@@ -1056,12 +1056,38 @@ function railDestinations(Router: ShellRouter): readonly RailDestination[] {
 }
 
 /**
+ * A section the top band can name: every feature this build can contain, plus the shell's own two.
+ *
+ * A closed union rather than `string`, and that is the whole of {@link topCrumbs}' correctness.
+ * `currentFeatureId` returns one of these, `LABELS` is a total map over them, and the ninth feature
+ * cannot be added to `FeatureId` without the crumb table refusing to compile — which is what
+ * `landingFor`'s exhaustive switch already does for the landing route and is why `ksql` was
+ * impossible to forget there and easy to forget here.
+ */
+export type CrumbSection = FeatureId | "settings" | "overview";
+
+/**
  * The top band's trail: the cluster, then the section.
  *
  * It always begins with the cluster, because this is the *installation* trail — its job is to say
  * which deployment and which cluster you are looking at, which is the question the environment rail
  * answers by colour and this answers in words. An object page adds its own, shorter breadcrumb in
  * the content column; the two are not redundant.
+ *
+ * ## Why the label table is total over {@link CrumbSection} and not a `Record<string, string>`
+ *
+ * It was the looser type, and the failure that type permits is not a blank crumb: a lookup that
+ * misses yields `undefined`, the `if` below declines to push, and what the band then draws is the
+ * cluster name alone — **which is exactly the trail the cluster's dashboard draws.** A
+ * correct-looking answer for the wrong screen, on every page of a section somebody forgot to name.
+ * W8-07 measured it on the one row that had no case: deleting `settings: "Settings"` left all 536
+ * shell cases green.
+ *
+ * Typed this way, a forgotten section is a type error at the table, before any test runs. The
+ * values are `string | undefined` rather than `string` so that "this section deliberately has no
+ * crumb" is a thing the table can *say*; a `Record` property is required whether or not its type
+ * admits `undefined`, so omitting a key is still the compile error — the option is to write the
+ * silence down, not to leave it out.
  */
 export function topCrumbs(
   clusters: readonly ClusterSummary[],
@@ -1075,9 +1101,14 @@ export function topCrumbs(
   const trail: Crumb[] = [{ label: name, href: Router.paths() }];
 
   const section = currentFeatureId(pathname, uiPrefix);
-  const LABELS: Record<string, string> = {
+  const LABELS: Record<CrumbSection, string | undefined> = {
     clusters: "Brokers",
     topics: "Topics",
+    /* The record browser, which hangs off a topic and is reached from a topic's page — so under
+       `/topics/<name>/messages` the section is `topics` and the trail says Topics, the page you
+       navigated from. This label is for `/messages/track`, the cross-topic search, which is the one
+       address this feature owns on its own. */
+    messages: "Messages",
     consumers: "Consumers",
     schemas: "Schema Registry",
     alerts: "Alerts",
@@ -1087,9 +1118,12 @@ export function topCrumbs(
        an id is a path segment. Spelling the crumb from the id would put `Ksql` in the top band. */
     ksql: "ksqlDB",
     settings: "Settings",
+    /* `undefined` on purpose, and written down rather than omitted: "overview" adds nothing,
+       because the cluster crumb already links there and a trail that repeats itself is a trail
+       nobody reads. Leaving the key out would say the same thing on screen and a different thing to
+       the next reader — that somebody forgot — which is the confusion this table exists to end. */
+    overview: undefined,
   };
-  // "overview" adds nothing: the cluster crumb already links there, and a trail that repeats itself
-  // is a trail nobody reads.
   const label = section === undefined ? undefined : LABELS[section];
   if (label !== undefined) trail.push({ label });
   return trail;
@@ -1264,8 +1298,13 @@ export function countLookup(
  *
  * `manage` is excluded from the dashboard test for the reason `clusterInUrl` excludes it: it is a
  * page of the cluster list, not the id of a cluster.
+ *
+ * The return type is {@link CrumbSection} rather than `string`, so that this function and
+ * {@link topCrumbs}' label table cannot part company: a section this returns that the table does
+ * not name is a compile error at the table, and a word returned here that is no feature id — a
+ * typo, a service name where a feature id belongs — is a compile error at the `return`.
  */
-export function currentFeatureId(pathname: string, uiPrefix: string): string | undefined {
+export function currentFeatureId(pathname: string, uiPrefix: string): CrumbSection | undefined {
   const relative = pathname.startsWith(uiPrefix) ? pathname.slice(uiPrefix.length) : pathname;
   const segments = relative.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) return "overview";
@@ -1286,6 +1325,16 @@ export function currentFeatureId(pathname: string, uiPrefix: string): string | u
   if (segments.includes("alerts")) return "alerts";
   if (segments.includes("connect")) return "connect";
   if (segments.includes("ksql")) return "ksql";
+  /* After `topics`, and that ordering is the rule rather than an accident of where it was typed.
+     The record browser lives at `/topics/<name>/messages` and belongs to Topics — it is opened from
+     a topic's page and the trail should lead back there. `/messages/track` is the other address the
+     same feature owns, it names no topic, and every test above it misses it: before this line it
+     fell through to the `/clusters/<id>` arm below and drew the cluster **dashboard's** trail over
+     the cross-topic search, which is the failure `topCrumbs`' header describes and the reason that
+     table is now total. The drawer highlights nothing for it, which is correct: `messages` is the
+     one registration with `sidebar: false`, and highlighting Overview — which is what happened
+     until this line existed — pointed at a page the operator was not on. */
+  if (segments.includes("messages")) return "messages";
   // `/clusters/<id>`, with or without `/dashboard/<tab>` after it. Both are the same page.
   if (segments[1] !== undefined && segments[1] !== "manage" && !segments.includes("brokers")) {
     return "overview";

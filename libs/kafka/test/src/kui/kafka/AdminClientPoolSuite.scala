@@ -18,10 +18,10 @@ import kui.testkit.KuiIOSuite
 
 /** The pool's own behaviour, without a broker.
   *
-  * What is under test here is sharing, generations, invalidation and measurement — not whether
-  * `Admin.create` works, which is a different question answered against a real broker in KAFKA-007.
-  * So the client factory is a parameter and the client is a do-nothing proxy: a fake that can be
-  * counted, closed and handed out, which is everything the pool does with one.
+  * What is under test here is sharing, generations, invalidation and measurement — not whether `Admin.create`
+  * works, which is a different question answered against a real broker in KAFKA-007. So the client factory is
+  * a parameter and the client is a do-nothing proxy: a fake that can be counted, closed and handed out, which
+  * is everything the pool does with one.
   */
 final class AdminClientPoolSuite extends KuiIOSuite {
 
@@ -37,9 +37,9 @@ final class AdminClientPoolSuite extends KuiIOSuite {
 
   /** An empty PKCS12 store, inline, so that a connection has something to materialize.
     *
-    * Hoisted out of `invalidationRunsTheClientsFinalizer` because a second case needs the same
-    * connection: one asserts that the file is gone afterwards, the other that it was still there while
-    * the client that named it was being closed.
+    * Hoisted out of `invalidationRunsTheClientsFinalizer` because a second case needs the same connection:
+    * one asserts that the file is gone afterwards, the other that it was still there while the client that
+    * named it was being closed.
     */
   private lazy val inlineKeystore: String = {
     val keystore = KeyStore.getInstance("PKCS12")
@@ -54,14 +54,18 @@ final class AdminClientPoolSuite extends KuiIOSuite {
     security = ClusterSecurity.Ssl(
       TlsConfig.default.copy(
         truststore = Some(
-          TrustStoreRef(StoreSource.Inline(Secret(inlineKeystore)), Some(Secret("changeit")), StoreType.Pkcs12)
+          TrustStoreRef(
+            StoreSource.Inline(Secret(inlineKeystore)),
+            Some(Secret("changeit")),
+            StoreType.Pkcs12
+          )
         )
       )
     )
   )
 
-  /** An `Admin` that does nothing. `Admin` has some fifty methods and the pool calls none of them;
-    * a reflective proxy is a fake with no maintenance cost rather than fifty stubs.
+  /** An `Admin` that does nothing. `Admin` has some fifty methods and the pool calls none of them; a
+    * reflective proxy is a fake with no maintenance cost rather than fifty stubs.
     */
   private def fakeAdmin(): Admin = {
     val handler: InvocationHandler = (_: Any, method: Method, _: Array[Object]) =>
@@ -76,7 +80,7 @@ final class AdminClientPoolSuite extends KuiIOSuite {
   }
 
   /** What the factory did, so a test can assert on it. */
-  private final case class Tracker(
+  final private case class Tracker(
       created: Ref[IO, Int],
       closed: Ref[IO, Int],
       properties: Ref[IO, List[Map[String, String]]]
@@ -353,9 +357,7 @@ final class AdminClientPoolSuite extends KuiIOSuite {
       t <- tracker
       started <- Ref.of[IO, Boolean](false)
       fiber <- poolOf(t, AdminMetrics.noop[IO])
-        .use(pool =>
-          pool.run(plaintext, "describeCluster")(succeed) >> started.set(true) >> IO.never[Unit]
-        )
+        .use(pool => pool.run(plaintext, "describeCluster")(succeed) >> started.set(true) >> IO.never[Unit])
         .start
       _ <- started.get.iterateUntil(identity)
       _ <- fiber.cancel

@@ -20,10 +20,10 @@ import kui.kernel.cluster.ClusterConnection
   */
 final class RecordingAdminPool(val runs: Ref[IO, List[String]], client: Admin) extends AdminClientPool[IO] {
 
-  /** `IO.defer`, because a Kafka call can throw before it returns a future — an admin client whose
-    * connection has gone throws from `describeConfigs` itself — and the real pool invokes `call` inside a
-    * `flatMap`, so that throw arrives as a failed effect. A fixture that evaluated it eagerly would let the
-    * exception past the very `handleErrorWith` the suite is here to assert.
+  /** `IO.defer`, because a Kafka call can throw before it returns a future — an admin client whose connection
+    * has gone throws from `describeConfigs` itself — and the real pool invokes `call` inside a `flatMap`, so
+    * that throw arrives as a failed effect. A fixture that evaluated it eagerly would let the exception past
+    * the very `handleErrorWith` the suite is here to assert.
     */
   def run[A](connection: ClusterConnection, operation: String)(call: Admin => IO[A]): IO[A] =
     runs.update(_ :+ operation) *> IO.defer(call(client))

@@ -53,9 +53,9 @@ object ClusterRig {
       delay: FiniteDuration = Duration.Zero,
       storeHealth: StoreHealth = StoreHealth.Online,
       description: ClusterDescription = TopologyFixtures.defaultDescription,
-      /** Applied to the admin fake *before* the snapshot cells start, so that the first refresh already
-        * sees what the suite wants it to see. A suite that configured the fake afterwards would be
-        * asserting against a snapshot filled from the defaults.
+      /** Applied to the admin fake *before* the snapshot cells start, so that the first refresh already sees
+        * what the suite wants it to see. A suite that configured the fake afterwards would be asserting
+        * against a snapshot filled from the defaults.
         */
       setup: FakeClusterAdmin[IO] => IO[Unit] = _ => IO.unit
   ): Resource[IO, ClusterRig] =
@@ -88,13 +88,13 @@ object ClusterRig {
     * intended trade: a first page in a second beats a first page that waits on a six-feature probe of a
     * cluster that may be down, and the next refresh thirty seconds later fills the gaps in.
     *
-    * For a suite it is a coin toss. Whether the first snapshot contains log directories depended on which
-    * of two fibers finished first, and on a starved machine the topology won about one run in thirty —
+    * For a suite it is a coin toss. Whether the first snapshot contains log directories depended on which of
+    * two fibers finished first, and on a starved machine the topology won about one run in thirty —
     * `BrokerDetailUseCaseSuite.logDirsFallsBackToTheSnapshotWhenTheLiveCallFails` then had nothing to fall
     * back to. So "settled" here means the stronger and more useful thing: the probe has answered *and* the
     * topology has been refreshed since, so what the cells hold is what a running KUI holds after its first
-    * minute rather than during its first second. The extra refresh is forced rather than waited for,
-    * because waiting for the background loop would put a thirty-second sleep in every suite.
+    * minute rather than during its first second. The extra refresh is forced rather than waited for, because
+    * waiting for the background loop would put a thirty-second sleep in every suite.
     */
   def settled(rig: ClusterRig): IO[Unit] = {
     // The budget is one virtual (or real) minute rather than a second: a suite that deliberately
@@ -102,14 +102,16 @@ object ClusterRig {
     // snapshot, and polling stops the moment the cells are ready, so a healthy rig pays nothing
     // for the headroom.
     def loaded(cellOf: ClusterRef => IO[Option[SnapshotCell[IO, ?]]]): IO[Boolean] =
-      rig.registry.refs.flatMap { refs =>
-        refs.traverse { ref =>
-          cellOf(ref).flatMap {
-            case None => false.pure[IO]
-            case Some(cell) => cell.get.map(_.status != SnapshotStatus.Initializing)
+      rig.registry.refs
+        .flatMap { refs =>
+          refs.traverse { ref =>
+            cellOf(ref).flatMap {
+              case None => false.pure[IO]
+              case Some(cell) => cell.get.map(_.status != SnapshotStatus.Initializing)
+            }
           }
         }
-      }.map(_.forall(identity))
+        .map(_.forall(identity))
 
     // Giving up quietly would turn "the snapshot was never loaded" into a confusing assertion
     // failure somewhere else in the suite, minutes of reading away from the cause. It fails here,
@@ -145,29 +147,30 @@ object ClusterRig {
 
   /** Refreshes each topology until it was built from the probe, and says whether it has been.
     *
-    * One forced refresh is not enough, and the reason is worth writing down because it is the shape of
-    * the flake this helper exists to remove. `SnapshotCell` writes its new state *before* it clears the
-    * slot that marks a refresh as in flight, and `refresh` joins an in-flight refresh rather than
-    * starting another. In the window between those two writes — microseconds on an idle machine,
-    * unbounded on a starved one — a forced refresh joins the load that is already finishing and comes
-    * back with that load's value, which for the very first load is a topology built before the
-    * capability probe answered. Asking again until the answer is right turns a race into a condition,
-    * which is the whole point.
+    * One forced refresh is not enough, and the reason is worth writing down because it is the shape of the
+    * flake this helper exists to remove. `SnapshotCell` writes its new state *before* it clears the slot that
+    * marks a refresh as in flight, and `refresh` joins an in-flight refresh rather than starting another. In
+    * the window between those two writes — microseconds on an idle machine, unbounded on a starved one — a
+    * forced refresh joins the load that is already finishing and comes back with that load's value, which for
+    * the very first load is a topology built before the capability probe answered. Asking again until the
+    * answer is right turns a race into a condition, which is the whole point.
     */
   private def probed(rig: ClusterRig): IO[Boolean] =
-    rig.registry.refs.flatMap { refs =>
-      refs.traverse { ref =>
-        (rig.snapshots.capabilitiesOf(ref.id), rig.snapshots.topologyOf(ref.id)).tupled.flatMap {
-          case (Some(capabilities), Some(topology)) =>
-            for {
-              features <- capabilities.get.map(_.value)
-              snapshot <- topology.refresh
-            } yield features.forall(probe => snapshot.value.forall(_.features == probe))
-          // A cluster with no cells yet is not settled; the caller polls again.
-          case _ => false.pure[IO]
+    rig.registry.refs
+      .flatMap { refs =>
+        refs.traverse { ref =>
+          (rig.snapshots.capabilitiesOf(ref.id), rig.snapshots.topologyOf(ref.id)).tupled.flatMap {
+            case (Some(capabilities), Some(topology)) =>
+              for {
+                features <- capabilities.get.map(_.value)
+                snapshot <- topology.refresh
+              } yield features.forall(probe => snapshot.value.forall(_.features == probe))
+            // A cluster with no cells yet is not settled; the caller polls again.
+            case _ => false.pure[IO]
+          }
         }
       }
-    }.map(_.forall(identity))
+      .map(_.forall(identity))
 
   /** Retries `read` until `holds` is true, or gives up after a bounded number of attempts.
     *

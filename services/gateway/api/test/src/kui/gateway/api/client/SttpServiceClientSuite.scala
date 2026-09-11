@@ -20,17 +20,17 @@ import kui.security.{PrincipalClaims, PrincipalCodec, RequestDigests}
 /** That a call the gateway makes on another service's behalf carries exactly what ADR-020 and
   * `ARCHITECTURE.md` §5 say it carries, and that every failure comes back as a value.
   *
-  * The suite is written against the *real* published endpoint of the cluster service rather than a
-  * locally invented one. That is the point of GW-002: a route the gateway calls is a value the owning
-  * team wrote, so a test that used its own endpoint definition would be testing a copy and would pass on
-  * the day the two drifted apart.
+  * The suite is written against the *real* published endpoint of the cluster service rather than a locally
+  * invented one. That is the point of GW-002: a route the gateway calls is a value the owning team wrote, so
+  * a test that used its own endpoint definition would be testing a copy and would pass on the day the two
+  * drifted apart.
   */
 final class SttpServiceClientSuite extends CatsEffectSuite {
 
   /** One real published endpoint of the cluster service, driven end to end through the client.
     *
-    * `getCluster` rather than the list, because it has a path parameter: a client that dropped or mangled
-    * one would still pass every assertion made against a parameterless route.
+    * `getCluster` rather than the list, because it has a path parameter: a client that dropped or mangled one
+    * would still pass every assertion made against a parameterless route.
     */
   private val getCluster = ClusterEndpoints.getCluster
 
@@ -125,7 +125,8 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
       for {
         stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
         tracer <- traces.tracerProvider.get("kui.test")
-        telemetry = Telemetry.fromProviders[IO](traces.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
+        telemetry = Telemetry
+          .fromProviders[IO](traces.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
         _ <- kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>
           SttpServiceClient
             .resource[IO](
@@ -137,9 +138,11 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
               stub.backend
             )
             .use(client =>
-              tracer.span("inbound").surround(
-                client.call(getCluster, cluster)(Fixture.context(Some(ClusterId.unsafe("local"))))
-              )
+              tracer
+                .span("inbound")
+                .surround(
+                  client.call(getCluster, cluster)(Fixture.context(Some(ClusterId.unsafe("local"))))
+                )
             )
         }
         sent <- stub.sent.map(_.head)

@@ -14,12 +14,12 @@ import kui.testkit.KuiIOSuite
 
 /** The asymmetry between the two caches, which is the whole design of this class.
   *
-  * A schema id is immutable, so its cache has a size and no expiry; the *latest* version of a subject is
-  * what changes when a schema evolves, so its cache must expire. `CachingSchemaRegistry`'s scaladoc argues
-  * both at length, and the second was carried by nothing: replacing `ttl = Some(config.subjectCacheTtl)`
-  * with `ttl = None` left all 279 cases of `libs/kafka`, `libs/kafka-auth` and `libs/serde-confluent`
-  * green, and a produce form would go on validating against a schema the topic had moved past for as long
-  * as the process ran.
+  * A schema id is immutable, so its cache has a size and no expiry; the *latest* version of a subject is what
+  * changes when a schema evolves, so its cache must expire. `CachingSchemaRegistry`'s scaladoc argues both at
+  * length, and the second was carried by nothing: replacing `ttl = Some(config.subjectCacheTtl)` with
+  * `ttl = None` left all 279 cases of `libs/kafka`, `libs/kafka-auth` and `libs/serde-confluent` green, and a
+  * produce form would go on validating against a schema the topic had moved past for as long as the process
+  * ran.
   */
 final class CachingSchemaRegistrySuite extends KuiIOSuite {
 
@@ -30,8 +30,8 @@ final class CachingSchemaRegistrySuite extends KuiIOSuite {
 
   /** Short enough that the case costs a fraction of a second, long enough that the two lookups before the
     * sleep cannot straddle it. The margin is an order of magnitude in both directions: expiry is decided
-    * against `Clock[IO].monotonic`, which only moves forwards, so the failure this case can produce is a
-    * true one.
+    * against `Clock[IO].monotonic`, which only moves forwards, so the failure this case can produce is a true
+    * one.
     */
   private val ttl: FiniteDuration = 50.millis
 

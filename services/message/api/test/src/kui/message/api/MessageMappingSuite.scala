@@ -18,15 +18,14 @@ import kui.message.domain.{DecodeError, Decoded, DecodedRecord, RenderedHeader, 
 /** The field-level rules `MessageMapping` argues for at length, and which nothing asserted.
   *
   * `services/message/api` shipped one suite — `ServiceRbacGuardSuite` — so every rule in this file was
-  * reachable only through a route that asserts a status code, which is not what a route suite looks at.
-  * Five mutations were applied one at a time against `./mill services.message.__.test`, each leaving it at
-  * 183/183 green: making `payload`'s absent branch unreachable, dropping `deserializeErrors` to `Nil`,
-  * zeroing `filterErrors`, removing the floor under a spent budget, and mapping `NoTimestamp` to
-  * `LOG_APPEND_TIME`.
+  * reachable only through a route that asserts a status code, which is not what a route suite looks at. Five
+  * mutations were applied one at a time against `./mill services.message.__.test`, each leaving it at 183/183
+  * green: making `payload`'s absent branch unreachable, dropping `deserializeErrors` to `Nil`, zeroing
+  * `filterErrors`, removing the floor under a spent budget, and mapping `NoTimestamp` to `LOG_APPEND_TIME`.
   *
   * The budget and filter cases read the encoder's own output — the frame `MessageMapping.event` builds —
-  * rather than a hand-written literal, because a hand-written literal on each side of a wire is what put
-  * two of the metrics service's four cards on screen drawing nothing.
+  * rather than a hand-written literal, because a hand-written literal on each side of a wire is what put two
+  * of the metrics service's four cards on screen drawing nothing.
   */
 final class MessageMappingSuite extends FunSuite {
 

@@ -10,8 +10,8 @@ import sttp.tapir.server.ServerEndpoint
 import kui.contracts.ErrorEnvelope
 import kui.contracts.ErrorEnvelope.given
 
-/** That a deployment behind a reverse proxy on a sub-path works, and that nothing in a contract has
-  * to know about it.
+/** That a deployment behind a reverse proxy on a sub-path works, and that nothing in a contract has to know
+  * about it.
   */
 final class BasePathSuite extends CatsEffectSuite {
 

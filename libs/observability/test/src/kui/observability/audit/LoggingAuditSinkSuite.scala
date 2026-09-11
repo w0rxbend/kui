@@ -36,7 +36,8 @@ final class LoggingAuditSinkSuite extends CatsEffectSuite {
     detail = Map("resource" -> "a detail key that collides with a field name")
   )
 
-  /** A logger whose every write fails, which is what a full disk or a broken appender looks like from here. */
+  /** A logger whose every write fails, which is what a full disk or a broken appender looks like from here.
+    */
   private def failingLogger(attempts: Ref[IO, Int]): StructuredLogger[IO] =
     new StructuredLogger[IO] {
       private def boom: IO[Unit] =

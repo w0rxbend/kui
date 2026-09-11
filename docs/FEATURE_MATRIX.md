@@ -20,14 +20,20 @@ dropped silently.
   `topic`, `message`, `consumer`, `schema`, `connect`, `ksql`, `security`, `identity`,
   `metrics`, `config`). `—` means frontend-only.
 - **MFE** — the frontend package that owns the screen, named without its `@kui/` scope
-  (`shell`, `kernel`, `feature-clusters`, `feature-topics`, `feature-messages`,
+  (`shell`, `kernel`, `feature-alerts`, `feature-clusters`, `feature-topics`, `feature-messages`,
   `feature-consumers`, `feature-schemas`, `feature-connect`, `feature-ksql`,
   `feature-security`, `feature-metrics`, `feature-admin`). `—` means backend-only.
-  `feature-alerts` exists too and no row names it: the alerts feed is reached from the shell's
-  bell rather than from a row of its own, which is a gap in this column and not in the product.
-  Nine of the twelve named above exist in `frontend/packages/` as of 2026-09-11; `feature-security`,
-  `feature-metrics` and `feature-admin` are names reserved by this matrix for milestones that have
-  not started.
+  **Ten of the thirteen named above exist in `frontend/packages/` as of 2026-09-11**;
+  `feature-security`, `feature-metrics` and `feature-admin` are names reserved by this matrix for
+  milestones that have not started. `frontend/packages/api` is the eleventh directory on disk and
+  is not in this list, because it owns no screen.
+  `feature-alerts` was left out of the roster while being counted in the total, and it is named
+  here now: a roster that omits a package it counts is the same defect this file's own checker
+  exists to catch, found in this file. **No capability row names it in the MFE column**, because
+  the alerts feed is reached from the shell's bell rather than from a screen with a row of its own
+  — that is a gap in this column and not in the product, and it is stated rather than closed with
+  an invented row, because adding one would move the row count, the milestone table and the
+  delivered percentage to describe a capability nobody has audited.
 - **Milestone** — `M0`..`M9` from `docs/ROADMAP.md`. `—` only for rejected rows.
 
 > **Frontend evidence predating 2026-09-05 names deleted code.** ADR-048 replaced the Scala.js and
@@ -630,6 +636,31 @@ is the merged OpenAPI pair, which went from 61 paths, 72 operations and 156 sche
 76 operations and 160 schemas**; the figures published about them in ADR-048 and
 `frontend/packages/api/README.md` moved with them and are compared by
 `./scripts/feature-matrix-check.sh`.
+
+**A record of the wave-9 pass, 2026-09-11:** 189 rows, of which 72 `RESEARCHING`, 70 `COMPLETE`,
+18 `REVIEW`, 7 `TESTING`, 8 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`,
+4 `REJECTED`, and no `BLOCKED` row — recounted here with the same awk over the State column that
+`./scripts/feature-matrix-check.sh` runs. **No row moved, and this time the reason is a scope and
+not a shortage.** The four rows wave 8 named as the next ones to move — `KC-001` and
+`KS-001`/`KS-002`/`KS-003` — were re-read against their own wording in this pass. Each is
+`TESTING`, which this file defines as built, gated and reachable; each would move to `COMPLETE`
+only on the standard set at the top of this file, *a person doing the thing from a browser against
+a running KUI*, and this pass owns neither a stack nor a browser suite. It is a documents pass. The
+evidence that would move all four exists in wave 9 — a quickstart rebuilt from this tree with both
+seed scripts run, and `pnpm -C frontend e2e` driven against it — and it belongs to the packets that
+own those trees. **Moving a row on a report of somebody else's run is the exact substitution this
+file's rule was written against**, and it is worth saying plainly in the last wave rather than
+quietly taking the four.
+
+Two of the four carry a limit their row's own wording does not: `KC-005` has pause, resume and
+restart and has no restart-all-tasks, no restart-failed-tasks and no stop; `KC-006` draws the task
+bar and has no per-task restart endpoint at all. **Both sub-capabilities are absent from the
+product, so neither row can reach `COMPLETE` on any browser run**, and that is recorded in their
+Notes rather than by moving them — a row whose wording is larger than what shipped is a row that
+has to be narrowed or a capability that has to be built, and neither is a state change.
+
+The one correction this pass made is in the MFE key above: it counted twelve packages and named
+eleven, with `feature-alerts` disclosed in a sentence and missing from the roster. It is named now.
 
 ## The twenty-three screens, and how much of them a browser covers
 

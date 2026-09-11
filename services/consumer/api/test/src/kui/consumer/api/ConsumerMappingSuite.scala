@@ -14,9 +14,9 @@ import kui.kernel.{BrokerId, GroupId}
   * The domain has carried `host` and `port` since it was written; the mapping kept only the id, so the
   * consumer-groups table printed `broker 1` where `SCREENS-V4.md` §4.12 prints `broker-1:9092`. The
   * interesting case is not the happy one — it is the group that only ever appeared in a listing, whose
-  * `DESCRIBE` was skipped or refused (`KafkaGroupAdminPort.summaryOf`). That group has no coordinator at
-  * all, and the three fields have to go missing together: a host beside an id with no port is an address a
-  * screen would render as `broker-1:undefined`.
+  * `DESCRIBE` was skipped or refused (`KafkaGroupAdminPort.summaryOf`). That group has no coordinator at all,
+  * and the three fields have to go missing together: a host beside an id with no port is an address a screen
+  * would render as `broker-1:undefined`.
   */
 final class ConsumerMappingSuite extends FunSuite {
 

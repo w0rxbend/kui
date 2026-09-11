@@ -318,6 +318,51 @@ final class KsqlRoutesSuite extends CatsEffectSuite {
     )
   }
 
+  test("the done reason says whether ksqlDB finished the query or KUI's budget ended it") {
+    // W9-A1: `if exhausted then Exhausted else Budget` was held by nothing. The wired stream case counts
+    // `event: done` lines and never reads the reason, so collapsing the conditional to one constant left
+    // all eighteen cases in this file, all 182 in this service and all 4,299 in the repository green.
+    //
+    // The distinction is the one ADR-035 put on `done` and the one this file's own scaladoc argues for at
+    // length: "your five minutes are up" and "the query finished" are different things to tell somebody
+    // watching a live topic, and a browser told `exhausted` for both reports a topic as having stopped
+    // producing when in fact the tab had simply been open too long.
+    //
+    // Driven through `KsqlRoutes.frames` rather than through the server, because the budget path ends the
+    // source stream *without* a frame of its own — the appended terminal is the whole mechanism — and a
+    // wired case cannot produce that without waiting out a real budget.
+    val correlationId = kui.kernel.CorrelationId.unsafe("0123456789abcdef")
+
+    def reasonOf(frame: kui.ksql.domain.QueryFrame): IO[Option[String]] =
+      KsqlRoutes
+        .frames[IO](fs2.Stream.emit(Right(frame)), correlationId)
+        .head
+        .compile
+        .lastOrError
+        .map(event => event.data.hcursor.get[String]("reason").toOption)
+
+    for {
+      finished <- reasonOf(kui.ksql.domain.QueryFrame.Ended(exhausted = true))
+      stopped <- reasonOf(kui.ksql.domain.QueryFrame.Ended(exhausted = false))
+      silent <- KsqlRoutes
+        .frames[IO](
+          fs2.Stream.empty.covaryAll[IO, Either[kui.kernel.error.KuiError, kui.ksql.domain.QueryFrame]],
+          correlationId
+        )
+        .compile
+        .toList
+    } yield {
+      assertEquals(finished, Some(kui.contracts.sse.DoneReason.Exhausted.wire))
+      assertEquals(stopped, Some(kui.contracts.sse.DoneReason.Budget.wire))
+      // And a source that ends without saying anything at all is `budget`, which is the path a browser
+      // takes every time somebody leaves a push query open until `ksql.streamTimeout` expires.
+      assertEquals(
+        silent.map(_.data.hcursor.get[String]("reason").toOption),
+        List(Some(kui.contracts.sse.DoneReason.Budget.wire))
+      )
+    }
+  }
+
   test("a statement that finishes is refused by the stream endpoint") {
     resource().use(rig =>
       for {

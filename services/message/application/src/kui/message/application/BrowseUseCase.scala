@@ -139,7 +139,8 @@ object BrowseUseCase {
       serdes: SerdeSource[F],
       source: RecordSource[F],
       cursors: CursorCodec[F],
-      filters: FilterSource[F]
+      filters: FilterSource[F],
+      masking: RecordMasking[F]
   ): BrowseUseCase[F] =
     new BrowseUseCase[F] {
 
@@ -197,7 +198,16 @@ object BrowseUseCase {
             case Right(_) =>
               Stream.eval(predicateFor(request)).flatMap {
                 case Left(error) => Stream.emit(BrowseEvent.Failed(error))
-                case Right(predicate) => reading(request, budget, predicate)
+                case Right(predicate) =>
+                  // The mask is resolved once for the whole browse, before the first record is read
+                  // (ADR-023, DM-001). Once, because which rules reach this topic cannot change
+                  // mid-stream and re-deciding per record would re-walk the rule list a million times
+                  // on a browse of a million records; before, because `kui.masking.applied` counts
+                  // browses on which masking applied, and a browse that delivered nothing still had
+                  // its rules in force.
+                  Stream
+                    .eval(masking.forTopic(request.cluster, request.topic))
+                    .flatMap(mask => reading(request, budget, predicate, mask))
               }
           }
 
@@ -216,13 +226,14 @@ object BrowseUseCase {
       private def reading(
           request: BrowseRequest,
           budget: PollBudget,
-          filter: Option[CompiledFilter[F]]
+          filter: Option[CompiledFilter[F]],
+          mask: RecordMask
       ): Stream[F, BrowseEvent] =
         Stream.emit(BrowseEvent.Phase(ReadingRecords)) ++
           Stream
             .eval((Clock[F].monotonic, Ref.of[F, State](State.empty)).tupled)
             .flatMap { case (startedAt, state) =>
-              records(request, budget, state, filter) ++ ending(request, budget, state, startedAt)
+              records(request, budget, state, filter, mask) ++ ending(request, budget, state, startedAt)
             }
 
       /** The record events, and the progress events between them. */
@@ -230,7 +241,8 @@ object BrowseUseCase {
           request: BrowseRequest,
           budget: PollBudget,
           state: Ref[F, State],
-          filter: Option[CompiledFilter[F]]
+          filter: Option[CompiledFilter[F]],
+          mask: RecordMask
       ): Stream[F, BrowseEvent] =
         source
           .browse(request, budget)
@@ -240,7 +252,7 @@ object BrowseUseCase {
           .takeThrough(_.isRight)
           .evalMap {
             case Left(error) => state.update(_.copy(failure = Some(error))).as(Step.stop)
-            case Right(raw) => deliver(request, budget, state, raw, filter)
+            case Right(raw) => deliver(request, budget, state, raw, filter, mask)
           }
           .takeThrough(_.more)
           .flatMap(step => Stream.chunk(step.events))
@@ -251,10 +263,11 @@ object BrowseUseCase {
           budget: PollBudget,
           state: Ref[F, State],
           raw: RawRecord,
-          filter: Option[CompiledFilter[F]]
+          filter: Option[CompiledFilter[F]],
+          mask: RecordMask
       ): F[Step] =
         for {
-          record <- decode(request, raw)
+          record <- decode(request, raw, mask)
           // Both filters, in the cheap-first order: the substring is a `contains` over text already in
           // hand, and the expression is a program. A record the substring rejected is never handed to the
           // engine, which is what keeps a smart filter's cost proportional to what it is asked about.
@@ -348,25 +361,35 @@ object BrowseUseCase {
       private def verdictOf(filter: Option[CompiledFilter[F]], record: DecodedRecord): F[FilterVerdict] =
         filter.fold(FilterVerdict.Matched.pure[F])(_.test(record))
 
-      private def decode(request: BrowseRequest, raw: RawRecord): F[DecodedRecord] =
+      /** Both halves of a record, read by a serde and then masked.
+        *
+        * The mask is applied here and nowhere else, which is what makes ADR-023's "before any DTO leaves the
+        * service" true for every consumer of this stream at once — the record event, the string filter, the
+        * smart filter and the cursor all see the same masked value, because there is only one. A mask applied
+        * at the API layer instead would leave the two filters reading the original, which turns a filter into
+        * a way of asking questions about a field nobody is allowed to see.
+        */
+      private def decode(request: BrowseRequest, raw: RawRecord, mask: RecordMask): F[DecodedRecord] =
         for {
           key <- serdes.decode(request.cluster, request.topic, Target.Key, request.keySerde, raw.key)
           value <- serdes.decode(request.cluster, request.topic, Target.Value, request.valueSerde, raw.value)
-        } yield DecodedRecord(
-          partition = raw.partition,
-          offset = raw.offset,
-          timestamp = raw.timestamp,
-          timestampType = raw.timestampType,
-          key = key._1,
-          value = value._1,
-          headers = raw.headers.map(render),
-          keySize = raw.keySize,
-          valueSize = raw.valueSize,
-          headersSize = raw.headersSize,
-          decodeErrors = List(
-            key._2.map(DecodeError(Target.Key, key._1.serde, _)),
-            value._2.map(DecodeError(Target.Value, value._1.serde, _))
-          ).flatten
+        } yield mask(
+          DecodedRecord(
+            partition = raw.partition,
+            offset = raw.offset,
+            timestamp = raw.timestamp,
+            timestampType = raw.timestampType,
+            key = key._1,
+            value = value._1,
+            headers = raw.headers.map(render),
+            keySize = raw.keySize,
+            valueSize = raw.valueSize,
+            headersSize = raw.headersSize,
+            decodeErrors = List(
+              key._2.map(DecodeError(Target.Key, key._1.serde, _)),
+              value._2.map(DecodeError(Target.Value, value._1.serde, _))
+            ).flatten
+          )
         )
     }
 

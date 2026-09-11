@@ -93,6 +93,7 @@ object TrackUseCase {
       clusters: ClusterProfileSource[F],
       serdes: SerdeSource[F],
       source: RecordSource[F],
+      masking: RecordMasking[F],
       limits: BrowseLimits = BrowseLimits.Default
   ): TrackUseCase[F] =
     new TrackUseCase[F] {
@@ -138,14 +139,19 @@ object TrackUseCase {
             Stream.eval(progress.get).flatMap { before =>
               if before.matched >= query.limit.toLong then Stream.empty
               else
-                source
-                  .browse(request, budget)
-                  .takeThrough(_.isRight)
-                  .evalMap {
-                    case Left(error) => (TrackEvent.Failed(error): TrackEvent).some.pure[F]
-                    case Right(raw) => consider(query, topic, prepared, progress, raw)
-                  }
-                  .unNone
+                // Once per topic, not once per record, and not once per track: masking rules are scoped
+                // by topic pattern, so a track over six topics has six answers and each is constant for
+                // the whole of its topic's scan.
+                Stream.eval(masking.forTopic(query.cluster, topic)).flatMap { mask =>
+                  source
+                    .browse(request, budget)
+                    .takeThrough(_.isRight)
+                    .evalMap {
+                      case Left(error) => (TrackEvent.Failed(error): TrackEvent).some.pure[F]
+                      case Right(raw) => consider(query, topic, prepared, progress, raw, mask)
+                    }
+                    .unNone
+                }
             }
         }
 
@@ -160,11 +166,12 @@ object TrackUseCase {
           topic: TopicName,
           prepared: PreparedMatch,
           progress: Ref[F, Progress],
-          raw: RawRecord
+          raw: RawRecord,
+          mask: RecordMask
       ): F[Option[TrackEvent]] =
         if raw.timestamp.isAfter(query.until) then Option.empty[TrackEvent].pure[F]
         else
-          decode(query, topic, raw).flatMap { record =>
+          decode(query, topic, raw, mask).flatMap { record =>
             val matched = prepared.matches(record)
 
             progress.updateAndGet(_.saw(matched)).map { now =>
@@ -218,26 +225,39 @@ object TrackUseCase {
         * Matching on the decoded text and not the raw bytes is the point: a person searching for `order-4711`
         * means the characters they can read, and a search of the bytes would miss it on every topic whose
         * values are not plain text — which is most of them.
+        *
+        * The mask is applied here for the same reason and with the same consequence as in the browse
+        * (`RecordMasking`): a track matches on what the screen would show, so a masked field is not
+        * trackable. A track that matched on the unmasked text would be a search over exactly the values the
+        * rule hides, and it would return the record while drawing a row of asterisks — which tells the
+        * searcher what they were looking for without ever printing it.
         */
-      private def decode(query: TrackQuery, topic: TopicName, raw: RawRecord): F[DecodedRecord] =
+      private def decode(
+          query: TrackQuery,
+          topic: TopicName,
+          raw: RawRecord,
+          mask: RecordMask
+      ): F[DecodedRecord] =
         for {
           key <- serdes.decode(query.cluster, topic, Target.Key, None, raw.key)
           value <- serdes.decode(query.cluster, topic, Target.Value, None, raw.value)
-        } yield DecodedRecord(
-          partition = raw.partition,
-          offset = raw.offset,
-          timestamp = raw.timestamp,
-          timestampType = raw.timestampType,
-          key = key._1,
-          value = value._1,
-          headers = raw.headers.map(BrowseUseCase.render),
-          keySize = raw.keySize,
-          valueSize = raw.valueSize,
-          headersSize = raw.headersSize,
-          decodeErrors = List(
-            key._2.map(DecodeError(Target.Key, key._1.serde, _)),
-            value._2.map(DecodeError(Target.Value, value._1.serde, _))
-          ).flatten
+        } yield mask(
+          DecodedRecord(
+            partition = raw.partition,
+            offset = raw.offset,
+            timestamp = raw.timestamp,
+            timestampType = raw.timestampType,
+            key = key._1,
+            value = value._1,
+            headers = raw.headers.map(BrowseUseCase.render),
+            keySize = raw.keySize,
+            valueSize = raw.valueSize,
+            headersSize = raw.headersSize,
+            decodeErrors = List(
+              key._2.map(DecodeError(Target.Key, key._1.serde, _)),
+              value._2.map(DecodeError(Target.Value, value._1.serde, _))
+            ).flatten
+          )
         )
     }
 

@@ -13,8 +13,8 @@ import kui.testkit.KuiSuite
 /** The five per-cluster admin knobs: their defaults, their bounds, and the one rule that spans two of them.
   *
   * The knobs exist because one cluster in a deployment is sometimes not like the others — ten thousand
-  * topics, or a broker on the other side of an ocean — and raising a timeout for that one must not change
-  * how KUI talks to the healthy ones.
+  * topics, or a broker on the other side of an ocean — and raising a timeout for that one must not change how
+  * KUI talks to the healthy ones.
   */
 final class AdminTuningSuite extends KuiSuite {
 

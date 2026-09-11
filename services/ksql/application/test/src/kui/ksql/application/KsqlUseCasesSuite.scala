@@ -68,7 +68,8 @@ final class KsqlUseCasesSuite extends CatsEffectSuite {
 
     rig(objectsAnswer = down).flatMap(rig =>
       rig.useCases.objects(alice, cluster).map {
-        case Right(KsqlListing.Answered(Left(error))) => assertEquals(error.code, ErrorCode.UpstreamUnavailable)
+        case Right(KsqlListing.Answered(Left(error))) =>
+          assertEquals(error.code, ErrorCode.UpstreamUnavailable)
         case other => fail(s"expected an answered-with-failure, got $other")
       }
     )
@@ -129,6 +130,24 @@ final class KsqlUseCasesSuite extends CatsEffectSuite {
           assertEquals(plan.token, None)
           assertEquals(plan.expiresAt, None)
           assertEquals(plan.warnings, Nil)
+        case Left(error) => fail(s"the plan failed: ${error.message}")
+      }
+    )
+  }
+
+  test("planning a push query answers the address that will run it, rather than nothing") {
+    // W9-A1: `describe`'s `if statement.push then List(PushQueryElsewhere) else Nil` was held by nothing —
+    // collapsing it to `Nil` left all 22 cases here and all 4,299 in the repository green. The browser
+    // routes a push query off `shape` and never reads this, but the plan endpoint is also what somebody
+    // holding a `curl` gets, and "wrong endpoint" with no alternative is a dead end. It is the same
+    // sentence `execute` refuses with, from the same constant, so the two cannot drift apart.
+    rig().flatMap(rig =>
+      rig.useCases.plan(alice, cluster, pushQuery).map {
+        case Right(plan) =>
+          assertEquals(plan.statement.shape, StatementShape.PushQuery)
+          assertEquals(plan.warnings, List(KsqlUseCases.PushQueryElsewhere))
+          // And it still needs no confirmation: a push query changes nothing.
+          assertEquals(plan.token, None)
         case Left(error) => fail(s"the plan failed: ${error.message}")
       }
     )
@@ -235,6 +254,34 @@ final class KsqlUseCasesSuite extends CatsEffectSuite {
         .execute(alice, bare, "CREATE STREAM A AS SELECT * FROM ORDERS;", None)
         .map(answer => assertEquals(answer.left.toOption.map(_.code), Some(ErrorCode.Unsupported)))
     )
+  }
+
+  test("a statement on a configured cluster with no client is a wiring failure, not a deployment choice") {
+    // W9-A1: `execute`'s `case None => notWired(cluster)` was held by nothing — replacing it with
+    // `notConfigured` left all 4,299 cases in the repository green. The two sentences send an operator to
+    // different places: `KUI-UNSUPPORTED` says "you did not configure a ksqlDB here", which is a screen
+    // that looks deliberately switched off, and `KUI-INVALID-STATE` says "you did, and this process could
+    // not build a client for it", which is a KUI defect somebody has to go and look at.
+    //
+    // `KsqlRig.unwired` exists for this case: it is the only profile in the rig that is configured,
+    // writable, and has no client, which is the one combination that reaches this arm.
+    rig().flatMap { rig =>
+      for {
+        answer <- rig.useCases.execute(alice, unwired, "CREATE STREAM A AS SELECT * FROM ORDERS;", None)
+        executed <- rig.server.executed.get
+        outcomes <- rig.outcomes
+      } yield {
+        assertEquals(answer.left.toOption.map(_.code), Some(ErrorCode.InvalidState))
+        assert(clue(answer.left.toOption.map(_.message).getOrElse("")).contains("could not build a client"))
+        assertEquals(executed, Nil)
+        // And it is audited, because the guard wraps it: a statement that did not run on a cluster
+        // somebody may write to is a thing an incident review looks for. `Refused` and not `Failed`,
+        // because `KUI-INVALID-STATE` carries HTTP 409 and `MutationGuard` splits the two at 500 — which
+        // is arguably the wrong side for a KUI wiring fault, and is recorded here as measured rather than
+        // quietly asserted the other way.
+        assertEquals(outcomes, List(MutationOutcome.Refused))
+      }
+    }
   }
 
   test("a statement that is not one statement is refused with a sentence about what to do") {

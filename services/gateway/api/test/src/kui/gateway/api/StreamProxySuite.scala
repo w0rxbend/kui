@@ -26,8 +26,8 @@ final class StreamProxySuite extends CatsEffectSuite {
   /** MUnit's default is 30 seconds, and one test here pushes a million events through the relay. On an idle
     * machine that takes about nine seconds; in a full `__.test` run it shares the CPU with a dozen
     * Testcontainers suites starting brokers, and it has been seen to exceed thirty. The timeout is a safety
-    * net against a stream that never finishes, not an assertion about speed, so widening it costs nothing:
-    * a relay that really did accumulate would never finish at any timeout.
+    * net against a stream that never finishes, not an assertion about speed, so widening it costs nothing: a
+    * relay that really did accumulate would never finish at any timeout.
     */
   override def munitIOTimeout: scala.concurrent.duration.Duration = 3.minutes
 
@@ -214,7 +214,8 @@ final class StreamProxySuite extends CatsEffectSuite {
   test("anUpstreamThatFailsMidBodyKeepsTheBytesItAlreadySentAndGainsAnErrorEvent") {
     // ADR-032's stale-data rule: what arrived stands. Discarding a half page because the last poll failed is
     // the behaviour the research records as a defect.
-    val failing = render(List(messageEvent(1))) ++ Stream.raiseError[IO](new RuntimeException("upstream died"))
+    val failing =
+      render(List(messageEvent(1))) ++ Stream.raiseError[IO](new RuntimeException("upstream died"))
 
     StreamProxy
       .withTerminalEvent(failing, envelope)
@@ -252,6 +253,37 @@ final class StreamProxySuite extends CatsEffectSuite {
         assertEquals(events.map(_.name), List(SseEventName.Error))
         assert(events.head.data.noSpaces.contains("KUI-KAFKA-TIMEOUT"), events.head.data.noSpaces)
       }
+  }
+
+  test("aCrLfTerminatedUpstreamsOwnTerminalEventIsRecognised") {
+    // W9-A1. Every fixture in this file is built by `SseEvent.bytes`, which ends its lines with a bare
+    // `\n`, so nothing here had ever put a CR LF stream through the detector — and the event-stream
+    // format allows one. A CR LF upstream's frames parse correctly on both sides of this hop
+    // (`SseWire` splits with `fs2.text.lines`, which treats CR LF as one break), so if the detector alone
+    // missed the terminal, the gateway would append an `error` after a `done` the upstream really sent and
+    // a stream that ended perfectly would reach the browser as one that broke.
+    //
+    // **This case is a regression guard and not a closed mutation, and the distinction is stated rather
+    // than implied.** Deleting `.stripSuffix("\r")` from `isTerminalLine` leaves it green, because the
+    // `trim` on the next line already removes the carriage return: the strip is provably redundant today
+    // and the mutation is an equivalent one. What this holds is the *property*, against the next person
+    // who replaces that `trim` with an exact comparison.
+    val crlf =
+      "event: message\r\ndata: {}\r\n\r\n" +
+        "event: done\r\ndata: {\"reason\":\"exhausted\"}\r\n\r\n"
+
+    textOf(
+      StreamProxy.withTerminalEvent(
+        Stream.emits(crlf.getBytes(StandardCharsets.UTF_8).toList).covary[IO],
+        envelope
+      )
+    ).map { body =>
+      assertEquals(body, crlf, "the upstream bytes must be forwarded unchanged")
+      assert(
+        !body.contains(envelope.code),
+        s"the gateway appended its own error after an upstream that had already said done: $body"
+      )
+    }
   }
 
   test("aTerminalEventSplitAcrossChunkBoundariesIsStillSeen") {

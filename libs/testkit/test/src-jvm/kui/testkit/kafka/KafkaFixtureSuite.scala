@@ -5,7 +5,6 @@ import scala.jdk.CollectionConverters.*
 
 import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Resource}
-
 import munit.FunSuite
 import org.apache.kafka.clients.admin.Admin
 import org.apache.kafka.common.errors.{SaslAuthenticationException, SslAuthenticationException}
@@ -136,7 +135,9 @@ final class KafkaFixtureSuite extends FunSuite {
           // The YAML form has to name the same broker, so that a suite driving the loader from a file and a
           // suite building the value get the same cluster.
           assert(
-            ClusterConfigs.yamlFor(broker, kui.kernel.ClusterId.unsafe("fixture")).contains(broker.bootstrapServers),
+            ClusterConfigs
+              .yamlFor(broker, kui.kernel.ClusterId.unsafe("fixture"))
+              .contains(broker.bootstrapServers),
             "the YAML form did not name the broker"
           )
         }
@@ -146,8 +147,8 @@ final class KafkaFixtureSuite extends FunSuite {
 
   /** Asserts the specific exception somewhere in the failure's cause chain, and says which client it was.
     *
-    * Kafka wraps an authentication failure in an `ExecutionException`, so the class being looked for is
-    * never the top one.
+    * Kafka wraps an authentication failure in an `ExecutionException`, so the class being looked for is never
+    * the top one.
     */
   private def assertFailsWith[E: reflect.ClassTag](outcome: Either[Throwable, Int], who: String): Unit =
     outcome match {

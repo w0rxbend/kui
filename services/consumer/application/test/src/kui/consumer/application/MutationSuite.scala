@@ -25,7 +25,11 @@ final class MutationSuite extends KuiIOSuite {
   private val group: GroupId = GroupId.unsafe("orders-consumer")
 
   private val emptyGroup: ConsumerGroup =
-    GroupFixtures.group(id = group.value, state = GroupState.Empty, partitions = List(GroupFixtures.state(0, Some(40L))))
+    GroupFixtures.group(
+      id = group.value,
+      state = GroupState.Empty,
+      partitions = List(GroupFixtures.state(0, Some(40L)))
+    )
 
   private val liveGroup: ConsumerGroup =
     GroupFixtures.group(
@@ -147,7 +151,10 @@ final class MutationSuite extends KuiIOSuite {
       invalidated <- invalidations.get
     } yield {
       assert(applied.isRight, s"apply failed: $applied")
-      assertEquals(state.applied.map((id, offsets) => id -> offsets.values.map(_.value).toList), List(group -> List(0L)))
+      assertEquals(
+        state.applied.map((id, offsets) => id -> offsets.values.map(_.value).toList),
+        List(group -> List(0L))
+      )
       assertEquals(records.size, 1)
       assertEquals(records.head.kind, MutationKind.ResetOffsets)
       assertEquals(records.head.outcome, MutationOutcome.Succeeded)
@@ -302,7 +309,10 @@ final class MutationSuite extends KuiIOSuite {
       state <- port.state.get
     } yield {
       assertEquals(result.map(_.partitions), Right(Set(GroupFixtures.partition(0))))
-      assertEquals(state.deletedOffsets.map((_, partitions) => partitions), List(Set(GroupFixtures.partition(0))))
+      assertEquals(
+        state.deletedOffsets.map((_, partitions) => partitions),
+        List(Set(GroupFixtures.partition(0)))
+      )
     }
   }
 
@@ -312,7 +322,12 @@ final class MutationSuite extends KuiIOSuite {
       (port, _, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteOffsets = DeleteOffsetsUseCase.make[IO](_ => port, guard, logger)
-      result <- deleteOffsets.delete(Caller, ConsumerRig.Cluster, group, kui.kernel.TopicName.unsafe("untouched"))
+      result <- deleteOffsets.delete(
+        Caller,
+        ConsumerRig.Cluster,
+        group,
+        kui.kernel.TopicName.unsafe("untouched")
+      )
       state <- port.state.get
     } yield {
       assertEquals(result.map(_.partitions), Right(Set.empty[TopicPartition]))

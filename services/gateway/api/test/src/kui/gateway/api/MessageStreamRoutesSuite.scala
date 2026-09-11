@@ -12,8 +12,8 @@ import kui.contracts.ErrorEnvelope
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
-import kui.kernel.error.KuiError
 import kui.kernel.ServiceId
+import kui.kernel.error.KuiError
 import kui.security.SignedPrincipal
 
 /** The browse relay's terminal-event promise, driven through a real listener.

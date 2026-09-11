@@ -289,6 +289,8 @@ final class ProfileChangeListenerSuite extends KuiIOSuite {
 
   private def eventually[A](read: IO[A])(holds: A => Boolean): IO[A] =
     read
-      .flatMap(value => if holds(value) then IO.pure(value) else IO.sleep(10.millis) *> eventually(read)(holds))
+      .flatMap(value =>
+        if holds(value) then IO.pure(value) else IO.sleep(10.millis) *> eventually(read)(holds)
+      )
       .timeout(5.seconds)
 }

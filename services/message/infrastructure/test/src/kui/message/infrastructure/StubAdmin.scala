@@ -7,9 +7,9 @@ import org.apache.kafka.clients.admin.Admin
 /** A Kafka `Admin` that answers the calls one suite makes and refuses every other.
   *
   * A dynamic proxy rather than a written class, for the reason `services/cluster`'s and `services/topic`'s
-  * copies give: `Admin` declares more than sixty methods, a purge makes four of them, and a hand-written
-  * stub would be several hundred lines of `???` that every Kafka upgrade breaks. Refusing everything else is
-  * the useful half — a call the fixture did not account for fails loudly here instead of quietly returning a
+  * copies give: `Admin` declares more than sixty methods, a purge makes four of them, and a hand-written stub
+  * would be several hundred lines of `???` that every Kafka upgrade breaks. Refusing everything else is the
+  * useful half — a call the fixture did not account for fails loudly here instead of quietly returning a
   * `null` the adapter would then read as an answer, and the refusal is itself how the `describeConfigs`
   * failure path is driven.
   *

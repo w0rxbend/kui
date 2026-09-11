@@ -20,11 +20,11 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The collector, assembled the way `MetricsWiring` assembles it, asked the way the route asks it.
   *
-  * Nothing here composes an answer by hand. A body an exporter would serve goes through the real parser,
-  * the real buffer and the real scrape pass, and the question is put to `MetricsUseCases` — the object
-  * `MetricsRoutes` calls — through `ConfiguredClusterSources`, which is the lookup the wiring builds. That
-  * is the whole reason this suite is in `app`: it is the deepest module that can see both the adapter and
-  * the use case, and a case that stops short of the seam is a case that asserts its own arrangement.
+  * Nothing here composes an answer by hand. A body an exporter would serve goes through the real parser, the
+  * real buffer and the real scrape pass, and the question is put to `MetricsUseCases` — the object
+  * `MetricsRoutes` calls — through `ConfiguredClusterSources`, which is the lookup the wiring builds. That is
+  * the whole reason this suite is in `app`: it is the deepest module that can see both the adapter and the
+  * use case, and a case that stops short of the seam is a case that asserts its own arrangement.
   */
 final class BrokerScrapeLoopSuite extends KuiIOSuite {
 
@@ -82,10 +82,12 @@ final class BrokerScrapeLoopSuite extends KuiIOSuite {
   /** A source that serves whatever the test queued, one answer per scrape. */
   private def scraping(answers: Ref[IO, List[Either[KuiError, String]]]): BrokerScrape[IO] =
     (at: Instant) =>
-      answers.modify {
-        case head :: rest => (rest, head)
-        case Nil => (Nil, Right(exposition(0.0)))
-      }.map(_.flatMap(body => PrometheusExposition.brokerSampleAt(at, body).left.map(malformed)))
+      answers
+        .modify {
+          case head :: rest => (rest, head)
+          case Nil => (Nil, Right(exposition(0.0)))
+        }
+        .map(_.flatMap(body => PrometheusExposition.brokerSampleAt(at, body).left.map(malformed)))
 
   private def malformed(why: String): KuiError =
     InfrastructureError.Remote(ErrorCode.UpstreamUnavailable, why, Nil)
@@ -211,7 +213,6 @@ final class BrokerScrapeLoopSuite extends KuiIOSuite {
         case other => fail(s"expected NotMeasured, got $other")
       }
   }
-
 
   // -----------------------------------------------------------------------------------------------
   // The fibre itself. `pass` is what every case above exercises; `resource` is what the composition

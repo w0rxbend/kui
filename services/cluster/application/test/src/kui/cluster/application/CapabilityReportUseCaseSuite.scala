@@ -6,7 +6,6 @@ import scala.concurrent.duration.*
 
 import cats.effect.IO
 import cats.effect.testkit.TestControl
-
 import org.scalacheck.{Gen, Prop}
 
 import kui.cluster.domain.*

@@ -3,8 +3,7 @@ package kui.kernel
 import munit.ScalaCheckSuite
 import org.scalacheck.Prop.forAll
 
-/** The redaction guarantees of `Secret`, checked on every rendering path a secret can escape
-  * through.
+/** The redaction guarantees of `Secret`, checked on every rendering path a secret can escape through.
   */
 final class SecretSuite extends ScalaCheckSuite {
 

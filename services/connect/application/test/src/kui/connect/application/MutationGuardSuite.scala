@@ -21,9 +21,7 @@ final class MutationGuardSuite extends KuiIOSuite {
   import ConnectRig.*
 
   private def guard(sink: ConnectorOperationSink[IO]): IO[MutationGuard[IO]] =
-    FakeStructuredLogger[IO].map(logger =>
-      MutationGuard.make[IO](new Source(Map.empty), sink, logger)
-    )
+    FakeStructuredLogger[IO].map(logger => MutationGuard.make[IO](new Source(Map.empty), sink, logger))
 
   test("a cancelled restart is audited as Unknown, because the worker may well have accepted it") {
     // The required case. A cancellation lands between the request going out and the 202 coming back, and
@@ -102,9 +100,11 @@ final class MutationGuardSuite extends KuiIOSuite {
         IO.raiseError(new RuntimeException("the log disk is full"))
     }
 
-    guard(broken).flatMap(
-      _.guard(caller, cluster, payments, elastic, ConnectorOperation.Pause)(IO.pure(().asRight[KuiError]))
-    ).assertEquals(Right(()))
+    guard(broken)
+      .flatMap(
+        _.guard(caller, cluster, payments, elastic, ConnectorOperation.Pause)(IO.pure(().asRight[KuiError]))
+      )
+      .assertEquals(Right(()))
   }
 
   test("a cluster KUI has never heard of is audited as a failure and never reaches the operation") {

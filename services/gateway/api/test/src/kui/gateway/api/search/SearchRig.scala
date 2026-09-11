@@ -65,17 +65,17 @@ object SearchRig {
 
   /** One recorded upstream call: which operation, on which cluster, and what it asked *for*.
     *
-    * A record and not a formatted string, so a case can assert on the count and on the query separately and
-    * a failure prints something a reader can act on.
+    * A record and not a formatted string, so a case can assert on the count and on the query separately and a
+    * failure prints something a reader can act on.
     *
-    * `pageSize` and `states` are here because the fold's cost bound is a property of the *request* and not
-    * of the answer. Every source's page size is cut to the caller's `limit` again by
-    * `SearchResultsDto.take` before the answer leaves the gateway, so a source that asked its service for a
-    * hundred rows produces a response byte-identical to one that asked for ten — and the extra ninety are
-    * paid for upstream, where the schema service enriches every row it returns. The same is true of the
-    * group state filter: a search that asked only for `Stable` groups and a search that asked for every
-    * state look identical whenever no dead group happened to match. Neither rule can be asserted from a
-    * response body, so both are recorded here.
+    * `pageSize` and `states` are here because the fold's cost bound is a property of the *request* and not of
+    * the answer. Every source's page size is cut to the caller's `limit` again by `SearchResultsDto.take`
+    * before the answer leaves the gateway, so a source that asked its service for a hundred rows produces a
+    * response byte-identical to one that asked for ten — and the extra ninety are paid for upstream, where
+    * the schema service enriches every row it returns. The same is true of the group state filter: a search
+    * that asked only for `Stable` groups and a search that asked for every state look identical whenever no
+    * dead group happened to match. Neither rule can be asserted from a response body, so both are recorded
+    * here.
     *
     * @param pageSize
     *   what the source asked its service to return, where that service pages. `topic.names` is unpaged by
@@ -164,8 +164,8 @@ object SearchRig {
       )(ctx: CallContext): Stream[IO, SseEvent] = Stream.empty
     }
 
-  /** What a service that filters on its own side would return: a case-insensitive substring match, cut to
-    * the page size it was asked for.
+  /** What a service that filters on its own side would return: a case-insensitive substring match, cut to the
+    * page size it was asked for.
     */
   private def matching(names: List[String], q: Option[String], pageSize: Int): List[String] = {
     val needle = q.getOrElse("").toLowerCase(java.util.Locale.ROOT)

@@ -18,8 +18,8 @@ import kui.cluster.domain.{
   ReplicaState
 }
 import kui.contracts.cluster.ClusterSummaryDto
-import kui.kernel.{BrokerId, Secret}
 import kui.kernel.cluster.*
+import kui.kernel.{BrokerId, Secret}
 
 /** That the mapping tells the truth about a cluster, and never tells anyone a credential.
   *
@@ -116,8 +116,10 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
 
     assertEquals(dir.replicas.map(_.sizeBytes), List(9_000L, 4_000L, 4_000L, 1_000L))
     // Ties break by topic then partition, so two replicas of the same size still have one order.
-    assertEquals(dir.replicas.map(replica => (replica.topic, replica.partition)).take(3),
-      List(("orders", 1), ("audit", 0), ("orders", 0)))
+    assertEquals(
+      dir.replicas.map(replica => (replica.topic, replica.partition)).take(3),
+      List(("orders", 1), ("audit", 0), ("orders", 0))
+    )
   }
 
   test("aSummaryReportsWhatKafkaSaidAndNothingItDidNot") {

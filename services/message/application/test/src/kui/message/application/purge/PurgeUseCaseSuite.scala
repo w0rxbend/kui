@@ -15,8 +15,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The two-phase purge, which is the operation ADR-045 was written for and had no suite of its own.
   *
-  * Two mutations, applied one at a time against `./mill services.message.__.test`, each leaving it at
-  * 183/183 green:
+  * Two mutations, applied one at a time against `./mill services.message.__.test`, each leaving it at 183/183
+  * green:
   *
   *   - `Either.cond(planned.nonEmpty, …)` made unconditional, so a token planned against an already-empty
   *     topic is sent to Kafka — "a call that can still fail and can never help", in the code's own words;

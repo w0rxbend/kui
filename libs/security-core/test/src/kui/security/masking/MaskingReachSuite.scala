@@ -4,20 +4,20 @@ import cats.data.NonEmptyList
 import io.circe.{parser, Json}
 import munit.FunSuite
 
-import kui.kernel.serde.Target
 import kui.kernel.TopicName
+import kui.kernel.serde.Target
 
-/** Two rules of the engine's *reach* that `MaskingEngineSuite` leaves open: which scope a header rule is
-  * read under, and what a masked number comes back as.
+/** Two rules of the engine's *reach* that `MaskingEngineSuite` leaves open: which scope a header rule is read
+  * under, and what a masked number comes back as.
   *
-  * Both were found by mutation against `./mill libs.securityCore.jvm.test` (93 cases, 5 suites), which
-  * stayed green for each:
+  * Both were found by mutation against `./mill libs.securityCore.jvm.test` (93 cases, 5 suites), which stayed
+  * green for each:
   *
   *   - `maskHeaders` filters its rules with `scopeMatches(_, topic, Target.Value)`, and the scaladoc argues
-  *     for it: *"A rule scoped to `topicKeysPattern` does not apply: headers belong to the record, not to
-  *     its key or its value, so only value-scoped and unscoped rules reach them."* Reading the same rules
-  *     under `Target.Key` instead left 93/93 green — the two header cases in `MaskingEngineSuite` use
-  *     unscoped rules, which match under either scope.
+  *     for it: *"A rule scoped to `topicKeysPattern` does not apply: headers belong to the record, not to its
+  *     key or its value, so only value-scoped and unscoped rules reach them."* Reading the same rules under
+  *     `Target.Key` instead left 93/93 green — the two header cases in `MaskingEngineSuite` use unscoped
+  *     rules, which match under either scope.
   *   - `maskLeaf` turns a masked number into a JSON **string**, because *"masking a number and keeping it a
   *     number would either change its magnitude or fail to hide it"*. Returning the number untouched left
   *     93/93 green: every masked fixture in that suite holds a string.

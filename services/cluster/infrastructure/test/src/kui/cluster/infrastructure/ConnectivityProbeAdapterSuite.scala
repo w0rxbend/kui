@@ -49,7 +49,9 @@ final class ConnectivityProbeAdapterSuite extends KuiIOSuite {
 
   test("anUnreachableClusterIsUnreachable") {
     probeWith(
-      StubKafkaClusterAdmin(describeCluster = Left(InfrastructureError.Unreachable("kafka:local", "TimeoutException")))
+      StubKafkaClusterAdmin(describeCluster =
+        Left(InfrastructureError.Unreachable("kafka:local", "TimeoutException"))
+      )
     ).assertEquals(Connectivity.Unreachable(ConnectivityProbeAdapter.CouldNotConnect))
   }
 

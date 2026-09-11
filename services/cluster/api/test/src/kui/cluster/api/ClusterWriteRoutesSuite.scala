@@ -70,7 +70,9 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
       ),
       defaultRole = Some(
         DefaultRole(
-          List(RbacPolicy.permission(rbac.Resource.ApplicationConfig, None, Set(Action.ApplicationConfigView)))
+          List(
+            RbacPolicy.permission(rbac.Resource.ApplicationConfig, None, Set(Action.ApplicationConfigView))
+          )
         )
       )
     )
@@ -91,7 +93,8 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
       mechanism = Some("SCRAM-SHA-512"),
       username = Some(ClusterFixtures.Canary),
       password = Some(Secret(ClusterFixtures.Canary)),
-      truststore = Some(StoreMaterialWrite(Secret(ClusterFixtures.Canary), Some(Secret(ClusterFixtures.Canary)))),
+      truststore =
+        Some(StoreMaterialWrite(Secret(ClusterFixtures.Canary), Some(Secret(ClusterFixtures.Canary)))),
       keystore = None,
       verifyHostname = true
     ),
@@ -115,7 +118,15 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
       } yield ClusterTestServer(
         TapirStreamStubInterpreter(interceptors, StreamBackendStub[IO, Fs2Streams[IO]](summon))
           .whenServerEndpointsRunLogic(
-            ClusterWriteRoutes[IO](writes, probe, codec, rejections, logger, RbacGuard.allowAll[IO], permitted)
+            ClusterWriteRoutes[IO](
+              writes,
+              probe,
+              codec,
+              rejections,
+              logger,
+              RbacGuard.allowAll[IO],
+              permitted
+            )
           )
           .backend(),
         logger,
@@ -127,7 +138,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
   /** The stub, with the fields each case needs. Kept local rather than in the shared fixtures because the
     * timing case needs the delay and nothing else does.
     */
-  private final class ClusterWriteUseCaseStub(
+  final private class ClusterWriteUseCaseStub(
       val answer: ClusterProfile => Either[KuiError, ClusterProfile] = _.asRight[KuiError],
       val takes: FiniteDuration = Duration.Zero,
       val seen: Option[Ref[IO, List[(ClusterProfile, ProfileVersion)]]] = None,
@@ -326,9 +337,8 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     val failing = new ClusterWriteUseCaseStub(answer = _ => Left(ClusterWriteRoutes.NoStore))
 
     server(failing).use(service => put(service).as(service)).flatMap { service =>
-      service.logger.entries.map(lines =>
-        assert(!lines.mkString("\n").contains(ClusterFixtures.Canary), lines.toString)
-      )
+      service.logger.entries
+        .map(lines => assert(!lines.mkString("\n").contains(ClusterFixtures.Canary), lines.toString))
     }
   }
 
@@ -410,7 +420,8 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     // The store record would go and the configuration file would put it straight back on the next
     // resolve. An operator watching a row they deleted reappear has no way to tell that from a bug.
     val refused = new ClusterWriteUseCaseStub(
-      removal = Left(kui.cluster.application.ClusterWriteUseCase.staticallyDefined(ClusterId.unsafe("prod-eu")))
+      removal =
+        Left(kui.cluster.application.ClusterWriteUseCase.staticallyDefined(ClusterId.unsafe("prod-eu")))
     )
 
     server(refused).use(remove(_)).map { response =>
@@ -515,9 +526,8 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     server(new ClusterWriteUseCaseStub()).use(service => test_connection(service).map((service, _))).flatMap {
       (service, response) =>
         assert(!response.body.contains(ClusterFixtures.Canary), response.body)
-        service.logger.entries.map(lines =>
-          assert(!lines.mkString("\n").contains(ClusterFixtures.Canary), lines.toString)
-        )
+        service.logger.entries
+          .map(lines => assert(!lines.mkString("\n").contains(ClusterFixtures.Canary), lines.toString))
     }
   }
 
@@ -535,9 +545,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     // Every one of them classified for read-only mode. An unmarked mutation keeps answering on a cluster
     // an operator has marked read-only and nothing reports it as an exception (ADR-047).
     assert(
-      ClusterWriteEndpoints.all.forall(endpoint =>
-        endpoint.attribute(KuiEndpoint.MutationKey).isDefined
-      ),
+      ClusterWriteEndpoints.all.forall(endpoint => endpoint.attribute(KuiEndpoint.MutationKey).isDefined),
       ClusterWriteEndpoints.all.flatMap(_.info.name).toString
     )
 
@@ -563,7 +571,9 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     assert(underPolicy(editor))
     assert(!underPolicy(Principal.Anonymous))
     assert(
-      !underPolicy(Principal(UserName.unsafe("viewer"), Set(RoleName.unsafe("reader")), PrincipalKind.Session))
+      !underPolicy(
+        Principal(UserName.unsafe("viewer"), Set(RoleName.unsafe("reader")), PrincipalKind.Session)
+      )
     )
   }
 }

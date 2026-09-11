@@ -74,7 +74,7 @@ final class MetricsProxySuite extends CatsEffectSuite {
     )
   )
 
-  private final case class Recorded(context: CallContext, input: String)
+  final private case class Recorded(context: CallContext, input: String)
 
   private def stubClient(answer: Either[KuiError, Any]): IO[(ServiceClient[IO], Ref[IO, List[Recorded]])] =
     Ref.of[IO, List[Recorded]](Nil).map { calls =>

@@ -16,8 +16,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * ADR-053 §5's whole argument for a second record type rests on this: the record is second, the vocabulary
   * is not. If this sink wrote `alerts.who` where `LoggingAuditSink` writes `audit.principal`, KUI would have
-  * two audit trails and the answer to "everything this person did today" would depend on which service did
-  * it — which is exactly the drift ADR-051 §5 refused to create and this file exists to avoid.
+  * two audit trails and the answer to "everything this person did today" would depend on which service did it
+  * — which is exactly the drift ADR-051 §5 refused to create and this file exists to avoid.
   *
   * It is asserted against the field *constants* rather than against string literals, so the day somebody
   * renames a field in `LoggingAuditSink` both sinks move together and this suite still passes. What it

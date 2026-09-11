@@ -338,6 +338,15 @@ between its own page and something else.
   `frontend/packages/api/src/schema.d.ts` and `scripts/feature-matrix-check.sh`'s counts all move
   with it; regenerating them is W5-09's, and the gateway module's `openApiCheck` is red until it
   happens. Designed intermediate state, not a breakage.
+<!-- checked: openapi-totals -- verified by ./scripts/feature-matrix-check.sh -- claims: openapi-document, openapi-totals, residue -->
+- A delta is not a figure anything can recount, so the document those four paths and nine schemas
+  landed on is stated here as well, and checked rather than remembered:
+  `services/metrics/api/openapi.json` is **8 paths, 8 operations and 13 component schemas** — the
+  five metrics endpoints plus the three health probes every KUI service serves, one operation per
+  path. Count them with `jq '[(.paths|length), ([.paths[]|keys[]]|length),
+  (.components.schemas|length)]' services/metrics/api/openapi.json`, which is what
+  `./mill services.metrics.api.openApiCheck` regenerates and compares.
+<!-- /checked -->
 - `MetricsCapabilities` reports all five feature names, derived from `MetricsEndpoints.all` rather
   than written out, so a sixth endpoint cannot be a card the browser never asks for.
 - One scrape now produces one `BrokerSample` holding everything, kept in one `SeriesWindow` per

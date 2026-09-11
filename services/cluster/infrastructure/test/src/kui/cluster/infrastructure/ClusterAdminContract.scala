@@ -16,8 +16,8 @@ import kui.testkit.KuiIOSuite
   * Every case here has to be true of a healthy cluster of any shape, because a container cannot be asked to
   * lose its controller on cue. The cases that need a cluster in a specific, awkward state — no controller
   * during a failover, ACLs switched off, a call the broker refuses — are asserted in the stub-driven suite,
-  * where that state can be constructed; `KafkaToDomainSuite` covers the same shapes at the conversion
-  * level, which is where the actual logic lives.
+  * where that state can be constructed; `KafkaToDomainSuite` covers the same shapes at the conversion level,
+  * which is where the actual logic lives.
   */
 abstract class ClusterAdminContract extends KuiIOSuite {
 
@@ -82,7 +82,9 @@ abstract class ClusterAdminContract extends KuiIOSuite {
       case Left(error) => fail(s"describeCluster failed: ${error.code.wire}")
       case Right(description) =>
         description.brokers.toList.foreach { broker =>
-          broker.rack.foreach(rack => assert(rack.value.trim.nonEmpty, s"broker ${broker.id.value} has a blank rack"))
+          broker.rack.foreach(rack =>
+            assert(rack.value.trim.nonEmpty, s"broker ${broker.id.value} has a blank rack")
+          )
         }
     }
   }
@@ -92,7 +94,8 @@ abstract class ClusterAdminContract extends KuiIOSuite {
     // would take a working screen down over a number nobody needs.
     withPort(_.detectVersion(profile)).map {
       case Left(error) => fail(s"detectVersion must not fail on a reachable cluster: ${error.code.wire}")
-      case Right(version) => assert(version.forall(_.raw.trim.nonEmpty), "a detected version keeps what the broker said")
+      case Right(version) =>
+        assert(version.forall(_.raw.trim.nonEmpty), "a detected version keeps what the broker said")
     }
   }
 

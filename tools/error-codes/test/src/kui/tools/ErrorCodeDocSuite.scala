@@ -32,7 +32,7 @@ final class ErrorCodeDocSuite extends FunSuite {
 
   test("the table is sorted by code, so a new case makes a one-line diff") {
     val rendered = ErrorCodeDoc.render(ErrorCode.values.toList)
-    val codes    = rendered.linesIterator.filter(_.startsWith("| `")).map(_.split('`')(1)).toList
+    val codes = rendered.linesIterator.filter(_.startsWith("| `")).map(_.split('`')(1)).toList
 
     assertEquals(codes, codes.sorted)
   }

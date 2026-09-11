@@ -13,9 +13,9 @@ import kui.topic.application.TopicCapability
   * The file's own header spends two paragraphs on it — "`available` or `degraded`, never `unavailable`. A
   * service that is answering this request at all is reachable by definition… a Kafka cluster the topic
   * service cannot reach must not dim the Topics entry in the sidebar" — and nothing asserted the arm that
-  * carries it. Mapping `TopicCapability.Unavailable` to `not_configured` left
-  * `./mill services.topic.__.test` at 287/287 green, and ADR-032 then hides the whole Topics row for a
-  * cluster that has merely never been scraped.
+  * carries it. Mapping `TopicCapability.Unavailable` to `not_configured` left `./mill services.topic.__.test`
+  * at 287/287 green, and ADR-032 then hides the whole Topics row for a cluster that has merely never been
+  * scraped.
   */
 final class TopicCapabilityMappingSuite extends FunSuite {
 

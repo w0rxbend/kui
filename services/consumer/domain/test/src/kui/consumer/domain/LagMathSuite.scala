@@ -2,12 +2,13 @@ package kui.consumer.domain
 
 import java.time.Instant
 
-import kui.consumer.domain.fixtures.GroupFixtures
-import kui.kernel.group.LagAnomaly
-import kui.kernel.Offset
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+
+import kui.consumer.domain.fixtures.GroupFixtures
+import kui.kernel.Offset
+import kui.kernel.group.LagAnomaly
 
 /** Lag, and the four ways it can fail to be a number.
   *

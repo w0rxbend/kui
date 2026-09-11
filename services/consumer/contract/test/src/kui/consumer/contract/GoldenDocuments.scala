@@ -294,7 +294,6 @@ object GoldenDocuments {
       |  "note" : "3 of 12 partitions have no leader, so their end offsets could not be read"
       |}""".stripMargin
 
-
   /** The list as it goes out when the cluster is answering. */
   val groupsResponse: String =
     """{
@@ -355,8 +354,8 @@ object GoldenDocuments {
 
   /** The same rows, from a cluster that has stopped answering.
     *
-    * This is the document the whole freshness envelope exists for. The rows are identical to the ones above
-    * — that is the point: without `status` and `reason` a browser cannot tell this answer from that one, and
+    * This is the document the whole freshness envelope exists for. The rows are identical to the ones above —
+    * that is the point: without `status` and `reason` a browser cannot tell this answer from that one, and
     * the lag figures in it are from before the broker died.
     */
   val groupsResponseStale: String =

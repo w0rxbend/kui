@@ -44,7 +44,8 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
   test("authMeAnswersAnonymousInM0") {
     GatewayTestServer.resource().use { server =>
       server.get(meUri).map { response =>
-        val body = decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
+        val body =
+          decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
         assertEquals(body.authType, "disabled")
         assertEquals(body.principal.kind, "anonymous")
         assertEquals(body.principal.name, "anonymous")
@@ -59,7 +60,8 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
     // hide every write control in the deployment that has asked for no authorization at all.
     GatewayTestServer.resource().use { server =>
       server.get(meUri).map { response =>
-        val body = decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
+        val body =
+          decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
 
         assertEquals(body.permissions.map(_.resource).toSet, Resource.values.map(_.wire).toSet)
         assert(body.permissions.forall(_.clusters == List(ClusterScope.EveryWire)))
@@ -84,7 +86,10 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         secondCookie = cookieOf(second)
         // Logging out cleared the session; the new cookie belongs to a fresh session with a different
         // token, so replaying the first token against it must fail.
-        stale <- server.post(logoutUri, Map("Cookie" -> secondCookie, SessionMiddleware.CsrfHeaderName -> token))
+        stale <- server.post(
+          logoutUri,
+          Map("Cookie" -> secondCookie, SessionMiddleware.CsrfHeaderName -> token)
+        )
       } yield {
         assertEquals(allowed.code.code, 200, allowed.body)
         assertEquals(stale.code.code, 403, stale.body)
@@ -111,7 +116,10 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         first <- server.get(meUri)
         cookie = cookieOf(first)
         token = tokenOf(first)
-        loggedOut <- server.post(logoutUri, Map("Cookie" -> cookie, SessionMiddleware.CsrfHeaderName -> token))
+        loggedOut <- server.post(
+          logoutUri,
+          Map("Cookie" -> cookie, SessionMiddleware.CsrfHeaderName -> token)
+        )
         afterLogout <- server.get(meUri, Map("Cookie" -> cookie))
         afterBody = decode[AuthMeResponse](afterLogout.body).toOption.get
       } yield {

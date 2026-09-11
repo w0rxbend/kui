@@ -79,18 +79,17 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
     both { transports =>
       ask(transports)(
         _.call(ClusterEndpoints.getCluster, EmptyClusterUseCases.UnknownCluster)(AllInOneFixture.context)
-      ).map {
-        (inProcess, overHttp) =>
-          assertEquals(
-            inProcess.leftMap(_.code),
-            overHttp.leftMap(_.code),
-            "a business failure must survive both transports as the same error code"
-          )
-          assertEquals(
-            inProcess.leftMap(_.code),
-            Left(ErrorCode.ClusterNotFound),
-            "a cluster that is not configured is a not-found failure, not an upstream failure"
-          )
+      ).map { (inProcess, overHttp) =>
+        assertEquals(
+          inProcess.leftMap(_.code),
+          overHttp.leftMap(_.code),
+          "a business failure must survive both transports as the same error code"
+        )
+        assertEquals(
+          inProcess.leftMap(_.code),
+          Left(ErrorCode.ClusterNotFound),
+          "a cluster that is not configured is a not-found failure, not an upstream failure"
+        )
       }
     }
   }

@@ -20,17 +20,17 @@ import kui.http.sse.{Sse, SseEvent}
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.KuiError
 import kui.kernel.{ClusterId, ServiceId}
-import kui.ksql.contract.dto.QueryRowDto
 import kui.ksql.contract.KsqlStreamEndpoint
-import kui.security.rbac.{Action, ClusterFlags, DefaultRole, RbacPolicy, Resource as RbacResource}
+import kui.ksql.contract.dto.QueryRowDto
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, ClusterFlags, DefaultRole, RbacPolicy, Resource as RbacResource}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The push-query relay's gateway-specific promises, exercised through a real listener.
   *
   * The same five questions `AlertsStreamRoutesSuite` asks of the alerts relay, because it is the same
-  * mechanism and the mistakes available to it are the same ones. Two are worth restating for this route:
-  * the statement is a query parameter, which is the input the derivation would have decoded and the relay
+  * mechanism and the mistakes available to it are the same ones. Two are worth restating for this route: the
+  * statement is a query parameter, which is the input the derivation would have decoded and the relay
   * forwards untouched; and the permission is `KSQL:EXECUTE` rather than a read, because a push query is a
   * query ksqlDB runs and holds open.
   */
@@ -55,7 +55,7 @@ final class KsqlStreamRoutesSuite extends CatsEffectSuite {
   private def address(server: GatewayTestServer.Running): sttp.model.Uri =
     server.at(path).addParam(KsqlStreamEndpoint.StatementParam, statement)
 
-  private final case class Opened(endpoint: String, path: String, context: CallContext, input: Any)
+  final private case class Opened(endpoint: String, path: String, context: CallContext, input: Any)
 
   private def client(
       source: Stream[IO, SseEvent]
@@ -76,16 +76,18 @@ final class KsqlStreamRoutesSuite extends CatsEffectSuite {
             endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[IO, Byte], Fs2Streams[IO]],
             input: I
         )(ctx: CallContext): Stream[IO, SseEvent] =
-          Stream.eval(
-            opened.update(
-              _ :+ Opened(
-                endpoint.info.name.getOrElse("<unnamed>"),
-                endpoint.showPathTemplate(),
-                ctx,
-                input
+          Stream
+            .eval(
+              opened.update(
+                _ :+ Opened(
+                  endpoint.info.name.getOrElse("<unnamed>"),
+                  endpoint.showPathTemplate(),
+                  ctx,
+                  input
+                )
               )
             )
-          ).drain ++ source
+            .drain ++ source
 
         def circuitStates: Stream[IO, CircuitEvent] = Stream.empty
       }
@@ -120,9 +122,9 @@ final class KsqlStreamRoutesSuite extends CatsEffectSuite {
 
   /** One `row` frame, rendered by the ksql contract's own encoder rather than written out as JSON.
     *
-    * The relay never looks inside a frame, so the payload could be anything — but a hand-written literal
-    * here would be a fourth spelling of a wire this project has already been bitten by having three of, and
-    * it would stop telling the truth the moment the DTO moved.
+    * The relay never looks inside a frame, so the payload could be anything — but a hand-written literal here
+    * would be a fourth spelling of a wire this project has already been bitten by having three of, and it
+    * would stop telling the truth the moment the DTO moved.
     */
   private def row(values: String*): SseEvent =
     SseEvent.data(KsqlStreamEndpoint.EventName, QueryRowDto(values.toList.map(Some(_))).asJson)

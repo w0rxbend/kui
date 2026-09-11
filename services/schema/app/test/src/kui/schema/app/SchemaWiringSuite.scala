@@ -114,9 +114,7 @@ final class SchemaWiringSuite extends KuiIOSuite {
     val logger = FakeStructuredLogger[IO]
 
     logger
-      .flatMap(fake =>
-        SchemaWiring.startupLog[IO](List(bare, configured), fake) *> fake.entries
-      )
+      .flatMap(fake => SchemaWiring.startupLog[IO](List(bare, configured), fake) *> fake.entries)
       .map { entries =>
         // One line per *configured* cluster and none for the bare one: the two branches are exclusive,
         // so a deployment that has any registry at all never prints the "none" sentence.

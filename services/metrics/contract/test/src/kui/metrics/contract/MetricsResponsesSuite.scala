@@ -16,9 +16,9 @@ import kui.metrics.contract.dto.*
   *
   * Cross-compiled: the same assertions run under Node, which is what makes "the browser decodes what the
   * service encodes" a fact rather than a hope. The browser's own half is
-  * `frontend/packages/shell/src/overview/wire.golden.test.ts`, which reads these same files off disk and
-  * runs them through the fetchers the screen uses — so the two sides are asserted against one artefact
-  * instead of against two hand-written literals that agree with nothing but themselves.
+  * `frontend/packages/shell/src/overview/wire.golden.test.ts`, which reads these same files off disk and runs
+  * them through the fetchers the screen uses — so the two sides are asserted against one artefact instead of
+  * against two hand-written literals that agree with nothing but themselves.
   */
 final class MetricsResponsesSuite extends FunSuite {
 
@@ -71,7 +71,10 @@ final class MetricsResponsesSuite extends FunSuite {
 
   test("a throughput series is exactly its golden document, gap and measured zero and all") {
     assertGolden("throughput-response.json", GoldenDocuments.throughputResponse, throughput.asJson)
-    assertEquals(parse(GoldenDocuments.throughputResponse).flatMap(_.as[ThroughputResponse]), Right(throughput))
+    assertEquals(
+      parse(GoldenDocuments.throughputResponse).flatMap(_.as[ThroughputResponse]),
+      Right(throughput)
+    )
   }
 
   test("a null rate and a zero rate survive the round trip as different facts") {
@@ -82,7 +85,8 @@ final class MetricsResponsesSuite extends FunSuite {
     val decoded = parse(GoldenDocuments.throughputResponse)
       .flatMap(_.as[ThroughputResponse])
       .fold(failure => fail(failure.toString), identity)
-    val buckets = decoded.throughput.toOption.map(_.buckets).getOrElse(fail("the golden section carries data"))
+    val buckets =
+      decoded.throughput.toOption.map(_.buckets).getOrElse(fail("the golden section carries data"))
 
     assertEquals(buckets.map(_.bytesInPerSecond), List(Some(124800.5), None, Some(0.0)))
   }
@@ -142,7 +146,11 @@ final class MetricsResponsesSuite extends FunSuite {
     val response =
       RequestHandlersResponse(Section.Ok(RequestHandlersDto(None, Some(0.7104), Nil), at))
 
-    assertGolden("request-handlers-one-absent.json", GoldenDocuments.requestHandlersOneAbsent, response.asJson)
+    assertGolden(
+      "request-handlers-one-absent.json",
+      GoldenDocuments.requestHandlersOneAbsent,
+      response.asJson
+    )
     assertEquals(
       parse(GoldenDocuments.requestHandlersOneAbsent).flatMap(_.as[RequestHandlersResponse]),
       Right(response)
@@ -180,7 +188,10 @@ final class MetricsResponsesSuite extends FunSuite {
       TopProducersResponse(Section.Ok(TopProducersDto(TopProducersDto.ByTopic, Nil, 0), at))
 
     assertGolden("top-producers-empty.json", GoldenDocuments.topProducersEmpty, response.asJson)
-    assertEquals(parse(GoldenDocuments.topProducersEmpty).flatMap(_.as[TopProducersResponse]), Right(response))
+    assertEquals(
+      parse(GoldenDocuments.topProducersEmpty).flatMap(_.as[TopProducersResponse]),
+      Right(response)
+    )
   }
 
   test("a deployment with no metrics source answers not_configured and carries no data at all") {
@@ -218,7 +229,10 @@ final class MetricsResponsesSuite extends FunSuite {
     )
 
     assertGolden("record-size-unavailable.json", GoldenDocuments.recordSizeUnavailable, response.asJson)
-    assertEquals(parse(GoldenDocuments.recordSizeUnavailable).flatMap(_.as[RecordSizeResponse]), Right(response))
+    assertEquals(
+      parse(GoldenDocuments.recordSizeUnavailable).flatMap(_.as[RecordSizeResponse]),
+      Right(response)
+    )
   }
 
   test("every golden document names the section key its endpoint actually answers under") {

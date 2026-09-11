@@ -10,8 +10,8 @@ import kui.kernel.cluster.ClusterConnection
 /** An `AdminClientPool` that hands every call the same client.
   *
   * The pool's real behaviour — the client lifetime, the timeouts, the metrics, the reconnect — is
-  * `libs/kafka`'s and is tested there. What this module needs from it is a way to put a stub `Admin` in
-  * front of `KafkaRecordDeleter`, which takes a pool and not a client.
+  * `libs/kafka`'s and is tested there. What this module needs from it is a way to put a stub `Admin` in front
+  * of `KafkaRecordDeleter`, which takes a pool and not a client.
   *
   * `IO.defer`, because a Kafka call can throw before it returns a future — an admin client whose connection
   * has gone throws from `describeConfigs` itself — and the real pool invokes `call` inside a `flatMap`, so

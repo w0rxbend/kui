@@ -70,8 +70,8 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
       )
       .evalTap(ClusterRig.settled)
 
-  /** Four partitions across the three brokers of the default description: broker 1 leads two, brokers 2 and
-    * 3 one each, and every partition is replicated everywhere.
+  /** Four partitions across the three brokers of the default description: broker 1 leads two, brokers 2 and 3
+    * one each, and every partition is replicated everywhere.
     */
   private val fourPartitions: TopicSweep = TopologyFixtures.sweep(
     List(
@@ -338,11 +338,10 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
   test("configsReturnUnsupportedAndNotAnEmptyList") {
     // The named managed-service defect: an empty configuration table and "this cluster does not
     // expose broker configuration" look identical to a user and mean opposite things.
-    rig(configs = Map(broker1 -> Left(ApplicationError.Unsupported("broker configuration")))).use {
-      built =>
-        built.brokers.configs(prod.id, broker1, includeDocs = false).map { result =>
-          assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unsupported))
-        }
+    rig(configs = Map(broker1 -> Left(ApplicationError.Unsupported("broker configuration")))).use { built =>
+      built.brokers.configs(prod.id, broker1, includeDocs = false).map { result =>
+        assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unsupported))
+      }
     }
   }
 

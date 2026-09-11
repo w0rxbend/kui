@@ -13,8 +13,8 @@ import kui.kernel.error.InfrastructureError
 /** The events every KUI stream shares (ADR-035).
   *
   * The names are asserted as literals because they are used on both sides of the wire as strings:
-  * `addEventListener("done", ...)` in the browser, `event: done` on the server. Nothing converts
-  * them, so nothing would catch a rename.
+  * `addEventListener("done", ...)` in the browser, `event: done` on the server. Nothing converts them, so
+  * nothing would catch a rename.
   */
 final class SseEventsSuite extends FunSuite {
 

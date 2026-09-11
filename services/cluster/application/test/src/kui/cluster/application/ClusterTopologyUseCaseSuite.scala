@@ -28,8 +28,8 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
   private val at: Instant = Instant.parse("2026-09-04T09:00:00Z")
   private val since: Instant = Instant.parse("2026-09-04T09:00:30Z")
 
-  /** Long enough that any read which actually waited for a broker would be caught, short enough that
-    * the virtual-time scheduler does not have to step through an hour of it.
+  /** Long enough that any read which actually waited for a broker would be caught, short enough that the
+    * virtual-time scheduler does not have to step through an hour of it.
     */
   private val SlowAdmin: FiniteDuration = 10.seconds
 
@@ -103,12 +103,12 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
         _ <- IO.sleep(31.seconds)
         after <- rig.topology.view(prod.id)
       } yield
-      // A timestamp that moves while the data does not is a lie the UI repeats in the words
-      // "as of thirty seconds ago".
-      assertEquals(
-        after.toOption.flatMap(_.freshness.scrapedAtOption),
-        before.toOption.flatMap(_.freshness.scrapedAtOption)
-      )
+        // A timestamp that moves while the data does not is a lie the UI repeats in the words
+        // "as of thirty seconds ago".
+        assertEquals(
+          after.toOption.flatMap(_.freshness.scrapedAtOption),
+          before.toOption.flatMap(_.freshness.scrapedAtOption)
+        )
     }
 
     TestControl.executeEmbed(scenario)
@@ -156,9 +156,9 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
         _ <- IO.sleep(31.seconds)
         second <- rig.topology.view(prod.id)
       } yield
-      // A user asks "how long has this been broken", not "how long has it been broken in this
-      // particular way".
-      assertEquals(second.toOption.flatMap(sinceOf), first.toOption.flatMap(sinceOf))
+        // A user asks "how long has this been broken", not "how long has it been broken in this
+        // particular way".
+        assertEquals(second.toOption.flatMap(sinceOf), first.toOption.flatMap(sinceOf))
     }
 
     TestControl.executeEmbed(scenario)

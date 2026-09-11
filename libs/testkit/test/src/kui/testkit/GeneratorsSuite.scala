@@ -6,9 +6,9 @@ import kui.kernel.*
 
 /** That the generators generate what they claim.
   *
-  * A generator nobody checks is a silent source of false confidence: if `validTopicName` produced
-  * something Kafka would reject, every property built on it would be testing the wrong thing, and
-  * they would all still be green.
+  * A generator nobody checks is a silent source of false confidence: if `validTopicName` produced something
+  * Kafka would reject, every property built on it would be testing the wrong thing, and they would all still
+  * be green.
   */
 final class GeneratorsSuite extends KuiSuite {
 

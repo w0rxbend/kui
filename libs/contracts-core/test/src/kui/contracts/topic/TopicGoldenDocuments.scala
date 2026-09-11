@@ -38,8 +38,8 @@ object TopicGoldenDocuments {
       |  "cleanupPolicy" : null
       |}""".stripMargin
 
-  /** A topic with one offline partition: `leader` is null, and every count that would have had to
-    * include that partition is null too, on the partition row and on the topic row alike.
+  /** A topic with one offline partition: `leader` is null, and every count that would have had to include
+    * that partition is null too, on the partition row and on the topic row alike.
     */
   val topicDetail: String =
     """{

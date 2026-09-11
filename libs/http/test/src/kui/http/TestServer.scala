@@ -18,11 +18,11 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** A real server on a real port, for the assertions that only a real server can make.
   *
-  * A stub interpreter would be faster, and for most of `libs/http` it would be enough. It would
-  * not be enough for the ones that matter here: whether an unmatched route reaches the reject
-  * handler at all, whether the correlation id really appears in a response *header*, and whether
-  * `basePath` changes what the operating system's socket answers. Those are properties of the
-  * wiring, and a stub would assert the wiring it replaced.
+  * A stub interpreter would be faster, and for most of `libs/http` it would be enough. It would not be enough
+  * for the ones that matter here: whether an unmatched route reaches the reject handler at all, whether the
+  * correlation id really appears in a response *header*, and whether `basePath` changes what the operating
+  * system's socket answers. Those are properties of the wiring, and a stub would assert the wiring it
+  * replaced.
   */
 object TestServer {
 
@@ -35,8 +35,8 @@ object TestServer {
 
     def baseUri: Uri = Uri.unsafeParse(s"http://localhost:${binding.port}")
 
-    /** `baseUri` with a path appended. The interpolator will not splice a path into a URI that
-      * already has an authority, so the whole thing is parsed from text instead.
+    /** `baseUri` with a path appended. The interpolator will not splice a path into a URI that already has an
+      * authority, so the whole thing is parsed from text instead.
       */
     def at(path: String): Uri = Uri.unsafeParse(s"http://localhost:${binding.port}$path")
 

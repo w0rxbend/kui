@@ -14,8 +14,8 @@ import kui.metrics.domain.*
 /** The translation between the two vocabularies, and the section a card is drawn from.
   *
   * The range exists twice — once as the browser spells it, once with the window and step behind it — because
-  * the layering rules forbid either module seeing the other. Two spellings kept equal by everyone
-  * remembering is exactly the kind of rule this repository has learned to make a test instead.
+  * the layering rules forbid either module seeing the other. Two spellings kept equal by everyone remembering
+  * is exactly the kind of rule this repository has learned to make a test instead.
   */
 final class MetricsMappingSuite extends FunSuite {
 

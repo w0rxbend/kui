@@ -33,6 +33,9 @@
 #                     table two paragraphs above the state totals, which sat outside every marker
 #                     while the totals beside it were checked -- so moving one row's Milestone cell
 #                     left the table wrong and this script green
+#   openapi-totals    the per-service and merged OpenAPI totals ADR-052, ADR-053 and ADR-054
+#                     publish in their Consequences. Nothing read any of the three until
+#                     2026-09-11, and ADR-053's merged figures had been stale for a whole wave
 #   adr-index         every `docs/adr/ADR-*.md` against the rows of `DECISIONS.md`, and every row
 #                     against a file. ADR-052 was accepted, referenced by four documents and had no
 #                     row in the index for a whole wave; it was repaired by hand, and a
@@ -128,11 +131,11 @@
 # out. **Nothing looked at what it was compared against, because nothing recorded it.**
 #
 # The fourth column, the self-check and the audit are that hole. Section 2 below carries the detail
-# and `TECH_DEBT.md` TD-023 carries the cheapest attack still standing, with its measured cost --
+# and the header block below carries the cheapest attack still standing, with its measured cost --
 # because a claim about one's own gate is measured, not asserted, and this file is where the
 # project learned that.
 #
-# WHY A LEDGER WAS NOT ENOUGH EITHER, WHICH IS SECTION 6
+# WHY A LEDGER WAS NOT ENOUGH EITHER, WHICH IS SECTION 7
 # ------------------------------------------------------
 # Wave 7's rebuild -- the ledger, the fourth column and the audit -- was published as costing two
 # edits to defeat. Re-measured on 2026-09-11 against the same file with the documents true, it cost
@@ -157,13 +160,42 @@
 #      ledger says that block published to be in it -- a second reading of the claimed side that
 #      does not go through `claim` at all.
 #
-# And the refusals themselves are now driven. Section 6 is there because six guards in wave 7's
+# And the refusals themselves are now driven. Section 7 is there because six guards in wave 7's
 # file were mutated one at a time on 2026-09-11 and the run stayed green for every one: a refusal
 # whose failing case never arrives in this repository is a line nothing distinguishes from `true`.
 # The failing cases are fixtures now.
 #
-# The cheapest attack on the finished file is **two lines**, both in this file, and it is published
-# with its measurement in `TECH_DEBT.md` TD-023. Two is not a large number. It is the measured one.
+# WHY EIGHT FIXTURES WERE NOT ENOUGH EITHER, WHICH IS SECTIONS 3 AND 6
+# ---------------------------------------------------------------------
+# Wave 8's eight fixtures all drive the *marked-document* machinery, and the two things in this
+# file that carry no marker were therefore untouched by every one of them. Both were one line on
+# 2026-09-11, both measured against the shipped script with the documents true:
+#
+#   `claim npm-version "" "$version" "${matched:-not in the cell}"` -> `... "$version" "$version"`
+#      DEPENDENCY_MATRIX.md then published `vite` at `9.9.9` against a `frontend/package.json`
+#      pinning `8.2.2`, and the run printed `283 claims checked, all true` and exited 0
+#
+#   `grep -c 'checked:'` over ADR-052, ADR-053 and ADR-054 answered 0, and ADR-053 had been
+#      publishing `61 paths, 72 operations and 156 component schemas` about documents that are
+#      65, 76 and 160 for a whole wave, because the one person who measured the correction did not
+#      own the file
+#
+# Section 3 has a fixture and a second reading of the row now; section 6 brings the three ADRs
+# inside markers. And attacking the result found three more one-line collapses of the same shape,
+# every one of them a `claim` call whose `matched` argument was empty -- which skips the
+# claimed-side refusal, so nothing required the claimed figure to have been read out of a
+# document. `state-total` let the matrix paragraph publish `99 COMPLETE` against a table of 70;
+# `adr-file` let `DECISIONS.md` point ADR-052's row at ADR-053's document; `milestone-rows` let
+# the milestone table publish any row count. All three now pass the fragment they read, and the
+# two comparisons that cannot -- the residue, and the Total line's split, whose fact is its own
+# arithmetic -- have fixtures instead.
+#
+# The cheapest attack on the finished file is **two lines**, both in this file, measured on
+# 2026-09-11: `dependency_version_fact` rewritten to `printf '%s' "$2"`, which answers the pin
+# whatever the row says and so defeats the comparison and its audit together, plus fixture 9's
+# disagreeing case compared with itself. With both, `vite` at `9.9.9` against a pin of `8.2.2`
+# printed `348 claims checked, all true` and exited 0. Two is not a large number. It is the
+# measured one, and it is published here rather than in a row nobody re-derives.
 #
 # The per-section counts are kept beside the registry rather than instead of it. A count still says
 # something the kinds do not -- that a section compared *fewer instances* of a kind it still
@@ -216,6 +248,11 @@ adr048="docs/adr/ADR-048-solidjs-typescript-vite-frontend.md"
 apireadme="frontend/packages/api/README.md"
 deps="DEPENDENCY_MATRIX.md"
 decisions="DECISIONS.md"
+# Section 6's three. Each publishes totals about a document the build generates, and until
+# 2026-09-11 `grep -c 'checked:'` over all three answered 0.
+adr052="docs/adr/ADR-052-metrics-endpoints.md"
+adr053="docs/adr/ADR-053-alert-events.md"
+adr054="docs/adr/ADR-054-connect-endpoints.md"
 
 # The npm manifests section 3 reads, written out one per line. The sentence below used to be false
 # of this very list, and the way it was false is worth keeping: section 3 fed `jq` the glob
@@ -243,6 +280,7 @@ manifests=(
 # Every input is named rather than globbed: a glob that matches nothing checks nothing and says so
 # to nobody, which is the failure this script was written to end.
 for required in "$matrix" README.md "$adr048" "$apireadme" "$deps" "$decisions" \
+                "$adr052" "$adr053" "$adr054" \
                 docs/api/openapi.json "${manifests[@]}"; do
   if [[ ! -f $required ]]; then
     echo "feature-matrix-check: $required is missing; the check cannot run." >&2
@@ -270,12 +308,14 @@ declare -A registry=(
   [merged-document]="csrf-operations document-claim document-fact document-facts header-table\
  if-match-operations openapi-version paths-and-schemas principal-operations principal-paths\
  residue"
-  [dependencies]="manifest npm-version"
+  [dependencies]="dependency-audit dependency-claim dependency-fact manifest npm-version"
   [milestones]="milestone-line milestone-p0 milestone-p1 milestone-rows total-line total-p0\
  total-p1 total-rows total-split"
   [adr-index]="adr-file adr-row"
   [guard-fixtures]="claim-refuses-noncomparison claimed-side-read count-assertion\
- empty-block-refused fact-independence figure-published header-kind-inverse marker-list-refused"
+ dependency-row-compared empty-block-refused fact-independence figure-published\
+ header-kind-inverse marker-list-refused residue-reports-unclaimed total-split-compared"
+  [openapi-totals]="openapi-document openapi-totals residue"
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -467,9 +507,26 @@ check_marked_file() {
 
 # The residue: digits the block publishes that no comparison consumed. `consume` is how a
 # comparison says which fragment it read.
+# A section that reads a table rather than a paragraph has no residue check and therefore no
+# `text` to strike anything out of. It still has a claimed side that was read out of a document,
+# and `claim`'s refusal below is the gate on that, so `matched` is passed there too and this is a
+# no-op rather than an error. Written as an existence test and not as a `${text-}` default because
+# a nameref to an unset variable under `set -u` ends the run with nothing printed.
 consume() {
+  [[ -n ${!1+set} ]] || return 0
   local -n text_ref=$1
   text_ref=${text_ref/"$2"/}
+}
+
+# Is this figure one the text actually publishes? A whole token, so that `26` is not found inside
+# `126` and a claim cannot be satisfied by a digit belonging to another sentence. Defined here
+# rather than beside the audit that named it because `claim`'s own refusal calls it, and `claim`
+# runs in section 0 before any document is read.
+figure_is_published() {
+  if printf '%s' "$1" | grep -qE "(^|[^0-9.])$(printf '%s' "$2" | sed 's/[.]/[.]/g')([^0-9%]|%|$)"
+  then printf 'published'
+  else printf 'not published'
+  fi
 }
 
 # One comparison, as one call. It records the claim, strikes the figure it read out of the block
@@ -519,7 +576,15 @@ claim() {
     local -a groups=("$@")
     local at
     for (( at = 0; at < ${#groups[@]}; at += 3 )); do
-      [[ $matched == *"${groups[$at]}"* ]] && continue
+      # A figure is matched whole and anything else as a substring. The substring test alone let a
+      # claimed `8` be satisfied by the `18` in the cell beside it, which is the difference between
+      # a refusal and a refusal that can be argued with; `figure_is_published` is the same whole-
+      # token reader the claimed-side audit is made of, and fixture 8 drives it in both directions.
+      if [[ ${groups[$at]} =~ ^[0-9]+(\.[0-9]+)*%?$ ]]; then
+        [[ $(figure_is_published "$matched" "${groups[$at]}") == published ]] && continue
+      else
+        [[ $matched == *"${groups[$at]}"* ]] && continue
+      fi
       fail "${where-a comparison}: the \`$kind\` claim compared \`${groups[$at]}\` as the figure" \
            "the document publishes, and the text it struck out of the block --" \
            "\`$matched\` -- does not contain it. The claimed side of a comparison has to be read" \
@@ -676,7 +741,7 @@ percent=$(rounded_percent "$complete" "$in_scope")
 # without a comparison being added beside it.
 check_rows_region() {
   local where=$1 text=$2 rest tok n name
-  declare -A claimed=()
+  declare -A claimed=() claimed_token=()
 
   # The state totals, in both directions at once. This used to be two loops, the second of which
   # -- the one that notices a state present in the rows and named nowhere in the prose --
@@ -687,6 +752,13 @@ check_rows_region() {
   while [[ $rest =~ ([0-9]+)\ \`([A-Z][A-Z\ ,]*[A-Z])\` ]]; do
     tok=${BASH_REMATCH[0]}; n=${BASH_REMATCH[1]}; name=${BASH_REMATCH[2]}
     claimed[$name]=$n
+    # The fragment the figure was read out of, kept so that the comparison below can be handed it.
+    # Without it `claim` sees an empty `matched`, its claimed-side refusal is skipped, and the
+    # whole of section 1 is one line from a comparison of the fact with itself -- measured on
+    # 2026-09-11 on this file with sections 3 and 6 finished: `"${claimed[$name]}"` rewritten to
+    # `"${actual[$name]:-0}"` let this paragraph publish `99 COMPLETE` against a table holding 70
+    # with the run printing `346 claims checked, all true` and exiting 0.
+    claimed_token[$name]=$tok
     rest=${rest#*"$tok"}
     consume text "$tok"
   done
@@ -715,7 +787,7 @@ check_rows_region() {
         "named" "unnamed" \
         "$where names no total for \`$name\`; ${actual[$name]:-0} row(s) are in that state."
     else
-      claim state-total "" \
+      claim state-total "${claimed_token[$name]:-}" \
         "${claimed[$name]}" "${actual[$name]:-0}" \
         "$where says ${claimed[$name]} \`$name\` rows; $matrix has ${actual[$name]:-0}."
     fi
@@ -795,8 +867,9 @@ close_section rows 18
 #      an audit derivation taught to answer that same false figure is caught by the per-header
 #      comparison too, because its two sides come from different places.
 #
-# The cheapest attack still standing is published in `TECH_DEBT.md` TD-023 with its measured cost,
-# because house rule 17 of the wave that wrote this asks for the attack and not for the assertion.
+# The cheapest attack still standing is published in this file's own header with its measured
+# cost, because house rule 17 of the wave that wrote this asks for the attack and not for the
+# assertion -- and because a cost kept in another document is a figure nobody re-derives.
 
 read -r doc_paths doc_ops doc_schemas doc_version < <(jq -r '
   def ops: [.paths | to_entries[] as $p | $p.value | to_entries[] as $o
@@ -978,15 +1051,6 @@ check_document_region() {
 # claim was compared with. A comparison edited to compare a published figure with itself -- the
 # cheapest attack left once the facts are looked up by the name the prose gives them -- records the
 # false figure in the fact column, and is named here with both sides printed.
-# Is this figure one the block actually publishes? A whole token, so that `26` is not found inside
-# `126` and a claim cannot be satisfied by a digit belonging to another sentence.
-figure_is_published() {
-  if printf '%s' "$1" | grep -qE "(^|[^0-9.])$(printf '%s' "$2" | sed 's/[.]/[.]/g')([^0-9%]|%|$)"
-  then printf 'published'
-  else printf 'not published'
-  fi
-}
-
 audit_document_facts() {
   local line a b c pairs pair fact expected header index complaint audited=0
   local recorded
@@ -1156,34 +1220,149 @@ if [[ -z ${dep_rows//[[:space:]]/} ]]; then
   dep_rows=""
 fi
 
-while IFS=$'\t' read -r name version; do
-  [[ -z $name ]] && continue
-  [[ $name == @kui/* ]] && continue
-  row=$(awk -F'|' -v n="$name" '
+# The manifests, read a second time by an expression that is not the one above: `dep_rows` selects
+# the two dependency objects by key and takes their entries; this adds the two objects together
+# first. `audit_dependency_rows` compares the claimed side of every `npm-version` claim against
+# this table, so a comparison rewritten to put the *document's* own cell on both sides is caught by
+# a reader that never looked at the document.
+declare -A manifest_pins=()
+while IFS=$'\t' read -r pinned_name pinned_version; do
+  [[ -z $pinned_name ]] && continue
+  manifest_pins[$pinned_name]="${manifest_pins[$pinned_name]:+${manifest_pins[$pinned_name]} }\
+$pinned_version"
+done < <(jq -r '[(.dependencies // {}), (.devDependencies // {})] | add // {}
+                | to_entries[] | "\(.key)\t\(.value)"' "${manifests[@]}" | sort -u)
+
+# The version cell `DEPENDENCY_MATRIX.md` publishes for one package, by the column positions every
+# table in that file shares: the name is the second cell and the version the third. Lifted out of
+# the loop below so that a fixture can drive the shipped lookup over a row written for the
+# occasion, which is the whole of why section 3's comparison was the last one in this file with no
+# fixture behind it.
+dependency_cell() {
+  awk -F'|' -v n="$2" '
     NF >= 6 {
       f = $2; sub(/^[ \t`]+/, "", f); sub(/[ \t`]+$/, "", f)
       v = $3; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
       if (f == n) { print v; exit }
-    }' "$deps")
+    }' "$1"
+}
+
+# The same row, read again without awk and without awk's field splitting. `audit_dependency_rows`
+# compares against this and not against `dependency_cell`, for the reason
+# `header_fact_from_document` exists: a fact re-derived by the expression that produced it is one
+# reading wearing two hats.
+dependency_cell_again() {
+  local file=$1 name=$2 line name_cell version_cell
+  while IFS= read -r line; do
+    [[ $line == \|* ]] || continue
+    IFS='|' read -r _ name_cell version_cell _ <<< "$line"
+    name_cell=${name_cell//[\` ]/}          # an npm package name carries no space
+    [[ $name_cell == "$name" ]] || continue
+    version_cell=${version_cell#"${version_cell%%[![:space:]]*}"}
+    printf '%s' "${version_cell%"${version_cell##*[![:space:]]}"}"
+    return
+  done < "$file"
+}
+
+# The version *token* out of a cell that equals the pin, or `not in the cell`. A cell may name more
+# than one version -- axe-core is pinned differently at the root and in two packages -- so the fact
+# is the token that matched rather than the whole cell. It used to be `[[ $row == *"$version"* ]]`,
+# whose one-line weakening to `[[ -n $row ]]` let DEPENDENCY_MATRIX.md record any version at all.
+dependency_version_fact() {
+  local matched
+  matched=$(printf '%s' "$1" | grep -oE '[^ ,|`()]+' | grep -Fx -- "$2" || true)
+  printf '%s' "${matched:-not in the cell}"
+}
+
+# One dependency row, compared -- and the comparison is a function rather than four lines inside a
+# loop for one reason: **a fixture can drive a function.** Every refusal section 7 drives is driven
+# because the input that exercises it does not exist in this repository, and a row publishing a
+# version nothing pins is exactly that kind of input.
+compare_dependency_row() {
+  local file=$1 name=$2 pinned=$3 row
+  row=$(dependency_cell "$file" "$name")
   if [[ -z $row ]]; then
-    fail "$deps has no row for the npm dependency \`$name\` (pinned at $version under frontend/)."
-    continue
+    fail "$file has no row for the npm dependency \`$name\` (pinned at $pinned under frontend/)."
+    return
   fi
   scope dependencies "npm:$name"
-  # The cell may name more than one version -- axe-core is pinned differently at the root and in
-  # two packages -- so the fact is the version *token* out of the cell that matches, and "not in
-  # the cell" when none does. It used to be `[[ $row == *"$version"* ]]`, whose one-line weakening
-  # to `[[ -n $row ]]` let DEPENDENCY_MATRIX.md record any version at all; the comparison is one
-  # `claim` now, so it is the same comparator the self-check drove before this run began, and the
-  # pair it compared is in the ledger.
-  matched=$(printf '%s' "$row" | grep -oE '[^ ,|`()]+' | grep -Fx -- "$version" || true)
   claim npm-version "" \
-    "$version" "${matched:-not in the cell}" \
-    "$deps records \`$name\` as $row; frontend/ pins $version."
+    "$pinned" "$(dependency_version_fact "$row" "$pinned")" \
+    "$file records \`$name\` as $row; frontend/ pins $pinned."
+}
+
+# Fixture 4's shape, applied to the one section the fixtures skipped.
+#
+# `audit_document_facts` re-derives both sides of every merged-document claim out of the files
+# rather than out of this script's own variables. Section 3 had no such reading, and what that
+# cost was measured on 2026-09-11 against the shipped file: rewriting one call site from
+# `claim npm-version "" "$version" "${matched:-not in the cell}"` to `... "$version" "$version"`
+# -- **one line** -- let `DEPENDENCY_MATRIX.md` publish `vite` at `9.9.9` against a
+# `frontend/package.json` pinning `8.2.2`, with the run printing `283 claims checked, all true` and
+# exiting 0. Every gate agreed and each was right to: the kind was `npm-version`, the registry
+# pinned it, `close_section` counted 37 and the manifest roster reconciled over all twelve
+# manifests. **Not one of them read the row a second time.**
+#
+# This does, from both ends, by paths the claim did not take:
+#
+#   `dependency-fact`  the fact the ledger recorded, against the row re-read without awk. The
+#                      attack above records the *pinned* version as the fact, and the row it came
+#                      from does not contain it.
+#   `dependency-claim` the claimed side, against `manifest_pins`, which was built by a second `jq`
+#                      program. The mirror-image attack -- both sides taken from the *cell* -- puts
+#                      a version no manifest pins on the claimed side.
+#   `dependency-audit` how many claims this reached, against how many the section made, so an audit
+#                      narrowed with a `continue` is a figure that moves.
+audit_dependency_rows() {
+  local line a b c pairs name claimed fact row recheck pinned_state audited=0 recorded=0
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c pairs <<< "$line"
+    [[ $a == dependencies && $c == npm-version ]] && recorded=$(( recorded + 1 ))
+  done
+  # `for` expands the array once, so this loop sees the section as it stood when it began and the
+  # `dependency-fact` lines it appends are not themselves audited.
+  scope dependencies "the dependency ledger"
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c pairs <<< "$line"
+    [[ $a == dependencies && $c == npm-version ]] || continue
+    audited=$(( audited + 1 ))
+    name=${b#npm:}
+    claimed=${pairs%%>*}
+    fact=${pairs#*>}
+    row=$(dependency_cell_again "$deps" "$name")
+    recheck=$(dependency_version_fact "$row" "$claimed")
+    claim dependency-fact "" \
+      "$fact" "$recheck" \
+      "the \`npm-version\` claim for \`$name\` was compared against \`$fact\`, and re-reading\
+ $deps's own row -- \`${row:-no row at all}\` -- answers \`$recheck\`. A claim of the right kind\
+ compared against a fact the document does not carry is what the kind, the count, the registry and\
+ the manifest roster all pass over."
+    if [[ " ${manifest_pins[$name]:-} " == *" $claimed "* ]]; then
+      pinned_state=pinned
+    else
+      pinned_state="not pinned under frontend/"
+    fi
+    claim dependency-claim "" \
+      "pinned" "$pinned_state" \
+      "the \`npm-version\` claim for \`$name\` says frontend/ pins \`$claimed\`, and no manifest\
+ under frontend/ pins that. The claimed side of this comparison is the pin, so a comparison that\
+ takes both of its sides out of $deps is a true statement about nothing."
+  done
+  claim dependency-audit "" \
+    "$audited" "$recorded" \
+    "this audit re-read the rows behind $audited of the dependencies section's $recorded\
+ \`npm-version\` claims; a claim it does not reach is one nothing reads the document again for."
+}
+
+while IFS=$'\t' read -r name version; do
+  [[ -z $name ]] && continue
+  [[ $name == @kui/* ]] && continue
+  compare_dependency_row "$deps" "$name" "$version"
 done <<< "$dep_rows"
 
+audit_dependency_rows
 reconcile_manifest_claims "closing \`dependencies\`"
-close_section dependencies 37
+close_section dependencies 88
 
 # ---------------------------------------------------------------------------------------------
 # 4. The milestone table against the Milestone and Priority columns of the rows it counts.
@@ -1222,6 +1401,36 @@ done < <(awk -F'|' '
     if (m != "") print m "\t" p
   }' "$matrix")
 
+# The Total line's split, and it is a function for the reason section 3's row comparison is one.
+# `189 (150 from research + 39 KUI-new)` is a claim about where the rows came from, and the only
+# thing in this repository that can check it is that the two parts add up to the row count -- so
+# this comparison's *fact* is derived from its own claim, and the claimed-side refusal that gates
+# every other figure in this section cannot see it collapse. Measured on 2026-09-11 with every
+# other gate in this file finished: `claim total-split "" "$(( ... ))" "$rows"` rewritten to
+# `... "$rows" "$rows"`, **one line**, let the Total line publish a split that does not add up with
+# the run green. A fixture is the only reading left, so there is one.
+compare_total_split() {
+  local cell=$1 total=$2
+  if [[ $cell =~ \(([0-9]+)\ from\ research\ \+\ ([0-9]+)\ KUI-new\) ]]; then
+    claim total-split "" \
+      "$(( BASH_REMATCH[1] + BASH_REMATCH[2] ))" "$total" \
+      "$matrix (checked: milestones): the Total line splits the rows as ${BASH_REMATCH[1]} +\
+ ${BASH_REMATCH[2]}, which is not $total."
+  else
+    fail "$matrix (checked: milestones): the Total line no longer says how the rows split" \
+         "between research and KUI-new; that claim has gone rather than become false."
+  fi
+}
+
+# **Every comparison below is handed the cell it read its figure out of.** Section 4 reads a table
+# and has no residue check, so until 2026-09-11 every one of its nine claim kinds passed an empty
+# `matched` and `claim`'s claimed-side refusal never ran over any of them: one line -- a claimed
+# figure rewritten to the fact beside it -- let this table publish any row count with the run
+# green. The same hole was measured in section 1 and in section 5 on the same day, and it is one
+# hole and not three: a `claim` call with an empty `matched` is a comparison whose claimed side
+# nothing has to have read out of a document. The cell is not struck out of anything here -- there
+# is no `text` in this section -- and `consume` is a no-op for exactly that case.
+#
 # Reads one cell: leading and trailing space and the bold markers the total line uses.
 cell() {
   local value=$1
@@ -1252,26 +1461,18 @@ while IFS= read -r line; do
       fail "$matrix (checked: milestones): the Total line names no row count."
       continue
     }
-    claim total-rows "" \
+    claim total-rows "$claimed_rows" \
       "${BASH_REMATCH[1]}" "$rows" \
       "$matrix (checked: milestones): the Total line says ${BASH_REMATCH[1]} rows; the table has\
  $rows."
 
-    if [[ $claimed_rows =~ \(([0-9]+)\ from\ research\ \+\ ([0-9]+)\ KUI-new\) ]]; then
-      claim total-split "" \
-        "$(( BASH_REMATCH[1] + BASH_REMATCH[2] ))" "$rows" \
-        "$matrix (checked: milestones): the Total line splits the rows as ${BASH_REMATCH[1]} +\
- ${BASH_REMATCH[2]}, which is not $rows."
-    else
-      fail "$matrix (checked: milestones): the Total line no longer says how the rows split" \
-           "between research and KUI-new; that claim has gone rather than become false."
-    fi
+    compare_total_split "$claimed_rows" "$rows"
 
-    claim total-p0 "" \
+    claim total-p0 "$claimed_p0" \
       "$claimed_p0" "$milestone_p0_total" \
       "$matrix (checked: milestones): the Total line says $claimed_p0 P0 rows; the table has\
  $milestone_p0_total."
-    claim total-p1 "" \
+    claim total-p1 "$claimed_p1" \
       "$claimed_p1" "$milestone_p1_total" \
       "$matrix (checked: milestones): the Total line says $claimed_p1 P1 rows; the table has\
  $milestone_p1_total."
@@ -1283,15 +1484,15 @@ while IFS= read -r line; do
   milestone_claimed[$key]=1
   milestone_lines=$(( milestone_lines + 1 ))
 
-  claim milestone-rows "" \
+  claim milestone-rows "$claimed_rows" \
     "$claimed_rows" "${milestone_rows[$key]:-0}" \
     "$matrix (checked: milestones): $label says $claimed_rows rows; ${milestone_rows[$key]:-0}\
  rows name that milestone."
-  claim milestone-p0 "" \
+  claim milestone-p0 "$claimed_p0" \
     "$claimed_p0" "${milestone_p0[$key]:-0}" \
     "$matrix (checked: milestones): $label says $claimed_p0 P0 rows; it has\
  ${milestone_p0[$key]:-0}."
-  claim milestone-p1 "" \
+  claim milestone-p1 "$claimed_p1" \
     "$claimed_p1" "${milestone_p1[$key]:-0}" \
     "$matrix (checked: milestones): $label says $claimed_p1 P1 rows; it has\
  ${milestone_p1[$key]:-0}."
@@ -1380,7 +1581,7 @@ for file in ${adr_files+"${adr_files[@]}"}; do
   # The claimed side is what the index links `id` to and the fact is where the decision actually
   # is, so a missing row and a row pointing at the wrong document are the same comparison rather
   # than two branches, and the pair is in the ledger either way.
-  claim adr-file "" \
+  claim adr-file "${adr_row_link[$id]:-}" \
     "${adr_row_link[$id]:-no row in $decisions}" "$file" \
     "$decisions links \`$id\` to ${adr_row_link[$id]:-nothing}; the decision is at $file. A\
  missing row is the omission ADR-052 shipped with for a whole wave."
@@ -1402,10 +1603,84 @@ done
 close_section adr-index 112
 
 # ---------------------------------------------------------------------------------------------
-# 6. The fixtures: six refusals this file makes that nothing in it could drive.
+# 6. The OpenAPI totals three ADRs publish about documents the build generates.
 # ---------------------------------------------------------------------------------------------
 #
-# Sections 0 to 5 check documents. This one checks the refusals, and it exists because on
+# ADR-052, ADR-053 and ADR-054 each state in their Consequences how large the document their
+# service's endpoints generate is, and ADR-053 states the merged document's totals as well.
+# `grep -c 'checked:'` over the three answered **0** on 2026-09-11: four documents' figures were
+# compared by this script and these three were not. What that cost is measured rather than
+# imagined. ADR-053 published `61 paths, 72 operations and 156 component schemas` about documents
+# that had been 65, 76 and 160 since the eleventh service landed; the packet that measured the
+# correction could not make it, because the file belonged to a packet that had already frozen, and
+# the line stayed wrong for a whole wave. A figure inside a marker does not need an owner with a
+# free hand -- it fails the build, and whoever is holding the build fixes it.
+#
+# **The document a claim is about is read out of the sentence that publishes it**, the way section
+# 2 reads a header's name out of the prose. There is no constant in this file saying which document
+# ADR-053's first figure is about, so renaming the document in the prose renames what the claim is
+# compared against; and a path that is not a document in this repository answers so rather than
+# being skipped. That is also what makes `openapi_fact` hard to point elsewhere: the three blocks
+# name three documents with three different answers, so a body rewritten to read any one of them
+# reddens the other two in the same run.
+
+openapi_fact() {
+  local file=$1 mode=$2
+  if [[ ! -f $file ]]; then printf 'not a document in this repository'; return; fi
+  jq -r --arg mode "$mode" '
+    if $mode == "paths" then (.paths | length)
+    elif $mode == "operations" then ([.paths[] | keys[]] | length)
+    else (.components.schemas | length) end | tostring' "$file"
+}
+
+# One sentence shape, and the ADRs are written to it: ``<document>` is **N paths, M operations and
+# K component schemas**`. Three figures in one `claim` because they are one sentence about one
+# document -- a block that publishes two of the three leaves the third unmatched, the sentence
+# unstruck, and the residue check reports every figure in it.
+# Held in a variable rather than written inline so that the sentence shape stays inside 100
+# columns and stays readable: a regular expression that has to be read in two halves is one a
+# document can drift away from without anybody noticing.
+openapi_totals_shape='`([A-Za-z0-9_./-]+\.json)` is \*\*([0-9]+) paths, ([0-9]+) operations'
+openapi_totals_shape+=' and ([0-9]+) component schemas\*\*'
+
+check_openapi_totals_region() {
+  local where=$1 text=$2 rest tok file present paths operations schemas
+  rest=$text
+  while [[ $rest =~ $openapi_totals_shape ]]; do
+    tok=${BASH_REMATCH[0]}
+    file=${BASH_REMATCH[1]}
+    if [[ -f $file ]]; then present=$file; else present="not a document in this repository"; fi
+    claim openapi-document "" \
+      "$file" "$present" \
+      "$where publishes totals about \`$file\`, which is $present. A figure about a document\
+ nothing generates is a figure nothing can move when the contract does."
+    paths=$(openapi_fact "$file" paths)
+    operations=$(openapi_fact "$file" operations)
+    schemas=$(openapi_fact "$file" schemas)
+    claim openapi-totals "$tok" \
+      "${BASH_REMATCH[2]}" "$paths" \
+      "$where says $file is ${BASH_REMATCH[2]} paths; it is $paths." \
+      "${BASH_REMATCH[3]}" "$operations" \
+      "$where says $file is ${BASH_REMATCH[3]} operations; it is $operations." \
+      "${BASH_REMATCH[4]}" "$schemas" \
+      "$where says $file is ${BASH_REMATCH[4]} component schemas; it is $schemas."
+    rest=${rest#*"$tok"}
+  done
+
+  report_unclaimed_figures "$where" "$text"
+}
+
+for file in "$adr052" "$adr053" "$adr054"; do
+  check_marked_file openapi-totals "$file" check_openapi_totals_region
+done
+
+close_section openapi-totals 11
+
+# ---------------------------------------------------------------------------------------------
+# 7. The fixtures: refusals this file makes that nothing in it could drive.
+# ---------------------------------------------------------------------------------------------
+#
+# Sections 0 to 6 check documents. This one checks the refusals, and it exists because on
 # 2026-09-11 six of them were mutated one at a time against the green tree and the run stayed at
 # `all true`, exit 0:
 #
@@ -1679,10 +1954,106 @@ verify_figure_is_published() {
     "a percentage the block publishes was read as absent because of the \`%\` beside it."
 }
 
+# Fixture 9: the dependency row, which is the one comparison in this file that had no fixture
+# behind it -- and the hole that left is not a hypothesis. Measured on 2026-09-11 against the
+# shipped script: `claim npm-version "" "$version" "${matched:-not in the cell}"` rewritten to
+# `... "$version" "$version"`, one line, and `DEPENDENCY_MATRIX.md` publishing `vite` at `9.9.9`
+# against a `frontend/package.json` pinning `8.2.2` left the run printing `283 claims checked, all
+# true` and exiting 0. The eight fixtures above all drive the marked-document machinery; section 3
+# has no markers, so not one of them reached it.
+#
+# The fixture drives the **shipped** `compare_dependency_row` over a table written for the
+# occasion, in all three of its states: a row that agrees, a row that publishes a version nothing
+# pins, and a package with no row at all. Asserting the count in each state is what catches the
+# opposite mutation too -- a comparison rewritten to refuse everything fails the agreeing case in
+# the same claim.
+verify_dependency_row_comparison() {
+  local table=$fixtures/dependency-matrix.md agreeing disagreeing absent
+  cat > "$table" <<'MD'
+| Package | Version | Scope | Where | ADR |
+| --- | --- | --- | --- | --- |
+| fixture-pinned | 8.2.2 | npm (dev) | workspace root | ADR-048 |
+| fixture-stale | 9.9.9 | npm (dev) | workspace root | ADR-048 |
+MD
+  agreeing=$(drive compare_dependency_row "$table" fixture-pinned 8.2.2)
+  disagreeing=$(drive compare_dependency_row "$table" fixture-stale 8.2.2)
+  absent=$(drive compare_dependency_row "$table" fixture-unlisted 8.2.2)
+  scope guard-fixtures "the dependency row"
+  claim dependency-row-compared "" \
+    "$agreeing" "0" \
+    "a dependency row naming the version the manifest pins drew $agreeing disagreement(s); this\
+ comparison must pass the case every true row in DEPENDENCY_MATRIX.md is." \
+    "$disagreeing" "1" \
+    "a dependency row publishing 9.9.9 against a pin of 8.2.2 drew $disagreeing disagreement(s);\
+ that is the one-line attack this fixture exists for -- a comparison of the pin with itself,\
+ beside a row that can then record any version at all." \
+    "$absent" "1" \
+    "a package with no row in the table at all drew $absent disagreement(s); \"adding a\
+ dependency requires a row here\" is the half of DEPENDENCY_MATRIX.md's own preamble this section\
+ was written to enforce."
+}
+
+# Fixture 10: the residue, which is the one gate in this file that deliberately does not route
+# through the ledger -- and was therefore the last one nothing drove. Measured on 2026-09-11
+# against this file with every other fixture in place: adding `s/[0-9]+//g` to the list of terms
+# `report_unclaimed_figures` strikes out before it looks, **one line**, let the checked paragraph
+# in `docs/FEATURE_MATRIX.md` publish `KUI draws 999 screens` -- a figure no comparison reads --
+# with the run printing `346 claims checked, all true` and exiting 0. The residue still recorded
+# its claim, so the kind, the marker, the count and the registry all stood.
+#
+# Three states, because the strike-out list has to keep doing its job as well as stopping: a block
+# whose every figure was consumed, a block with one that was not, and a block whose only digits are
+# the date and the `ADR-nnn` reference that are not figures about the thing being counted.
+verify_residue_reports_unclaimed() {
+  local consumed unclaimed exempt
+  consumed=$(drive report_unclaimed_figures "a fixture block" "every figure here was struck out")
+  unclaimed=$(drive report_unclaimed_figures "a fixture block" "and 999 screens nothing reads")
+  exempt=$(drive report_unclaimed_figures "a fixture block" \
+             "written 2026-09-11 under ADR-048 in wave-8")
+  scope guard-fixtures "the residue"
+  claim residue-reports-unclaimed "" \
+    "$consumed" "0" \
+    "a block every comparison had consumed drew $consumed disagreement(s); the residue must pass\
+ the case it is written to allow, or every true paragraph in this repository fails." \
+    "$unclaimed" "1" \
+    "a block publishing a figure no comparison read drew $unclaimed disagreement(s); that is the\
+ whole of what the residue is for, and widening the list of terms it strikes out first is one\
+ line -- after which a marked block can publish anything with the count and the marker standing." \
+    "$exempt" "0" \
+    "a block whose only digits are a date, an ADR reference and a wave number drew $exempt\
+ disagreement(s); those are not figures about the thing being counted and striking them out is\
+ why the residue can be strict about everything else."
+}
+
 verify_header_kind_inverse
 verify_claimed_side_is_read
 verify_figure_is_published
-close_section guard-fixtures 10
+# Fixture 11: the Total line's split, driven in all three of its states. The comparison behind it
+# is the one figure in this file whose fact comes from its own claim, so no second reading of the
+# document can catch it going quiet -- which leaves exactly this.
+verify_total_split() {
+  local adds_up short gone
+  adds_up=$(drive compare_total_split "189 (150 from research + 39 KUI-new)" 189)
+  short=$(drive compare_total_split "189 (100 from research + 39 KUI-new)" 189)
+  gone=$(drive compare_total_split "189 rows" 189)
+  scope guard-fixtures "the Total line's split"
+  claim total-split-compared "" \
+    "$adds_up" "0" \
+    "a Total line whose split adds up to the row count drew $adds_up disagreement(s); this\
+ comparison must pass the case the table is." \
+    "$short" "1" \
+    "a Total line splitting 189 rows as 100 + 39 drew $short disagreement(s); that is the\
+ one-line collapse this fixture exists for, and the claimed-side refusal cannot see it because\
+ the sum being compared is the claim's own arithmetic rather than a figure read off the page." \
+    "$gone" "1" \
+    "a Total line that no longer says how the rows split drew $gone disagreement(s); a claim that\
+ has gone rather than become false is the failure this whole section was written after."
+}
+
+verify_dependency_row_comparison
+verify_residue_reports_unclaimed
+verify_total_split
+close_section guard-fixtures 13
 
 # ---------------------------------------------------------------------------------------------
 
@@ -1717,8 +2088,10 @@ printf '  self-check: %d, rows: %d, merged-document: %d, milestones: %d, adr-ind
   "${section_counts[self-check]}" "${section_counts[rows]}" \
   "${section_counts[merged-document]}" \
   "${section_counts[milestones]}" "${section_counts[adr-index]}"
-printf ' guard-fixtures: %d, dependencies: %d over %d named manifests.\n' \
-  "${section_counts[guard-fixtures]}" "${section_counts[dependencies]}" "${#manifests[@]}"
+printf ' openapi-totals: %d, guard-fixtures: %d,' \
+  "${section_counts[openapi-totals]}" "${section_counts[guard-fixtures]}"
+printf ' dependencies: %d over %d named manifests.\n' \
+  "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \
   "$matrix" "$rows" "$complete" "$in_scope" "$percent"
 printf '  docs/api/openapi.json: %d paths, %d operations, %d schemas;' \

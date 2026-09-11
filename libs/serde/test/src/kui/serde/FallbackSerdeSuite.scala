@@ -23,7 +23,7 @@ final class FallbackSerdeSuite extends KuiSuite {
     FallbackSerde[IO].deserializer(topic, Target.Value).flatMap(_.deserialize(Nil, bytes)).unsafeRunSync()
 
   property("no byte array fails to decode") {
-    forAll { (bytes: Array[Byte]) => decode(bytes).isRight }
+    forAll((bytes: Array[Byte]) => decode(bytes).isRight)
   }
 
   test("the empty payload decodes to the empty string") {
@@ -58,7 +58,10 @@ final class FallbackSerdeSuite extends KuiSuite {
   }
 
   test("it carries no properties, so nothing downstream can mistake it for a serde that knows a schema") {
-    assertEquals(decode("x".getBytes(StandardCharsets.UTF_8)).map(_.properties), Right(Map.empty[String, io.circe.Json]))
+    assertEquals(
+      decode("x".getBytes(StandardCharsets.UTF_8)).map(_.properties),
+      Right(Map.empty[String, io.circe.Json])
+    )
   }
 
   test("it is never a candidate: not preferable, and it claims no sample") {
@@ -66,7 +69,7 @@ final class FallbackSerdeSuite extends KuiSuite {
     assertEquals(serde.preferable(topic, Target.Value).unsafeRunSync(), false)
     serde match {
       case detector: SampleDetector => assertEquals(detector.claims("anything".getBytes), false)
-      case _                        => fail("the fallback is built on SimpleSerde and so is a SampleDetector")
+      case _ => fail("the fallback is built on SimpleSerde and so is a SampleDetector")
     }
   }
 

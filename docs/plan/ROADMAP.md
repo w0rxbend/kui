@@ -660,7 +660,19 @@ recorded — **unmet: no connector has ever been deployed on the quickstart's wo
 that would assert it skip. Wave 8 deploys one, rewrites the spec against the golden the service already
 ships, and runs both against images built from the tree.
 
-## M10 — Close the book  ·  no new service  ·  **four of six bullets closed in wave 8; the milestone does not close**
+## M10 — Close the book  ·  no new service  ·  **wave 9 closed every bullet it was open on and the milestone still does not close**
+
+> **Status after wave 9, measured at its close on 2026-09-11 and not read off a report.** All four
+> things this section listed as open are closed: the two screens have cases (`pnpm -C frontend e2e`
+> is **105 passed, 3 skipped, 0 failed**), the dependency-row weakening is red in two independent
+> gates, `./deployment/compose/smoke.sh` ran over eleven containers and **passed**, and
+> `./scripts/feature-matrix-check.sh` is **348 claims over eight sections**. `docs/plan/` is not
+> reduced, and it cannot be: **definition-of-done items 1 and 4 are open, and neither is a gate.**
+> `/ui/` — the address the product opens on — draws *"Asking the cluster how it is."* over six empty
+> stat tiles with no request in flight; `README.md` says Kafka Connect and ksqlDB are not built.
+> Both are in `docs/plan/WAVE-10.md` with the command that finds them. Everything below this box is
+> wave 8's record of the same section and is kept because its measurements are still the ones a
+> reader needs.
 
 **What closed, measured here.** `docs/FEATURE_MATRIX.md` is accurate and every count it publishes
 about itself sits inside a checked region — `./scripts/feature-matrix-check.sh` exits 0 at **283
@@ -688,7 +700,8 @@ directions at **56 rows over 56 ADRs**. The a11y sweep is clean over **790 stori
    container landed.** Wave 8's integration ran thirteen gates and that was not one of them, and
    neither was `pnpm -C frontend e2e`; both were run here instead, and one of the two was red. The
    distributed eleven-container stack is the one deployment shape nobody in wave 8 drove.
-4. **`docs/plan/` is not reduced to `README.md` and this file.** It holds `WAVE-09.md` and
+4. **`docs/plan/` is not reduced to `README.md` and this file.** It holds `WAVE-09.md` (now
+   `WAVE-10.md`) and
    `docs/plan/verification/`, and the wave that still needs a plan file cannot be the wave that
    deletes it. This is M10's own last bullet and it is now the last one standing.
 
@@ -1676,3 +1689,162 @@ No milestone changed order. **M9 closed.** M10 closed four of its six bullets an
 named things: two screens of browser coverage that need one line of quickstart configuration, the
 dependency-row half of its own weakening criterion, a `smoke.sh` run, and `docs/plan/` reducing to two
 files. Wave 9 is a short closing wave and is the last one in this plan.
+
+---
+
+## What wave 9 actually did
+
+Wave 9 was **six building packets and two adversaries**, written to be the last wave in this plan. It
+ran to the end without an interruption, which no wave since wave 4 had done, and **every one of the
+four things M10 was open on is closed.** The definition of done is still not met, on two items that
+were never gates, and the closer found both by opening the product rather than by running the suite.
+
+**Judge the tree, not the reports. All eight packets landed.** Re-checked file by file here:
+
+| Packet | What is on disk | Filed a verification file? |
+| --- | --- | --- |
+| W9-01 | the second registered cluster in `kui-quickstart.yaml`, the eleven-container `smoke.sh` run, three missing `package.json` COPYs in `deployment/frontend/Dockerfile`, `ci.yml`, the quickstart README | yes |
+| W9-02 | `feature-matrix-check.sh`'s eighth section and the dependency-row fixtures — **283 claims → 348 over eight sections**; ADR-052/053/054 figures; TD-028…TD-034 | yes |
+| W9-03 | `M08`, `M09` and `M14`; `wordFor` deleted; `connect.spec.ts` scoped to the pill — **101 passed / 4 skipped → 105 passed / 3 skipped** | yes |
+| W9-04 | `StatusPill`'s `data-state`, `CrumbSection` and the total `LABELS` table, the `/messages/track` crumb defect | yes |
+| W9-05 | `KuiTests extends … with ScalafmtModule with ScalafixModule`, `.scalafix-tests.conf`, and **380 of 499 test sources reformatted** | **no** |
+| W9-06 | `MaskingConfig`, `RecordMasking`, `ConfiguredRecordMasking`, `MaskingMetrics`, wired into `BrowseUseCase`, `TrackUseCase` and `MessageWiring` | yes |
+| W9-A1 | 23 mutations over `services/ksql`, `services/gateway` and `feature-ksql`; 14 new cases, 11 Scala and 3 TypeScript | **no** — see below |
+| W9-A2 | 12 mutations closing 11 filed findings; 7 test sources | yes |
+
+**Two reports are missing and neither packet was idle.** W9-05's work is on disk and measurable in one
+command — `./mill resolve '__.fix' | grep -c '\.test\.fix'` answers **81** where it answered 0 — and
+it wrote its findings into its packet result instead. W9-A1's absence is a **mechanism failure and not
+a packet failure**: `docs/plan/verification/` was W9-A2's under this wave's partition and W9-A1's own
+instructions forbade it writing report files, so the richest adversarial sweep in this project's
+history — 23 mutations, 16 genuine ungated rules, 13 closed — exists only as a structured payload.
+Wave 8's lesson was *a packet with no report is not a packet that did not run*; wave 9's is narrower
+and worse: **a partition can make the report impossible.**
+
+**The gates, re-run at the close, one at a time, against images built from this tree.**
+`./scripts/run-tests.sh` **4,310 cases over 81 modules** (wave 8: 4,254). `pnpm -C frontend test`
+**1,908 over 82 files** (1,895). `pnpm -C frontend e2e` **105 passed, 3 skipped, 0 failed** (101/4).
+`./scripts/feature-matrix-check.sh` **348 claims over eight sections** (283 over seven).
+`./mill __.checkFormat` **495/495 over 1,145 sources** — 252 over 646 before, and the difference is
+every test tree in the repository. `./mill checkArchitecture` 195 modules. `./mill __.openApiCheck`
+2629/2629. The a11y sweep clean over **790 stories × 2 themes**.
+`deployment/quickstart/quickstart.sh` brings up nine containers with two registered clusters.
+
+### The four things M10 was open on, each closed
+
+1. **The two screens.** `M08` — the cluster-switch toast — has a case for the first time, and it
+   **fails rather than skips** on a one-cluster deployment, which is the right choice and the opposite
+   of what kept it uncovered for four waves. `M09`'s second-cluster clause and `M14`'s plural receipt
+   both have passing cases. The blocker was one entry in a YAML file, exactly as M10 said.
+2. **The dependency row.** The one-line collapse that printed `283 claims checked, all true` over a
+   `vite` row reading `9.9.9` against a pin of `8.2.2` is now **RED in two independent gates** — the
+   claimed-side refusal and fixture 9 — and the verifier reproduced it from the plan's own line rather
+   than from the report.
+3. **`smoke.sh` ran**, for the first time since the tenth service, over eleven containers, and
+   **passed** — including stopping `kui-cluster` and watching the other nine carry on. It was the item
+   most likely to fail and it did not.
+4. **`docs/plan/` is not reduced**, and that is the one M10 bullet wave 9 could not close, because the
+   definition of done is not met.
+
+### The two definition-of-done items that are still open, and how they were found
+
+**Not by a gate. By opening the product.** Every one of fourteen gates is green over both of these.
+
+* **Item 1.** `http://localhost:8090/ui/` — the address the product opens on — draws *"Asking the
+  cluster how it is."* over six stat tiles that carry a label and nothing else, and holds that state
+  after `networkidle` plus fifteen seconds, during which the only requests it makes are `/auth/me`,
+  `/auth/settings` and `/capabilities/stream`. **Nothing is being asked.** It is the exact shape item 1
+  forbids: not a fabricated figure, which this project has hunted for nine waves, but a fabricated
+  *claim about a figure*. W9-03 filed it against its own rewrite — the case that would have caught it
+  asserted `getByText("Quickstart")` on that page until wave 9 replaced it with a rail assertion — and
+  nobody owned the repair. A second, smaller one on a capture screen: `formatBytes` prints raw doubles
+  below 1 kB, so `M01`'s CONSUME card reads `81.2359955010432 B/s` beside a PRODUCTION card reading
+  `1.2 kB/s`.
+* **Item 4.** `README.md`'s status banner says *"milestones 0 to 5"* and its **What is not built**
+  section says *"No Kafka Connect, no ksqlDB"* — against a tree that ships both services and drives
+  their two screens with seven passing browser cases and one deployment-shaped skip. `docs/FEATURE_MATRIX.md`'s `DM-001` says the masking engine
+  has *"no caller in any service"* and that *"there is no configuration that can define a rule"*; wave
+  9 gave it both, and the packet that moved it correctly told the matrix's owner rather than editing
+  the matrix — and the matrix's owner had already frozen. `docs/overview/README.md`'s gate table is
+  stale in five rows. `ARCHITECTURE.md:156` names a domain type, `MaskingPolicy`, that
+  `grep -rn --include='*.scala'` finds **zero** times.
+
+**Both failures have one cause and it is worth stating plainly.** Every false sentence above sits
+outside every `<!-- checked: -->` region. The 348-claim gate compares **figures**; it does not read
+**prose**. So a repository that fails the build when a paragraph says `99 COMPLETE` against a table of
+70 printed `348 claims checked, all true` over a README whose headline claim is four milestones stale.
+That is `docs/ROADMAP-SOLID.md`'s failure mode, committed by the machinery built to prevent it.
+
+### Did the mechanism work? Six numbers, then the answer.
+
+**House rule 18's amendment is the highest-yield change this plan has made, and it is not adversarial
+at all.** Seven of ten verification passes died silently in wave 8; **five of five filed in wave 9**,
+because the file became a pass's *first* act rather than its last. The closer's input went from 23
+filed findings to **40**, for no extra work.
+
+**The closer converted 11 of 40 filed rows — 27.5% — and 12 of 12 whose closing case was inside its
+ownership.** That is the sharpest measurement in the wave. The pre-commitment was 80% of filed
+findings; the shortfall is not capacity, not input and not skill. It is **partition**:
+`scripts/feature-matrix-check.sh` alone held ten of the twenty-eight hand-backs, `deployment/**` four,
+`frontend/e2e/**` four, and six needed one word of production visibility before any case could exist.
+Wave 8 concluded the scarce resource was filed findings and the plan responded with one hunter and one
+closer; the input arrived and **the constraint moved to ownership**, where nobody was looking.
+
+**The hunter found 16 genuine ungated rules in 23 mutations — 70%, the highest rate in this project —
+and closed 13.** It argued two equivalent mutants down with the algebra shown and kept them out of the
+denominator, which is the discipline three waves asked for. Its headline measurement deserves quoting:
+**nine production rules deleted or inverted at once in `services/ksql` and `./scripts/run-tests.sh`
+reported 81 modules, 4,299 cases, all passing**; separately, five rules removed from `feature-ksql` and
+`pnpm -C frontend test` reported 1,904 passing — over a destructive-confirmation dialogue that drew no
+danger banner, could be dismissed by a stray click on the veil, and whose confirm button was never
+busy.
+
+**The building packets' disclosure rate, for the seventh wave running, did not move.** Every packet
+disclosed a green mutation because the rule demands one; every verifier then found more. W9-02's
+verifier found ten fresh green attacks on the gate the packet had just hardened, one of them a
+two-line attack on `docs/FEATURE_MATRIX.md` itself — the file the whole script exists for. **Nine
+waves of asking authors to find their own holes has produced no measurable improvement, and nine waves
+of adversaries has produced 300-plus closed rules.** That is the finding, and it has been the same
+finding since wave 4.
+
+**And one number moved that nobody predicted.** W9-05 widened the style gates from 646 production
+sources to 1,145 — every file in the repository — and **380 of 499 test sources had to be
+reformatted**, including **12 of the 13 test sources wave 9 itself wrote before that packet ran**.
+Six waves of asking authors to hold a column rule by hand produced one correct file in thirteen. The
+first widened `fix --check` also reported 126 `DisableSyntax` violations, none of them fixable by a
+rewrite and every one inspected turning out to be load-bearing — a `Node | Null` controller that *is*
+the input under test, `KeyStore.load(null, …)`, `Proxy.newProxyInstance(...).asInstanceOf`, and 47
+fixture builders throwing out of a `.fold`. Taking the tool's advice would have deleted assertions.
+The packet wrote `.scalafix-tests.conf` with the four relaxed sub-rules and their measured site counts
+beside each, and proved the relaxation scoped in both directions.
+
+### What surprised us
+
+**A formatter created a file its own linter cannot parse.** `new Thread(() => try … catch { … },
+"name")` in `GatewayWiringSuite`: the author's original parses under scalafix, scalafmt's output does
+not (`` `outdent` expected but `,` found ``), and scalafmt is **not idempotent** on it — pass 1 dangles
+the argument, pass 2 packs it onto the catch's closing brace. `scalac` compiles both. Invisible for
+eight waves because no production source writes a braceless `try` as a non-final argument. The
+repository now has exactly one `// format: off`.
+
+**`smoke.sh` passes over a stack whose entire topics product answers 401.** A wrong
+`KUI_PRINCIPAL_KEY` on `kui-topic` leaves the script printing `PASSED` in 107 seconds and *"topic
+capability: available"* twice, while `GET /api/v1/clusters/measured/topics` answers
+`KUI-UNAUTHENTICATED`. Six of the nine routed services are covered only by a capability probe, which
+is a health call that carries no signed principal. Found by the packet, reproduced in both directions
+by its verifier.
+
+**A masking rule that loads and looks correct can return a card number in full.** `MaxKeep` is
+enforced per end, so `keep: {prefix: 20, suffix: 20}` passes validation and
+`maskKeepingEnds`' `if maskedCount <= 0 then text` hands back `4111111111111111` unchanged. The cap's
+own stated reason — *"suffix: 44 on a card number returns it unmasked"* — is defeated by writing 20
+twice.
+
+**And the thing that has held for four waves.** Naming **one** ungated rule per packet and making its
+owner close it is **40 of 40**. The adversaries exist for the other four and a half per packet.
+
+**Wave 10 is written.** It is six building packets and two adversaries, it is a repair wave with no
+new service, endpoint, ADR or feature package, and its two load-bearing items are a per-tile assertion
+on the screen the product opens on and a claim kind that compares a **sentence** against a fact. If
+those land, the two open definition-of-done items become gates. If they do not, wave 11 is this wave
+again.

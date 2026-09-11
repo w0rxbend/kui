@@ -3,8 +3,7 @@ package kui.cluster.infrastructure.store
 import java.time.Instant
 
 import kui.cluster.domain.StoreHealth as DomainHealth
-import kui.config.store.StoreHealth as ConfigHealth
-import kui.config.store.StoreKey
+import kui.config.store.{StoreHealth as ConfigHealth, StoreKey}
 import kui.kernel.error.ErrorCode
 import kui.testkit.KuiSuite
 

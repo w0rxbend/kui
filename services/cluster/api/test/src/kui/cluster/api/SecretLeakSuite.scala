@@ -24,8 +24,8 @@ import kui.cluster.application.{
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
 import kui.contracts.KuiEndpoint
 import kui.http.principal.RbacGuard
-import kui.observability.Telemetry
 import kui.kernel.BrokerId
+import kui.observability.Telemetry
 import kui.security.{PrincipalClaims, PrincipalKind, RequestDigest}
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -34,16 +34,16 @@ import kui.testkit.fakes.FakeStructuredLogger
   * ==Why this suite exists as a walk rather than as a review==
   *
   * ADR-046 puts the cluster's password, its keystore bytes and its property overrides on
-  * `GET /internal/v1/clusters/{id}/profile`, because a Kafka-facing service cannot open a connection
-  * without them. Every other endpoint of this service must still be unable to emit one — and "must" is a
-  * property of *all* the endpoints, including the one somebody adds next year by copying the profile route
-  * because it was the nearest example.
+  * `GET /internal/v1/clusters/{id}/profile`, because a Kafka-facing service cannot open a connection without
+  * them. Every other endpoint of this service must still be unable to emit one — and "must" is a property of
+  * *all* the endpoints, including the one somebody adds next year by copying the profile route because it was
+  * the nearest example.
   *
-  * So this is a walk over every declared endpoint rather than an assertion about the ones anybody thought
-  * of. The fixture profile's every credential is one distinctive token; each route is driven; and the token
-  * is asserted to appear in exactly one response body. `everyDeclaredEndpointIsExercised` is the half that
-  * keeps the walk honest: a new endpoint that this file does not drive fails the suite, so the list cannot
-  * silently stop covering the service.
+  * So this is a walk over every declared endpoint rather than an assertion about the ones anybody thought of.
+  * The fixture profile's every credential is one distinctive token; each route is driven; and the token is
+  * asserted to appear in exactly one response body. `everyDeclaredEndpointIsExercised` is the half that keeps
+  * the walk honest: a new endpoint that this file does not drive fails the suite, so the list cannot silently
+  * stop covering the service.
   *
   * The second half is the one M1's own review would have wanted: a secret that never reaches a *body* can
   * still reach a log line or a span attribute, which is a file on a disk in a different system, usually with
@@ -55,14 +55,18 @@ final class SecretLeakSuite extends CatsEffectSuite {
   private val canary = ClusterFixtures.Canary
 
   private val topologyView =
-    TopologyView(profile.ref, Some(ClusterFixtures.topology(profile)), SnapshotFreshness.Fresh(ClusterFixtures.At))
+    TopologyView(
+      profile.ref,
+      Some(ClusterFixtures.topology(profile)),
+      SnapshotFreshness.Fresh(ClusterFixtures.At)
+    )
 
   /** Every endpoint this service declares, with a concrete request line for it.
     *
-    * The paths are written out rather than derived from `showPathTemplate`, because a template's
-    * placeholders have to be filled in with values that exist in the fixture registry anyway — and a
-    * hand-written path that has drifted from its endpoint answers 404, which
-    * `everyResponseIsAnAnswerAndNotARoutingMiss` catches.
+    * The paths are written out rather than derived from `showPathTemplate`, because a template's placeholders
+    * have to be filled in with values that exist in the fixture registry anyway — and a hand-written path
+    * that has drifted from its endpoint answers 404, which `everyResponseIsAnAnswerAndNotARoutingMiss`
+    * catches.
     */
   private val requests: List[(AnyEndpoint, String, String)] = List(
     (ClusterEndpoints.listClusters, "GET", "/internal/v1/clusters"),
@@ -74,12 +78,13 @@ final class SecretLeakSuite extends CatsEffectSuite {
     (ProfileEndpoints.profile, "GET", "/internal/v1/clusters/prod-eu/profile")
   )
 
-  /** Answering stubs, not refusing ones: a 404 body carries no secret either, so a walk over routes that
-    * all missed would pass the leak assertion while proving nothing.
+  /** Answering stubs, not refusing ones: a 404 body carries no secret either, so a walk over routes that all
+    * missed would pass the leak assertion while proving nothing.
     */
   private val brokers = new ClusterFixtures.StubBrokers(
     brokerList = Right(BrokerList(profile.ref, Nil, SnapshotFreshness.Fresh(ClusterFixtures.At))),
-    dirs = Right(BrokerLogDirs(profile.ref, BrokerId.unsafe(1), Nil, SnapshotFreshness.Fresh(ClusterFixtures.At))),
+    dirs =
+      Right(BrokerLogDirs(profile.ref, BrokerId.unsafe(1), Nil, SnapshotFreshness.Fresh(ClusterFixtures.At))),
     configView = Right(BrokerConfigView(profile.ref, BrokerId.unsafe(1), Nil, hasDocumentation = false))
   )
 
@@ -170,7 +175,11 @@ final class SecretLeakSuite extends CatsEffectSuite {
   test("onlyTheProfileEndpointEmitsASecret") {
     responses.map { (_, answers) =>
       val leaking = answers.collect { case (path, response) if response.body.contains(canary) => path }
-      assertEquals(leaking, List("/internal/v1/clusters/prod-eu/profile"), answers.map(_._2.body).mkString("\n"))
+      assertEquals(
+        leaking,
+        List("/internal/v1/clusters/prod-eu/profile"),
+        answers.map(_._2.body).mkString("\n")
+      )
     }
   }
 
@@ -208,7 +217,9 @@ final class SecretLeakSuite extends CatsEffectSuite {
   test("theRedactedClusterDtoStillRedacts") {
     // M1's assertion, re-run here so that widening the profile cannot weaken it by accident.
     responses.map { (_, answers) =>
-      val rows = answers.collectFirst { case (path, response) if path == "/internal/v1/clusters" => response.body }
+      val rows = answers.collectFirst {
+        case (path, response) if path == "/internal/v1/clusters" => response.body
+      }
       assert(rows.exists(body => !body.contains(canary)), rows.toString)
       assert(rows.exists(_.contains("SASL_SSL")), rows.toString)
     }

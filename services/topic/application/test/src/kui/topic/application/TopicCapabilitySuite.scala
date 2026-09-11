@@ -5,8 +5,8 @@ import java.time.Instant
 import cats.effect.IO
 
 import kui.cache.{Snapshot, SnapshotCell, SnapshotStatus}
-import kui.kernel.error.InfrastructureError
 import kui.kernel.ClusterId
+import kui.kernel.error.InfrastructureError
 import kui.topic.domain.{ClusterProfiles, ClusterRef, TopicSnapshot}
 
 /** The per-cluster capability fold, and the isolation it exists to provide. */

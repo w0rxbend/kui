@@ -52,9 +52,9 @@ object StreamingEndpoint {
     * only honest way to check it is to ask the producer how much work it did after the consumer went away.
     *
     * @param verify
-    *   how the token is checked. It is the same codec the caller signs with, so this route exercises the
-    *   real principal path rather than skipping it: a streaming endpoint that forgot to authenticate would
-    *   be a much worse bug than a leaked fiber.
+    *   how the token is checked. It is the same codec the caller signs with, so this route exercises the real
+    *   principal path rather than skipping it: a streaming endpoint that forgot to authenticate would be a
+    *   much worse bug than a leaked fiber.
     */
   def route(
       produced: Ref[IO, Int],

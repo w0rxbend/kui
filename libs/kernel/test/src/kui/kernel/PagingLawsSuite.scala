@@ -82,7 +82,9 @@ final class PagingLawsSuite extends ScalaCheckSuite {
     // number of pages that actually have something on them. This is the arithmetic the reference product
     // gets wrong whenever a filter removes anything, and stating it as a law is what stops it coming back.
     forAllNoShrink(lists, pageSizes) { (items, size) =>
-      val total = Page.of(items, PageRequest(PositiveInt.One, PageSize.unsafe(size))).totalItems
+      val total = Page
+        .of(items, PageRequest(PositiveInt.One, PageSize.unsafe(size)))
+        .totalItems
         .getOrElse(fail("a list built in memory always knows its total"))
       val pageCount = math.max(1L, (total + size - 1L) / size)
 
@@ -95,7 +97,8 @@ final class PagingLawsSuite extends ScalaCheckSuite {
       assertEquals(nonEmpty, expected)
       // And one page past the count is empty, with the total unchanged: the client can tell "you have run
       // off the end" from "there is nothing here at all" without a second request.
-      val past = Page.of(items, PageRequest(PositiveInt.unsafe((pageCount + 1L).toInt), PageSize.unsafe(size)))
+      val past =
+        Page.of(items, PageRequest(PositiveInt.unsafe((pageCount + 1L).toInt), PageSize.unsafe(size)))
       assert(past.items.isEmpty)
       assertEquals(past.totalItems, Some(total))
     }
@@ -108,7 +111,9 @@ final class PagingLawsSuite extends ScalaCheckSuite {
     forAllNoShrink(smallLists, Gen.chooseNum(1, 50)) { (items, size) =>
       val pageCount = math.max(1, (items.size + size - 1) / size)
       val walked = (1 to pageCount).toList
-        .flatMap(number => Page.of(items, PageRequest(PositiveInt.unsafe(number), PageSize.unsafe(size))).items)
+        .flatMap(number =>
+          Page.of(items, PageRequest(PositiveInt.unsafe(number), PageSize.unsafe(size))).items
+        )
       assertEquals(walked, items)
     }
   }

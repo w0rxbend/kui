@@ -16,9 +16,9 @@ import kui.kernel.{ClusterId, GroupId, ServiceId, TopicName}
   * wrong thing — so the join here is the committed file plus the generated `schema.d.ts`, not one test
   * running twice.
   *
-  * The case that earns its place is the empty `subjects` beside a `partial` naming `schema`. That pair is
-  * the endpoint's entire argument — "we could not ask" is not "nothing matched" — and it is the one thing a
-  * later change could quietly drop by omitting an empty list from the encoder.
+  * The case that earns its place is the empty `subjects` beside a `partial` naming `schema`. That pair is the
+  * endpoint's entire argument — "we could not ask" is not "nothing matched" — and it is the one thing a later
+  * change could quietly drop by omitting an empty list from the encoder.
   */
 final class SearchDtoSuite extends FunSuite {
 

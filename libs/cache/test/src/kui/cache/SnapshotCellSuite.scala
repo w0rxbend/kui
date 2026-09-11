@@ -14,8 +14,8 @@ import kui.testkit.KuiIOSuite
 
 /** The staleness contract, asserted against virtual time.
   *
-  * Nothing here sleeps for real. The whole subject of this type is what happens after thirty seconds
-  * of a failing upstream, and a suite that slept through that would be slow and flaky at once.
+  * Nothing here sleeps for real. The whole subject of this type is what happens after thirty seconds of a
+  * failing upstream, and a suite that slept through that would be slow and flaky at once.
   */
 final class SnapshotCellSuite extends KuiIOSuite {
 

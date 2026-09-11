@@ -13,7 +13,12 @@
 #
 # CI runs this in the end-to-end job, right after the images are built, so that a broken compose
 # file is caught by the same run that builds the artefacts it describes. A developer can run it too,
-# and should: it takes about a minute and it is the most convincing thing in the repository.
+# and should: it takes one to two minutes and it is the most convincing thing in the repository.
+#
+# "About a minute" is what stood here, and it was measured when this stack ran eight containers.
+# Re-measured 2026-09-11 on the eleven-container stack, three consecutive runs against images that
+# already existed, on a 16-core developer machine under concurrent load: 83s, 112s, 121s. The growth
+# is in `up --wait`, not in the assertions -- three more containers to start and become healthy.
 #
 #   ./deployment/compose/smoke.sh
 #

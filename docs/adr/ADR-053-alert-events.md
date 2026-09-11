@@ -247,16 +247,19 @@ topic and a replay, which is `libs/config`'s metadata store and a milestone of i
 
 ## Consequences
 
-- `services/alerts/api/openapi.json` is **6 paths and 12 component schemas** — three alerts paths
-  carrying three operations, plus the three health probes every KUI service serves — generated from
-  the endpoint values and committed. Count them with
-  `jq '.paths | length, (.paths | keys)' services/alerts/api/openapi.json`. The committed merged
-  service and browser documents contain all three public alerts operations; measured at wave 7's
-  integration they are **61 paths, 72 operations and 156 component schemas**, and the number moves
-  every time a service is added, so it is quoted with the command that recounts it:
+<!-- checked: openapi-totals -- verified by ./scripts/feature-matrix-check.sh -- claims: openapi-document, openapi-totals, residue -->
+- `services/alerts/api/openapi.json` is **6 paths, 6 operations and 12 component schemas** — three
+  alerts paths carrying three operations, plus the three health probes every KUI service serves,
+  one operation per path — generated from the endpoint values and committed. The committed merged
+  service and browser documents contain all three public alerts operations, and
+  `docs/api/openapi.json` is **65 paths, 76 operations and 160 component schemas**. That figure
+  moves every time a service is added, so it is quoted with the command that recounts it:
   `jq '[(.paths|length), ([.paths[]|keys[]]|length), (.components.schemas|length)]'
-  docs/api/openapi.json`. `./mill services.gateway.api.openApiCheck` keeps both generated views
-  aligned with the endpoint values.
+  docs/api/openapi.json`, and the same command over the service's own document answers the first
+  three. `./mill services.gateway.api.openApiCheck` keeps both generated views aligned with the
+  endpoint values. **Both sentences sit inside a marker because the second one was wrong for a
+  whole wave** — it published the totals the tenth service left behind, and nothing read it.
+<!-- /checked -->
 - `ServiceContracts.byService` gains a ninth service, `AllInOneWiring` gains an entry and the compose
   stack gains a container — and there is a **fourth** edge, which belonged to none of the three and is
   the reason the service was unroutable for a wave: `alerts.contract.jvm` in `services.gateway.api`'s

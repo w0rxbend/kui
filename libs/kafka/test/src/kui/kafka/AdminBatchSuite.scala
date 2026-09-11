@@ -13,9 +13,9 @@ import kui.testkit.KuiIOSuite
 
 /** The batching rules, including the two that are only visible in time.
   *
-  * `parallelismIsBounded` and `theBatchTakesAsLongAsItsSlowestWave` are asserted with `TestControl`
-  * against virtual time, so a change from `parTraverseN` to `parTraverse` fails the suite rather
-  * than merely making production slower and a broker angrier.
+  * `parallelismIsBounded` and `theBatchTakesAsLongAsItsSlowestWave` are asserted with `TestControl` against
+  * virtual time, so a change from `parTraverseN` to `parTraverse` fails the suite rather than merely making
+  * production slower and a broker angrier.
   */
 final class AdminBatchSuite extends KuiIOSuite {
 
@@ -96,11 +96,10 @@ final class AdminBatchSuite extends KuiIOSuite {
     val program = for {
       running <- Ref.of[IO, Int](0)
       peak <- Ref.of[IO, Int](0)
-      _ <- AdminBatch.chunked[IO, Int, String]((1 to 8).toList, 1, parallelism = 4, operation) {
-        chunk =>
-          running.updateAndGet(_ + 1).flatMap(now => peak.update(_.max(now))) >>
-            IO.sleep(chunkDuration) >>
-            running.update(_ - 1).as(chunk.map(k => k -> s"v$k").toMap)
+      _ <- AdminBatch.chunked[IO, Int, String]((1 to 8).toList, 1, parallelism = 4, operation) { chunk =>
+        running.updateAndGet(_ + 1).flatMap(now => peak.update(_.max(now))) >>
+          IO.sleep(chunkDuration) >>
+          running.update(_ - 1).as(chunk.map(k => k -> s"v$k").toMap)
       }
       observed <- peak.get
     } yield observed

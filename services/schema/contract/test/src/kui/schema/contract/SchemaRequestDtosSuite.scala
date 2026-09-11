@@ -2,6 +2,7 @@ package kui.schema.contract
 
 import io.circe.parser.parse
 import io.circe.syntax.*
+import munit.FunSuite
 import sttp.tapir.{Schema as TapirSchema, SchemaType}
 
 import kui.kernel.Subject
@@ -11,20 +12,19 @@ import kui.schema.contract.dto.{
   SchemaReferenceDto,
   SetCompatibilityRequest
 }
-import munit.FunSuite
 
 /** The two write bodies of the schema service, and the one place their decoder and their document meet.
   *
   * `services.schema.contract.jvm.test` resolved as a test target and contained **no source file at all**
-  * until this one, which is how the same class of defect stayed in the tree for two milestones: a module
-  * that reports zero cases is a green gate over an unmeasured file, and `scripts/run-tests.sh` names it
-  * out loud on every run without failing.
+  * until this one, which is how the same class of defect stayed in the tree for two milestones: a module that
+  * reports zero cases is a green gate over an unmeasured file, and `scripts/run-tests.sh` names it out loud
+  * on every run without failing.
   *
   * What is asserted here is the pair of facts nothing else could see. Both request codecs default
-  * `schemaType` to `AVRO` when it is absent — the registry's own convention, and therefore what a client
-  * that copied a registry payload will send — while Tapir derives every non-`Option` field as *required*,
-  * so the published document demanded a field the server does not need. Two artefacts generated from one
-  * file, disagreeing about the same field.
+  * `schemaType` to `AVRO` when it is absent — the registry's own convention, and therefore what a client that
+  * copied a registry payload will send — while Tapir derives every non-`Option` field as *required*, so the
+  * published document demanded a field the server does not need. Two artefacts generated from one file,
+  * disagreeing about the same field.
   *
   * Cross-compiled, so both the JVM and the browser half of this contract run it (ADR-003).
   */

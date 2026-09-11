@@ -3,7 +3,6 @@ package kui.http.sse
 import java.time.Instant
 
 import scala.concurrent.duration.DurationInt
-
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
@@ -22,9 +21,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** That a stream behaves the same way whatever it is streaming.
   *
-  * The timing cases run under `TestControl`: a suite that really waited fifteen seconds for a
-  * heartbeat would take a minute and would still be the first thing to go flaky on a loaded CI
-  * machine.
+  * The timing cases run under `TestControl`: a suite that really waited fifteen seconds for a heartbeat would
+  * take a minute and would still be the first thing to go flaky on a loaded CI machine.
   */
 final class SseSuite extends CatsEffectSuite {
 
@@ -123,7 +121,8 @@ final class SseSuite extends CatsEffectSuite {
   // ---------------------------------------------------------------------------------------------
 
   test("emitsAHeartbeatAfterFifteenIdleSecondsAndNoneWhileBusy") {
-    val idle = Stream.eval(IO.sleep(46.seconds)).drain ++ Stream.emit(SseEvent.done(DoneReason.Exhausted, None))
+    val idle =
+      Stream.eval(IO.sleep(46.seconds)).drain ++ Stream.emit(SseEvent.done(DoneReason.Exhausted, None))
 
     val busy = Stream
       .awakeEvery[IO](1.second)

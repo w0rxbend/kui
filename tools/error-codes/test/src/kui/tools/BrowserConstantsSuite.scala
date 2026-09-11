@@ -16,8 +16,8 @@ import kui.kernel.error.ErrorCode
   *
   * Until 2026-09-07 that refusal was a `throw` inside a private method whose only caller was the renderer,
   * over a fold of `Action.values` that no test can put into the failing state. It failed `DisableSyntax` and
-  * nothing could reach it. It is now a value over the pairs, which is what makes the two cases below
-  * possible at all.
+  * nothing could reach it. It is now a value over the pairs, which is what makes the two cases below possible
+  * at all.
   */
 final class BrowserConstantsSuite extends FunSuite {
 
@@ -96,8 +96,7 @@ final class BrowserConstantsSuite extends FunSuite {
     val shipped = BrowserConstants.render(ErrorCode.values.toList).toOption.get
     assertEquals(shipped, BrowserConstants.render(ErrorCode.values.toList, declared).toOption.get)
 
-    val emitted = shipped
-      .linesIterator
+    val emitted = shipped.linesIterator
       .dropWhile(!_.startsWith("export const ConnectorFallbackActions"))
       .drop(1)
       .takeWhile(_ != "];")

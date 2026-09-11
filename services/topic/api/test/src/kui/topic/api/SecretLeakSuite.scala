@@ -72,7 +72,12 @@ final class SecretLeakSuite extends CatsEffectSuite {
       .fold(error => fail(error.message), identity)
 
   private val detail =
-    TopicDetail.of(TopicName.unsafe("orders"), isInternal = false, List(partition), cleanupPolicy = Some("delete"))
+    TopicDetail.of(
+      TopicName.unsafe("orders"),
+      isInternal = false,
+      List(partition),
+      cleanupPolicy = Some("delete")
+    )
 
   /** A sensitive configuration key whose value and default both hold the sentinel.
     *

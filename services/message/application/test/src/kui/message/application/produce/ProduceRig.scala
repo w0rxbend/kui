@@ -20,8 +20,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The doubles both produce suites are built from.
   *
-  * They are recording rather than merely stubbed, because the properties that matter here are about *what
-  * was called and in what order*: a read-only cluster must be refused before a producer exists, and an audit
+  * They are recording rather than merely stubbed, because the properties that matter here are about *what was
+  * called and in what order*: a read-only cluster must be refused before a producer exists, and an audit
   * record must be written whether or not the write worked. A stub that only returned answers could not fail
   * either of those tests.
   */
@@ -34,8 +34,7 @@ object ProduceRig {
   /** A cluster profile source with one cluster, writable or not. */
   final class Profiles(readOnly: Boolean, known: Boolean = true) extends ClusterProfileSource[IO] {
     def cluster(id: ClusterId): IO[Either[KuiError, BrowseCluster]] =
-      if !known then
-        IO.pure(ApplicationError.NotFound("cluster", id.value, ErrorCode.ClusterNotFound).asLeft)
+      if !known then IO.pure(ApplicationError.NotFound("cluster", id.value, ErrorCode.ClusterNotFound).asLeft)
       else
         IO.realTimeInstant.map(now =>
           BrowseCluster(id, "Quickstart (local)", readOnly, now, stale = false).asRight
@@ -91,20 +90,22 @@ object ProduceRig {
     def send(
         records: List[RawProducerRecord]
     ): IO[Either[KuiError, List[Either[KuiError, ProducedAt]]]] =
-      sent.update(_ ++ records).as(
-        records.zipWithIndex
-          .map((_, index) =>
-            if failFrom.exists(index >= _) then
-              ApplicationError.Unsupported("the broker refused this record").asLeft[ProducedAt]
-            else
-              ProducedAt(
-                PartitionId.unsafe(0),
-                Offset.unsafe(100L + index),
-                Instant.parse("2026-09-04T09:00:00Z")
-              ).asRight[KuiError]
-          )
-          .asRight
-      )
+      sent
+        .update(_ ++ records)
+        .as(
+          records.zipWithIndex
+            .map((_, index) =>
+              if failFrom.exists(index >= _) then
+                ApplicationError.Unsupported("the broker refused this record").asLeft[ProducedAt]
+              else
+                ProducedAt(
+                  PartitionId.unsafe(0),
+                  Offset.unsafe(100L + index),
+                  Instant.parse("2026-09-04T09:00:00Z")
+                ).asRight[KuiError]
+            )
+            .asRight
+        )
   }
 
   /** A serde source that turns text into UTF-8 bytes, and can be told to refuse.
@@ -161,7 +162,5 @@ object ProduceRig {
   }
 
   def guardFor(profiles: ClusterProfileSource[IO], audit: AuditSink[IO]): IO[MutationGuard[IO]] =
-    FakeStructuredLogger[IO].map(logger =>
-      MutationGuard.make[IO](profiles, audit, logger)
-    )
+    FakeStructuredLogger[IO].map(logger => MutationGuard.make[IO](profiles, audit, logger))
 }

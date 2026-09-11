@@ -5,8 +5,8 @@ import cats.effect.{IO, Resource}
 
 import kui.cluster.domain.{ClusterAdmin as ClusterAdminPort, ClusterProfile, ControllerMode}
 import kui.kafka.admin as adm
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.BrokerId
+import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.observability.Telemetry
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -79,7 +79,8 @@ final class ClusterAdminAdapterSuite extends ClusterAdminContract {
       .flatMap(stub => adapterFor(stub).use(_.describeCluster(profile)))
       .map {
         case Left(error) => fail(s"a cluster mid-failover must still describe: ${error.code.wire}")
-        case Right(description) => assertEquals(description.controller, Option.empty[kui.cluster.domain.Broker])
+        case Right(description) =>
+          assertEquals(description.controller, Option.empty[kui.cluster.domain.Broker])
       }
   }
 
@@ -193,9 +194,7 @@ final class ClusterAdminAdapterSuite extends ClusterAdminContract {
     val timedOut = Left(InfrastructureError.Timeout("describeLogDirs", 30000L))
 
     StubKafkaClusterAdmin(logDirs = timedOut)
-      .flatMap(stub =>
-        adapterFor(stub).use(_.describeLogDirs(profile, NonEmptyList.of(BrokerId.unsafe(1))))
-      )
+      .flatMap(stub => adapterFor(stub).use(_.describeLogDirs(profile, NonEmptyList.of(BrokerId.unsafe(1)))))
       .map {
         case Left(error) => assertEquals(error.code, ErrorCode.Timeout)
         case Right(result) => fail(s"a timeout is a retryable failure, not an empty disk: $result")

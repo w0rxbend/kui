@@ -9,12 +9,11 @@ import kui.testkit.KuiSuite
 
 /** Where the store's design is actually tested.
   *
-  * The version rule — a record is applied only when its version is exactly the next one for its key — is
-  * what makes concurrent writes from several KUI replicas safe with no lock anywhere. Every replica folds
-  * the same ordered partition through this same function, so every replica reaches the same answer about
-  * who won a race without any of them talking to each other. The integration suite proves that end to end
-  * against a broker; this suite proves it as a property, one layer down, where a counter-example is
-  * readable.
+  * The version rule — a record is applied only when its version is exactly the next one for its key — is what
+  * makes concurrent writes from several KUI replicas safe with no lock anywhere. Every replica folds the same
+  * ordered partition through this same function, so every replica reaches the same answer about who won a
+  * race without any of them talking to each other. The integration suite proves that end to end against a
+  * broker; this suite proves it as a property, one layer down, where a counter-example is readable.
   */
 final class StoreStateSuite extends KuiSuite {
 
@@ -22,7 +21,12 @@ final class StoreStateSuite extends KuiSuite {
   private val other = StoreKey(StoreSection.Cluster, "aardvark")
   private val at = Instant.parse("2026-09-03T10:00:00Z")
 
-  private def record(k: StoreKey, version: Long, by: String = "replica-a", deleted: Boolean = false): StoreRecord =
+  private def record(
+      k: StoreKey,
+      version: Long,
+      by: String = "replica-a",
+      deleted: Boolean = false
+  ): StoreRecord =
     StoreRecord(1, k, version, at, by, deleted, Json.obj("writer" -> Json.fromString(by)))
 
   private def fold(state: StoreState, entries: List[(StoreRecord, Long)]): StoreState =
@@ -39,7 +43,10 @@ final class StoreStateSuite extends KuiSuite {
   test("ignoresAStaleVersion") {
     // The lost-race rule. Two replicas both read version 2 and both produced version 3; the one whose
     // record landed second in the partition lost, and every replica reaches that conclusion alone.
-    val state = fold(StoreState.empty, List(record(key, 1L) -> 0L, record(key, 2L) -> 1L, record(key, 3L, "replica-a") -> 2L))
+    val state = fold(
+      StoreState.empty,
+      List(record(key, 1L) -> 0L, record(key, 2L) -> 1L, record(key, 3L, "replica-a") -> 2L)
+    )
     val (after, applied) = state.apply(record(key, 3L, "replica-b"), 3L)
     assertEquals(applied, StoreApplied.Ignored(key, 3L, 4L))
     assertEquals(after.get(key).flatMap(_.payload.hcursor.get[String]("writer").toOption), Some("replica-a"))
@@ -103,7 +110,8 @@ final class StoreStateSuite extends KuiSuite {
 
   property("lastAppliedOffsetIsMonotonic") {
     Prop.forAll(Gen.listOf(Gen.choose(0L, 1000L))) { offsets =>
-      val states = offsets.scanLeft(StoreState.empty)((state, offset) => state.apply(record(key, 1L), offset)._1)
+      val states =
+        offsets.scanLeft(StoreState.empty)((state, offset) => state.apply(record(key, 1L), offset)._1)
       states.map(_.lastAppliedOffset).sliding(2).forall {
         case List(before, after) => after >= before
         case _ => true
@@ -132,9 +140,11 @@ final class StoreStateSuite extends KuiSuite {
     // A writer cannot learn whether it won by comparing the map to what it wrote: by the time it looks, a
     // third writer may have moved the key on again. It asks what the log did with *its own offset*, which
     // is a fact rather than an inference — so the outcome has to be retrievable by offset.
-    val state = fold(StoreState.empty, List(record(key, 1L, "replica-a") -> 40L, record(key, 1L, "replica-b") -> 41L))
+    val state =
+      fold(StoreState.empty, List(record(key, 1L, "replica-a") -> 40L, record(key, 1L, "replica-b") -> 41L))
     state.outcomeAt(40L) match {
-      case Some(StoreApplied.Accepted(StoreChange.Upserted(applied))) => assertEquals(applied.updatedBy, "replica-a")
+      case Some(StoreApplied.Accepted(StoreChange.Upserted(applied))) =>
+        assertEquals(applied.updatedBy, "replica-a")
       case other => fail(s"offset 40 should have been accepted, got $other")
     }
     assertEquals(state.outcomeAt(41L), Some(StoreApplied.Ignored(key, 1L, 2L)))

@@ -203,10 +203,10 @@ object KsqlTestServer {
   /** A stream response, drained to a string.
     *
     * `asStreamAlwaysUnsafe` rather than `asStringAlways`, because the body of a streaming endpoint is an
-    * `fs2.Stream` and the stub backend hands it over as one; reading it as a string would ask the backend
-    * to convert a capability it was given. Draining it is safe here because every stream this suite opens
-    * ends — `Sse` promises exactly one terminal event — and a stream that did not would hang the case
-    * rather than pass it, which is the right failure.
+    * `fs2.Stream` and the stub backend hands it over as one; reading it as a string would ask the backend to
+    * convert a capability it was given. Draining it is safe here because every stream this suite opens ends —
+    * `Sse` promises exactly one terminal event — and a stream that did not would hang the case rather than
+    * pass it, which is the right failure.
     */
   def stream(rig: Rig, path: String, roles: Set[RoleName] = Set.empty): IO[(Int, String)] =
     token("GET", path, roles).flatMap(signed =>

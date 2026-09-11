@@ -1,11 +1,12 @@
 package kui.message.domain
 
-import kui.kernel.browse.{Direction, IsolationLevel, SeekMode}
-import kui.kernel.error.ErrorCode
-import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+
+import kui.kernel.browse.{Direction, IsolationLevel, SeekMode}
+import kui.kernel.error.ErrorCode
+import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 
 /** What a browse request refuses, and what it quietly corrects.
   *
@@ -76,7 +77,9 @@ final class BrowseRequestSuite extends ScalaCheckSuite {
     // believe is anchored somewhere it is not.
     assert(build(seek = SeekMode.AtOffset(Offset.unsafe(42)), live = true).isLeft)
     assert(build(seek = SeekMode.AtTimestamp(1700000000000L), live = true).isLeft)
-    assert(build(seek = SeekMode.AtOffsets(Map(PartitionId.unsafe(0) -> Offset.unsafe(1))), live = true).isLeft)
+    assert(
+      build(seek = SeekMode.AtOffsets(Map(PartitionId.unsafe(0) -> Offset.unsafe(1))), live = true).isLeft
+    )
 
     assert(build(seek = SeekMode.Latest, live = true).isRight)
     assert(build(seek = SeekMode.Beginning, live = true).isRight)
@@ -102,7 +105,8 @@ final class BrowseRequestSuite extends ScalaCheckSuite {
     assert(build(partitions = Some(Set.empty)).isLeft)
     assert(build(partitions = None).isRight)
     assertEquals(
-      build(partitions = Some(Set(PartitionId.unsafe(2), PartitionId.unsafe(0)))).map(_.partitions.map(_.length)),
+      build(partitions = Some(Set(PartitionId.unsafe(2), PartitionId.unsafe(0))))
+        .map(_.partitions.map(_.length)),
       Right(Some(2))
     )
   }
@@ -121,7 +125,10 @@ final class BrowseRequestSuite extends ScalaCheckSuite {
         case Left(error) =>
           assertEquals(error.code, ErrorCode.Validation)
           assert(error.details.nonEmpty, "the error carries no field detail")
-          assert(error.details.forall(_.field.exists(_.nonEmpty)), s"a detail names no field: ${error.details}")
+          assert(
+            error.details.forall(_.field.exists(_.nonEmpty)),
+            s"a detail names no field: ${error.details}"
+          )
         case Right(request) => fail(s"expected a rejection, got $request")
       }
     }

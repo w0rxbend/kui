@@ -4,7 +4,7 @@ import java.time.Instant
 
 import scala.concurrent.duration.DurationInt
 
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import fs2.Stream
 
@@ -48,8 +48,8 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
 
   /** A serde that reads text and refuses one particular payload.
     *
-    * That is what a real serde failure looks like: not a broken cluster, but one record whose producer
-    * wrote something the configured decoder does not accept.
+    * That is what a real serde failure looks like: not a broken cluster, but one record whose producer wrote
+    * something the configured decoder does not accept.
     */
   private def serdes(failsOn: String): SerdeSource[IO] = new SerdeSource[IO] {
 
@@ -129,14 +129,16 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   private def useCase(
       records: List[Either[KuiError, RawRecord]],
       failsOn: String = "<nothing fails>",
-      filters: FilterSource[IO] = FilterSource.unsupported[IO]
+      filters: FilterSource[IO] = FilterSource.unsupported[IO],
+      masking: RecordMasking[IO] = RecordMasking.none[IO]
   ): BrowseUseCase[IO] =
     BrowseUseCase.make[IO](
       clusters,
       serdes(failsOn),
       source(records),
       CursorCodec.hmacSha256[IO](key),
-      filters
+      filters,
+      masking
     )
 
   /** A smart filter that answers by looking at the value's text, so that a test can say which records it
@@ -216,7 +218,8 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   test("a cursor resumes every partition at its own offset") {
     // The reason the seek grammar keeps a per-partition form: a continuation that could only express one
     // offset for every partition could not express what a cursor already means.
-    val offsets = Map(PartitionId.unsafe(0) -> Offset.unsafe(100L), PartitionId.unsafe(3) -> Offset.unsafe(250L))
+    val offsets =
+      Map(PartitionId.unsafe(0) -> Offset.unsafe(100L), PartitionId.unsafe(3) -> Offset.unsafe(250L))
 
     for {
       cursor <- cursorFor(offsets)
@@ -449,7 +452,8 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
       serdes("<nothing fails>"),
       (_, _) => Stream.raiseError[IO](new IllegalStateException("the record source must not be reached")),
       CursorCodec.hmacSha256[IO](key),
-      FilterSource.unsupported[IO]
+      FilterSource.unsupported[IO],
+      RecordMasking.none[IO]
     )
 
     events(browse, request(10, of = ClusterId.unsafe("nowhere"))).map { produced =>
@@ -459,5 +463,137 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
         case _ => false
       })
     }
+  }
+
+  // ----------------------------------------------------------------------------------- the masking
+
+  /** A `RecordMasking` that rewrites the value's text, and counts how often it was asked for a mask.
+    *
+    * The count is the interesting half. "Is the record masked" and "how often were the rules resolved" are
+    * different questions, and only the second can distinguish a mask resolved once for the browse from one
+    * resolved per record — which is the difference between `kui.masking.applied` meaning what
+    * `MetricNames.MaskingApplied` says it means and it being a record counter wearing the wrong name.
+    */
+  private def maskingThat(
+      resolutions: Ref[IO, Int],
+      rewrite: String => String
+  ): RecordMasking[IO] =
+    (_, _) =>
+      resolutions
+        .update(_ + 1)
+        .as(record => record.copy(value = record.value.copy(text = rewrite(record.value.text))))
+
+  test("every delivered record carries the mask, and the browse resolves it once and not once per record") {
+    // DM-001, ADR-023: masking runs after deserialization and before any DTO leaves the service. The
+    // browse is where "after deserialization" happens, so this is the assertion that the product applies
+    // the rule at all -- every other masking case in this repository would stay green with the mask
+    // resolved and then dropped on the floor.
+    val records = List(raw(0, "4111"), raw(1, "4222"), raw(2, "4333")).map(_.asRight[KuiError])
+
+    for {
+      resolutions <- Ref.of[IO, Int](0)
+      produced <- events(
+        useCase(records, masking = maskingThat(resolutions, _ => "****")),
+        request(10)
+      )
+      resolved <- resolutions.get
+    } yield {
+      assertEquals(delivered(produced), List("****", "****", "****"))
+      assertEquals(resolved, 1)
+    }
+  }
+
+  test("the string filter reads the masked text, so a masked value cannot be searched for") {
+    // THE ORACLE, AND IT IS THE REASON THE MASK IS APPLIED AT THE DECODE RATHER THAN AT THE API LAYER.
+    // A filter running on the unmasked text answers questions about the hidden value: `4111` returning
+    // one row tells the reader the card number without ever drawing it. The cost is that a masked field
+    // is not searchable, which is the honest consequence of hiding it -- `MaskingRule` says masking
+    // "hides a field from every reader equally", and a reader's filter is that reader.
+    val records = List(raw(0, "4111"), raw(1, "9999")).map(_.asRight[KuiError])
+
+    for {
+      resolutions <- Ref.of[IO, Int](0)
+      browse = useCase(records, masking = maskingThat(resolutions, _ => "****"))
+      byOriginal <- events(browse, request(10, Some("4111")))
+      byMask <- events(browse, request(10, Some("****")))
+    } yield {
+      assert(delivered(byOriginal).isEmpty, clue = delivered(byOriginal))
+      assertEquals(delivered(byMask), List("****", "****"))
+    }
+  }
+
+  test("the smart filter is handed the masked record too, for the same reason") {
+    val records = List(raw(0, "4111"), raw(1, "9999")).map(_.asRight[KuiError])
+    val keepsUnmasked = filterOver(record =>
+      if record.value.text == "4111" then FilterVerdict.Matched else FilterVerdict.DidNotMatch
+    )
+
+    for {
+      resolutions <- Ref.of[IO, Int](0)
+      produced <- events(
+        useCase(records, filters = keepsUnmasked, masking = maskingThat(resolutions, _ => "****")),
+        filtered(10)
+      )
+    } yield assert(delivered(produced).isEmpty, clue = delivered(produced))
+  }
+
+  /** A `RecordMasking` that READS both of its arguments: it masks the one cluster and topic it was scoped to,
+    * records every pair it was asked about, and leaves everything else alone.
+    *
+    * `maskingThat` above discards both — `(_, _) => …` — and every other masking fake in this service does
+    * the same, which is why the argument hand-off was ungated: `topicKeysPattern` and `topicValuesPattern`
+    * exist to decide WHICH rules reach a read, and that decision is made from exactly this pair. A fake that
+    * ignores the pair cannot tell a browse that asked for its own topic from one that asked for a topic it is
+    * not reading, so a browse that resolves the mask for the wrong topic keeps working and masks nothing.
+    * Filed as W9-06/F1.
+    */
+  private def maskingScopedTo(
+      onlyCluster: ClusterId,
+      onlyTopic: TopicName,
+      asked: Ref[IO, List[(ClusterId, TopicName)]]
+  ): RecordMasking[IO] =
+    (of, forTopic) =>
+      asked
+        .update(_ :+ (of, forTopic))
+        .as(
+          if of == onlyCluster && forTopic == onlyTopic then
+            record => record.copy(value = record.value.copy(text = "****"))
+          else RecordMask.identity
+        )
+
+  test("the mask is resolved for the cluster and topic this browse is reading, and for no other") {
+    // A RULE SCOPED BY TOPIC PATTERN APPLIES TO THE TOPIC BEING READ, OR IT APPLIES TO NOTHING. Asking
+    // the port for a topic other than `request.topic` is a one-word edit that turns every
+    // `topicKeysPattern`/`topicValuesPattern` rule in a deployment off while the browse goes on
+    // delivering records: the scope is matched against a name nobody is reading, no rule matches, and
+    // the identity mask comes back. Both halves are asserted here — the pair the product asked about,
+    // and the text that came out — because either alone can be satisfied by a fake that discards its
+    // arguments.
+    val records = List(raw(0, "4111"), raw(1, "4222")).map(_.asRight[KuiError])
+
+    for {
+      asked <- Ref.of[IO, List[(ClusterId, TopicName)]](Nil)
+      produced <- events(
+        useCase(records, masking = maskingScopedTo(cluster, topic, asked)),
+        request(10)
+      )
+      pairs <- asked.get
+    } yield {
+      assertEquals(pairs, List((cluster, topic)))
+      assertEquals(delivered(produced), List("****", "****"))
+    }
+  }
+
+  test("a browse that fails on the cluster never resolves a mask") {
+    // Resolving the mask is where `kui.masking.applied` is written, so resolving one for a browse that
+    // could not start would publish a masking series for a read that never read anything.
+    for {
+      resolutions <- Ref.of[IO, Int](0)
+      _ <- events(
+        useCase(Nil, masking = maskingThat(resolutions, identity)),
+        request(10, of = ClusterId.unsafe("nowhere"))
+      )
+      resolved <- resolutions.get
+    } yield assertEquals(resolved, 0)
   }
 }

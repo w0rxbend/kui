@@ -99,8 +99,8 @@ object GoldenDocuments {
       |  "incompleteTopics" : 0
       |}""".stripMargin
 
-  /** A cluster that has never been scraped. Not an empty page: an empty page from a cluster with ten
-    * thousand topics is a lie that looks like data.
+  /** A cluster that has never been scraped. Not an empty page: an empty page from a cluster with ten thousand
+    * topics is a lie that looks like data.
     */
   val topicsResponseUnavailable: String =
     """{
@@ -251,8 +251,8 @@ object GoldenDocuments {
       |  }
       |}""".stripMargin
 
-  /** The statistics region of the topics list. Two of the three totals are absent because one topic could
-    * not be described: the count is still the whole cluster's, because `listTopics` answered.
+  /** The statistics region of the topics list. Two of the three totals are absent because one topic could not
+    * be described: the count is still the whole cluster's, because `listTopics` answered.
     */
   val topicStatistics: String =
     """{

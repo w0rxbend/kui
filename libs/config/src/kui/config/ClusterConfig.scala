@@ -33,7 +33,8 @@ final case class ClusterConfig(
     serde: ClusterSerdeConfig = ClusterSerdeConfig.empty,
     schemaRegistry: Option[SchemaRegistrySettings] = None,
     connect: List[ConnectClusterSettings] = Nil,
-    ksql: Option[KsqlSettings] = None
+    ksql: Option[KsqlSettings] = None,
+    masking: MaskingConfig = MaskingConfig.empty
 ) {
 
   /** The four things a client needs, as the one value every port takes.
@@ -56,8 +57,12 @@ final case class ClusterConfig(
     val registry = schemaRegistry.fold("")(settings => s", schemaRegistry=$settings")
     val connectClusters = if connect.isEmpty then "" else s", connect=[${connect.mkString(", ")}]"
     val ksqldb = ksql.fold("")(settings => s", ksql=$settings")
+    // The count and never the rules. `MaskingConfig.toString` says why: the roster of masked fields is a
+    // map of where this cluster's secrets are, and a startup diagnostic is not the place for one.
+    val masked = if masking.isEmpty then "" else s", masking=$masking"
     s"ClusterConfig(${id.value}, '$name', ${bootstrapServers.value}, " +
-      s"${security.securityProtocol}$mechanism, readOnly=$readOnly$extra$registry$connectClusters$ksqldb)"
+      s"${security.securityProtocol}$mechanism, readOnly=$readOnly$extra$registry$connectClusters" +
+      s"$ksqldb$masked)"
   }
 }
 

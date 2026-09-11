@@ -12,13 +12,13 @@ import kui.security.audit.{MutationKind, MutationOutcome}
 
 /** Publishing a record: what lands, what is refused, and what is written down about both.
   *
-  * The cases that matter here are not "it produces a record" — that is the easy half and a broker test
-  * covers it. They are the three that quietly go wrong:
+  * The cases that matter here are not "it produces a record" — that is the easy half and a broker test covers
+  * it. They are the three that quietly go wrong:
   *
   *   - a tombstone must stay a tombstone all the way down, because turning one into an empty value breaks
   *     compaction for whoever relies on it and nothing on any screen would say so;
-  *   - a read-only cluster must be refused **before a producer exists**, which is only assertable because
-  *     the fake counts how many times one was asked for;
+  *   - a read-only cluster must be refused **before a producer exists**, which is only assertable because the
+  *     fake counts how many times one was asked for;
   *   - every attempt must leave exactly one audit record, refusals included, because a trail that only holds
   *     successes cannot answer the question it exists for.
   */

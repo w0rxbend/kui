@@ -74,7 +74,10 @@ final class KsqlResponsesSuite extends FunSuite {
     // `KsqlObjectDto`'s header states which fields belong to which kind. This is the case that holds the
     // sentence: without it, a mapping that put a topic on a query or dropped a table's `windowed` would be
     // a silent change to what a screen can draw.
-    assertEquals((orders.topic.isDefined, orders.windowed, orders.statement, orders.partitions), (true, None, None, None))
+    assertEquals(
+      (orders.topic.isDefined, orders.windowed, orders.statement, orders.partitions),
+      (true, None, None, None)
+    )
     assertEquals((users.topic.isDefined, users.windowed), (true, Some(false)))
     assertEquals((query.topic, query.statement.isDefined, query.sinks), (None, true, List("ENRICHED_ORDERS")))
     assertEquals((topic.topic, topic.partitions, topic.replication), (None, Some(3), Some(3)))
@@ -142,7 +145,9 @@ final class KsqlResponsesSuite extends FunSuite {
     assertNotEquals(second.last, Some("null"))
   }
 
-  test("a destructive plan names the topic it would delete and carries a token; a harmless one carries none") {
+  test(
+    "a destructive plan names the topic it would delete and carries a token; a harmless one carries none"
+  ) {
     assertEquals((destructivePlan.destructive, destructivePlan.deletesTopic), (true, true))
     assert(destructivePlan.token.isDefined)
     assert(destructivePlan.expiresAt.isDefined)

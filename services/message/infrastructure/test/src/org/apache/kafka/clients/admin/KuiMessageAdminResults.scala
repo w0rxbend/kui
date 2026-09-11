@@ -12,8 +12,8 @@ import org.apache.kafka.common.internals.KafkaFutureImpl
   * methods rather than the table its siblings in `libs/kafka` and `services/topic` are. It exists for the
   * same reason they do — a test module cannot see another module's test sources — and it is what makes the
   * `cleanup.policy` read on a purge plan assertable at all: `KafkaRecordDeleter.cleanupPolicy` promises that
-  * a broker that will not be described costs the *warning* and never the plan, and that promise is about
-  * what a `describeConfigs` answer, or its absence, does.
+  * a broker that will not be described costs the *warning* and never the plan, and that promise is about what
+  * a `describeConfigs` answer, or its absence, does.
   *
   * Test sources only. Nothing shipped is in this package.
   */

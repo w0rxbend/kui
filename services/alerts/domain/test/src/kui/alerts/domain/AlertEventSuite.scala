@@ -84,13 +84,16 @@ final class AlertEventSuite extends FunSuite {
 
   test("a cleared resolution names nobody, because nobody did it") {
     val cleared =
-      AlertEvent.open(key, AlertSeverity.Warning, now, "full", "detail").resolvedBy(now, AlertResolutionKind.Cleared, None)
+      AlertEvent
+        .open(key, AlertSeverity.Warning, now, "full", "detail")
+        .resolvedBy(now, AlertResolutionKind.Cleared, None)
 
     assertEquals(cleared.resolution.flatMap(_.by), None)
   }
 
   test("the feed's order is newest first and is stable for two events opened in one millisecond") {
-    val older = AlertEvent.open(AlertKey.cluster(AlertRule.OfflinePartitions), AlertSeverity.Critical, now, "a", "")
+    val older =
+      AlertEvent.open(AlertKey.cluster(AlertRule.OfflinePartitions), AlertSeverity.Critical, now, "a", "")
     val newer = AlertEvent.open(key, AlertSeverity.Warning, now.plusSeconds(30), "b", "")
     val twin = AlertEvent.open(
       AlertKey(AlertRule.StuckRebalance, "payments"),

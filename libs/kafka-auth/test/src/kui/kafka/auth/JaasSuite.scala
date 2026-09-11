@@ -15,19 +15,19 @@ import kui.testkit.{ClusterGenerators, KuiSuite}
 
 /** The test that closes the injection bug.
   *
-  * `renderedJaasParsesBackToTheInput` is not checked against a reimplementation of the JAAS
-  * grammar, which could share a bug with the renderer. It is checked against
-  * `JaasContext.loadClientContext`, which is the code Kafka itself runs on the string KUI produces.
-  * If it parses back to exactly the options that went in, and to no others, then no password can
-  * end a quoted value early and smuggle a login-module option past the operator.
+  * `renderedJaasParsesBackToTheInput` is not checked against a reimplementation of the JAAS grammar, which
+  * could share a bug with the renderer. It is checked against `JaasContext.loadClientContext`, which is the
+  * code Kafka itself runs on the string KUI produces. If it parses back to exactly the options that went in,
+  * and to no others, then no password can end a quoted value early and smuggle a login-module option past the
+  * operator.
   */
 final class JaasSuite extends KuiSuite {
 
   /** A thousand samples rather than the project default of a hundred.
     *
-    * This is the one property in KUI whose failure is a security defect rather than a bug, and its
-    * input space — the awkward characters of a password — is small enough that a thousand samples
-    * cover it densely and cost a fraction of a second.
+    * This is the one property in KUI whose failure is a security defect rather than a bug, and its input
+    * space — the awkward characters of a password — is small enough that a thousand samples cover it densely
+    * and cost a fraction of a second.
     */
   override def scalaCheckTestParameters =
     super.scalaCheckTestParameters.withMinSuccessfulTests(1000)
@@ -37,9 +37,14 @@ final class JaasSuite extends KuiSuite {
     val context =
       JaasContext.loadClientContext(Collections.singletonMap("sasl.jaas.config", new Password(jaas)))
 
-    context.configurationEntries.get(0).getOptions.asScala.map { (key, value) =>
-      key -> String.valueOf(value)
-    }.toMap
+    context.configurationEntries
+      .get(0)
+      .getOptions
+      .asScala
+      .map { (key, value) =>
+        key -> String.valueOf(value)
+      }
+      .toMap
   }
 
   private val Backslash: String = "\\"
@@ -104,30 +109,29 @@ final class JaasSuite extends KuiSuite {
   }
 
   property("renderedJaasParsesBackToTheInput") {
-    forAll(ClusterGenerators.genUsername, ClusterGenerators.genAwkwardSecretString) {
-      (user, password) =>
-        val rendered = Jaas
-          .module(
-            LoginModules.Scram,
-            "required",
-            List(
-              "username" -> JaasValue.Plain(user),
-              "password" -> JaasValue.Hidden(Secret(password))
-            )
+    forAll(ClusterGenerators.genUsername, ClusterGenerators.genAwkwardSecretString) { (user, password) =>
+      val rendered = Jaas
+        .module(
+          LoginModules.Scram,
+          "required",
+          List(
+            "username" -> JaasValue.Plain(user),
+            "password" -> JaasValue.Hidden(Secret(password))
           )
-          .map(_.value)
+        )
+        .map(_.value)
 
-        rendered match {
-          case Left(error) => Prop.falsified :| s"refused a legal password: ${error.fieldName}"
-          case Right(jaas) =>
-            val parsed = parseOptions(jaas)
+      rendered match {
+        case Left(error) => Prop.falsified :| s"refused a legal password: ${error.fieldName}"
+        case Right(jaas) =>
+          val parsed = parseOptions(jaas)
 
-            assertEquals(parsed.get("username"), Some(user))
-            assertEquals(parsed.get("password"), Some(password))
-            // Nothing was injected: exactly the two options that were rendered came back.
-            assertEquals(parsed.keySet, Set("username", "password"))
-            Prop.passed
-        }
+          assertEquals(parsed.get("username"), Some(user))
+          assertEquals(parsed.get("password"), Some(password))
+          // Nothing was injected: exactly the two options that were rendered came back.
+          assertEquals(parsed.keySet, Set("username", "password"))
+          Prop.passed
+      }
     }
   }
 

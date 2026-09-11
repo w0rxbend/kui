@@ -41,7 +41,10 @@ final class StoreRecordSuite extends KuiSuite {
     val record = decoded(tombstoneGolden)
     assertEquals(record.deleted, true)
     assertEquals(record.payload, Json.obj())
-    assertEquals(StoreRecord.tombstone(record.key, record.version, record.updatedBy, record.updatedAt), record)
+    assertEquals(
+      StoreRecord.tombstone(record.key, record.version, record.updatedBy, record.updatedAt),
+      record
+    )
   }
 
   test("unknownEnvelopeVersionIsANamedError") {
@@ -70,7 +73,12 @@ final class StoreRecordSuite extends KuiSuite {
   }
 
   test("updatedAtIsSecondPrecision") {
-    val record = StoreRecord.create(StoreKey.SettingsGlobal, Json.obj(), "kui-test/1", Instant.parse("2026-09-03T10:15:30.123456789Z"))
+    val record = StoreRecord.create(
+      StoreKey.SettingsGlobal,
+      Json.obj(),
+      "kui-test/1",
+      Instant.parse("2026-09-03T10:15:30.123456789Z")
+    )
     assertEquals(record.updatedAt, Instant.parse("2026-09-03T10:15:30Z"))
     assertEquals(record.asJson.hcursor.get[String]("updatedAt"), Right("2026-09-03T10:15:30Z"))
   }
@@ -97,14 +105,18 @@ final class StoreRecordSuite extends KuiSuite {
       "keystore" -> marker("p2"),
       "listeners" -> Json.arr(Json.obj("token" -> marker("p3")))
     )
-    assertEquals(SecretJson.plaintextPaths(payload), List("security.password", "keystore", "listeners[0].token"))
+    assertEquals(
+      SecretJson.plaintextPaths(payload),
+      List("security.password", "keystore", "listeners[0].token")
+    )
     assertEquals(SecretJson.isFullyEncrypted(payload), false)
   }
 
   test("isFullyEncryptedIsFalseWhenOneMarkerRemains") {
     val encrypted = decoded(clusterGolden).payload
     assert(SecretJson.isFullyEncrypted(encrypted))
-    val leaked = encrypted.mapObject(_.add("token", Json.obj(SecretJson.PlaintextField -> Json.fromString("x"))))
+    val leaked =
+      encrypted.mapObject(_.add("token", Json.obj(SecretJson.PlaintextField -> Json.fromString("x"))))
     assertEquals(SecretJson.isFullyEncrypted(leaked), false)
     assertEquals(SecretJson.plaintextPaths(leaked), List("token"))
   }

@@ -111,12 +111,46 @@ test.describe("cross-entity search", () => {
     await expect(overlay).toContainText(/missing, not empty/i);
   });
 
-  test("says so in words when nothing matches, and never calls it a failure", async ({ page }) => {
-    await search(page, "zzz-nothing-matches-this-zzz");
-    /* The empty state and the failure state are different pictures because the operator's next
-       action is different: one is "search for something else", the other is "retry". */
+  /**
+   * Three renderings of "no rows", and which one is honest depends on who was asked.
+   *
+   * This case asserted `Nothing matches` flatly until wave 9, and it passed for four waves because
+   * the deployment registered **one** cluster and that cluster had a schema registry, so `partial`
+   * was always empty. With a second cluster registered and no registry on it
+   * (`deployment/quickstart/kui-quickstart.yaml`, W9-01), `/api/v1/search` — which is global rather
+   * than cluster-scoped — answers `partial: ["schema"]` on **every** query, and the overlay stops
+   * saying `Nothing matches`. That is `searchStatus` doing exactly what it was written to do:
+   * "Nothing matches" over a search that never reached the registry is a false negative, and a
+   * false negative in a search box is indistinguishable from an absence.
+   *
+   * So the branch is on the wire, like the case above it, and each arm asserts the *other* arm's
+   * sentence is absent — a rendering that drew both would be telling the operator two different
+   * things about one answer. What is common to both, and is what the case is named for, is that
+   * neither arm calls it a failure: the operator's next action after "nothing matched" is to search
+   * for something else, and after "not answering" it is to retry, and drawing the second over the
+   * first sends them to look at a gateway that is working.
+   */
+  test("says so in words when nothing matches, and never calls it a failure", async ({
+    page,
+    api,
+  }) => {
+    const query = "zzz-nothing-matches-this-zzz";
+    const answer = (await api.get(`/api/v1/search?q=${query}`)) as {
+      partial?: readonly string[];
+    };
+    const partial = answer.partial ?? [];
+
+    await search(page, query);
     const overlay = page.getByTestId("search");
-    await expect(overlay).toContainText(/Nothing matches/i);
+
+    if (partial.length === 0) {
+      await expect(overlay).toContainText(/Nothing matches/i);
+      await expect(overlay).not.toContainText(/Not searched/i);
+    } else {
+      await expect(overlay).toContainText(/Not searched/i);
+      await expect(overlay).toContainText(/missing, not empty/i);
+      await expect(overlay).not.toContainText(/Nothing matches/i);
+    }
     await expect(overlay).not.toContainText(/not answering/i);
   });
 

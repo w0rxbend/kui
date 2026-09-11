@@ -15,7 +15,13 @@ import org.apache.kafka.clients.admin.{
 import org.apache.kafka.common.KafkaFuture
 import org.apache.kafka.common.config.ConfigResource
 
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.{ClusterId, TopicName}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
@@ -26,17 +32,17 @@ import kui.topic.domain.{NewTopicSpec, TopicConfigChange}
   * `KafkaTopicWriterSuite` beside this one asserts `writeError`, which is pure. The rest of the adapter is a
   * translation from the domain's vocabulary into an admin call, and that translation was reachable from no
   * suite at all: the module had no Kafka `Admin` stub when the class shipped, and `KafkaTopicWriterSuite`'s
-  * own scaladoc records the consequence — a configuration `DELETE` turned into a `SET` "needs an admin
-  * client this module has no stub for and is reported rather than pretended". `StubAdmin` and
-  * `RecordingAdminPool` have since arrived for the read adapter, so it can be driven now.
+  * own scaladoc records the consequence — a configuration `DELETE` turned into a `SET` "needs an admin client
+  * this module has no stub for and is reported rather than pretended". `StubAdmin` and `RecordingAdminPool`
+  * have since arrived for the read adapter, so it can be driven now.
   *
   * Both rules below are ones where the *wrong* call succeeds. The broker accepts it, the operation reports
-  * success, and the cluster is left in a state the operator did not ask for — which is why neither could
-  * ever have been caught by asserting on a `TopicError`.
+  * success, and the cluster is left in a state the operator did not ask for — which is why neither could ever
+  * have been caught by asserting on a `TopicError`.
   *
   * The arguments are captured into an `AtomicReference` rather than a `Ref`, because `StubAdmin`'s answers
-  * are a plain synchronous partial function: the adapter calls it from inside its own `delay`, so there is
-  * no effect to run there and nothing to interleave with.
+  * are a plain synchronous partial function: the adapter calls it from inside its own `delay`, so there is no
+  * effect to run there and nothing to interleave with.
   */
 final class KafkaTopicWriteCallSuite extends KuiIOSuite {
 

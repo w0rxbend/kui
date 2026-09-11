@@ -12,9 +12,9 @@ import munit.CatsEffectSuite
 import org.typelevel.otel4s.oteljava.testkit.OtelJavaTestkit
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.*
-import sttp.model.Uri
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.StreamBackendStub
+import sttp.model.Uri
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
 import kui.cluster.application.*
@@ -97,8 +97,8 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
 
   /** A token for one request line, minted with whichever codec the server under test verifies with.
     *
-    * The digest covers the method and the *path*: a query string is deliberately outside it (ADR-020), so
-    * the token for `/log-dirs?brokerId=1` is minted over `/log-dirs`.
+    * The digest covers the method and the *path*: a query string is deliberately outside it (ADR-020), so the
+    * token for `/log-dirs?brokerId=1` is minted over `/log-dirs`.
     */
   private def token(server: ClusterTestServer, method: String, path: String): IO[SignedPrincipal] =
     IO.realTimeInstant.flatMap(now =>

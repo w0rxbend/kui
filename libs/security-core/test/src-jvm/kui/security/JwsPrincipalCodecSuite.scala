@@ -11,20 +11,20 @@ import kui.kernel.{RoleName, Secret, ServiceId, UserName}
 
 /** The signed half of ADR-020: what a service accepts, and — mostly — what it refuses.
   *
-  * A test that only proves a valid token works would pass against a codec that accepts everything.
-  * Every check the verification performs therefore has a test that defeats it, including a property
-  * that flips one character anywhere in a token and asserts the token stops verifying.
+  * A test that only proves a valid token works would pass against a codec that accepts everything. Every
+  * check the verification performs therefore has a test that defeats it, including a property that flips one
+  * character anywhere in a token and asserts the token stops verifying.
   */
 final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
-  /** The codec needs a `MonadThrow`, and `Attempt` is the smallest one there is: no
-    * runtime, no thread pool, and a failure that the test can look at directly.
+  /** The codec needs a `MonadThrow`, and `Attempt` is the smallest one there is: no runtime, no thread pool,
+    * and a failure that the test can look at directly.
     */
   private type Attempt[A] = Either[Throwable, A]
 
   private val now: Instant = Instant.parse("2026-09-03T10:00:00Z")
-  private val service      = ServiceId.unsafe("topic")
-  private val digest       = RequestDigests.of("POST", "/internal/v1/topics", "{}".getBytes("UTF-8"))
+  private val service = ServiceId.unsafe("topic")
+  private val digest = RequestDigests.of("POST", "/internal/v1/topics", "{}".getBytes("UTF-8"))
 
   private def key(kid: String, byte: Byte, notBefore: Instant): SigningKey =
     SigningKey(kid, Secret(Array.fill[Byte](32)(byte)), notBefore)
@@ -71,8 +71,8 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
     forAll(Gen.chooseNum(0, token.length - 1)) { index =>
       val replacement = if token.charAt(index) == 'A' then 'B' else 'A'
-      val tampered    = token.updated(index, replacement)
-      val result      = codec.verify(SignedPrincipal.unsafe(tampered), service, digest, now)
+      val tampered = token.updated(index, replacement)
+      val result = codec.verify(SignedPrincipal.unsafe(tampered), service, digest, now)
       assert(
         result.exists(_.isLeft),
         s"a token altered at index $index still verified"
@@ -82,14 +82,14 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
   test("a token signed with a key this service does not know is refused by key id") {
     val stranger = codecOf(key("k9", 9, now.minusSeconds(60)))
-    val token    = sign(claims(), by = stranger)
+    val token = sign(claims(), by = stranger)
 
     assertEquals(codec.verify(token, service, digest, now), Right(Left(PrincipalError.UnknownKeyId("k9"))))
   }
 
   test("a token signed with the right key id but the wrong key is refused by signature") {
     val impostor = codecOf(SigningKey("k2", Secret(Array.fill[Byte](32)(7)), now.minusSeconds(60)))
-    val token    = sign(claims(), by = impostor)
+    val token = sign(claims(), by = impostor)
 
     assertEquals(codec.verify(token, service, digest, now), Right(Left(PrincipalError.BadSignature)))
   }
@@ -104,7 +104,7 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
   test("an expired token is refused, and one within five seconds of skew is not") {
     val expiry = now.minusSeconds(4)
-    val token  = sign(claims(expiresAt = expiry))
+    val token = sign(claims(expiresAt = expiry))
 
     assertEquals(codec.verify(token, service, digest, now), Right(Right(claims().principal)))
     assertEquals(
@@ -121,7 +121,8 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
   }
 
   test("a token whose body hash differs by one byte is refused") {
-    val token = sign(claims(request = RequestDigests.of("POST", "/internal/v1/topics", "{ }".getBytes("UTF-8"))))
+    val token =
+      sign(claims(request = RequestDigests.of("POST", "/internal/v1/topics", "{ }".getBytes("UTF-8"))))
     assertEquals(codec.verify(token, service, digest, now), Right(Left(PrincipalError.RequestMismatch)))
   }
 
@@ -133,13 +134,16 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
     codec.verify(token, service, digest, now) match {
       case Right(Left(PrincipalError.Malformed(_))) => ()
-      case other                                    => fail(s"expected a rejected issuer, got $other")
+      case other => fail(s"expected a rejected issuer, got $other")
     }
   }
 
   test("rotation: both keys verify, and the newest active key signs") {
     val token = sign(claims())
-    assert(codec.verify(token, service, digest, now).exists(_.isRight), "the freshly signed token must verify")
+    assert(
+      codec.verify(token, service, digest, now).exists(_.isRight),
+      "the freshly signed token must verify"
+    )
 
     val onlyOldKey = codecOf(oldKey)
     assertEquals(
@@ -156,7 +160,7 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
   test("a key whose notBefore has not arrived is not used for signing") {
     val future = key("k3", 3, now.plusSeconds(3600))
-    val token  = sign(claims(), by = codecOf(oldKey, future))
+    val token = sign(claims(), by = codecOf(oldKey, future))
 
     assert(
       codecOf(oldKey).verify(token, service, digest, now).exists(_.isRight),
@@ -174,7 +178,7 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
 
   test("nothing prints the signing key: not the key, not the codec, not a rejection") {
     val secretBytes = "hunter2-hunter2-hunter2-hunter2!".getBytes("UTF-8")
-    val signingKey  = SigningKey("k1", Secret(secretBytes), now)
+    val signingKey = SigningKey("k1", Secret(secretBytes), now)
     val rendered = List(
       signingKey.toString,
       signingKey.key.toString,

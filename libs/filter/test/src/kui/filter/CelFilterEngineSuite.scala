@@ -10,8 +10,8 @@ import kui.kernel.ClusterId
 import kui.kernel.error.{ErrorCode, KuiError}
 import kui.testkit.KuiIOSuite
 
-/** What a user is allowed to write, what happens when they write something wrong, and the two properties
-  * that make a filter safe to run against a million records.
+/** What a user is allowed to write, what happens when they write something wrong, and the two properties that
+  * make a filter safe to run against a million records.
   */
 final class CelFilterEngineSuite extends KuiIOSuite {
 
@@ -120,7 +120,9 @@ final class CelFilterEngineSuite extends KuiIOSuite {
       "record.keyAsText.startsWith('order')",
       "has(record.value.status) && record.value.status == 'FAILED'"
     )
-    engine().use(port => examples.traverse_(source => port.register(source).map(r => assert(r.isRight, source))))
+    engine().use(port =>
+      examples.traverse_(source => port.register(source).map(r => assert(r.isRight, source)))
+    )
   }
 
   test("a compile error carries a position, which is what the editor underlines") {
@@ -193,7 +195,7 @@ final class CelFilterEngineSuite extends KuiIOSuite {
   test("a missing field is a Left, not a thrown exception") {
     evaluate("record.value.nosuchfield == 'x'").map {
       case Left(FilterError.Runtime(_)) => ()
-      case other                        => fail(s"expected a runtime error, got $other")
+      case other => fail(s"expected a runtime error, got $other")
     }
   }
 
@@ -201,8 +203,9 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     // `1 + 1` is a perfectly good CEL expression and a nonsensical filter. Calling a non-zero number
     // "matched" is how a user ends up with a filter that appears to work and silently matches everything.
     evaluate("1 + 1").map {
-      case Left(FilterError.Runtime(message)) => assert(message.contains("rather than true or false"), message)
-      case other                              => fail(s"expected a runtime error, got $other")
+      case Left(FilterError.Runtime(message)) =>
+        assert(message.contains("rather than true or false"), message)
+      case other => fail(s"expected a runtime error, got $other")
     }
   }
 
@@ -224,8 +227,8 @@ final class CelFilterEngineSuite extends KuiIOSuite {
         case Left(FilterError.Timeout(afterMs)) => assertEquals(afterMs, 0L)
         // A trivial program can legitimately finish inside a one-nanosecond window on a fast machine after
         // the JIT has warmed up, so a success is accepted; what must never happen is an exception escaping.
-        case Right(_)                           => ()
-        case Left(other)                        => fail(s"expected a timeout or a result, got $other")
+        case Right(_) => ()
+        case Left(other) => fail(s"expected a timeout or a result, got $other")
       }
     }
   }
@@ -239,7 +242,10 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     assertEquals(FilterId.of(source).value.length, 16)
     assertEquals(FilterId.of(source), FilterId.of(source))
     assertNotEquals(FilterId.of(source), FilterId.of("record.partition == 1"))
-    (engine().use(port => orFail(port.register(source))), engine().use(port => orFail(port.register(source)))).tupled
+    (
+      engine().use(port => orFail(port.register(source))),
+      engine().use(port => orFail(port.register(source)))
+    ).tupled
       .map((first, second) => assertEquals(first, second))
   }
 
@@ -254,7 +260,9 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     val source = "record.partition == 3"
     val id = FilterId.of(source)
     // A fresh engine: nothing in its cache, exactly like a pod that started thirty seconds ago.
-    engine().use(port => orFail(port.predicate(id, Some(source))).flatMap(_.test(record))).assertEquals(Right(true))
+    engine()
+      .use(port => orFail(port.predicate(id, Some(source))).flatMap(_.test(record)))
+      .assertEquals(Right(true))
   }
 
   test("an unknown id with no source is refused rather than silently matching everything") {

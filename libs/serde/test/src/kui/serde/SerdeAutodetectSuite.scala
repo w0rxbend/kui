@@ -49,7 +49,11 @@ final class SerdeAutodetectSuite extends KuiSuite {
     // Sixteen bytes that carry a valid version and variant are a UUID.
     val uuid = java.util.UUID.randomUUID()
     val uuidBytes =
-      ByteBuffer.allocate(16).putLong(uuid.getMostSignificantBits).putLong(uuid.getLeastSignificantBits).array()
+      ByteBuffer
+        .allocate(16)
+        .putLong(uuid.getMostSignificantBits)
+        .putLong(uuid.getLeastSignificantBits)
+        .array()
     assertEquals(detected(uuidBytes), Some(SerdeName.Uuid))
 
     // Sixteen bytes that do not are not a UUID, and are not text either.
@@ -80,7 +84,7 @@ final class SerdeAutodetectSuite extends KuiSuite {
   }
 
   property("ranking is deterministic: the same sample gives the same order every time") {
-    forAll { (bytes: Array[Byte]) => rank(bytes) == rank(bytes) }
+    forAll((bytes: Array[Byte]) => rank(bytes) == rank(bytes))
   }
 
   property("every ranked serde actually decodes the sample it was ranked for") {
@@ -116,7 +120,10 @@ final class SerdeAutodetectSuite extends KuiSuite {
       def parameters(t: TopicName, target: Target): IO[List[SerdeParameter]] = IO.pure(Nil)
       def deserializer(t: TopicName, target: Target): IO[Deserializer[IO]] = IO.pure(new Deserializer[IO] {
         val serde: SerdeName = name
-        def deserialize(h: List[RawHeader], b: Array[Byte]): IO[Either[DeserializeFailure, DeserializeResult]] =
+        def deserialize(
+            h: List[RawHeader],
+            b: Array[Byte]
+        ): IO[Either[DeserializeFailure, DeserializeResult]] =
           IO.pure(Right(DeserializeResult.text("never asked")))
       })
       def serializer(t: TopicName, target: Target, p: Map[String, String]): IO[Serializer[IO]] =
@@ -140,7 +147,10 @@ final class SerdeAutodetectSuite extends KuiSuite {
       def claims(sample: Array[Byte]): Boolean = true
       def deserializer(t: TopicName, target: Target): IO[Deserializer[IO]] = IO.pure(new Deserializer[IO] {
         val serde: SerdeName = name
-        def deserialize(h: List[RawHeader], b: Array[Byte]): IO[Either[DeserializeFailure, DeserializeResult]] =
+        def deserialize(
+            h: List[RawHeader],
+            b: Array[Byte]
+        ): IO[Either[DeserializeFailure, DeserializeResult]] =
           IO.raiseError(new RuntimeException("boom"))
       })
       def serializer(t: TopicName, target: Target, p: Map[String, String]): IO[Serializer[IO]] =

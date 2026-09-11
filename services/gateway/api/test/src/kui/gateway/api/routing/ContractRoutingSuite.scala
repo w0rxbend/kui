@@ -1,6 +1,7 @@
 package kui.gateway.api.routing
 
 import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
@@ -12,33 +13,27 @@ import munit.CatsEffectSuite
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 
-import kui.cluster.contract.dto.ClustersResponse
 import kui.cluster.contract.ClusterEndpoints
-import kui.contracts.Section
-import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
+import kui.cluster.contract.dto.ClustersResponse
 import kui.contracts.capability.{CapabilityKey, CapabilityState}
-import kui.contracts.{ErrorEnvelope, KuiEndpoint}
+import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
+import kui.contracts.{ErrorEnvelope, KuiEndpoint, Section}
 import kui.gateway.api.GatewayTestServer
-import kui.gateway.application.capability.{
-  CapabilityRegistry,
-  CapabilitySignals,
-  RegistryConfig
-}
+import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.ServiceId
+import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.observability.Correlation
 import kui.security.SignedPrincipal
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** That the gateway serves another service's API without containing a single path of its own.
   *
-  * The suite deliberately routes the *real* `ClusterEndpoints.all`. Deriving routes from a locally
-  * invented endpoint would test the derivation against a copy, and would keep passing on the day the copy
-  * and the published contract diverged -- which is the failure this whole mechanism exists to make
-  * impossible.
+  * The suite deliberately routes the *real* `ClusterEndpoints.all`. Deriving routes from a locally invented
+  * endpoint would test the derivation against a copy, and would keep passing on the day the copy and the
+  * published contract diverged -- which is the failure this whole mechanism exists to make impossible.
   */
 final class ContractRoutingSuite extends CatsEffectSuite {
 
@@ -71,8 +66,8 @@ final class ContractRoutingSuite extends CatsEffectSuite {
 
   /** A streaming endpoint under `/internal/v1`, which M0 has no real example of.
     *
-    * Writing the SSE passthrough now, against a stub, is cheaper than writing it in M3 under the pressure
-    * of a feature that needs it, and it means the derivation is known to handle both shapes before eleven
+    * Writing the SSE passthrough now, against a stub, is cheaper than writing it in M3 under the pressure of
+    * a feature that needs it, and it means the derivation is known to handle both shapes before eleven
     * services start relying on it.
     */
   private val events: Endpoint[SignedPrincipal, Unit, ErrorEnvelope, Stream[IO, Byte], Fs2Streams[IO]] =

@@ -7,13 +7,11 @@ import cats.effect.kernel.Ref
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
-import kui.kernel.ClusterId
-import kui.kernel.SchemaId
-import kui.kernel.Subject
 import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
+import kui.kernel.{ClusterId, SchemaId, Subject}
 import kui.schema.domain.*
-import kui.testkit.fakes.FakeStructuredLogger
 import kui.security.audit.{AuditSink, MutationRecord}
+import kui.testkit.fakes.FakeStructuredLogger
 
 /** A registry that answers from a map, or refuses, on demand.
   *

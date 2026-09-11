@@ -2,7 +2,6 @@ package kui.config
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-
 import org.scalacheck.{Gen, Prop}
 
 import kui.kernel.cluster.{ClusterSecurity, SaslMechanism, SaslProtocol}
@@ -11,8 +10,8 @@ import kui.testkit.KuiSuite
 /** The mechanism table of `docs/operations/configuration.md`, asserted one row at a time.
   *
   * Every row an operator can write down has to decode into the ADT case the renderer expects, and every row
-  * with a field missing has to say which field — once, naming that field, and not naming the other seven.
-  * An operator filling in a Kerberos cluster should learn about all three missing keys in one restart.
+  * with a field missing has to say which field — once, naming that field, and not naming the other seven. An
+  * operator filling in a Kerberos cluster should learn about all three missing keys in one restart.
   */
 final class ClusterSecuritySuite extends KuiSuite {
 
@@ -253,8 +252,8 @@ final class ClusterSecuritySuite extends KuiSuite {
   // The loader does not mangle a password on the way in
   // -------------------------------------------------------------------------------------------
 
-  /** Anything an operator might realistically paste into a password field, including the four characters
-    * that break a naively assembled JAAS string (Kouncil's `String.format` injection,
+  /** Anything an operator might realistically paste into a password field, including the four characters that
+    * break a naively assembled JAAS string (Kouncil's `String.format` injection,
     * `research/scala/security-research.md` §3). Rendering it is KAFKA-002's property test; this one asserts
     * the *loader* hands over exactly the bytes it was given, which is where the same bug would be invisible.
     */
@@ -298,9 +297,9 @@ final class ClusterSecuritySuite extends KuiSuite {
     *
     * Nothing said so. The configuration loaded, KUI started, and `Admin.create` then threw while opening the
     * PKCS12 store — which the cluster service reports as `KUI-UPSTREAM-UNAVAILABLE`, the same code a broker
-    * that is simply switched off produces. The secured cluster sat on the dashboard saying "unavailable"
-    * for ever, and the one place the real cause could have been read was the exception class name that
-    * nothing logged.
+    * that is simply switched off produces. The secured cluster sat on the dashboard saying "unavailable" for
+    * ever, and the one place the real cause could have been read was the exception class name that nothing
+    * logged.
     */
   private def tlsOf(security: ClusterSecurity): kui.kernel.cluster.TlsConfig =
     security match {

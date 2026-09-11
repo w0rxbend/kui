@@ -35,7 +35,13 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
     )
 
   private def opening(events: List[AlertEvent]): Evaluation =
-    Evaluation(events, Nil, Nil, AlertRuleState.empty, AlertRule.All.map(RuleReport(_, RuleOutcome.evaluated)))
+    Evaluation(
+      events,
+      Nil,
+      Nil,
+      AlertRuleState.empty,
+      AlertRule.All.map(RuleReport(_, RuleOutcome.evaluated))
+    )
 
   /** Two clusters nobody asserts about, which is what makes the publication cases exact. */
   private val warmUp = ClusterId.unsafe("warm-up")
@@ -45,20 +51,20 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
     *
     * ==Three timing assumptions, all removed==
     *
-    * These cases used to count frames against a baseline read at a moment chosen by a sleep, and one of
-    * them **failed under load**: measured here, `an acknowledgement publishes a frame` failed inside
-    * `./mill services.connect.__.test + services.alerts.__.test + services.metrics.__.test` and passed
-    * when `services.alerts.infrastructure.test` ran alone. The cause was not the store. It was that the
-    * seeding loop can publish more than once before the first frame is observed, so the baseline is taken
-    * with frames still in the subscriber's queue and the case that expects `before + 1` sees `before + 2`.
+    * These cases used to count frames against a baseline read at a moment chosen by a sleep, and one of them
+    * **failed under load**: measured here, `an acknowledgement publishes a frame` failed inside
+    * `./mill services.connect.__.test + services.alerts.__.test + services.metrics.__.test` and passed when
+    * `services.alerts.infrastructure.test` ran alone. The cause was not the store. It was that the seeding
+    * loop can publish more than once before the first frame is observed, so the baseline is taken with frames
+    * still in the subscriber's queue and the case that expects `before + 1` sees `before + 2`.
     *
     * So: `changes` subscribes when its stream is *pulled* and `.start` only schedules the fibre, so the
     * subscription is confirmed live by recording on `warmUp` until a `warmUp` frame arrives. Whatever that
     * loop published is on a cluster this method filters out. `writes` then runs on [[cluster]]. Finally a
     * record on `sentinel` closes the sequence and the wait is for **that** frame: fs2's `Topic` delivers to
-    * one subscriber in publication order, so a sentinel frame in hand proves every earlier frame is in
-    * hand too. Counting [[cluster]]'s frames after that is exact rather than a sleep-and-look, and a
-    * publication that was dropped fails the count rather than a timeout.
+    * one subscriber in publication order, so a sentinel frame in hand proves every earlier frame is in hand
+    * too. Counting [[cluster]]'s frames after that is exact rather than a sleep-and-look, and a publication
+    * that was dropped fails the count rather than a timeout.
     */
   private def framesFor(held: InMemoryAlertStore[IO])(writes: IO[Unit]): IO[List[ClusterId]] =
     for {

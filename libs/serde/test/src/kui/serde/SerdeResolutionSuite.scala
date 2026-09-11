@@ -1,7 +1,7 @@
 package kui.serde
 
-import org.scalacheck.Prop.forAll
 import org.scalacheck.Gen
+import org.scalacheck.Prop.forAll
 
 import kui.kernel.TopicName
 import kui.kernel.error.ErrorCode

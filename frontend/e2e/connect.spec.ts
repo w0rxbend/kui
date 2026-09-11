@@ -39,6 +39,16 @@
  * quickstart deploys a connector onto it (W8-10); a stack without either is a stack on which M9's
  * browser evidence does not exist, and a green run over three skips is how that went unnoticed for
  * two waves.
+ *
+ * ## And the words are not transcribed either, as of wave 9
+ *
+ * The rewrite above left one hand-copied wire behind: a `wordFor` at the foot of this file holding
+ * `connectorChip`'s five labels. It was correct — all five were compared in wave 8 — and being
+ * correct is not being gated, and it was the residue house rule 12 named by file. It is gone.
+ * `ConnectorCard` publishes the state word it drew from as `data-state` on its pill, so the
+ * comparison this file makes is the wire's word against the screen's word, and the *labels* belong
+ * to `packages/kernel/src/components/connect.test.tsx`, which pins all five by literal in the
+ * language that owns them.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -209,9 +219,53 @@ test.describe("Kafka Connect", () => {
       const subject = subjectOf(item);
       const card = page.locator(`[data-testid="connector"][data-connector="${subject}"]`);
       await expect(card, `no card for ${subject}`).toHaveCount(1);
-      // The state the worker reported, in this build's own words for it — never a word KUI chose
-      // for a state it did not recognise.
-      await expect(card).toContainText(wordFor(String(item["state"] ?? "")));
+
+      /*
+       * The pill, and only the pill.
+       *
+       * This line used to read `expect(card).toContainText(wordFor(state))`, and on this stack it
+       * asserted nothing. `card` is `ConnectorPanel`'s whole `<div>` — the pill, the task bar, the
+       * task sentence, the failure reason and the refusal are all inside it — and for
+       * `quickstart-file-source` (RUNNING, 1/1) the panel text carries *"1 of 1 tasks running."*.
+       * So `toContainText("running")` was satisfied by the **task sentence** whatever the pill
+       * said: a regression drawing an unreported state as `running`, or drawing no pill at all,
+       * passed it. Scoped here to the header's pill, which is the one element that is a claim
+       * about the connector's state.
+       */
+      const pill = card.locator(".kui-connector__head .kui-pill");
+      await expect(pill, `${subject} has no state pill at all`).toHaveCount(1);
+
+      /*
+       * And the comparison is machine word against machine word, with no label transcribed here.
+       *
+       * `wordFor` used to live at the foot of this file and copied `connectorChip`'s five labels
+       * into it — correct on the day they were copied, gated by nothing after it, in the one file
+       * whose thesis is that copies are read off disk. `ConnectorCard` now publishes `data-state`
+       * carrying the state word it was handed (W9-04), so what this asserts is the thing worth
+       * asserting: **the state on the screen is the state the Connect worker reported**, and the
+       * words beside it are `packages/kernel`'s to choose and to reword.
+       *
+       * Directly equal, with no fold written here on purpose. `feature-connect`'s `pillState`
+       * folds a state word this build does not draw — Kafka 3.5's `STOPPED`, say — to `UNKNOWN`
+       * rather than guessing, so a deployment running a connector in such a state reddens this
+       * line. That failure is real and the repair is to teach this build the state, in
+       * `feature-connect/src/wire.ts` and `packages/kernel`'s `ConnectorState`, not to widen this
+       * assertion: an `expect(drawn).toBeOneOf([wire, "UNKNOWN"])` here would pass a screen that
+       * had stopped reading the wire at all.
+       */
+      const wireState = String(item["state"] ?? "");
+      await expect(
+        pill,
+        `${subject}: the pill on screen and the state ${wireState} the worker reported disagree`,
+      ).toHaveAttribute("data-state", wireState);
+
+      /*
+       * The pill still has to say it in words. SPEC §4.0: colour is never the only signal, and a
+       * `data-state` with an empty stadium beside it is a shape with no meaning to a reader and to
+       * a screen reader. `toHaveText` and not `toContainText`, over the pill and not over the
+       * card, so nothing else on the panel can satisfy it.
+       */
+      await expect(pill, `${subject}'s pill is drawn with no words in it`).toHaveText(/\S/);
     }
 
     // And the page's own voice line counts the same rows. It is the only figure on this screen the
@@ -251,26 +305,3 @@ test.describe("Kafka Connect", () => {
     await expect(page.getByTestId("connect-list")).not.toContainText("msg/s");
   });
 });
-
-/**
- * The pill's wording for a state, mirroring `@kui/kernel`'s `connectorChip`.
- *
- * Written out rather than imported: `e2e/` has no project reference to the packages — Playwright
- * compiles these files on their own — so the kernel's own mapping is not reachable from here. It is
- * five words and the suite that owns them is `packages/kernel`'s; what this file is responsible for
- * is the *wire*, which it reads off disk instead of transcribing.
- */
-function wordFor(state: string): string {
-  switch (state.toUpperCase()) {
-    case "RUNNING":
-      return "running";
-    case "FAILED":
-      return "failed";
-    case "PAUSED":
-      return "paused";
-    case "UNASSIGNED":
-      return "unassigned";
-    default:
-      return "state not reported";
-  }
-}

@@ -8,8 +8,8 @@ import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.kernel.Resource
 import cats.syntax.all.*
-import io.circe.parser.parse
 import io.circe.Json
+import io.circe.parser.parse
 import munit.CatsEffectSuite
 import org.typelevel.otel4s.metrics.MeterProvider
 import sttp.client4.*
@@ -79,7 +79,7 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
     * Two stubs rather than one configurable one: the two are the two sides of the claim under test, and a
     * single stub with a flag would make each case read as a setting rather than as a situation.
     */
-  private final class DeadSource extends MetricsSourcePort[IO] {
+  final private class DeadSource extends MetricsSourcePort[IO] {
     def throughput(range: ThroughputRange, endingAt: Instant) = IO.pure(Left(exporterDown))
     def latency(range: ThroughputRange, endingAt: Instant) = IO.pure(Left(exporterDown))
     def requestHandlers(asOf: Instant): IO[Either[KuiError, Observed[RequestHandlerReading]]] =
@@ -90,7 +90,7 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
       IO.pure(Left(exporterDown))
   }
 
-  private final class LiveSource extends MetricsSourcePort[IO] {
+  final private class LiveSource extends MetricsSourcePort[IO] {
 
     def throughput(range: ThroughputRange, endingAt: Instant) =
       IO.pure(
@@ -147,7 +147,7 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
     * It is a third stub rather than a flag on `LiveSource` for the reason the other two are separate — the
     * situation is what is under test. Everything it holds is true; none of it is current.
     */
-  private final class AbandonedSource extends MetricsSourcePort[IO] {
+  final private class AbandonedSource extends MetricsSourcePort[IO] {
     private def scrapedAnHourBefore(asOf: Instant): Instant = asOf.minusSeconds(3600L)
 
     def throughput(range: ThroughputRange, endingAt: Instant) =
@@ -464,8 +464,14 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
       val buckets = data.downField("buckets").as[List[Json]].getOrElse(fail(response.body))
       // The two lines the legend draws, and a gap where nothing was sampled — never a zero, which would
       // claim the broker answered instantly.
-      assertEquals(buckets.flatMap(_.hcursor.get[Option[Double]]("produceP99Millis").toOption.flatten), List(9.0))
-      assertEquals(buckets.flatMap(_.hcursor.get[Option[Double]]("fetchP99Millis").toOption.flatten), List(502.0))
+      assertEquals(
+        buckets.flatMap(_.hcursor.get[Option[Double]]("produceP99Millis").toOption.flatten),
+        List(9.0)
+      )
+      assertEquals(
+        buckets.flatMap(_.hcursor.get[Option[Double]]("fetchP99Millis").toOption.flatten),
+        List(502.0)
+      )
       assert(buckets.exists(_.hcursor.get[Option[Double]]("produceP99Millis") == Right(None)), response.body)
     }
   }
@@ -619,7 +625,8 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
     server
       .use(backend =>
         paths.traverse(path =>
-          get(backend, path).map(response => assertEquals(response.code.code, 200, s"$path: ${response.body}"))
+          get(backend, path)
+            .map(response => assertEquals(response.code.code, 200, s"$path: ${response.body}"))
         )
       )
       .map(_ => ())

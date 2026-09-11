@@ -1,10 +1,11 @@
 package kui.message.domain
 
-import kui.kernel.error.ErrorCode
-import kui.kernel.{ClusterId, Offset, OffsetRange, PartitionId, TopicName}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+
+import kui.kernel.error.ErrorCode
+import kui.kernel.{ClusterId, Offset, OffsetRange, PartitionId, TopicName}
 
 /** The three things M3 does that change a cluster, and the rules that stop each of them being asked for by
   * accident.
@@ -48,7 +49,10 @@ final class MutationsSuite extends ScalaCheckSuite {
   test("countDefaultsToOneAndIsBoundedRatherThanClamped") {
     assertEquals(produce(None).map(_.count), Right(1))
     assertEquals(produce(Some(1)).map(_.count), Right(1))
-    assertEquals(produce(Some(ProduceRequest.DefaultMaxCount)).map(_.count), Right(ProduceRequest.DefaultMaxCount))
+    assertEquals(
+      produce(Some(ProduceRequest.DefaultMaxCount)).map(_.count),
+      Right(ProduceRequest.DefaultMaxCount)
+    )
 
     assert(produce(Some(0)).isLeft)
     assert(produce(Some(-1)).isLeft)
@@ -60,7 +64,9 @@ final class MutationsSuite extends ScalaCheckSuite {
       case Left(error) =>
         assertEquals(error.code, ErrorCode.Validation)
         assert(error.details.exists(_.field.contains("count")))
-        assert(error.details.exists(_.restrictions.exists(_.contains(ProduceRequest.DefaultMaxCount.toString))))
+        assert(
+          error.details.exists(_.restrictions.exists(_.contains(ProduceRequest.DefaultMaxCount.toString)))
+        )
       case Right(request) => fail(s"expected a rejection, got $request")
     }
   }

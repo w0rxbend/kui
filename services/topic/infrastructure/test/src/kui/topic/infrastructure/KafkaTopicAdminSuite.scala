@@ -57,7 +57,8 @@ final class KafkaTopicAdminSuite extends KuiSuite {
   test("a led partition carries the offsets that were read for it") {
     val key = new TopicPartition(topic.value, 3)
     val bounds = KafkaTopicAdmin.OffsetBounds(Map(key -> 10L), Map(key -> 42L))
-    val view = KafkaTopicAdmin.partitionView(topic, info(3, broker1, List(broker1, broker2), List(broker1)), bounds)
+    val view =
+      KafkaTopicAdmin.partitionView(topic, info(3, broker1, List(broker1, broker2), List(broker1)), bounds)
 
     assertEquals(view.flatMap(_.earliestOffset), Some(10L))
     assertEquals(view.flatMap(_.latestOffset), Some(42L))

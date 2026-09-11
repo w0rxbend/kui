@@ -12,10 +12,10 @@ import kui.testkit.fakes.FakeStructuredLogger
 /** The three lines that decide whether a deployment asks anybody to sign in.
   *
   * `services/identity/app` declared a test module in `build.mill` and shipped no test source, so every rule
-  * in this composition root was ungated by construction — including the one that turns
-  * `kui.auth.type: form` into "a username and password". A mapping that sent `Form` to `AuthMode.Disabled`
-  * would make a deployment that configured accounts serve every request anonymously, and nothing in this
-  * repository would have said so.
+  * in this composition root was ungated by construction — including the one that turns `kui.auth.type: form`
+  * into "a username and password". A mapping that sent `Form` to `AuthMode.Disabled` would make a deployment
+  * that configured accounts serve every request anonymously, and nothing in this repository would have said
+  * so.
   */
 final class IdentityWiringSuite extends KuiIOSuite {
 

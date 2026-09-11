@@ -2,9 +2,9 @@ package kui.message.contract
 
 import java.time.Instant
 
+import io.circe.Json
 import io.circe.parser.parse
 import io.circe.syntax.*
-import io.circe.Json
 import munit.FunSuite
 
 import kui.contracts.message.{DecodeErrorDto, DecodedPayloadDto, HeaderDto}
@@ -98,7 +98,8 @@ final class MessageDtosSuite extends FunSuite {
     reason = "the schema registry has a subject named orders-value"
   )
 
-  private val filterResult = FilterTestResultDto(matched = false, error = Some("no such field: value.orderID"))
+  private val filterResult =
+    FilterTestResultDto(matched = false, error = Some("no such field: value.orderID"))
 
   private def normalised(raw: String): String =
     parse(raw).fold(failure => fail(s"the golden document is not JSON: ${failure.message}"), _.spaces2)
@@ -122,7 +123,10 @@ final class MessageDtosSuite extends FunSuite {
 
   test("decodesItsOwnGoldenFile") {
     assertEquals(parse(GoldenDocuments.message).flatMap(_.as[MessageDto]), Right(cleanRecord))
-    assertEquals(parse(GoldenDocuments.messageWithDecodeError).flatMap(_.as[MessageDto]), Right(undecodableRecord))
+    assertEquals(
+      parse(GoldenDocuments.messageWithDecodeError).flatMap(_.as[MessageDto]),
+      Right(undecodableRecord)
+    )
     assertEquals(parse(GoldenDocuments.phaseEvent).flatMap(_.as[PhaseDto]), Right(phase))
     assertEquals(parse(GoldenDocuments.consumedEvent).flatMap(_.as[ConsumedDto]), Right(consumed))
     assertEquals(parse(GoldenDocuments.produceResult).flatMap(_.as[ProduceResultDto]), Right(produced))
@@ -130,7 +134,10 @@ final class MessageDtosSuite extends FunSuite {
     assertEquals(parse(GoldenDocuments.purgeResult).flatMap(_.as[PurgeResultDto]), Right(purged))
     assertEquals(parse(GoldenDocuments.trackQuery).flatMap(_.as[TrackQueryDto]), Right(track))
     assertEquals(parse(GoldenDocuments.serdeSuggestion).flatMap(_.as[SerdeSuggestionDto]), Right(suggestion))
-    assertEquals(parse(GoldenDocuments.filterTestResult).flatMap(_.as[FilterTestResultDto]), Right(filterResult))
+    assertEquals(
+      parse(GoldenDocuments.filterTestResult).flatMap(_.as[FilterTestResultDto]),
+      Right(filterResult)
+    )
   }
 
   test("aMissingDeserializeErrorsListIsADecodeFailure") {
@@ -196,7 +203,8 @@ final class MessageDtosSuite extends FunSuite {
     )
 
     fullyPopulated.foreach { case (name, document) =>
-      val nulls = document.hcursor.keys.getOrElse(Nil).filter(key => document.hcursor.get[Json](key).exists(_.isNull))
+      val nulls =
+        document.hcursor.keys.getOrElse(Nil).filter(key => document.hcursor.get[Json](key).exists(_.isNull))
       assertEquals(nulls.toList, Nil, s"$name has a field nothing can fill: $document")
     }
   }

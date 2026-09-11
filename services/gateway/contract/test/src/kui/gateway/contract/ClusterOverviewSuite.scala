@@ -128,7 +128,8 @@ final class ClusterOverviewSuite extends FunSuite {
     // A stale marker whose timestamp is the current time tells a reader nothing about how old the data is,
     // which is the only question the marker exists to answer.
     overview.clusters match {
-      case Section.Stale(_, fetchedAt, _) => assert(fetchedAt.isBefore(overview.generatedAt), fetchedAt.toString)
+      case Section.Stale(_, fetchedAt, _) =>
+        assert(fetchedAt.isBefore(overview.generatedAt), fetchedAt.toString)
       case other => fail(s"expected a stale section: $other")
     }
   }

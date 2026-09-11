@@ -11,14 +11,14 @@ import kui.kernel.ClusterId
   * ==Why this suite exists==
   *
   * `AlertRulesSuite` proves the fold does the right thing *given* the events already open, and
-  * `InMemoryAlertStoreSuite` proves the store keeps what it is told to keep. Neither of them looks at the
-  * one line that joins them — the pass reading the feed and handing those events to the fold — and that line
-  * was ungated when it was written: replacing `current.events` with an empty list left all 137 of this
-  * service's cases green, and every firing rule would then have opened a fresh event **every minute**, with
-  * the open count on the dashboard climbing for as long as the process ran.
+  * `InMemoryAlertStoreSuite` proves the store keeps what it is told to keep. Neither of them looks at the one
+  * line that joins them — the pass reading the feed and handing those events to the fold — and that line was
+  * ungated when it was written: replacing `current.events` with an empty list left all 137 of this service's
+  * cases green, and every firing rule would then have opened a fresh event **every minute**, with the open
+  * count on the dashboard climbing for as long as the process ran.
   *
-  * That is the shape wave 5 named: a rule gets a test when a consumer inside its own module exercises it,
-  * and this rule's only consumer is a loop.
+  * That is the shape wave 5 named: a rule gets a test when a consumer inside its own module exercises it, and
+  * this rule's only consumer is a loop.
   */
 final class EvaluateAlertsSuite extends CatsEffectSuite {
 
@@ -39,7 +39,7 @@ final class EvaluateAlertsSuite extends CatsEffectSuite {
     )
 
   /** A facts port that answers whatever the `Ref` currently holds, and counts how often it was asked. */
-  private final class Facts(current: Ref[IO, ClusterFacts], val reads: Ref[IO, Int])
+  final private class Facts(current: Ref[IO, ClusterFacts], val reads: Ref[IO, Int])
       extends ClusterFactsPort[IO] {
 
     def read(cluster: ClusterId): IO[ClusterFacts] = reads.update(_ + 1) >> current.get

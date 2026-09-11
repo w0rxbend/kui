@@ -4,8 +4,8 @@ import munit.FunSuite
 
 import kui.kafka.SkipReason
 import kui.kafka.admin.LogDir
-import kui.kernel.error.ErrorCode
 import kui.kernel.BrokerId
+import kui.kernel.error.ErrorCode
 
 /** The two conversions the adapter makes before any rule sees a number.
   *

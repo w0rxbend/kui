@@ -2,9 +2,8 @@ package kui.consumer.api
 
 import java.time.Instant
 
-import munit.FunSuite
-
 import cats.effect.IO
+import munit.FunSuite
 
 import kui.cache.SnapshotStatus
 import kui.consumer.application.{ClusterProfileSource, GroupSnapshots, SnapshotFreshness}
@@ -19,9 +18,9 @@ import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
   * Three rules, each argued for in a paragraph and each ungated. Measured one mutation at a time against
   * `./mill services.consumer.__.test`, which stayed at 185/185 green for every one:
   *
-  *   - `ConsumerCapabilities.starting` reporting `configured = false`, so a cluster the snapshot registry
-  *     has not caught up with reads as one the operator never configured — the row disappears instead of
-  *     saying it is starting;
+  *   - `ConsumerCapabilities.starting` reporting `configured = false`, so a cluster the snapshot registry has
+  *     not caught up with reads as one the operator never configured — the row disappears instead of saying
+  *     it is starting;
   *   - `capabilityOf`'s offline arm reporting `available`, so a cluster whose scrape is failing is drawn
   *     healthy;
   *   - `ConsumerReasons` classifying a refusal as `UPSTREAM_UNAVAILABLE`, which per ADR-039 §6 takes the

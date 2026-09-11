@@ -38,7 +38,7 @@ final class ConnectCapabilitiesSuite extends CatsEffectSuite {
   /** A worker that answers what it was told to. It counts nothing: what this suite asserts is the *verdict*
     * the probe reaches, and the call itself is `ConnectHttpSuite`'s subject.
     */
-  private final class Worker(answer: Either[KuiError, ConnectorFacts]) extends ConnectWorkerPort[IO] {
+  final private class Worker(answer: Either[KuiError, ConnectorFacts]) extends ConnectWorkerPort[IO] {
 
     def connectors: IO[Either[KuiError, ConnectorFacts]] = IO.pure(answer)
 
@@ -46,7 +46,7 @@ final class ConnectCapabilitiesSuite extends CatsEffectSuite {
       IO.pure(Right(()))
   }
 
-  private final class Source(
+  final private class Source(
       views: List[ConnectProfileView],
       workers: Map[(ClusterId, ConnectName), ConnectWorkerPort[IO]]
   ) extends ClusterConnectSource[IO] {

@@ -8,9 +8,9 @@ import kui.testkit.KuiIOSuite
 
 /** That the key derivation function does what a password hash has to do.
   *
-  * Four properties, and each of them is a real failure that has shipped in real products: a hash that does not
-  * verify, a hash that verifies against the wrong password, a salt that is the same for everybody (which makes
-  * one cracked password crack every identical one), and a corrupt stored value that throws instead of
+  * Four properties, and each of them is a real failure that has shipped in real products: a hash that does
+  * not verify, a hash that verifies against the wrong password, a salt that is the same for everybody (which
+  * makes one cracked password crack every identical one), and a corrupt stored value that throws instead of
   * answering "no".
   */
 final class Pbkdf2PasswordHasherSuite extends KuiIOSuite {

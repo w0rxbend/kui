@@ -9,8 +9,8 @@ import org.apache.kafka.clients.admin.{
   Admin,
   Config,
   ConfigEntry,
-  DeletedRecords,
   DeleteRecordsResult,
+  DeletedRecords,
   DescribeTopicsResult,
   KuiMessageAdminResults,
   ListOffsetsResult,
@@ -20,17 +20,23 @@ import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.errors.PolicyViolationException
 import org.apache.kafka.common.{KafkaFuture, Node, TopicCollection, TopicPartition, TopicPartitionInfo}
 
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The purge adapter, driven through an `Admin` rather than around one.
   *
-  * `KafkaRecordDeleter` shipped with no suite at all, and it could not have had one: this module had no
-  * Kafka `Admin` stub, so every rule in it — the leaderless filter, the compaction warning that must not
-  * cost the plan, the per-partition split of a `deleteRecords` answer — was reachable only through a route
-  * that asserts a status code. `StubAdmin` and `DirectAdminPool` beside this file are that stub.
+  * `KafkaRecordDeleter` shipped with no suite at all, and it could not have had one: this module had no Kafka
+  * `Admin` stub, so every rule in it — the leaderless filter, the compaction warning that must not cost the
+  * plan, the per-partition split of a `deleteRecords` answer — was reachable only through a route that
+  * asserts a status code. `StubAdmin` and `DirectAdminPool` beside this file are that stub.
   *
   * All three rules are ones where the wrong behaviour looks like success. Two of them are about an operator
   * who is one click from destroying records irreversibly, which is why the class exists in its own file at
@@ -78,8 +84,8 @@ final class KafkaRecordDeleterSuite extends KuiIOSuite {
     *
     * The record of what was asked is the point of the first case: a leaderless partition that reaches a
     * `listOffsets` does not fail the call, it makes the AdminClient retry metadata quietly until
-    * `default.api.timeout.ms` runs out — a millisecond call turned into a minute of nothing, exactly while
-    * a broker is down and the screen matters most.
+    * `default.api.timeout.ms` runs out — a millisecond call turned into a minute of nothing, exactly while a
+    * broker is down and the screen matters most.
     */
   private def offsetsFor(spec: String, asked: AtomicReference[List[TopicPartition]])(
       request: java.util.Map[?, ?]

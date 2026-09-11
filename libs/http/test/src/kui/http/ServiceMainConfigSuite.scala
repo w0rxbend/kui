@@ -12,8 +12,8 @@ import kui.kernel.Secret
 /** The slice of a loaded configuration the process shell reads, and the one field in it that is a
   * deployment-wide contract rather than a local setting.
   *
-  * `ServiceMain` is constructed by six `Main` objects and by no suite anywhere, so `ProcessConfig.from` — nine
-  * words that decide whether a service can verify anything the gateway signed — was executed by no case:
+  * `ServiceMain` is constructed by six `Main` objects and by no suite anywhere, so `ProcessConfig.from` —
+  * nine words that decide whether a service can verify anything the gateway signed — was executed by no case:
   * replacing `config.gateway.principalKeys` with `Nil` left 822 cases over eight `libs` modules green, and a
   * service built that way accepts no principal at all and answers `401 KUI-UNAUTHENTICATED` to every request
   * the gateway forwards.

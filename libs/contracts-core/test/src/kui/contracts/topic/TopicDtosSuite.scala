@@ -87,7 +87,10 @@ final class TopicDtosSuite extends FunSuite {
   test("everyGoldenDecodesAndReEncodesIdentically: each document decodes back to what it was written from") {
     assertEquals(parse(TopicGoldenDocuments.topicRow).flatMap(_.as[TopicRowDto]), Right(row))
     assertEquals(parse(TopicGoldenDocuments.topicDetail).flatMap(_.as[TopicDetailDto]), Right(detail))
-    assertEquals(parse(TopicGoldenDocuments.topicConfig).flatMap(_.as[TopicConfigEntryDto]), Right(configEntry))
+    assertEquals(
+      parse(TopicGoldenDocuments.topicConfig).flatMap(_.as[TopicConfigEntryDto]),
+      Right(configEntry)
+    )
   }
 
   test("aMissingMessageCountIsNullNotZero") {

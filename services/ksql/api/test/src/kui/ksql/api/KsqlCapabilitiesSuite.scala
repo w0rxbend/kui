@@ -22,7 +22,7 @@ final class KsqlCapabilitiesSuite extends CatsEffectSuite {
   private val readOnly = ClusterId.unsafe("prod-us")
   private val bare = ClusterId.unsafe("staging")
 
-  private final class StubClient(answer: Either[KuiError, KsqlObjects]) extends KsqlClient[IO] {
+  final private class StubClient(answer: Either[KuiError, KsqlObjects]) extends KsqlClient[IO] {
     def objects: IO[Either[KuiError, KsqlObjects]] = IO.pure(answer)
     def execute(statement: KsqlStatement): IO[Either[KuiError, StatementOutcome]] =
       IO.pure(Right(StatementOutcome.Status("done", None)))
@@ -37,7 +37,7 @@ final class KsqlCapabilitiesSuite extends CatsEffectSuite {
     def rows(statement: KsqlStatement): fs2.Stream[IO, Either[KuiError, QueryFrame]] = fs2.Stream.empty
   }
 
-  private final class Source(clients: Map[ClusterId, KsqlClient[IO]]) extends ClusterKsqlSource[IO] {
+  final private class Source(clients: Map[ClusterId, KsqlClient[IO]]) extends ClusterKsqlSource[IO] {
     private val views = List(
       KsqlProfileView(configured, "Production EU", readOnly = false, configured = true),
       KsqlProfileView(readOnly, "Production US", readOnly = true, configured = true),
@@ -51,9 +51,7 @@ final class KsqlCapabilitiesSuite extends CatsEffectSuite {
   }
 
   private def report(clients: Map[ClusterId, KsqlClient[IO]]) =
-    FakeStructuredLogger[IO].flatMap(logger =>
-      KsqlCapabilities.make[IO](new Source(clients), logger).report
-    )
+    FakeStructuredLogger[IO].flatMap(logger => KsqlCapabilities.make[IO](new Source(clients), logger).report)
 
   private val healthy: KsqlClient[IO] = new StubClient(Right(KsqlObjects.empty))
 

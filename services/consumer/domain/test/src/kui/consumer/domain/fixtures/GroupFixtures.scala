@@ -77,7 +77,8 @@ object GroupFixtures {
     group(
       state = GroupState.Stable,
       members = List(member("m-1", Set(0, 1))),
-      partitions = List(state(0, Some(90L), memberId = Some("m-1")), state(1, Some(100L), memberId = Some("m-1")))
+      partitions =
+        List(state(0, Some(90L), memberId = Some("m-1")), state(1, Some(100L), memberId = Some("m-1")))
     )
 
   val emptyGroup: ConsumerGroup =

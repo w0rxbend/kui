@@ -7,9 +7,9 @@ import kui.testkit.{ClusterGenerators, KuiSuite, RedactionAssertions}
 
 /** The two wire-name tables, and the promise that nothing here prints a credential.
   *
-  * Both tables are written as a `match` with no default case. Under `-Werror` an unmatched enum case
-  * is a compile error, so adding a mechanism without deciding its `sasl.mechanism` value fails the
-  * build here rather than failing authentication against a production cluster.
+  * Both tables are written as a `match` with no default case. Under `-Werror` an unmatched enum case is a
+  * compile error, so adding a mechanism without deciding its `sasl.mechanism` value fails the build here
+  * rather than failing authentication against a production cluster.
   */
 final class ClusterSecuritySuite extends KuiSuite {
 
@@ -103,8 +103,7 @@ final class ClusterSecuritySuite extends KuiSuite {
     val connection = ClusterConnection(
       id = kui.kernel.ClusterId.unsafe("prod"),
       bootstrapServers = BootstrapServers.unsafe("broker:9093"),
-      security =
-        ClusterSecurity.Sasl(SaslProtocol.SaslSsl, SaslMechanism.Plain("u", password), None),
+      security = ClusterSecurity.Sasl(SaslProtocol.SaslSsl, SaslMechanism.Plain("u", password), None),
       overrides = ClientProperties.empty,
       admin = AdminTuning.default
     )

@@ -1,9 +1,10 @@
 package kui.consumer.domain
 
+import munit.FunSuite
+
 import kui.consumer.domain.fixtures.GroupFixtures
 import kui.consumer.domain.fixtures.GroupFixtures.*
 import kui.kernel.group.GroupState
-import munit.FunSuite
 
 /** The aggregate's own rules: what a summary says, when a group is moving, and when its offsets may be
   * changed.
@@ -44,7 +45,11 @@ final class ConsumerGroupSuite extends FunSuite {
     assert(emptyGroup.permitsOffsetChange)
     assert(!stableGroup.permitsOffsetChange)
     // The case the two reference products disagree about: Empty, but a member has joined.
-    assert(!GroupFixtures.group(state = GroupState.Empty, members = List(member("m-1", Set(0)))).permitsOffsetChange)
+    assert(
+      !GroupFixtures
+        .group(state = GroupState.Empty, members = List(member("m-1", Set(0))))
+        .permitsOffsetChange
+    )
     assert(GroupFixtures.group(state = GroupState.Dead).permitsOffsetChange)
   }
 

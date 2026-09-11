@@ -33,8 +33,8 @@ final class SubjectSummarySuite extends KuiIOSuite {
   private def query(page: Int, size: Int): SubjectQuery =
     SubjectQuery(None, SortOrder.Asc, PageRequest(PositiveInt.unsafe(page), PageSize.unsafe(size)))
 
-  /** The badge's request: the total, and no rows to pay for. The page request it carries is never used to
-    * cut anything, which is why it can be the default.
+  /** The badge's request: the total, and no rows to pay for. The page request it carries is never used to cut
+    * anything, which is why it can be the default.
     */
   private val countOnly: SubjectQuery =
     SubjectQuery(None, SortOrder.Asc, PageRequest.Default, countOnly = true)

@@ -37,7 +37,13 @@ final class AlertRulesSuite extends FunSuite {
   test("a threshold raised above the fact closes no event and opens none") {
     val raised = limits.copy(offlinePartitions = 5, underReplicatedPartitions = 5)
 
-    val evaluation = AlertRules.evaluate(now, raised, partitions(offline = 4, underReplicated = 4), Nil, AlertRuleState.empty)
+    val evaluation = AlertRules.evaluate(
+      now,
+      raised,
+      partitions(offline = 4, underReplicated = 4),
+      Nil,
+      AlertRuleState.empty
+    )
 
     assertEquals(evaluation.opened, Nil)
     assertEquals(evaluation.resolved, Nil)
@@ -54,7 +60,13 @@ final class AlertRulesSuite extends FunSuite {
     val open = first.opened
 
     val second =
-      AlertRules.evaluate(now.plusSeconds(60), limits, partitions(offline = 3, underReplicated = 0), open, first.state)
+      AlertRules.evaluate(
+        now.plusSeconds(60),
+        limits,
+        partitions(offline = 3, underReplicated = 0),
+        open,
+        first.state
+      )
 
     assertEquals(second.opened, Nil)
     assertEquals(second.refreshed, open.map(_.id))
@@ -250,7 +262,13 @@ final class AlertRulesSuite extends FunSuite {
   test("an event's id survives a second pass, so a screen's acknowledge link does not go stale") {
     val first = firstPass(partitions(offline = 2, underReplicated = 0))
     val second =
-      AlertRules.evaluate(now.plusSeconds(120), limits, partitions(offline = 2, underReplicated = 0), first.opened, first.state)
+      AlertRules.evaluate(
+        now.plusSeconds(120),
+        limits,
+        partitions(offline = 2, underReplicated = 0),
+        first.opened,
+        first.state
+      )
 
     assertEquals(second.opened, Nil)
     assertEquals(second.refreshed, first.opened.map(_.id))

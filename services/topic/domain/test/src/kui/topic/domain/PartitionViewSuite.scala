@@ -23,7 +23,14 @@ final class PartitionViewSuite extends KuiSuite {
 
   test("aLeaderlessPartitionMayNotCarryOffsets") {
     val invented =
-      partitionOf(id = 0, leader = None, replicas = List(1), inSync = Nil, earliest = Some(0L), latest = Some(9L))
+      partitionOf(
+        id = 0,
+        leader = None,
+        replicas = List(1),
+        inSync = Nil,
+        earliest = Some(0L),
+        latest = Some(9L)
+      )
 
     assert(invented.isLeft, "offsets on a leaderless partition must be refused, not rendered")
   }

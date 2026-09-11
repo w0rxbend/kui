@@ -35,11 +35,11 @@ final case class SentRequest(method: String, uri: String, headers: List[Header],
 
 /** A stubbed service, plus the record of every request that reached it.
   *
-  * `libs/testkit`'s `StubUpstream` would have been the natural choice and cannot be: it hands back a
-  * plain `Backend[IO]`, and `SttpServiceClient` needs a `StreamBackend[IO, Fs2Streams[IO]]` so that the
-  * SSE path has a stream capability to send on. Rather than widen a fixture three other lanes already
-  * depend on, this suite keeps its own, which additionally records the outbound headers — the thing
-  * `StubUpstream` does not keep and that half of these assertions are about.
+  * `libs/testkit`'s `StubUpstream` would have been the natural choice and cannot be: it hands back a plain
+  * `Backend[IO]`, and `SttpServiceClient` needs a `StreamBackend[IO, Fs2Streams[IO]]` so that the SSE path
+  * has a stream capability to send on. Rather than widen a fixture three other lanes already depend on, this
+  * suite keeps its own, which additionally records the outbound headers — the thing `StubUpstream` does not
+  * keep and that half of these assertions are about.
   */
 trait StubService {
   def backend: StreamBackend[IO, Fs2Streams[IO]]
@@ -110,9 +110,9 @@ object ServiceClientFixture {
 
   /** A client wired to a stub, with the in-process (unsigned but claim-carrying) principal codec.
     *
-    * The in-process codec is the right one here: these assertions are about *which claims* the gateway
-    * puts in the token — audience, digest — and it renders them as plain JSON, so the suite can read them
-    * back without a key pair. KERN-006's `JwsPrincipalCodec` proves the signing itself.
+    * The in-process codec is the right one here: these assertions are about *which claims* the gateway puts
+    * in the token — audience, digest — and it renders them as plain JSON, so the suite can read them back
+    * without a key pair. KERN-006's `JwsPrincipalCodec` proves the signing itself.
     */
   def client(
       service: ServiceId,
@@ -133,11 +133,11 @@ object ServiceClientFixture {
 
   /** The same client with the outbound address rule stated out loud.
     *
-    * It is a separate method rather than a defaulted parameter on [[client]] so that [[client]] keeps
-    * calling `resource` with **no** `policy` argument, which is how every other case here exercises the
-    * fail-safe default. `SttpServiceClientSuite`'s loopback case deliberately does not go through either
-    * of these: it calls `SttpServiceClient.resource` itself, so that the one case which asserts the
-    * default cannot be weakened by an edit to this file.
+    * It is a separate method rather than a defaulted parameter on [[client]] so that [[client]] keeps calling
+    * `resource` with **no** `policy` argument, which is how every other case here exercises the fail-safe
+    * default. `SttpServiceClientSuite`'s loopback case deliberately does not go through either of these: it
+    * calls `SttpServiceClient.resource` itself, so that the one case which asserts the default cannot be
+    * weakened by an edit to this file.
     */
   def clientUnder(
       service: ServiceId,

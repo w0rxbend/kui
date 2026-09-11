@@ -306,10 +306,17 @@ jobs:
     #
     # Raised from 25, which was written when the job built five images. Measured rather than
     # guessed, on a warm Scala compile cache: seven Mill images took 83s and `smoke.sh` took 126s
-    # and 105s on two consecutive runs against images that already existed. That measurement has
-    # not been re-taken since and the list has grown twice, so read it as a floor rather than as
-    # today's number. Neither figure includes the two things a cold runner also pays for and the
-    # machine that measured it did not — the Scala compile behind those images, and
+    # and 105s on two consecutive runs against images that already existed. The sentence that stood
+    # here said that measurement had not been re-taken while the list grew twice, and asked the next
+    # reader to treat it as a floor; **re-taken 2026-09-11 on a 16-core developer machine under
+    # concurrent load (`uptime` 15–43)**, with the list at ten: `./mill --no-daemon
+    # deployment.docker.__.docker.build` built **eleven** images (the ten below plus `allinone`,
+    # which this job does not build) in **151s**, and `./deployment/compose/smoke.sh` took
+    # **83s, 112s and 121s** on three consecutive runs against images that already existed. So the
+    # per-image cost fell and the smoke run is where the growth went — three more containers to
+    # start and wait on than the run that produced 126s. Neither figure includes the two things a
+    # cold runner also pays for and neither machine that measured it did — the Scala compile behind
+    # those images, and
     # `docker compose` building `kui-frontend` from the pnpm workspace, which is the single largest
     # cost in the job and the reason the old ceiling was already close.
     #

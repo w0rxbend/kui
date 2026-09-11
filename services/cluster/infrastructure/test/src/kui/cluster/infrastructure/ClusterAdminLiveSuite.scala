@@ -5,7 +5,6 @@ import scala.concurrent.duration.{Duration, DurationInt}
 import cats.data.NonEmptyList
 import cats.effect.{IO, Resource}
 import cats.syntax.all.*
-
 import munit.catseffect.IOFixture
 
 import kui.cluster.domain.{ClusterAdmin as ClusterAdminPort, ClusterProfile, ProfileOrigin, ProfileVersion}
@@ -21,25 +20,25 @@ import kui.testkit.kafka.{ClusterConfigs, KafkaFixture, KafkaTopology, RunningBr
   *
   * This is M1's first exit criterion, stated in the roadmap as:
   *
-  * > Testcontainers suite: PLAINTEXT, SASL_PLAINTEXT/SCRAM and SSL clusters; each yields the same broker
-  * > list, configs and log dirs through the contract client.
+  * > Testcontainers suite: PLAINTEXT, SASL_PLAINTEXT/SCRAM and SSL clusters; each yields the same broker >
+  * list, configs and log dirs through the contract client.
   *
   * ==Why the same file runs three times==
   *
-  * The three subclasses below differ in one value: the topology the container is started in. Everything
-  * else — the profile, the adapter, every assertion — is shared, and that sharing is the claim. "The same
-  * answers come back over PLAINTEXT, SASL and TLS" is only worth something if it is literally the same
-  * assertions running against each; three suites written separately would drift, and the day one of them
-  * stopped checking something nobody would notice.
+  * The three subclasses below differ in one value: the topology the container is started in. Everything else
+  * — the profile, the adapter, every assertion — is shared, and that sharing is the claim. "The same answers
+  * come back over PLAINTEXT, SASL and TLS" is only worth something if it is literally the same assertions
+  * running against each; three suites written separately would drift, and the day one of them stopped
+  * checking something nobody would notice.
   *
   * ==Why the profile is built from a `ClusterConfig` and not by hand==
   *
   * `ClusterConfigs.forBroker` produces the `kui.clusters[]` entry an operator would have written for the
-  * broker that is running, including the SASL credentials the fixture provisioned and the paths of the
-  * PKCS12 stores it generated. Driving the adapter from that means the security material travels the route
-  * it travels in production — through `ClusterSecurity` and `libs/kafka-auth`'s property renderer — rather
-  * than through a hand-built profile that happens to work. A test that assembles its own properties proves
-  * the test can talk to Kafka, which is not the question.
+  * broker that is running, including the SASL credentials the fixture provisioned and the paths of the PKCS12
+  * stores it generated. Driving the adapter from that means the security material travels the route it
+  * travels in production — through `ClusterSecurity` and `libs/kafka-auth`'s property renderer — rather than
+  * through a hand-built profile that happens to work. A test that assembles its own properties proves the
+  * test can talk to Kafka, which is not the question.
   *
   * ==When Docker is not available==
   *
@@ -57,8 +56,8 @@ abstract class ClusterAdminLiveSuite(topology: KafkaTopology) extends ClusterAdm
 
   /** The broker, started once for the whole suite rather than once per test.
     *
-    * Sixteen cases against sixteen containers would take twenty minutes and assert nothing extra: every
-    * case in the contract is a read, so none of them can disturb another.
+    * Sixteen cases against sixteen containers would take twenty minutes and assert nothing extra: every case
+    * in the contract is a read, so none of them can disturb another.
     */
   private val broker: IOFixture[RunningBroker] =
     ResourceSuiteLocalFixture(

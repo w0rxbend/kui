@@ -10,11 +10,11 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The plan-signing key, and the line an operator needs when it was not configured.
   *
-  * `services/topic/app` declared a test module in `build.mill` and shipped no test source, so both halves
-  * of `signingKey` were ungated. The fallback's consequence is invisible until a second replica exists — a
-  * plan minted by one process is refused by the other, and the operator sees a confirmation that will not
-  * confirm — which is exactly why the file says it is "logged loudly rather than being silent", and why
-  * that sentence needs a case rather than a comment.
+  * `services/topic/app` declared a test module in `build.mill` and shipped no test source, so both halves of
+  * `signingKey` were ungated. The fallback's consequence is invisible until a second replica exists — a plan
+  * minted by one process is refused by the other, and the operator sees a confirmation that will not confirm
+  * — which is exactly why the file says it is "logged loudly rather than being silent", and why that sentence
+  * needs a case rather than a comment.
   */
 final class TopicWiringSuite extends KuiIOSuite {
 

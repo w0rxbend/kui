@@ -64,7 +64,10 @@ final class AlertsMappingSuite extends FunSuite {
     assertEquals(disk.evaluation.status, "ok")
     assertEquals(disk.evaluation.toOption.map(_.openEvents), Some(1))
     // And a rule with nothing open says zero, which is a measurement rather than an absence.
-    assertEquals(mapped.rules.find(_.rule == "offline-partitions").get.evaluation.toOption.map(_.openEvents), Some(0))
+    assertEquals(
+      mapped.rules.find(_.rule == "offline-partitions").get.evaluation.toOption.map(_.openEvents),
+      Some(0)
+    )
   }
 
   test("a rule that could not run carries unavailable with the failure's own reason") {
@@ -113,7 +116,8 @@ final class AlertsMappingSuite extends FunSuite {
   }
 
   test("every rule has a row whether or not it has anything to say") {
-    val mapped = AlertsMapping.feed(feed(reports = List(RuleReport(AlertRule.DiskUsage, RuleOutcome.evaluated))), at)
+    val mapped =
+      AlertsMapping.feed(feed(reports = List(RuleReport(AlertRule.DiskUsage, RuleOutcome.evaluated))), at)
 
     assertEquals(mapped.rules.map(_.rule), AlertRule.All.map(_.wire))
   }

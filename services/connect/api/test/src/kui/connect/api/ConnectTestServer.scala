@@ -108,9 +108,9 @@ object ConnectTestServer {
       .getOrElse(throw new IllegalStateException("the test signing key is too short for HS256"))
 
   /** @param routes
-    *   exactly the list `ConnectApi.routes` built, so that a case can assert what the composition root
-    *   serves rather than only what a request happened to reach. Handed out beside the backend because the
-    *   stub interpreter keeps no readable record of what it was given.
+    *   exactly the list `ConnectApi.routes` built, so that a case can assert what the composition root serves
+    *   rather than only what a request happened to reach. Handed out beside the backend because the stub
+    *   interpreter keeps no readable record of what it was given.
     */
   final case class Rig(backend: Backend[IO], worker: CountingWorker, routes: List[ServerEndpoint[Any, IO]])
 

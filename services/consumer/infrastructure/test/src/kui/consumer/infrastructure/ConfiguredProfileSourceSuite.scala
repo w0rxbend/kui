@@ -12,11 +12,11 @@ import kui.testkit.KuiIOSuite
   *
   * `ConfiguredProfileSource` is the consumer service's copy of `services/message`'s
   * `ConfiguredClusterProfiles` — the two classes make the same choice for the same stated reason — and the
-  * message copy has had a suite since wave 6 while this one had none at all. Four mutations were applied
-  * here one at a time against `./mill services.consumer.__.test`, and every one left it at 201/201 green:
-  * `connectionFor` falling back to `connections.values.headOption`, `readOnly` hard-wired to `false`,
-  * `all` truncated to one entry, and the view list reversed. The first two are the ones the message suite
-  * closed on the twin; a rule is not gated because its sibling's copy is.
+  * message copy has had a suite since wave 6 while this one had none at all. Four mutations were applied here
+  * one at a time against `./mill services.consumer.__.test`, and every one left it at 201/201 green:
+  * `connectionFor` falling back to `connections.values.headOption`, `readOnly` hard-wired to `false`, `all`
+  * truncated to one entry, and the view list reversed. The first two are the ones the message suite closed on
+  * the twin; a rule is not gated because its sibling's copy is.
   */
 final class ConfiguredProfileSourceSuite extends KuiIOSuite {
 

@@ -67,8 +67,8 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
 
   /** Reads until the answer satisfies `holds`, or gives up after five (virtual) seconds.
     *
-    * Returns the last value read either way, so a test that gives up still fails on its own
-    * assertion with the state it actually saw, rather than on a timeout that says nothing.
+    * Returns the last value read either way, so a test that gives up still fails on its own assertion with
+    * the state it actually saw, rather than on a timeout that says nothing.
     */
   private def eventually[A](read: IO[A])(holds: A => Boolean): IO[A] = {
     def attempt(remaining: Int): IO[A] =
@@ -159,20 +159,20 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
     // Not deleted and not left as it was: a cluster an operator removed must stop looking usable, and
     // ADR-032 says "not configured" is not a failure and must not be styled as one.
     afterOnePoll(Map(clusterId("prod-eu") -> capability("available"))) { (registry, signals, _) =>
-        for {
-          // A cluster the gateway once heard about, still in the signals, absent from this poll.
-          _ <- signals.update(key("gone"))(
-            _.copy(readiness = Some(ReadinessSignal.Ready), serviceReport = Some(capability("available")))
-          )
-          before <- registry.state(key("gone"))
-          _ <- signals.keysOf(cluster)
-          _ <- IO.sleep(interval + 1.second)
-          after <- registry.state(key("gone"))
-        } yield {
-          assertEquals(before, CapabilityState.Available)
-          assertEquals(after, CapabilityState.NotConfigured)
-        }
+      for {
+        // A cluster the gateway once heard about, still in the signals, absent from this poll.
+        _ <- signals.update(key("gone"))(
+          _.copy(readiness = Some(ReadinessSignal.Ready), serviceReport = Some(capability("available")))
+        )
+        before <- registry.state(key("gone"))
+        _ <- signals.keysOf(cluster)
+        _ <- IO.sleep(interval + 1.second)
+        after <- registry.state(key("gone"))
+      } yield {
+        assertEquals(before, CapabilityState.Available)
+        assertEquals(after, CapabilityState.NotConfigured)
       }
+    }
   }
 
   test("aNewClusterAppearsOnTheNextPollWithNoRestart") {
@@ -254,15 +254,18 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
             .toList
             .background
             .use { collected =>
-            for {
-              _ <- IO.sleep(1.second)
-              _ <- signals.update(key("prod-eu"))(
-                _.copy(readiness = Some(ReadinessSignal.Ready), serviceReport = Some(capability("available")))
-              )
-              _ <- IO.sleep(1.second)
-              events <- collected.flatMap(_.embedNever)
-            } yield assertEquals(events.map(_.entry.key.cluster.map(_.value)), List(Some("prod-eu")))
-          }
+              for {
+                _ <- IO.sleep(1.second)
+                _ <- signals.update(key("prod-eu"))(
+                  _.copy(
+                    readiness = Some(ReadinessSignal.Ready),
+                    serviceReport = Some(capability("available"))
+                  )
+                )
+                _ <- IO.sleep(1.second)
+                events <- collected.flatMap(_.embedNever)
+              } yield assertEquals(events.map(_.entry.key.cluster.map(_.value)), List(Some("prod-eu")))
+            }
         }
       }
     )
@@ -275,7 +278,11 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
     val reported = Map(
       clusterId("prod-eu") -> capability("available", name = Some("Production EU (primary)")),
       clusterId("dead") ->
-        capability("degraded", name = Some("Decommissioned"), reason = Some("the cluster could not be reached"))
+        capability(
+          "degraded",
+          name = Some("Decommissioned"),
+          reason = Some("the cluster could not be reached")
+        )
     )
 
     afterOnePoll(reported) { (registry, _, _) =>

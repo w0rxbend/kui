@@ -5,9 +5,9 @@ import java.time.Instant
 import cats.effect.IO
 import cats.effect.kernel.Deferred
 import cats.effect.testkit.TestControl
+import cats.syntax.all.*
 import io.circe.Json
 import io.circe.parser.parse
-import cats.syntax.all.*
 import munit.CatsEffectSuite
 import sttp.client4.*
 import sttp.model.StatusCode
@@ -57,7 +57,11 @@ final class TopicRoutesSuite extends CatsEffectSuite {
   /** Three topics, one of which Kafka flags internal. */
   private val snapshot: TopicSnapshot =
     TopicSnapshot.of(
-      Vector(summary("orders", internal = false), summary("payments", internal = false), summary("__consumer_offsets", internal = true)),
+      Vector(
+        summary("orders", internal = false),
+        summary("payments", internal = false),
+        summary("__consumer_offsets", internal = true)
+      ),
       at
     )
 
@@ -187,9 +191,8 @@ final class TopicRoutesSuite extends CatsEffectSuite {
     )
 
     TopicTestServer.resource(TopicTestServer.stale(partial, TopicTestServer.Timeout, since)).use { server =>
-      get(server, listPath()).map(response =>
-        assertEquals(field(body(response), "incompleteTopics"), Some(Json.fromInt(1)))
-      )
+      get(server, listPath())
+        .map(response => assertEquals(field(body(response), "incompleteTopics"), Some(Json.fromInt(1))))
     }
   }
 
@@ -238,9 +241,8 @@ final class TopicRoutesSuite extends CatsEffectSuite {
 
   test("a valid sort and mode are accepted") {
     TopicTestServer.resource(TopicTestServer.online(snapshot)).use { server =>
-      get(server, listPath("?sort=messageCount:desc&mode=fts&q=ord&page=1&pageSize=10")).map(response =>
-        assertEquals(response.code, StatusCode.Ok, response.body.toString)
-      )
+      get(server, listPath("?sort=messageCount:desc&mode=fts&q=ord&page=1&pageSize=10"))
+        .map(response => assertEquals(response.code, StatusCode.Ok, response.body.toString))
     }
   }
 
@@ -334,7 +336,10 @@ final class TopicRoutesSuite extends CatsEffectSuite {
     TopicTestServer.resource(TopicTestServer.online(snapshot), config = refused).use { server =>
       get(server, listPath("/orders/config")).map { response =>
         assertEquals(response.code, StatusCode.Ok, response.body.toString)
-        assertEquals(field(body(response), "config", "data", "status"), Some(Json.fromString("not_permitted")))
+        assertEquals(
+          field(body(response), "config", "data", "status"),
+          Some(Json.fromString("not_permitted"))
+        )
       }
     }
   }

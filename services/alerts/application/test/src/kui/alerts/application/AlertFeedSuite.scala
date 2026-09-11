@@ -38,7 +38,8 @@ final class AlertFeedSuite extends CatsEffectSuite {
 
   test("the open count is the count of open events and not of all of them") {
     val open = event(AlertRule.OfflinePartitions, "")
-    val resolved = event(AlertRule.DiskUsage, "broker-1:/var").resolvedBy(at, AlertResolutionKind.Cleared, None)
+    val resolved =
+      event(AlertRule.DiskUsage, "broker-1:/var").resolvedBy(at, AlertResolutionKind.Cleared, None)
 
     for {
       (store, alerts) <- rig
@@ -79,7 +80,11 @@ final class AlertFeedSuite extends CatsEffectSuite {
       first <- alerts.feed(caller, cluster, 50, markRead = true)
       second <- alerts.feed(caller, cluster, 50, markRead = false)
     } yield {
-      assertEquals(first.map(_.unreadCount), Right(1), clue = "the read that clears the bell still reports it")
+      assertEquals(
+        first.map(_.unreadCount),
+        Right(1),
+        clue = "the read that clears the bell still reports it"
+      )
       assertEquals(second.map(_.unreadCount), Right(0))
     }
   }

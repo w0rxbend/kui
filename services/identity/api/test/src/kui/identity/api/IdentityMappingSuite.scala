@@ -15,8 +15,8 @@ import kui.security.{Principal, PrincipalKind}
   * change from request to request for no reason, which defeats every cache and makes a golden-file test
   * impossible to write. Nothing asserted any of the three. Replacing each `.sorted` with `.sorted.reverse`
   * left `services.identity.__.test + apps.allinone.test` at 98/98 green, measured one mutation at a time —
-  * and this file is the first test source `services.identity.api.test` has ever had, which is why: the
-  * module was declared in `build.mill` and shipped nothing to run.
+  * and this file is the first test source `services.identity.api.test` has ever had, which is why: the module
+  * was declared in `build.mill` and shipped nothing to run.
   *
   * The sets below are built in an order that is not their sorted order, so a mapping that merely passed the
   * set through would answer something else.

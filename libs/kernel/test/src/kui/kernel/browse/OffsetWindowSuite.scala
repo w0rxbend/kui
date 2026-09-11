@@ -1,9 +1,10 @@
 package kui.kernel.browse
 
-import kui.kernel.{Offset, OffsetRange}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+
+import kui.kernel.{Offset, OffsetRange}
 
 /** The window arithmetic the backward browse walker is built out of.
   *

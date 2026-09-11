@@ -6,20 +6,20 @@ import kui.security.audit.MutationKind
 
 /** The one line that would delete [[AcknowledgementRecord]], asserted rather than described.
   *
-  * ADR-047 §3 wants one `MutationRecord` per mutation and `MutationKind` has no case for an
-  * acknowledgement. Wave 6's partition gives `libs/security-core` to nobody, so this service writes a second
-  * record type that shares the vocabulary — `AuthenticationRecord`'s answer to the same shape — rather than
-  * inventing a thirteenth case locally or reusing the nearest one, both of which ADR-051 §5 rejected for the
-  * schema service's registration.
+  * ADR-047 §3 wants one `MutationRecord` per mutation and `MutationKind` has no case for an acknowledgement.
+  * Wave 6's partition gives `libs/security-core` to nobody, so this service writes a second record type that
+  * shares the vocabulary — `AuthenticationRecord`'s answer to the same shape — rather than inventing a
+  * thirteenth case locally or reusing the nearest one, both of which ADR-051 §5 rejected for the schema
+  * service's registration.
   *
-  * ADR-051 asserted its gap instead of writing it down, and this is the same mechanism pointed the other
-  * way. It goes **red** the day somebody adds
+  * ADR-051 asserted its gap instead of writing it down, and this is the same mechanism pointed the other way.
+  * It goes **red** the day somebody adds
   *
   * `case AcknowledgeAlert extends MutationKind("alerts.event.acknowledge")`
   *
-  * to `libs/security-core/src/kui/security/audit/AuditSink.scala`, which is the day
-  * `AcknowledgementRecord`, `AcknowledgementSink` and `LoggingAcknowledgementSink` should be deleted and the
-  * guard given an `AuditSink` instead. A comment saying so would be a comment; this is a failing build.
+  * to `libs/security-core/src/kui/security/audit/AuditSink.scala`, which is the day `AcknowledgementRecord`,
+  * `AcknowledgementSink` and `LoggingAcknowledgementSink` should be deleted and the guard given an
+  * `AuditSink` instead. A comment saying so would be a comment; this is a failing build.
   */
 final class MutationKindGapSuite extends FunSuite {
 

@@ -8,9 +8,9 @@ import kui.kernel.ValidationError
 
 /** Which code each concrete failure carries, and what its message is allowed to say.
   *
-  * The table is the point. Every row is a decision from ADR-034, and the suite fails the moment a
-  * case is pointed at a different code — which is exactly the change that silently breaks a
-  * frontend that switches on the code and an operator's saved log query.
+  * The table is the point. Every row is a decision from ADR-034, and the suite fails the moment a case is
+  * pointed at a different code — which is exactly the change that silently breaks a frontend that switches on
+  * the code and an operator's saved log query.
   */
 final class KuiErrorSuite extends FunSuite {
 
@@ -41,7 +41,11 @@ final class KuiErrorSuite extends FunSuite {
       ApplicationError.Invalid("Request is not valid", List(FieldError.of("partitions", "must be > 0"))),
       ErrorCode.Validation
     ),
-    ("a broken business rule", DomainError.InvariantViolation("from must not exceed until"), ErrorCode.Validation),
+    (
+      "a broken business rule",
+      DomainError.InvariantViolation("from must not exceed until"),
+      ErrorCode.Validation
+    ),
     (
       "an unreachable upstream",
       InfrastructureError.Unreachable("schema-registry", "connection refused"),
@@ -114,12 +118,15 @@ final class KuiErrorSuite extends FunSuite {
     assert(!KuiError.InfrastructureCodes.contains(ErrorCode.ConfigVersionConflict))
 
     assertEquals(KuiError.remote(ErrorCode.StoreUnavailable, "gone").isInstanceOf[InfrastructureError], true)
-    assertEquals(KuiError.remote(ErrorCode.StoreNotConfigured, "no store").isInstanceOf[ApplicationError], true)
+    assertEquals(
+      KuiError.remote(ErrorCode.StoreNotConfigured, "no store").isInstanceOf[ApplicationError],
+      true
+    )
   }
 
   test("a rejected value object becomes a domain error that keeps the field it was about") {
     val rejected = ValidationError.Range("partitionId", Some("0"), None, "-1")
-    val error    = DomainError.fromValidation(rejected)
+    val error = DomainError.fromValidation(rejected)
     assertEquals(error.code, ErrorCode.Validation)
     assertEquals(error.details.flatMap(_.field), List("partitionId"))
     assertEquals(error.message, "partitionId must be at least 0, got '-1'")

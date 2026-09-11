@@ -14,8 +14,8 @@ import kui.testkit.KuiIOSuite
 /** The serde end to end, against a registry that is a `Map` rather than a server.
   *
   * Everything below is a statement about what a *user* sees: a decoded record, a picker row that is or is not
-  * offered, a sentence when something cannot work. The registry is faked at its own interface — three
-  * methods — rather than at HTTP, so these tests say nothing about wire details that `SchemaRegistryHttpSuite`
+  * offered, a sentence when something cannot work. The registry is faked at its own interface — three methods
+  * — rather than at HTTP, so these tests say nothing about wire details that `SchemaRegistryHttpSuite`
   * already pins.
   */
 final class SchemaRegistrySerdeSuite extends KuiIOSuite {
@@ -28,7 +28,11 @@ final class SchemaRegistrySerdeSuite extends KuiIOSuite {
 
   private val avroSchema = RegistrySchema(11, SchemaType.Avro, avroDefinition)
   private val jsonSchema =
-    RegistrySchema(12, SchemaType.Json, """{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}""")
+    RegistrySchema(
+      12,
+      SchemaType.Json,
+      """{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}"""
+    )
   private val protobufSchema =
     RegistrySchema(13, SchemaType.Protobuf, "syntax = \"proto3\"; message OrderPlaced { string id = 1; }")
 
@@ -45,7 +49,11 @@ final class SchemaRegistrySerdeSuite extends KuiIOSuite {
   ): SchemaRegistry[IO] = new SchemaRegistry[IO] {
     def schemaById(id: Int): IO[Either[KuiError, RegistrySchema]] =
       calls.update(_ + 1) *> IO.pure(
-        failure.toLeft(()).flatMap(_ => byId.get(id).toRight(InfrastructureError.Unreachable("schema-registry", "no such id")))
+        failure
+          .toLeft(())
+          .flatMap(_ =>
+            byId.get(id).toRight(InfrastructureError.Unreachable("schema-registry", "no such id"))
+          )
       )
     def latestForSubject(subject: String): IO[Either[KuiError, Option[RegistrySchema]]] =
       IO.pure(failure.toLeft(bySubject.get(subject)))
@@ -89,10 +97,21 @@ final class SchemaRegistrySerdeSuite extends KuiIOSuite {
       calls <- Ref.of[IO, Int](0)
       bare = fake(Map(11 -> avroSchema), Map.empty, calls)
       seen <- CachingSchemaRegistry
-        .resource[IO](bare, SchemaRegistryConfig(NonEmptyList.one(SafeUrl.unsafe("http://registry:8081"))), cluster, CacheMetrics.noop[IO])
+        .resource[IO](
+          bare,
+          SchemaRegistryConfig(NonEmptyList.one(SafeUrl.unsafe("http://registry:8081"))),
+          cluster,
+          CacheMetrics.noop[IO]
+        )
         .flatMap(cached =>
           BoundedCache
-            .make[IO, java.lang.Integer, ParsedSchema]("test.parsed", cluster, 64L, None, CacheMetrics.noop[IO])
+            .make[IO, java.lang.Integer, ParsedSchema](
+              "test.parsed",
+              cluster,
+              64L,
+              None,
+              CacheMetrics.noop[IO]
+            )
             .map(parsed => SchemaRegistrySerde[IO](cached, parsed))
         )
         .use(s =>
@@ -244,8 +263,11 @@ final class SchemaRegistrySerdeSuite extends KuiIOSuite {
       calls <- Ref.of[IO, Int](0)
       registry = fake(Map(11 -> avroSchema), Map("orders.v2.OrderPlaced" -> avroSchema), calls)
       result <- serde(registry).use(s =>
-        s.serializer(topic, Target.Value, Map(SchemaRegistrySerde.SubjectParameter -> "orders.v2.OrderPlaced"))
-          .flatMap(_.serialize("""{"id":"o-9"}""", Nil))
+        s.serializer(
+          topic,
+          Target.Value,
+          Map(SchemaRegistrySerde.SubjectParameter -> "orders.v2.OrderPlaced")
+        ).flatMap(_.serialize("""{"id":"o-9"}""", Nil))
       )
     } yield assert(result.isRight, result)
   }

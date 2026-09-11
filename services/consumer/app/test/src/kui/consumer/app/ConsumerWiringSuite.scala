@@ -26,10 +26,9 @@ final class ConsumerWiringSuite extends CatsEffectSuite {
 
   /** No clusters, because a configured cluster would have this suite open Kafka connections to nothing.
     *
-    * That is not a limitation of the fixture; it is the property under test in
-    * `wiringOpensNoKafkaConnection` below. The pool creates a client on first use and the first use is the
-    * background pass, so an empty cluster list and a full one differ only in whether that fiber has anything
-    * to scrape.
+    * That is not a limitation of the fixture; it is the property under test in `wiringOpensNoKafkaConnection`
+    * below. The pool creates a client on first use and the first use is the background pass, so an empty
+    * cluster list and a full one differ only in whether that fiber has anything to scrape.
     */
   private def wiring(
       cursorKey: Option[Secret[String]] = None,
@@ -108,12 +107,14 @@ final class ConsumerWiringSuite extends CatsEffectSuite {
     // ADR-045's token is what the apply endpoint accepts *instead of* a specification, so a key only one
     // replica knows is a reset that works or fails depending on which container answered.
     wiring(cursorKey = Some(Secret("0123456789abcdef0123456789abcdef"))).use { (_, logger) =>
-      logger.entries.map(_.map(_.message)).map(lines =>
-        assert(
-          lines.exists(_.contains("configured kui.streaming.cursorKey")),
-          clue = s"the wiring did not report using the configured key: $lines"
+      logger.entries
+        .map(_.map(_.message))
+        .map(lines =>
+          assert(
+            lines.exists(_.contains("configured kui.streaming.cursorKey")),
+            clue = s"the wiring did not report using the configured key: $lines"
+          )
         )
-      )
     }
   }
 
@@ -121,14 +122,16 @@ final class ConsumerWiringSuite extends CatsEffectSuite {
     // The fallback is correct for a single process and wrong for two, and the only way an operator finds
     // out which one they are running is this line. A silent fallback is the defect, not the fallback.
     wiring(cursorKey = None).use { (_, logger) =>
-      logger.entries.map(_.map(_.message)).map(lines =>
-        assert(
-          lines.exists(line =>
-            line.contains("no kui.streaming.cursorKey is configured") && line.contains("second replica")
-          ),
-          clue = s"the wiring did not warn that the key is per-process: $lines"
+      logger.entries
+        .map(_.map(_.message))
+        .map(lines =>
+          assert(
+            lines.exists(line =>
+              line.contains("no kui.streaming.cursorKey is configured") && line.contains("second replica")
+            ),
+            clue = s"the wiring did not warn that the key is per-process: $lines"
+          )
         )
-      )
     }
   }
 

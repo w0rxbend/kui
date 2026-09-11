@@ -12,9 +12,8 @@ import kui.kernel.error.{InfrastructureError, KuiError}
   * `SnapshotFreshness.of` states the rule in its own scaladoc — "a snapshot with a value and an offline
   * status is `Stale` and not `Unavailable`: data from the last successful scrape, with the time it was taken
   * beside it, is what the whole snapshot design exists to keep on screen when a cluster stops answering" —
-  * and nothing asserted it. Answering `Unavailable` from that arm left `./mill services.consumer.__.test`
-  * at 185/185 green, and the Consumers table would then empty itself the first time a coordinator went
-  * down.
+  * and nothing asserted it. Answering `Unavailable` from that arm left `./mill services.consumer.__.test` at
+  * 185/185 green, and the Consumers table would then empty itself the first time a coordinator went down.
   */
 final class SnapshotFreshnessSuite extends FunSuite {
 

@@ -14,8 +14,8 @@ import kui.kernel.{PageRequest, PageSize, PositiveInt, Sort, SortOrder}
   * Every assertion here is about one rule: a parameter that cannot be read is a 400 naming the parameter,
   * never a default quietly substituted for it. The reference product does the opposite — it resets an
   * out-of-range `page` to 1 and an unrecognised `mode` to substring matching — and the result is a screen
-  * that answers a question nobody asked, with nothing anywhere saying so
-  * (`research/kafbat/api-analysis.md` §3.3).
+  * that answers a question nobody asked, with nothing anywhere saying so (`research/kafbat/api-analysis.md`
+  * §3.3).
   */
 final class TopicQueryCodecsSuite extends ScalaCheckSuite {
 

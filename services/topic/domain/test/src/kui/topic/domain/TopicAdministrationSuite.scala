@@ -7,8 +7,8 @@ import kui.kernel.TopicName
 /** The rules that hold before anything reaches a cluster.
   *
   * They are here rather than in a route suite because every one of them is a statement about the operation
-  * and not about HTTP: "a partition count can only go up" is true of a `curl`, of a future MCP tool and of the
-  * screen, and a rule asserted only through a route is a rule the next caller can walk around.
+  * and not about HTTP: "a partition count can only go up" is true of a `curl`, of a future MCP tool and of
+  * the screen, and a rule asserted only through a route is a rule the next caller can walk around.
   */
 final class TopicAdministrationSuite extends munit.FunSuite {
 
@@ -106,7 +106,8 @@ final class TopicAdministrationSuite extends munit.FunSuite {
   test("aDeletionPlanSaysWhenTheTopicWillComeStraightBack") {
     // The behaviour KUI's own message browser was bitten by: with auto-creation on, the first client to
     // name the topic recreates it with the broker's defaults and none of its configuration.
-    val plan = DeletionPlan.of(orders, partitions = 3, records = Some(16L), autoCreateEnabled = Some(true), now)
+    val plan =
+      DeletionPlan.of(orders, partitions = 3, records = Some(16L), autoCreateEnabled = Some(true), now)
 
     assert(plan.warnings.map(_.code).contains(PlanWarning.AutoCreate))
     assert(

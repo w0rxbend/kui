@@ -30,8 +30,15 @@ final class ConnectMappingSuite extends FunSuite {
   )
 
   private def connector(state: String, tasks: List[ConnectorTask], trace: Option[String] = None): Connector =
-    Connector(payments, ConnectorName.unsafe("elastic-sink"), ConnectorKind.Sink, ConnectorState(state),
-      Some("10.0.0.1:8083"), trace, tasks)
+    Connector(
+      payments,
+      ConnectorName.unsafe("elastic-sink"),
+      ConnectorKind.Sink,
+      ConnectorState(state),
+      Some("10.0.0.1:8083"),
+      trace,
+      tasks
+    )
 
   private def task(id: Int, state: String, trace: Option[String] = None): ConnectorTask =
     ConnectorTask(TaskId.unsafe(id), ConnectorState(state), Some("10.0.0.1:8083"), trace)

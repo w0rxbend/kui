@@ -674,6 +674,23 @@ describe("which navigation entry is current", () => {
   });
 
   /**
+   * The screen that had been falling through since it was written, and was never noticed because
+   * the feature it belongs to is the one with no drawer entry.
+   *
+   * `/clusters/<id>/messages/track` is `@kui/feature-messages`' cross-topic search. It names no
+   * topic — that is what makes it the *cross-topic* one — so every `segments.includes` above it
+   * missed, and it fell through to the `/clusters/<id>` arm and came back `"overview"`: the drawer
+   * highlighted the cluster dashboard and the trail drew the dashboard's. The other half of the
+   * pair is the record browser under a topic, which stays `topics` because that is where the
+   * operator came from and where the trail should lead back to.
+   */
+  it("marks the cross-topic search as itself while the browser under a topic stays Topics", () => {
+    expect(currentFeatureId("/ui/clusters/prod/messages/track", "/ui")).toBe("messages");
+    expect(currentFeatureId("/kui/ui/clusters/prod/messages/track", "/kui/ui")).toBe("messages");
+    expect(currentFeatureId("/ui/clusters/prod/topics/orders/messages", "/ui")).toBe("topics");
+  });
+
+  /**
    * The address the product opens on, which was marking the wrong entry.
    *
    * `/clusters/<id>/dashboard/overview` fell through to the `clusters` fall-through, so the drawer
@@ -755,6 +772,147 @@ describe("the top band's trail", () => {
        switch made `ksql` impossible to forget — is a production change, filed to its owner. */
     const settings = topCrumbs(clusters, "prod", "/ui/settings", "/ui", router);
     expect(settings.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Settings"]);
+  });
+
+  it("names the cross-topic search, which used to draw the dashboard's trail", () => {
+    /*
+     * The section the label table was missing, found by typing the table over `FeatureId` rather
+     * than by anybody noticing on screen — which is the argument for the type in one sentence.
+     * `messages` is a feature id, `/clusters/<id>/messages/track` is an address it owns alone, and
+     * every section test in `currentFeatureId` missed it: it fell through to the `/clusters/<id>`
+     * arm and came back `overview`, so the band drew `prod-kyiv-01` and nothing else — the cluster
+     * dashboard's trail, over the cross-topic search.
+     *
+     * Nothing looked wrong. That is the whole defect: a blank second crumb is a rendering fault an
+     * eye catches, and a *correct trail for a different page* is one nobody does.
+     */
+    const track = topCrumbs(clusters, "prod", "/ui/clusters/prod/messages/track", "/ui", router);
+    expect(track.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Messages"]);
+
+    /* And the record browser is still Topics, which is not the same decision made twice. It is
+       reached from a topic's page and lives under that topic's address, so the trail that leads
+       back where the operator came from is the topic's. The ordering inside `currentFeatureId` is
+       what holds the two apart, and reversing it would send this trail to Messages. */
+    const browse = topCrumbs(
+      clusters,
+      "prod",
+      "/ui/clusters/prod/topics/orders/messages",
+      "/ui",
+      router,
+    );
+    expect(browse.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Topics"]);
+  });
+
+  it("draws a second crumb for every section a person can navigate to", () => {
+    /*
+     * The rule this packet owns, asserted over the product rather than over the table: **a section
+     * the frame can be on says which section it is.** Written as a sweep rather than as one more
+     * literal because the literals above are the vocabulary — is `ksqlDB` spelled with one capital,
+     * is `clusters` called Brokers — and this is the totality. They fail for different reasons and
+     * a rename should not be able to satisfy this one.
+     *
+     * The table's type is the first line of defence and is checked by `pnpm typecheck` before a
+     * case runs: a `FeatureId` with no row will not compile. This is the second, and it is not
+     * redundant with the first, because the type cannot see the *route*. A section named in the
+     * table that `currentFeatureId` never returns has a label nothing can reach, and a section
+     * `currentFeatureId` returns whose address is not in this list is a screen nobody checked. Both
+     * halves are here, one per row.
+     *
+     * `overview` is deliberately absent from the list and deliberately named in the table: the
+     * cluster crumb already links there. It is asserted the other way round, in the case above —
+     * the dashboard's trail is the cluster name alone.
+     */
+    const addresses: readonly (readonly [string, string])[] = [
+      ["/ui/clusters/prod/brokers", "Brokers"],
+      ["/ui/clusters/prod/topics", "Topics"],
+      ["/ui/clusters/prod/messages/track", "Messages"],
+      ["/ui/clusters/prod/consumer-groups", "Consumers"],
+      ["/ui/clusters/prod/schemas", "Schema Registry"],
+      ["/ui/clusters/prod/alerts", "Alerts"],
+      ["/ui/clusters/prod/connect", "Connect"],
+      ["/ui/clusters/prod/ksql", "ksqlDB"],
+      ["/ui/settings", "Settings"],
+    ];
+
+    for (const [address, expected] of addresses) {
+      const trail = topCrumbs(clusters, "prod", address, "/ui", router);
+      expect(trail.map((crumb) => crumb.label), `the trail on ${address}`).toEqual([
+        "prod-kyiv-01",
+        expected,
+      ]);
+    }
+
+    /* And no two sections share a word. A table whose rows were copied from one another draws the
+       same crumb on two different screens, which reads as a navigation that went nowhere.
+
+       Read off the PRODUCT and not off the literal above. `addresses.map(([, label]) => label)` is
+       the test's own answer key compared with itself: it can fail only if the author of this file
+       types one string twice, and no edit to `LABELS` or to `topCrumbs` can redden it. Filed as
+       W9-04/5.4. */
+    const words = addresses.map(
+      ([address]) => topCrumbs(clusters, "prod", address, "/ui", router)[1]?.label,
+    );
+    expect(new Set(words).size).toBe(words.length);
+  });
+
+  it("gives a second crumb to every feature address the route table registers", () => {
+    /*
+     * THE TOTALITY, TAKEN FROM THE REGISTRY THAT KNOWS RATHER THAN FROM A LIST BESIDE IT. The case
+     * above sweeps nine addresses written out by hand, and the type on `LABELS` forces a *key* and
+     * not a *crumb* — its values are `string | undefined`, so the compile error a missing section
+     * produces is satisfied by writing `undefined`. Both defences are therefore defeated by the
+     * same three lines: widen `CrumbSection`, add `reports: undefined` beside `overview`, add one
+     * arm to `currentFeatureId`, and `/clusters/<id>/reports` becomes a navigable section drawing
+     * the cluster dashboard's trail over itself, with `typecheck` and every shell case green.
+     * Filed as W9-04/5.3.
+     *
+     * `routing/routes.tsx` already answers "which feature is this address" for every route, because
+     * every one carries `gate("<featureId>")`; the table is walked here with a tagged gate exactly
+     * as `routing/routes.test.ts` walks it, so a route registered with no crumb fails in this
+     * package instead of being found in a browser. The record browser is not an exception to this
+     * assertion — `…/topics/:topicName/messages` deliberately draws Topics rather than Messages,
+     * which is a crumb, and which word it is is the case above's business.
+     */
+    type TableNode = {
+      readonly path?: string;
+      readonly component?: { readonly featureId?: string };
+      readonly children?: readonly TableNode[];
+    };
+
+    const tagged = createShellRouter("", {
+      home: () => null,
+      settings: () => null,
+      forbidden: () => null,
+      notFound: () => null,
+      feature: (id) => Object.assign(() => null, { featureId: id }),
+    });
+
+    const patterns: string[] = [];
+    const walk = (nodes: readonly TableNode[], prefix: string): void => {
+      for (const node of nodes) {
+        const here = `${prefix}${node.path ?? ""}`;
+        // A trailing `/` is how an index child is written; the router's own pattern has none.
+        if (node.component?.featureId !== undefined) patterns.push(here.replace(/(.)\/$/, "$1"));
+        if (node.children !== undefined) walk(node.children, here);
+      }
+    };
+    walk(tagged.routes as unknown as readonly TableNode[], "/ui");
+
+    /* The roster is derived, so it has to be non-trivial or a walker that found nothing would pass
+       this case in silence. Fifteen feature routes are registered today. */
+    expect(patterns.length).toBeGreaterThanOrEqual(15);
+
+    for (const pattern of patterns) {
+      const address = pattern
+        .replace(":clusterId", "prod")
+        .replace(":topicName", "orders")
+        .replace(":brokerId", "1")
+        .replace(":groupId", "orders-consumer")
+        .replace(":subject", "orders-value");
+      const trail = topCrumbs(clusters, "prod", address, "/ui", router);
+      expect(trail.map((crumb) => crumb.label), `the trail on ${address}`).toHaveLength(2);
+      expect(trail[1]?.label ?? "", `the section crumb on ${address}`).not.toBe("");
+    }
   });
 });
 

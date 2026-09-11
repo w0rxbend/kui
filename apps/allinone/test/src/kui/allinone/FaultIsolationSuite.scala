@@ -6,7 +6,6 @@ import cats.effect.IO
 import cats.effect.kernel.Resource
 
 import kui.cluster.api.ClusterApi
-import kui.http.principal.PrincipalVerification
 import kui.cluster.application.{CapabilityReport, CapabilityReportUseCase}
 import kui.contracts.capability.CapabilityKey
 import kui.gateway.application.capability.{
@@ -17,6 +16,7 @@ import kui.gateway.application.capability.{
 }
 import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.http.health.ReadinessCheck
+import kui.http.principal.PrincipalVerification
 import kui.kernel.error.InfrastructureError
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
@@ -187,8 +187,8 @@ final class FaultIsolationSuite extends KuiIOSuite {
   /** A use case whose infrastructure has gone away — in M1 terms, a broker that stopped answering.
     *
     * It fails rather than returning an empty report, because those are different things and the gateway has
-    * to tell them apart: an empty report is "this deployment has no clusters configured", and a failure is
-    * "I cannot find out". Only the second one dims a feature.
+    * to tell them apart: an empty report is "this deployment has no clusters configured", and a failure is "I
+    * cannot find out". Only the second one dims a feature.
     */
   private def brokenCapabilities: CapabilityReportUseCase[IO] =
     new CapabilityReportUseCase[IO] {

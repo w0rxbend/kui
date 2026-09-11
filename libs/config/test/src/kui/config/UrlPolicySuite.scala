@@ -7,10 +7,10 @@ import kui.testkit.KuiSuite
 
 /** That an operator cannot point KUI at an address it must not call.
   *
-  * `ARCHITECTURE.md` §14 is the rule; the reason is server-side request forgery. KUI fetches
-  * addresses supplied in configuration, so a URL such as `http://169.254.169.254/` — the address a
-  * cloud instance uses to hand out its own credentials — would turn a configuration field into a
-  * way of reading a private network through KUI's own network position.
+  * `ARCHITECTURE.md` §14 is the rule; the reason is server-side request forgery. KUI fetches addresses
+  * supplied in configuration, so a URL such as `http://169.254.169.254/` — the address a cloud instance uses
+  * to hand out its own credentials — would turn a configuration field into a way of reading a private network
+  * through KUI's own network position.
   */
 final class UrlPolicySuite extends KuiSuite {
 
@@ -42,10 +42,10 @@ final class UrlPolicySuite extends KuiSuite {
   /** The same two addresses as above, written the ways an attacker would write them.
     *
     * `2130706433` is `127.0.0.1` in plain decimal, `0x7f000001` the same number in hexadecimal and
-    * `017700000001` in octal; `127.1` is the short form the C library has always accepted. The
-    * `::ffff:` prefix is an IPv4-mapped IPv6 address, which every resolver unwraps back to the IPv4
-    * address inside it. Each of these reaches exactly the same host as the spelling above, so a
-    * check that refuses one and accepts another is not a check at all.
+    * `017700000001` in octal; `127.1` is the short form the C library has always accepted. The `::ffff:`
+    * prefix is an IPv4-mapped IPv6 address, which every resolver unwraps back to the IPv4 address inside it.
+    * Each of these reaches exactly the same host as the spelling above, so a check that refuses one and
+    * accepts another is not a check at all.
     */
   private val disguisedAddresses = List(
     "http://2130706433:8080/",
@@ -111,10 +111,9 @@ final class UrlPolicySuite extends KuiSuite {
   /** The values that must not relax the policy, and the one that must.
     *
     * There was no switch at all before this: `UrlPolicy.Strict` was the default in the loader and no
-    * composition root passed anything else, so a developer running the gateway and a service as two
-    * local processes, or a deployment with an OTLP collector on `http://localhost:4317`, simply could
-    * not start -- while both the operations guide and the design note claimed a development relaxation
-    * existed.
+    * composition root passed anything else, so a developer running the gateway and a service as two local
+    * processes, or a deployment with an OTLP collector on `http://localhost:4317`, simply could not start --
+    * while both the operations guide and the design note claimed a development relaxation existed.
     */
   test("only the exact value true relaxes the policy") {
     assertEquals(UrlPolicy.fromEnv(Map(UrlPolicy.AllowPrivateUpstreams -> "true")), UrlPolicy.Dev)

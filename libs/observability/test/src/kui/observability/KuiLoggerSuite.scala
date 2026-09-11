@@ -3,8 +3,8 @@ package kui.observability
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
+import ch.qos.logback.classic.Logger as LogbackLogger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.classic.{Logger as LogbackLogger}
 import ch.qos.logback.core.read.ListAppender
 import munit.CatsEffectSuite
 import org.slf4j.LoggerFactory
@@ -15,27 +15,27 @@ import org.typelevel.otel4s.trace.Tracer
 
 import kui.kernel.{ClusterId, CorrelationId}
 
-/** That a KUI log entry carries exactly the fields `ARCHITECTURE.md` §13 promises, and that they
-  * belong to the request that produced it.
+/** That a KUI log entry carries exactly the fields `ARCHITECTURE.md` §13 promises, and that they belong to
+  * the request that produced it.
   *
-  * These assertions go through the real Logback pipeline rather than a fake logger. That is the
-  * point: the fields reach a log line through SLF4J's MDC, and MDC is per-thread while cats-effect
-  * fibers move between threads. Only the real path can show that the ids do not leak from one
-  * request into another's line.
+  * These assertions go through the real Logback pipeline rather than a fake logger. That is the point: the
+  * fields reach a log line through SLF4J's MDC, and MDC is per-thread while cats-effect fibers move between
+  * threads. Only the real path can show that the ids do not leak from one request into another's line.
   */
 final class KuiLoggerSuite extends CatsEffectSuite {
 
   private val serviceName = "kui-test"
 
-  /** Runs `body` with a Logback appender attached to the root logger, and hands back what it
-    * recorded.
+  /** Runs `body` with a Logback appender attached to the root logger, and hands back what it recorded.
     */
   private def captured(body: StructuredLogger[IO] => IO[Unit]): IO[List[ILoggingEvent]] =
     for {
       logger <- KuiLogger.make[IO](serviceName)
-      events <- IO.blocking(attach()).bracket { appender =>
-        body(logger) *> IO.blocking(appender.list.asScala.toList)
-      }(appender => IO.blocking(detach(appender)))
+      events <- IO
+        .blocking(attach())
+        .bracket { appender =>
+          body(logger) *> IO.blocking(appender.list.asScala.toList)
+        }(appender => IO.blocking(detach(appender)))
     } yield events
 
   private def attach(): ListAppender[ILoggingEvent] = {
@@ -171,10 +171,12 @@ final class KuiLoggerSuite extends CatsEffectSuite {
       for {
         tracer <- testkit.tracerProvider.get("kui.test")
         logger <- KuiLogger.traced[IO](serviceName, telemetry, "kui.test")
-        events <- IO.blocking(attach()).bracket { appender =>
-          tracer.span("request").use(_ => logger.info("traced")) *>
-            IO.blocking(appender.list.asScala.toList)
-        }(appender => IO.blocking(detach(appender)))
+        events <- IO
+          .blocking(attach())
+          .bracket { appender =>
+            tracer.span("request").use(_ => logger.info("traced")) *>
+              IO.blocking(appender.list.asScala.toList)
+          }(appender => IO.blocking(detach(appender)))
       } yield {
         val ctx = context(events.find(_.getMessage == "traced").get)
         assertEquals(ctx.get(ContextKeys.TraceId).map(_.length), Some(32))

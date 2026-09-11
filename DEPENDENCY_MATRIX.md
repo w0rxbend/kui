@@ -6,7 +6,12 @@ Adding a dependency requires the review procedure in [CONTRIBUTING.md](CONTRIBUT
 `./scripts/feature-matrix-check.sh` enforces the second half of that for the browser build: it reads
 every `dependencies` and `devDependencies` entry under `frontend/` and fails when one has no row, or
 has a row naming a different version. Until it was written, "and a row here" was a convention that
-two dependencies had already slipped past.
+two dependencies had already slipped past. **What "enforces" means here was measured on 2026-09-11
+and was less than this sentence implied:** the comparison could be rewritten in one line to compare
+the pin with itself, after which a row could record any version at all with the run still printing
+`all true`. It is now driven by a fixture over a row written for the occasion, and every row this
+file publishes is re-read a second time and compared against the manifests again, so the cheapest
+way to make a false row green is two edits inside the script rather than one.
 
 This file covers **two builds**. The JVM half is Maven coordinates resolved by Mill; the browser
 half is npm packages resolved by pnpm, and its versions live in `frontend/package.json` and the

@@ -90,7 +90,9 @@ final class PrometheusExpositionSuite extends FunSuite {
     val samples = PrometheusExposition.parse(lowercased)
     val decoyIsFirst =
       samples.indexWhere(_.name.contains("replicationbytesinpersec")) <
-        samples.indexWhere(sample => sample.name == "kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate")
+        samples.indexWhere(sample =>
+          sample.name == "kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate"
+        )
 
     assert(decoyIsFirst, "the fixture must put the decoy first or this case gates nothing")
     assertEquals(samples.find(_.name.contains("replicationbytesinpersec")).map(_.value), Some(61200.0))
@@ -158,7 +160,9 @@ final class PrometheusExpositionSuite extends FunSuite {
     val samples = PrometheusExposition.parse(lowercased)
     val decoyIsFirst =
       samples.indexWhere(_.name.contains("brokerrequesthandleravgidlepercent")) <
-        samples.indexWhere(_.name == "kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate")
+        samples.indexWhere(
+          _.name == "kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate"
+        )
 
     assert(decoyIsFirst, "the fixture must put the decoy pools first or this case gates nothing")
     assertEquals(sampleOf(lowercased).requestHandlerIdleRatio, Some(0.8912))
@@ -358,9 +362,14 @@ final class PrometheusExpositionSuite extends FunSuite {
     val topics = sampleOf(captured).topicBytesInPerSecond.getOrElse(fail("no per-topic family"))
 
     assertEquals(topics.map(_.topic), List("__consumer_offsets", "analytics.pageviews", "orders.v1"))
-    assertEquals(topics.find(_.topic == "__consumer_offsets").map(_.bytesInPerSecond), Some(156.9725527287428))
+    assertEquals(
+      topics.find(_.topic == "__consumer_offsets").map(_.bytesInPerSecond),
+      Some(156.9725527287428)
+    )
     assert(
-      !PrometheusExposition.parse(captured).exists(sample => sample.labels.keySet.exists(_.contains("client"))),
+      !PrometheusExposition
+        .parse(captured)
+        .exists(sample => sample.labels.keySet.exists(_.contains("client"))),
       "a per-client.id dimension would change ADR-052's decision, so its absence is asserted"
     )
   }

@@ -35,8 +35,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * subject list's and the registration's. The other seven could be reduced to constants with the whole
   * service green: the schema panel's `references` emptied, an inherited compatibility level reported as the
   * subject's own, the registry-wide level marked as inherited from itself, a version list truncated, a
-  * nonsense version segment answered with the latest schema. Every one of those is a wrong answer on a
-  * screen and none of them is visible below the route, because `SchemaMapping` is the module that turns an
+  * nonsense version segment answered with the latest schema. Every one of those is a wrong answer on a screen
+  * and none of them is visible below the route, because `SchemaMapping` is the module that turns an
   * application type into the bytes a browser reads.
   *
   * The registry is a fake with fixed contents and everything between it and the socket is real: the path
@@ -58,7 +58,7 @@ final class SchemaReadRoutesSuite extends KuiIOSuite {
       List(SchemaReference("address.proto", Subject.unsafe("address-value"), SchemaVersion.unsafe(2)))
   )
 
-  private final class Registry extends SchemaRegistryPort[IO] {
+  final private class Registry extends SchemaRegistryPort[IO] {
 
     def subjects: IO[Either[KuiError, List[Subject]]] =
       IO.pure(Right(List(orders, Subject.unsafe("payments-value"))))

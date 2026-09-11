@@ -3,7 +3,6 @@ package kui.cluster.domain
 import java.time.Instant
 
 import cats.data.NonEmptyList
-
 import org.scalacheck.{Arbitrary, Gen}
 
 import kui.kernel.{BrokerId, Host, KafkaClusterId, PartitionId, Port, TopicName, TopicPartition}

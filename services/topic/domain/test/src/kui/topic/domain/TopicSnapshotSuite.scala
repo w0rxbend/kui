@@ -4,8 +4,8 @@ import java.time.Instant
 
 import org.scalacheck.Prop.forAll
 
-import kui.kernel.{BrokerId, PartitionId, TopicName}
 import kui.kernel.search.SearchMode
+import kui.kernel.{BrokerId, PartitionId, TopicName}
 import kui.testkit.KuiSuite
 
 /** The snapshot, and the one thing that must never happen to it: rows and index disagreeing. */
@@ -39,7 +39,8 @@ final class TopicSnapshotSuite extends KuiSuite {
       TopicSummary.of(TopicName.unsafe("orders"), isInternal = false, Nil),
       TopicSummary.of(TopicName.unsafe("payments"), isInternal = false, Nil)
     )
-    val snap = TopicSnapshot.of(rows, at, Map(TopicName.unsafe("payments") -> "KUI is not authorized to read this"))
+    val snap =
+      TopicSnapshot.of(rows, at, Map(TopicName.unsafe("payments") -> "KUI is not authorized to read this"))
 
     assertEquals(snap.size, 2, "`incomplete` explains a row, it does not remove it")
     assertEquals(snap.incompleteCount, 1)

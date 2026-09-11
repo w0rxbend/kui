@@ -69,7 +69,8 @@ final class ListTopicsSuite extends KuiSuite {
       pageSize = size,
       // A visibility predicate that actually hides something, so that step 1 of the pipeline is exercised
       // rather than merely present.
-      visible = if hideEvery then (name: TopicName) => !name.value.startsWith("a") else TopicListQuery.EverythingVisible
+      visible = if hideEvery then (name: TopicName) => !name.value.startsWith("a")
+      else TopicListQuery.EverythingVisible
     )
 
   property("theTotalCountsWhatTheFiltersLeft") {
@@ -115,8 +116,10 @@ final class ListTopicsSuite extends KuiSuite {
   property("theUnionOfEveryPageIsTheFilteredSetExactlyOnce") {
     forAll(snapshotGen, queries) { (snapshot, request) =>
       val size = request.page.pageSize.value
-      val total = ListTopics(snapshot, request.copy(page = PageRequest(PositiveInt.One, request.page.pageSize)))
-        .totalItems
+      val total = ListTopics(
+        snapshot,
+        request.copy(page = PageRequest(PositiveInt.One, request.page.pageSize))
+      ).totalItems
         .getOrElse(0L)
         .toInt
       val pageCount = math.max(1, (total + size - 1) / size)
@@ -203,7 +206,8 @@ final class ListTopicsSuite extends KuiSuite {
     // The pipeline computes a page over what was read. The incompleteness note and the staleness badge are
     // carried beside it, by the edge, from the snapshot itself — a list that refused to render because two
     // topics could not be read would be the M1 lesson unlearned.
-    val snapshot = TopicSnapshot.of(Vector(row("orders")), at, Map(TopicName.unsafe("gone") -> "it no longer exists"))
+    val snapshot =
+      TopicSnapshot.of(Vector(row("orders")), at, Map(TopicName.unsafe("gone") -> "it no longer exists"))
 
     assertEquals(ListTopics(snapshot, query()).totalItems, Some(1L))
     assertEquals(snapshot.incompleteCount, 1)
@@ -211,7 +215,9 @@ final class ListTopicsSuite extends KuiSuite {
 
   property("everyRowOnThePageSurvivesTheFilters") {
     forAll(snapshotGen, queries) { (snapshot, request) =>
-      assert(ListTopics(snapshot, request).items.forall(row => ListTopics.matches(snapshot, request, row.name)))
+      assert(
+        ListTopics(snapshot, request).items.forall(row => ListTopics.matches(snapshot, request, row.name))
+      )
     }
   }
 

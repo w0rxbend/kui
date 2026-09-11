@@ -9,12 +9,12 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.DurationInt
 
 import cats.data.NonEmptyList
-import cats.effect.kernel.Resource
 import cats.effect.IO
+import cats.effect.kernel.Resource
 import cats.syntax.all.*
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
-import io.circe.parser.parse
 import io.circe.Json
+import io.circe.parser.parse
 import sttp.client4.*
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.BackendStub
@@ -45,11 +45,11 @@ import kui.testkit.fakes.FakeStructuredLogger
   * Three more could not be reached that way, because they are decided by `make` itself and by nothing it
   * exposes: the `(ClusterId, ConnectName)` key the worker map is built under, the `RbacGuard` read-only
   * predicate built from this process's own `kui.clusters[]`, and the audit sink threaded into
-  * `MutationGuard`. **Nothing in this repository constructed `ConnectWiring.make` at all**, so all three
-  * were passed into something and never observed. The cases at the end of this file build it against a
-  * Connect worker on a loopback port — a real one, because `make` opens a real connection pool and refuses a
-  * private address unless the policy allows it — and drive its own routes through Tapir's stub interpreter,
-  * which is what a browser reaches.
+  * `MutationGuard`. **Nothing in this repository constructed `ConnectWiring.make` at all**, so all three were
+  * passed into something and never observed. The cases at the end of this file build it against a Connect
+  * worker on a loopback port — a real one, because `make` opens a real connection pool and refuses a private
+  * address unless the policy allows it — and drive its own routes through Tapir's stub interpreter, which is
+  * what a browser reaches.
   */
 final class ConnectWiringSuite extends KuiIOSuite {
 
@@ -212,7 +212,7 @@ final class ConnectWiringSuite extends KuiIOSuite {
     * `UrlPolicy` parameter load-bearing here — a loopback address is private, so `UrlPolicy.Dev` is what the
     * operator's `KUI_ALLOW_PRIVATE_UPSTREAMS` would have set.
     */
-  private final class Worker(val port: Int, val lastPath: AtomicReference[String], val name: String) {
+  final private class Worker(val port: Int, val lastPath: AtomicReference[String], val name: String) {
     def url: SafeUrl = SafeUrl.unsafe(s"http://127.0.0.1:$port")
   }
 

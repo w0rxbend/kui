@@ -85,7 +85,11 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
   }
 
   test("theResetPlanRequestMatchesItsGoldenFile") {
-    assertMatchesGolden("reset-plan-request", ConsumerSamples.resetPlanRequest, GoldenDocuments.resetPlanRequest)
+    assertMatchesGolden(
+      "reset-plan-request",
+      ConsumerSamples.resetPlanRequest,
+      GoldenDocuments.resetPlanRequest
+    )
   }
 
   test("theResetApplyRequestMatchesItsGoldenFile") {
@@ -293,7 +297,10 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     // disagreeing about a timezone offset; a single wire format is where that stops.
     val rendered = ConsumerSamples.detail.asJson.hcursor.get[String]("observedAt")
     assertEquals(rendered, Right("2026-09-04T09:15:00.000Z"))
-    assertEquals(ConsumerSamples.resetPlan.asJson.hcursor.get[String]("expiresAt"), Right("2026-09-04T09:20:00.000Z"))
+    assertEquals(
+      ConsumerSamples.resetPlan.asJson.hcursor.get[String]("expiresAt"),
+      Right("2026-09-04T09:20:00.000Z")
+    )
   }
 
   test("theResetPlanRequestRejectsAModeWithoutItsParameter") {
@@ -322,7 +329,8 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     val page = ConsumerSamples.page.asJson.hcursor.downField("page")
     assertEquals(page.get[Int]("pageCount"), Right(1))
     assertEquals(page.get[Option[Long]]("totalItems"), Right(Some(2L)))
-    val lying = """{"items":[],"page":{"page":1,"pageSize":25,"totalItems":100,"pageCount":999,"nextPageToken":null}}"""
+    val lying =
+      """{"items":[],"page":{"page":1,"pageSize":25,"totalItems":100,"pageCount":999,"nextPageToken":null}}"""
     val decoded = decode[PageDto[GroupSummaryDto]](lying)
     assertEquals(decoded.map(_.page.pageCount), Right(Some(4)))
   }

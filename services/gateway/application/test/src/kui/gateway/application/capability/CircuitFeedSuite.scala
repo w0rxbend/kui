@@ -1,6 +1,7 @@
 package kui.gateway.application.capability
 
 import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
@@ -15,8 +16,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** That an open circuit reaches the user.
   *
-  * This is the gap the feed exists to close. When a breaker opens, the gateway stops calling that service
-  * — including the readiness poll — so without this the gateway would know a service was unusable and the
+  * This is the gap the feed exists to close. When a breaker opens, the gateway stops calling that service —
+  * including the readiness poll — so without this the gateway would know a service was unusable and the
   * sidebar would still say it was fine until a poll eventually timed out.
   */
 final class CircuitFeedSuite extends CatsEffectSuite {

@@ -6,9 +6,9 @@ import java.time.Instant
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.kernel.{Ref, Resource}
+import io.circe.parser.parse
 import io.circe.syntax.*
 import io.circe.{Json, Printer}
-import io.circe.parser.parse
 import org.typelevel.otel4s.metrics.MeterProvider
 import sttp.client4.*
 import sttp.client4.impl.cats.implicits.*
@@ -16,7 +16,7 @@ import sttp.client4.testing.BackendStub
 import sttp.model.Uri
 import sttp.tapir.server.stub4.TapirStubInterpreter
 
-import kui.contracts.rbac.{EndpointDecision, EndpointAuthorization}
+import kui.contracts.rbac.{EndpointAuthorization, EndpointDecision}
 import kui.contracts.{HttpHeaders, KuiEndpoint}
 import kui.http.principal.{PrincipalVerification, RbacGuard, SecuredRoutes}
 import kui.kernel.error.KuiError
@@ -25,8 +25,8 @@ import kui.observability.Telemetry
 import kui.schema.application.*
 import kui.schema.contract.SchemaMutationEndpoints
 import kui.schema.contract.dto.*
-import kui.schema.contract.dto.RegisterSchemaRequest.given
 import kui.schema.contract.dto.CompatibilityCheckRequest.given
+import kui.schema.contract.dto.RegisterSchemaRequest.given
 import kui.schema.domain.*
 import kui.security.*
 import kui.security.rbac.*
@@ -40,18 +40,18 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * Everything asserted here is decided somewhere a use-case test cannot see it — a status code, an envelope
   * field, an `details[0]`, and the permission the endpoint declares. The registry is a recording fake and
-  * everything between it and the socket is real: the path codec, the body binding of ADR-020 Amendment 1,
-  * the use case's read-only refusal, the mapping and `ErrorEnvelope.statusOf`.
+  * everything between it and the socket is real: the path codec, the body binding of ADR-020 Amendment 1, the
+  * use case's read-only refusal, the mapping and `ErrorEnvelope.statusOf`.
   *
   * ==Where the 403 actually comes from==
   *
-  * This service wires `RbacGuard.allowAll` today, exactly as the two compatibility writes do, and the
-  * gateway is the enforcement point for a call that arrives through it. Both are the same `EndpointDecision`
-  * over the same declaration this endpoint carries, so the two cases below are the two halves of that: one
-  * calls `decide` directly on the published endpoint value, and one binds the route behind a real
-  * `RbacGuard` and reads the status code. Neither composes a permission by hand — both read the
-  * declaration `SchemaMutationEndpoints.registerVersion` publishes, which is the thing that would be wrong
-  * if `Action.SchemaCreate` were the wrong action or the declaration were missing.
+  * This service wires `RbacGuard.allowAll` today, exactly as the two compatibility writes do, and the gateway
+  * is the enforcement point for a call that arrives through it. Both are the same `EndpointDecision` over the
+  * same declaration this endpoint carries, so the two cases below are the two halves of that: one calls
+  * `decide` directly on the published endpoint value, and one binds the route behind a real `RbacGuard` and
+  * reads the status code. Neither composes a permission by hand — both read the declaration
+  * `SchemaMutationEndpoints.registerVersion` publishes, which is the thing that would be wrong if
+  * `Action.SchemaCreate` were the wrong action or the declaration were missing.
   */
 final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
 
@@ -76,7 +76,7 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
   // A registry that records what it was asked to store
   // -----------------------------------------------------------------------------------------------
 
-  private final class RecordingRegistry(
+  final private class RecordingRegistry(
       rejection: Option[KuiError],
       version: Option[SchemaVersion],
       val stored: Ref[IO, List[(String, String, String)]],
@@ -137,8 +137,7 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
         }
 
         val guard =
-          if policy.enabled then
-            RbacGuard.fromPolicy[IO](policy, _ => ClusterFlags.Writable, logger)
+          if policy.enabled then RbacGuard.fromPolicy[IO](policy, _ => ClusterFlags.Writable, logger)
           else RbacGuard.allowAll[IO]
 
         val secured = new SecuredRoutes[IO](codec, SchemaApi.Id, rejections, logger, guard)
@@ -358,7 +357,10 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
           json.downField("details").downN(0).get[List[String]]("restrictions"),
           Right(List(explanation))
         )
-        assertEquals(json.downField("details").downN(0).get[Option[String]]("field"), Right(Some("definition")))
+        assertEquals(
+          json.downField("details").downN(0).get[Option[String]]("field"),
+          Right(Some("definition"))
+        )
       }
     }
   }
@@ -443,9 +445,9 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
       } yield {
         assertEquals(response.code.code, 200, response.body)
         assertEquals(
-          proposals.flatMap(_.references).map(reference =>
-            (reference.name, reference.subject.value, reference.version.value)
-          ),
+          proposals
+            .flatMap(_.references)
+            .map(reference => (reference.name, reference.subject.value, reference.version.value)),
           List(("com.acme.Address", "address-value", 3), ("com.acme.Money", "money-value", 1))
         )
       }

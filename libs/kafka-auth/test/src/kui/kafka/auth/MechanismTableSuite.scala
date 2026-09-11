@@ -9,18 +9,18 @@ import kui.testkit.KuiSuite
 
 /** One golden file per SASL mechanism.
   *
-  * Risk R-1 of the milestone plan says that GSSAPI, OAUTHBEARER, AWS MSK IAM, Azure Entra and GCP
-  * Managed Kafka cannot be integration-tested locally: no container speaks Kerberos to a test, and
-  * none of the three cloud handlers authenticates without a real account. The answer is not to ship
-  * them untested. It is to assert the exact property map each one renders against a committed file
-  * taken from the vendor's own documentation, so that "KUI supports AWS MSK IAM" means "these are
-  * the properties KUI produces, and here they are, in the repository, in a diff".
+  * Risk R-1 of the milestone plan says that GSSAPI, OAUTHBEARER, AWS MSK IAM, Azure Entra and GCP Managed
+  * Kafka cannot be integration-tested locally: no container speaks Kerberos to a test, and none of the three
+  * cloud handlers authenticates without a real account. The answer is not to ship them untested. It is to
+  * assert the exact property map each one renders against a committed file taken from the vendor's own
+  * documentation, so that "KUI supports AWS MSK IAM" means "these are the properties KUI produces, and here
+  * they are, in the repository, in a diff".
   *
-  * The fixtures carry fake credentials (`golden-user` / `golden-secret`), so the
-  * `sasl.jaas.config` line is written out unredacted and a human can read the diff.
+  * The fixtures carry fake credentials (`golden-user` / `golden-secret`), so the `sasl.jaas.config` line is
+  * written out unredacted and a human can read the diff.
   *
-  * They are read from the test classpath rather than from a path, because Mill runs a test in a
-  * sandbox directory rather than in the module directory, so a relative path finds nothing.
+  * They are read from the test classpath rather than from a path, because Mill runs a test in a sandbox
+  * directory rather than in the module directory, so a relative path finds nothing.
   */
 final class MechanismTableSuite extends KuiSuite {
 
@@ -44,8 +44,7 @@ final class MechanismTableSuite extends KuiSuite {
       .render(connection(security), ClientPurpose.Admin, "kui-admin-golden")
       .fold(
         errors => fail(s"render failed: ${errors.toList.map(_.message).mkString("; ")}"),
-        properties =>
-          properties.unsafeValues.toList.sortBy(_._1).map((k, v) => s"$k=$v").mkString("\n")
+        properties => properties.unsafeValues.toList.sortBy(_._1).map((k, v) => s"$k=$v").mkString("\n")
       )
 
   private def readGolden(name: String): String =
@@ -64,8 +63,8 @@ final class MechanismTableSuite extends KuiSuite {
 
   /** Every mechanism, and the fixture that records what it renders.
     *
-    * The `match` has no default case, so adding a mechanism to the ADT fails to compile here until
-    * somebody decides what it renders and commits the evidence.
+    * The `match` has no default case, so adding a mechanism to the ADT fails to compile here until somebody
+    * decides what it renders and commits the evidence.
     */
   private def goldenFileFor(mechanism: SaslMechanism): String = mechanism match {
     case SaslMechanism.Plain(_, _) => "properties-sasl-ssl-plain.properties"

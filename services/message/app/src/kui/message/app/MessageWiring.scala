@@ -29,10 +29,12 @@ import kui.message.infrastructure.{
   CelFilterSource,
   ClusterSerdeSource,
   ConfiguredClusterProfiles,
+  ConfiguredRecordMasking,
   KafkaBrowseConsumer,
   KafkaRecordDeleter,
   KafkaRecordProducer,
-  KafkaRecordSource
+  KafkaRecordSource,
+  MaskingMetrics
 }
 import kui.observability.Telemetry
 import kui.observability.audit.LoggingAuditSink
@@ -119,18 +121,27 @@ object MessageWiring {
         tuning
       )
       serdeSource = new ClusterSerdeSource[F](serdes)
+      // DM-001, ADR-023. The masking engine's first production caller: rules come from this process's
+      // own `kui.clusters[].masking[]`, and the mask is applied inside the read, at the decode, so that
+      // every consumer of a decoded record — the record event, both filters, the DTO — sees the same
+      // masked value. There is no second placement that satisfies "before any DTO leaves the service"
+      // for all of them at once.
+      maskingMetrics <- Resource.eval(MaskingMetrics.otel4s[F](meter))
+      masking = ConfiguredRecordMasking.of[F](clusters, maskingMetrics)
+      _ <- Resource.eval(describeMasking[F](clusters, logger))
       browse = BrowseUseCase.make[F](
         profiles,
         serdeSource,
         source,
         CursorCodec.hmacSha256[F](signingKey),
-        filterSource
+        filterSource,
+        masking
       )
       filters = FilterUseCase.make[F](filterSource)
       // A track reads through the same record source a browse does, so the seek arithmetic and the
       // decoding have one implementation: what a track matches on is exactly what the browse screen would
       // have shown for the same record.
-      track = TrackUseCase.make[F](profiles, serdeSource, source)
+      track = TrackUseCase.make[F](profiles, serdeSource, source, masking)
       // ADR-047's three parts, wired once and shared by both writes. The guard is the only way this
       // service changes a cluster: it holds the read-only refusal and the audit record, and it is what
       // returns the result, so a use case cannot be added that writes without going through them.
@@ -340,6 +351,29 @@ object MessageWiring {
     backend.toList.flatMap(client =>
       ClusterSerdeFactories.forCluster[F](cluster, client, telemetry, logger, metrics, policy)
     )
+
+  /** One INFO line per cluster that configures masking, saying how many rules are in force.
+    *
+    * "Was this deployment masking anything?" is unanswerable after the fact unless the process said so at
+    * startup, and it is the first question asked when a field turns up in full where it should not have — or,
+    * more often, when a field an operator can see on a screen turns up as asterisks and nobody remembers why.
+    *
+    * The **count** and never the rules. A masking rule names the fields and the topics an operator thought
+    * were worth hiding, which is itself a map of where this cluster's secrets are; putting that roster into
+    * `docker logs` would undo a share of what the rules are for. `MaskingConfig.toString` makes the same
+    * choice for the same reason, and this line is what stops the two from disagreeing.
+    */
+  private def describeMasking[F[_]: Async](
+      clusters: List[ClusterConfig],
+      logger: StructuredLogger[F]
+  ): F[Unit] =
+    clusters.filter(_.masking.nonEmpty).traverse_ { cluster =>
+      logger.info(
+        s"cluster '${cluster.id.value}' masks browsed and tracked records with " +
+          s"${cluster.masking.rules.size} rule(s) (ADR-023, DM-001). Masking is never applied on produce " +
+          "or resend"
+      )
+    }
 
   /** One INFO line per cluster that configures a registry, and one WARN for the case KUI cannot honour.
     *

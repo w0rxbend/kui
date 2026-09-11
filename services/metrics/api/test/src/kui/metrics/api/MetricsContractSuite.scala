@@ -32,7 +32,10 @@ final class MetricsContractSuite extends FunSuite {
 
     assertEquals(declared.map(_.operation), MetricsEndpoints.all.flatMap(_.info.name))
     assertEquals(declared.flatMap(_.requirements.map(_.resource)).distinct, List(Resource.Metrics))
-    assertEquals(declared.flatMap(_.requirements.flatMap(_.actions.toList)).distinct, List(Action.MetricsView))
+    assertEquals(
+      declared.flatMap(_.requirements.flatMap(_.actions.toList)).distinct,
+      List(Action.MetricsView)
+    )
     // A read-only cluster must still be able to look at a chart. `Rbac.decide` refuses any altering
     // action there, so an action classified wrongly would take the whole dashboard away from a
     // deployment that deliberately cannot change anything.

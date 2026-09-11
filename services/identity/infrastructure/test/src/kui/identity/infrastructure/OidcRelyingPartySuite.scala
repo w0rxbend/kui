@@ -9,15 +9,15 @@ import com.nimbusds.jose.jwk.gen.RSAKeyGenerator
 import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.{JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
+import sttp.client4.Backend
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.BackendStub
-import sttp.client4.Backend
 import sttp.model.StatusCode
 
 import kui.config.OidcConfig
 import kui.identity.application.PendingLogin
-import kui.kernel.error.ErrorCode
 import kui.kernel.Secret
+import kui.kernel.error.ErrorCode
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -84,7 +84,8 @@ final class OidcRelyingPartySuite extends KuiIOSuite {
       .expirationTime(Date.from(expiresAt))
       .build()
 
-    val jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(signingKey.getKeyID).build(), claims)
+    val jwt =
+      new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(signingKey.getKeyID).build(), claims)
     jwt.sign(new RSASSASigner(signingKey))
     jwt.serialize
   }

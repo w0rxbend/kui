@@ -15,10 +15,10 @@ import kui.testkit.KuiIOSuite
 
 /** What the client does with each answer a ksqlDB server can give.
   *
-  * A stub rather than a running ksqlDB: every promise here is a promise about a *response*, and a real
-  * ksqlDB is the slowest possible way to produce one — and cannot be made to produce most of them at all.
-  * The server KUI has to survive is the one that names a stream it will not describe, the one that answers a
-  * 400 because the operator typed `SELCT`, and the one behind an ingress that answers 404 for everything.
+  * A stub rather than a running ksqlDB: every promise here is a promise about a *response*, and a real ksqlDB
+  * is the slowest possible way to produce one — and cannot be made to produce most of them at all. The server
+  * KUI has to survive is the one that names a stream it will not describe, the one that answers a 400 because
+  * the operator typed `SELCT`, and the one behind an ingress that answers 404 for everything.
   */
 final class KsqlHttpSuite extends KuiIOSuite {
 
@@ -123,7 +123,9 @@ final class KsqlHttpSuite extends KuiIOSuite {
         // `replicaInfo` is one entry per partition, each the replica count — so two partitions with three
         // replicas each, and not three partitions.
         assertEquals(
-          objects.items.collectFirst { case topic: KsqlObject.Topic => (topic.partitions, topic.replication) },
+          objects.items.collectFirst { case topic: KsqlObject.Topic =>
+            (topic.partitions, topic.replication)
+          },
           Some((2, 3))
         )
       case Left(error) => fail(s"the listing failed: ${error.message}")
@@ -333,6 +335,79 @@ final class KsqlHttpSuite extends KuiIOSuite {
     assertEquals(KsqlHttp.cellOf(io.circe.Json.True), Some("true"))
     // The literal string "null" is a value somebody stored, and it is not a NULL.
     assertEquals(KsqlHttp.cellOf(io.circe.Json.fromString("null")), Some("null"))
+  }
+
+  test("a push query is ended by its own stream budget rather than running until the process does") {
+    // W9-A1: `interruptAfter(streamTimeout)` was held by nothing. Every fixture in this file passes a
+    // thirty-second budget over a body of two or three lines, so the interruption was never reached — and
+    // multiplying the budget by ten thousand left all nineteen cases here and all 4,299 in the repository
+    // green. The key `kui.clusters.<n>.ksql.streamTimeout` exists for exactly this branch: a push query does
+    // not finish, so a tab somebody left open holds a query running on the operator's ksqlDB until the KUI
+    // process dies.
+    //
+    // A header and then silence is what an idle push query over a quiet topic *is*, so the stream under
+    // test never ends on its own: the assertion is that it ends anyway.
+    val header = "[{\"header\":{\"queryId\":\"q\",\"schema\":\"`ID` STRING\"}},\n"
+
+    val calls: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF(_ => IO.pure(ResponseStub.adjust("[]", StatusCode.Ok): sttp.client4.Response[StubBody]))
+
+    val streaming: StreamBackend[IO, Fs2Streams[IO]] =
+      StreamBackendStub[IO, Fs2Streams[IO]](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+        .thenRespondF(_ =>
+          IO.pure(
+            ResponseStub.adjust(
+              Stream.emits(header.getBytes("UTF-8").toList).covary[IO] ++ Stream.never[IO],
+              StatusCode.Ok
+            ): sttp.client4.Response[StubBody]
+          )
+        )
+
+    val client = new KsqlHttp[IO](
+      calls,
+      streaming,
+      base,
+      scala.concurrent.duration.Duration(250, "milliseconds"),
+      KsqlCredentials.anonymous[IO]
+    )
+
+    val statement = KsqlStatement.parse("SELECT * FROM ORDERS EMIT CHANGES;").toOption.get
+
+    client
+      .rows(statement)
+      .compile
+      .toList
+      // Five seconds is twenty budgets: a stream still open then is one the budget is not ending, and a
+      // timeout here fails the case rather than hanging the module.
+      .timeout(scala.concurrent.duration.Duration(5, "seconds"))
+      .map(frames => assertEquals(frames, List(Right(QueryFrame.Header(List("ID"))))))
+  }
+
+  test("a topic row whose replicaInfo is empty is unreadable rather than an exception") {
+    // W9-A1: `.filter(_.nonEmpty)` is the only thing standing between `counts.head` and a
+    // NoSuchElementException, and every fixture in this file gave `replicaInfo` two entries. Deleting the
+    // filter left the whole repository green. ksqlDB publishes `replicaInfo` per partition, so a topic with
+    // no partitions visible to it — mid-deletion, or a server that answered the field as `[]` — is a row
+    // this client must name rather than one that throws inside a listing the screen is waiting for.
+    val answer =
+      """[{ "@type": "kafka_topics", "topics": [ { "name": "vanishing", "replicaInfo": [] } ] }]"""
+
+    server { case "/ksql" => (StatusCode.Ok, answer) }.objects.map {
+      case Right(objects) =>
+        assertEquals(objects.items, Nil)
+        assertEquals(objects.unreadable, List("vanishing"))
+      case Left(error) => fail(s"the listing failed instead of naming the row: ${error.message}")
+    }
+  }
+
+  test("a 403 is KUI's credentials being rejected, exactly as a 401 is") {
+    // W9-A1: the `|| status == StatusCode.Forbidden` arm had no case. A ksqlDB behind an authenticating
+    // proxy answers 403 for a principal it knows and will not serve, and reporting that as a generic
+    // upstream failure tells an operator their server is broken when what is wrong is KUI's credentials.
+    server { case "/ksql" => (StatusCode.Forbidden, "") }.objects.map {
+      case Left(error) => assertEquals(error.code, ErrorCode.UpstreamAuth)
+      case Right(other) => fail(s"expected an auth failure, got $other")
+    }
   }
 
   test("a configured path is applied once, not twice") {

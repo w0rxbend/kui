@@ -17,8 +17,8 @@ import kui.http.health.ReadinessCheck
 import kui.http.{ErrorInterceptor, KuiServer}
 import kui.kernel.{Host, Port}
 import kui.observability.Telemetry
-import kui.testkit.fakes.FakeStructuredLogger
 import kui.security.rbac.RbacPolicy
+import kui.testkit.fakes.FakeStructuredLogger
 
 /** A gateway on a real port, for the assertions that only a real server can make.
   *

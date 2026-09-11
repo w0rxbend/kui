@@ -492,9 +492,8 @@ final class AuthAndRbacConfigSuite extends KuiSuite {
 
   /** One configured cluster and two roles, each naming a cluster of the caller's choosing.
     *
-    * Every other fixture in this section writes exactly one role, which is what left the fold below it
-    * unable to fail: with one role there is no second offender to lose and `$index` is never anything but
-    * `0`.
+    * Every other fixture in this section writes exactly one role, which is what left the fold below it unable
+    * to fail: with one role there is no second offender to lose and `$index` is never anything but `0`.
     */
   private def oneClusterAndTwoRolesOn(first: String, second: String): String =
     s"""kui:

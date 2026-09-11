@@ -2,19 +2,20 @@ package kui.message.application.cursor
 
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
+import munit.ScalaCheckSuite
+import org.scalacheck.Prop.forAll
+import org.scalacheck.{Arbitrary, Gen}
 
 import kui.kernel.browse.{Direction, IsolationLevel, SeekMode}
 import kui.kernel.error.ErrorCode
 import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, Offset, PartitionId, Secret, TopicName}
 import kui.message.domain.{BrowseRequest, MessageGenerators}
-import munit.ScalaCheckSuite
-import org.scalacheck.Prop.forAll
-import org.scalacheck.{Arbitrary, Gen}
 
 /** The cursor exists so that "next page" works on a replica that has never heard of this browse.
   *
@@ -84,7 +85,8 @@ final class CursorCodecSuite extends ScalaCheckSuite {
   test("decodesOnASecondCodecInstanceWithTheSameKey") {
     // The whole reason this type exists. The reference product keys its paging state by a random id in a
     // process-local cache, so this exact assertion is one it cannot make.
-    val cursor = cursorOf(Map(PartitionId.unsafe(0) -> Offset.unsafe(43L), PartitionId.unsafe(1) -> Offset.unsafe(17L)))
+    val cursor =
+      cursorOf(Map(PartitionId.unsafe(0) -> Offset.unsafe(43L), PartitionId.unsafe(1) -> Offset.unsafe(17L)))
     assertEquals(decodedBy(secondReplica, encoded(cursor)), Right(cursor))
   }
 
@@ -125,7 +127,7 @@ final class CursorCodecSuite extends ScalaCheckSuite {
 
     (parts(one), parts(other)) match {
       case (Some(a), Some(b)) => a == b
-      case _                  => false
+      case _ => false
     }
   }
 

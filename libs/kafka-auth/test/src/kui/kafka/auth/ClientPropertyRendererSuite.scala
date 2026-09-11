@@ -11,10 +11,10 @@ import kui.testkit.{ClusterGenerators, KuiSuite, RedactionAssertions}
 
 /** What the renderer promises about the map it builds.
   *
-  * Three of these are the properties a reviewer would otherwise have to take on trust: the override
-  * layer really does win over the keys KUI computes itself, hostname verification is rendered in
-  * both directions rather than left to a client default, and no secret survives into either of the
-  * two renderings that are safe to print.
+  * Three of these are the properties a reviewer would otherwise have to take on trust: the override layer
+  * really does win over the keys KUI computes itself, hostname verification is rendered in both directions
+  * rather than left to a client default, and no secret survives into either of the two renderings that are
+  * safe to print.
   */
 final class ClientPropertyRendererSuite extends KuiSuite {
 
@@ -118,8 +118,7 @@ final class ClientPropertyRendererSuite extends KuiSuite {
     val inline = ClusterSecurity.Ssl(
       TlsConfig.default.copy(
         truststore = Some(TrustStoreRef(StoreSource.Inline(Secret("AAAA")), None, StoreType.Jks)),
-        keystore =
-          Some(KeyStoreRef(StoreSource.Inline(Secret("AAAA")), None, None, StoreType.Jks))
+        keystore = Some(KeyStoreRef(StoreSource.Inline(Secret("AAAA")), None, None, StoreType.Jks))
       )
     )
 

@@ -1,19 +1,19 @@
 package kui.config.store
 
-import scala.io.Source
-import scala.util.Using
-
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
+
+import scala.io.Source
+import scala.util.Using
 
 import io.circe.Json
 import io.circe.parser.parse
 
 /** Reads a committed golden file out of `libs/config/test/resources/store` and parses it.
   *
-  * Golden files are compared as parsed JSON rather than as text. Comparing text would make the suite fail
-  * on a trailing newline or a reordered field, which is noise; comparing parsed JSON fails on exactly the
-  * thing that matters, which is a changed format.
+  * Golden files are compared as parsed JSON rather than as text. Comparing text would make the suite fail on
+  * a trailing newline or a reordered field, which is noise; comparing parsed JSON fails on exactly the thing
+  * that matters, which is a changed format.
   */
 object StoreFixtures {
 
@@ -24,9 +24,9 @@ object StoreFixtures {
 
   /** Copies the committed `filestore` fixtures out of the classpath into a real directory.
     *
-    * `FileConfigStore` takes a `java.nio.file.Path`, because that is what an operator mounts, and a
-    * classpath resource is not one. Copying the fixtures is the smallest bridge, and it keeps them
-    * visible in the repository next to the suite that reads them.
+    * `FileConfigStore` takes a `java.nio.file.Path`, because that is what an operator mounts, and a classpath
+    * resource is not one. Copying the fixtures is the smallest bridge, and it keeps them visible in the
+    * repository next to the suite that reads them.
     */
   def fileStoreRoot(files: List[String] = defaultFileStore): Path = {
     val root = Files.createTempDirectory("kui-filestore")
@@ -39,7 +39,8 @@ object StoreFixtures {
     root
   }
 
-  val defaultFileStore: List[String] = List("cluster/local.json", "cluster/broken.json", "settings/global.json")
+  val defaultFileStore: List[String] =
+    List("cluster/local.json", "cluster/broken.json", "settings/global.json")
 
   /** Writes an extra file into an existing root, for the cases where an inline document is clearer than
     * another committed fixture.

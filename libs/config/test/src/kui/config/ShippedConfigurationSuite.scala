@@ -124,15 +124,15 @@ final class ShippedConfigurationSuite extends KuiSuite {
     * THAT SENTENCE USED TO CONTINUE *"a pattern broadened until it swallowed a KUI configuration file would
     * take that file out of the left-over set and fail on the missing row"*, AND IT WAS FALSE FOR THE ONE
     * WIDENING ANYBODY WOULD MAKE. Measured on this tree before the case below existed: replacing
-    * `"kafka-jmx-exporter.yml"` with `".yml"` left `./mill libs.config.test` at 395/395 with this suite
-    * 14/14 green. Nothing on disk needed the widened pattern to stay honest -- every row of [[shipped]] is a
+    * `"kafka-jmx-exporter.yml"` with `".yml"` left `./mill libs.config.test` at 395/395 with this suite 14/14
+    * green. Nothing on disk needed the widened pattern to stay honest -- every row of [[shipped]] is a
     * `*.yaml`, a `.yaml` name does not contain the text `.yml`, and every `docker-compose*.yml` was already
     * excluded by the row above -- so the partition did not move at all and the "still matches something"
     * check passed on the Compose files. The reconciliation was inert for exactly the class of file it was
     * written to notice: the next `*.yml` KUI configuration anybody ships.
     *
-    * So the widening is checked against files that do not exist yet rather than against the ones that do,
-    * by [[excludedBy]] and the probe assertion in the case below.
+    * So the widening is checked against files that do not exist yet rather than against the ones that do, by
+    * [[excludedBy]] and the probe assertion in the case below.
     */
   private val notKuiConfiguration: List[(String, String)] = List(
     "docker-compose" ->
@@ -149,42 +149,41 @@ final class ShippedConfigurationSuite extends KuiSuite {
   /** The [[notKuiConfiguration]] row that claims a file, if one does.
     *
     * Extracted so that the partition below and the probe beside it cannot ask the question two different
-    * ways. A probe with its own copy of `contains` would keep passing after somebody changed the real
-    * matcher to a suffix test or a `Path.getFileName` comparison, which is the failure this whole suite is
-    * about: two hand-written halves that agree by coincidence until one of them moves.
+    * ways. A probe with its own copy of `contains` would keep passing after somebody changed the real matcher
+    * to a suffix test or a `Path.getFileName` comparison, which is the failure this whole suite is about: two
+    * hand-written halves that agree by coincidence until one of them moves.
     */
   private def excludedBy(name: String): Option[(String, String)] =
     notKuiConfiguration.find((pattern, _) => name.contains(pattern))
 
   /** The names a widened exclusion pattern would swallow: every file KUI's next configuration plausibly is.
     *
-    * On-disk names cannot carry this assertion and that is the whole point: every file the reconciliation
-    * can see today is a `*.yaml` in a directory that already holds one, so a pattern widened past them
-    * moves nothing and both directions of the set difference stay empty. The rule is about the files that
-    * are not here, and it is derived from what IS here so that nothing has to be remembered twice.
+    * On-disk names cannot carry this assertion and that is the whole point: every file the reconciliation can
+    * see today is a `*.yaml` in a directory that already holds one, so a pattern widened past them moves
+    * nothing and both directions of the set difference stay empty. The rule is about the files that are not
+    * here, and it is derived from what IS here so that nothing has to be remembered twice.
     *
     * ==Two families, and the second one is why this is a `def` over the filesystem==
     *
     * **The extension twins.** `shipped` is the roster of files the loader must accept, so its `.yml` twins
     * are the eleventh row written `.yml`, which half the YAML in this repository already is.
     *
-    * **A KUI configuration in each directory `deployment/` already has.** The twins above are all named
-    * after files that exist, in directories that already hold a `shipped` row, so a pattern widened along
-    * the *directory* rather than the extension is invisible to them -- and `deployment/metrics/`,
+    * **A KUI configuration in each directory `deployment/` already has.** The twins above are all named after
+    * files that exist, in directories that already hold a `shipped` row, so a pattern widened along the
+    * *directory* rather than the extension is invisible to them -- and `deployment/metrics/`,
     * `deployment/frontend/` and `deployment/storybook/` hold no `shipped` row at all, which makes them the
-    * cheapest place for a widening to hide. Measured on this tree: replacing `"kafka-jmx-exporter.yml"`
-    * with `"metrics/"` leaves the reconciliation above completely green -- the pattern still matches the
-    * exporter, no `shipped` row is under that path, and the left-over set does not move -- while silently
-    * excluding the `deployment/metrics/kui.yaml` somebody writes next. With this family present that
-    * widening reddens the case below and nothing else, which is the only form of evidence this suite
-    * accepts about itself.
+    * cheapest place for a widening to hide. Measured on this tree: replacing `"kafka-jmx-exporter.yml"` with
+    * `"metrics/"` leaves the reconciliation above completely green -- the pattern still matches the exporter,
+    * no `shipped` row is under that path, and the left-over set does not move -- while silently excluding the
+    * `deployment/metrics/kui.yaml` somebody writes next. With this family present that widening reddens the
+    * case below and nothing else, which is the only form of evidence this suite accepts about itself.
     *
     * ==What is deliberately NOT probed, and why it is not a hole==
     *
     * An extension `deployment/` does not use at all -- `.conf`, `.properties` -- needs no probe: the first
-    * case above asserts that every pattern still matches something on disk, and a pattern matching no
-    * `.yaml` or `.yml` fails there before this case is reached. Probing it would add an assertion that
-    * cannot fail, which is the thing this suite exists to refuse.
+    * case above asserts that every pattern still matches something on disk, and a pattern matching no `.yaml`
+    * or `.yml` fails there before this case is reached. Probing it would add an assertion that cannot fail,
+    * which is the thing this suite exists to refuse.
     */
   private def widenedExclusionProbes(root: Path): List[String] = {
     val extensionTwins = shipped.map((relative, _, _) => relative.stripSuffix(".yaml") + ".yml")
@@ -309,6 +308,57 @@ final class ShippedConfigurationSuite extends KuiSuite {
     }
   }
 
+  test("a shipped file that adds a masking section still loads, and none of them has one today") {
+    // DM-001/ADR-023's half of this suite, and the only half W9-06 could write: `deployment/**` belongs to
+    // another packet this wave, so no shipped file can be given a `masking:` block here. What CAN be
+    // asserted is the two facts that matter to an operator copying one of these examples.
+    //
+    // FIRST, that every shipped file is unchanged by the new section existing -- the standing rule for
+    // every configuration section this project has added, stated over the files somebody actually copies
+    // rather than over an invented one. `shipped` already proves each of them loads; this proves none of
+    // them silently acquired a masking rule.
+    //
+    // SECOND, and this is the one an absence could hide: that the section is REACHABLE from a real shipped
+    // file. `kui.clusters.*.masking.*` had to be added to the loader's known-key list, and a key missing
+    // from that list is refused as "is not a KUI configuration key" -- so a masking rule written into any
+    // of these files would stop the process, and no suite over the files as they stand could tell. The
+    // overlay below is a second document in the same load, which is exactly how `docker-compose` layers a
+    // deployment's file over an image's default.
+    val quickstart = "deployment/quickstart/kui-quickstart.yaml"
+
+    val asShipped = KuiConfigSource
+      .loadFrom[IO](Nil, List(resolve(quickstart)), Map.empty, UrlPolicy.Dev)
+      .unsafeRunSync()
+      .fold(errors => fail(s"$quickstart does not load:\n${errors.render}"), identity)
+
+    assert(
+      asShipped.clusters.forall(_.masking.isEmpty),
+      clue = s"a shipped file now configures masking: ${asShipped.clusters.map(_.id.value)}"
+    )
+
+    val overlay = ConfigFixtures.yaml(
+      """kui:
+        |  clusters:
+        |    - masking:
+        |        - kind: mask
+        |          fields: [cardNumber]
+        |          keep:
+        |            suffix: 4
+        |""".stripMargin
+    )
+
+    val withMasking = KuiConfigSource
+      .loadFrom[IO](Nil, List(resolve(quickstart), overlay), Map.empty, UrlPolicy.Dev)
+      .unsafeRunSync()
+      .fold(
+        errors => fail(s"$quickstart does not load with a masking rule over it:\n${errors.render}"),
+        identity
+      )
+
+    assertEquals(withMasking.clusters.head.masking.rules.size, 1)
+    assertEquals(withMasking.clusters.head.masking.rules.head.fields.map(_.toList), Some(List("cardNumber")))
+  }
+
   test("the quickstart describes the broker the quickstart starts") {
     val loaded = KuiConfigSource
       .loadFrom[IO](Nil, List(resolve("deployment/quickstart/kui-quickstart.yaml")), Map.empty, UrlPolicy.Dev)
@@ -318,8 +368,34 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // `quickstart.sh` starts one broker under the Compose service name `kafka`, and the promise made in
     // that script's own output is that the dashboard shows a cluster with nothing else to type. If this
     // entry stops naming that broker, the promise is broken and nothing else would say so.
-    assertEquals(loaded.clusters.map(_.id.value), List("quickstart"))
-    assertEquals(loaded.clusters.head.bootstrapServers.value, "kafka:9092")
+    //
+    // TWO REGISTERED PROFILES OVER THAT ONE BROKER, since wave 9. `staging-eu-01` is the second, and it
+    // is what gives the cluster selector something to switch to: the design's own capture spells the
+    // toast "Switched to staging-eu-01" (SCREENS-V4 §1, M08) and no browser case had ever opened that
+    // menu, because a one-entry menu has nothing to choose. Both entries point at `kafka:9092` on
+    // purpose — the quickstart runs one Kafka, and what the screens need is a second *profile*.
+    //
+    // The order is asserted rather than the set: the first entry is the one the shell lands on, and a
+    // newcomer who sees `staging-eu-01` first is looking at the cluster with no metrics source, no
+    // registry, no Connect and no ksqlDB — which is the emptiest possible first screen of this product.
+    assertEquals(loaded.clusters.map(_.id.value), List("quickstart", "staging-eu-01"))
+    assertEquals(loaded.clusters.map(_.bootstrapServers.value).distinct, List("kafka:9092"))
+
+    // THE DISPLAY NAME, WHICH IS THE WORD THE DESIGN ASKS A BROWSER TO READ. The id and the broker were
+    // asserted above and the name was not, so `- name: "Staging (EU)"` was a one-line edit with every
+    // Scala gate green -- and `frontend/e2e/shell.spec.ts` deliberately discovers the second cluster's
+    // name off `/api/v1/clusters` rather than writing it down, which is right for the browser and leaves
+    // the word itself unasserted by anything in the tree. M08's capture spells the toast "Switched to
+    // staging-eu-01" (SCREENS-V4 §1), so the name and the id agreeing is the product's promise and not a
+    // coincidence of this file. Filed as W9-01/V1.
+    assertEquals(loaded.clusters.map(_.name), List("Quickstart (local)", "staging-eu-01"))
+
+    // AND THE ABSENCE THAT THE ENTRY EXISTS FOR. The comment above `staging-eu-01` in the YAML argues at
+    // length that it must have no `kui.metrics.sources` member, because `traffic.spec.ts`'s "says the
+    // same thing about a cluster nobody configured a source for" needs a registered cluster whose
+    // throughput answers `not_configured`. Four lines of YAML take that subject away again; this is the
+    // assertion that notices. Filed as W9-01/V2.
+    assertEquals(loaded.metrics.sources.keys.map(_.value).toList, List("quickstart"))
   }
 
   test("the production example's secrets are all resolved and none is left as its own reference") {
@@ -346,7 +422,9 @@ final class ShippedConfigurationSuite extends KuiSuite {
 
     val analytics = loaded.clusters
       .find(_.id.value == "analytics")
-      .getOrElse(fail(s"the example no longer has an `analytics` cluster: ${loaded.clusters.map(_.id.value)}"))
+      .getOrElse(
+        fail(s"the example no longer has an `analytics` cluster: ${loaded.clusters.map(_.id.value)}")
+      )
 
     analytics.security match {
       case kui.kernel.cluster.ClusterSecurity.Sasl(_, mechanism, Some(tls)) =>
@@ -366,8 +444,8 @@ final class ShippedConfigurationSuite extends KuiSuite {
 
   /** The repository root, found by walking up to the directory holding `build.mill`.
     *
-    * A test runs in a sandbox directory, so a relative path means nothing. Walking up to a file that only
-    * the root has is more robust than any number of `../`, and it fails with a sentence rather than a
+    * A test runs in a sandbox directory, so a relative path means nothing. Walking up to a file that only the
+    * root has is more robust than any number of `../`, and it fails with a sentence rather than a
     * `NoSuchFileException` when it is wrong.
     */
   private def repositoryRoot: Path = {

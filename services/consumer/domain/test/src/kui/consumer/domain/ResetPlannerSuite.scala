@@ -4,18 +4,19 @@ import java.time.Instant
 
 import scala.concurrent.duration.*
 
-import kui.consumer.domain.fixtures.GroupFixtures
-import kui.kernel.{GroupId, Offset, TopicPartition}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
+import kui.consumer.domain.fixtures.GroupFixtures
+import kui.kernel.{GroupId, Offset, TopicPartition}
+
 /** Where a running application will start reading next, decided by a pure function.
   *
   * Two properties carry most of the weight: no proposed offset is ever outside the range the partition holds,
-  * and every clamp is reported. A silent clamp is what Kafbat does, and it means an operator who typed
-  * 900 000 into a partition holding 400 records is shown a confirmation that agrees with them and a cluster
-  * that does something else.
+  * and every clamp is reported. A silent clamp is what Kafbat does, and it means an operator who typed 900
+  * 000 into a partition holding 400 records is shown a confirmation that agrees with them and a cluster that
+  * does something else.
   */
 final class ResetPlannerSuite extends ScalaCheckSuite {
 
@@ -44,11 +45,17 @@ final class ResetPlannerSuite extends ScalaCheckSuite {
     )
 
   test("earliest plans the beginning of each partition") {
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ToEarliest, window, now)), Map(0 -> 10L, 1 -> 0L))
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ToEarliest, window, now)),
+      Map(0 -> 10L, 1 -> 0L)
+    )
   }
 
   test("latest plans the end of each partition") {
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ToLatest, window, now)), Map(0 -> 100L, 1 -> 50L))
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ToLatest, window, now)),
+      Map(0 -> 100L, 1 -> 50L)
+    )
   }
 
   test("a timestamp plans the offset the cluster resolved for it") {
@@ -79,8 +86,14 @@ final class ResetPlannerSuite extends ScalaCheckSuite {
   }
 
   test("a shift moves from the committed offset") {
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(5L), window, now)), Map(0 -> 45L, 1 -> 30L))
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(-5L), window, now)), Map(0 -> 35L, 1 -> 20L))
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(5L), window, now)),
+      Map(0 -> 45L, 1 -> 30L)
+    )
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(-5L), window, now)),
+      Map(0 -> 35L, 1 -> 20L)
+    )
   }
 
   test("a shift with no committed offset counts from the beginning, and says so") {

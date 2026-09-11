@@ -19,8 +19,8 @@ import kui.testkit.KuiIOSuite
   * their data.
   *
   * The serdes here are built through `ClusterSerdes.resource` from a factory that fails the way a
-  * schema-registry serde fails when the registry is down, so the arrangement is the product's own rather
-  * than a hand-written stand-in for it.
+  * schema-registry serde fails when the registry is down, so the arrangement is the product's own rather than
+  * a hand-written stand-in for it.
   */
 final class ClusterSerdeSourceSuite extends KuiIOSuite {
 
@@ -30,9 +30,9 @@ final class ClusterSerdeSourceSuite extends KuiIOSuite {
 
   private val Unreachable: String = "the schema registry could not be reached"
 
-  /** Bytes no serde claims and the cluster's configured default cannot read: a lone UTF-8 continuation
-    * byte. Auto-detection asks each serde whether the bytes are its own before configuration is consulted,
-    * so a payload every serde recognises would never reach the fall-through this case is about.
+  /** Bytes no serde claims and the cluster's configured default cannot read: a lone UTF-8 continuation byte.
+    * Auto-detection asks each serde whether the bytes are its own before configuration is consulted, so a
+    * payload every serde recognises would never reach the fall-through this case is about.
     */
   private val NotUtf8: Array[Byte] = Array(0xc3.toByte, 0x28.toByte)
 

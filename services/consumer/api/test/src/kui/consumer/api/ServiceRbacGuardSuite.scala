@@ -15,8 +15,8 @@ import kui.testkit.KuiIOSuite
   * what a second check buys. The answer is the case every request below constructs: a call that never went
   * through the gateway. A KUI service listens on its own port and trusts a signed principal; anything on the
   * same network that can reach that port and hold a signing key can call it. If the only check lived at the
-  * edge, the consumer service would be open to whatever else runs beside it — which is precisely what
-  * ADR-021 says must not be true of any service.
+  * edge, the consumer service would be open to whatever else runs beside it — which is precisely what ADR-021
+  * says must not be true of any service.
   *
   * So every request here goes straight to this service's own routes, with a valid principal and no gateway
   * anywhere. That is the shape of the attack the second check exists for, and it is the only shape in which

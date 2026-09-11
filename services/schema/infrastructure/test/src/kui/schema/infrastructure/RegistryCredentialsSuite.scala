@@ -23,8 +23,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * comment: the client secret goes in the `Authorization` header rather than the form body *because a proxy
   * logs a form body*; a cluster configured for OAuth with no issuer client refuses every call rather than
   * sending it unauthenticated; an issuer's response body is never quoted, because it is the one response in
-  * KUI most likely to contain the credential that was just sent. Every one of them could be reversed with
-  * the whole schema service green.
+  * KUI most likely to contain the credential that was just sent. Every one of them could be reversed with the
+  * whole schema service green.
   *
   * The transport is a stub for the reason `RegistryHttpSuite` gives: each promise here is a promise about a
   * *request* or about one *response*, and a real issuer can produce almost none of the responses that matter.
@@ -310,8 +310,8 @@ final class RegistryCredentialsSuite extends KuiIOSuite {
   /** An issuer that answers a different token each time and records what it was sent.
     *
     * The token *changes* on purpose: a cache that never expired and one that renewed correctly are
-    * indistinguishable if every answer is the same string, which is how a case can watch a renewal
-    * happen and still pass when it stops happening.
+    * indistinguishable if every answer is the same string, which is how a case can watch a renewal happen and
+    * still pass when it stops happening.
     */
   private def rotatingIssuerStub(
       seen: Ref[IO, List[sttp.client4.GenericRequest[?, ?]]],

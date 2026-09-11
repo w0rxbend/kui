@@ -118,23 +118,45 @@
  * dashboard's alerts card all read this accessor, which is what §3.8 means by one number in three
  * places that cannot disagree.
  *
- * The other three are kept rather than deleted, and at wave 8 that is a decision taken one member at
- * a time rather than a habit:
+ * ## Wave 9 re-ran both greps and the answer did not move — including the part that was promised
  *
- * - **`unreadCount()` stays and is not to be deleted.** Wave 8's plan gives the drawer's Alerts
- *   badge to the per-principal count, which is this accessor — a contract between two packets
- *   rather than something measured here, and deleting a member in the wave that is wiring it would
- *   be the two halves of one seam disagreeing inside one wave.
- * - **`connection()` stays.** It is the only observable this store has of the stream's lifecycle and
- *   is what the case pinning *a released stream moves nothing* reads — deleting it would take that
- *   assertion with it, which is a gate lost to tidiness.
- * - **`lastReadAt()` stays, and it is the weakest of the three.** Its only justification is the
- *   interface: {@link Alerts} is implemented by three doubles outside this package —
- *   `shell/src/overview/harness.tsx`'s `staticAlerts` among them — so removing a member is an edit
- *   in two packages the kernel does not own, and the shell already reads `lastReadAt` off the
- *   decoded feed (`shell/src/data/alerts.ts`, which compares it to each event's `openedAt`) rather
- *   than through the store. If a wave ever owns the kernel and the shell together, this is the one
- *   to delete.
+ * Re-measured on 2026-09-11, over the same scope, and **all three still have zero production
+ * callers.** The second grep returns exactly two hits and neither is this interface:
+ * `App.tsx:1346`'s gateway stream and `feature-messages/src/transport.ts:88` both call
+ * `SseHandle.connection()`, which is the trap the paragraph above warns about.
+ *
+ * Two consecutive waves' plans have now written down that `unreadCount()` gained a caller in the
+ * drawer's Alerts badge, and the tree has disagreed both times. The badge is
+ * `alertsBadge(alerts.openCount())` (`App.tsx:805`) — the cluster-wide **open** count, not the
+ * per-principal unread one — and the bell takes `alerts.openCount()` and `alerts.unread()`
+ * (`App.tsx:944-945`), where `unread()` is a *boolean over* the count rather than the count.
+ * `TopBar` does declare an `unreadCount` prop, which is a third thing wearing the same word, and
+ * **the shell passes it nothing**: it defaults to `0` and that zero is what `Notifications` is
+ * handed. The plan is not wrong about where the number should come from; it is wrong about whether
+ * the wiring happened, and it has been wrong about it twice — which is what a sentence nothing in
+ * the repository compares to the tree does over time.
+ *
+ * **The decision, taken here and recorded rather than assumed: all three stay, for three different
+ * reasons, and only one of them is weak.**
+ *
+ * - **`unreadCount()` stays.** It is the per-principal figure the server sends and the only
+ *   accessor that carries it; `unread()` answers a different question — *is there anything* — and
+ *   cannot be widened back into a count. Deleting the count in a wave whose own plan is trying to
+ *   draw it would be the two halves of one seam disagreeing inside one wave, and the badge is one
+ *   prop away from reading it.
+ * - **`connection()` stays.** It is the only observable this store has of the stream's lifecycle
+ *   and is what the case pinning *a released stream moves nothing* reads — deleting it would take
+ *   that assertion with it, which is a gate lost to tidiness.
+ * - **`lastReadAt()` stays, and it is the weakest of the three by a long way.** Nothing reads it,
+ *   nothing is about to, and the shell already gets the same value off the decoded feed
+ *   (`shell/src/data/alerts.ts:209`, which compares it to each event's `openedAt`) rather than
+ *   through this store. It survives on ownership alone: {@link Alerts} is implemented by two
+ *   doubles outside this package — `shell/src/overview/harness.tsx:157`'s `staticAlerts` and
+ *   `feature-alerts/src/fixtures.tsx:62`'s `storeFor` — so removing the member is a three-file edit
+ *   across three packages, and the packet that owns this file owns neither of the other two. It is
+ *   filed as debt with that edit named rather than left as an implication. **This is the one to
+ *   delete the moment a packet owns the kernel and the shell together**, and it is now the only
+ *   member of this interface with no argument for its existence beyond who may touch which file.
  *
  * ## Why there is no poller behind the stream
  *

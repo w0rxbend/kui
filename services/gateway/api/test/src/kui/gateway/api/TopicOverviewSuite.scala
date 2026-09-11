@@ -107,7 +107,10 @@ final class TopicOverviewSuite extends CatsEffectSuite {
     }
 
   private def statuses(result: Either[KuiError, TopicOverviewDto]): Map[String, String] =
-    result.fold(error => fail(s"the aggregation should have answered: ${error.message}"), TopicOverviewDto.statuses)
+    result.fold(
+      error => fail(s"the aggregation should have answered: ${error.message}"),
+      TopicOverviewDto.statuses
+    )
 
   test("theTopicSectionIsOkWhenTheTopicServiceAnswers") {
     ask(Right(detailResponse)).map { result =>
@@ -209,7 +212,11 @@ final class TopicOverviewSuite extends CatsEffectSuite {
     val groups = List(Json.obj("groupId" -> Json.fromString("orders-consumer")))
 
     val source = new TopicOverviewUseCase.SectionSource[IO] {
-      def fetch(cluster: ClusterId, topic: TopicName, context: CallContext): IO[Either[KuiError, List[Json]]] =
+      def fetch(
+          cluster: ClusterId,
+          topic: TopicName,
+          context: CallContext
+      ): IO[Either[KuiError, List[Json]]] =
         IO.pure(Right(groups))
     }
 
@@ -224,7 +231,11 @@ final class TopicOverviewSuite extends CatsEffectSuite {
 
   test("a registered section that fails costs only its own section") {
     val source = new TopicOverviewUseCase.SectionSource[IO] {
-      def fetch(cluster: ClusterId, topic: TopicName, context: CallContext): IO[Either[KuiError, List[Json]]] =
+      def fetch(
+          cluster: ClusterId,
+          topic: TopicName,
+          context: CallContext
+      ): IO[Either[KuiError, List[Json]]] =
         IO.pure(Left(InfrastructureError.Unreachable("kui-consumer", "connection refused")))
     }
 
@@ -261,7 +272,8 @@ final class TopicOverviewSuite extends CatsEffectSuite {
   test("the overview endpoint claims no path a proxied topic route already claims") {
     // Two routes for one address is invisible in a route list. `/overview` is a suffix no topic endpoint
     // has, and this is the assertion that keeps it that way.
-    val proxied = TopicEndpoints.all.map(_.showPathTemplate().takeWhile(_ != '?').replace("/internal/v1", "/api/v1"))
+    val proxied =
+      TopicEndpoints.all.map(_.showPathTemplate().takeWhile(_ != '?').replace("/internal/v1", "/api/v1"))
 
     assert(
       !proxied.contains(TopicOverviewEndpoints.overview.showPathTemplate().takeWhile(_ != '?')),

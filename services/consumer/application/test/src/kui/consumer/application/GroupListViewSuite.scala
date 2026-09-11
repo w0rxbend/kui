@@ -20,8 +20,8 @@ import kui.testkit.KuiIOSuite
   *   - `sortRows`' `if query.sort == GroupSortField.Id && query.descending then ordered.reverse` is the only
   *     descending direction the `Id` sort has; the other four go through `stable`, which reverses the
   *     `Ordering` instead. Deleting the branch left every existing case green, because none of them asks for
-  *     a descending `Id` sort — and `sort=id&order=desc` would then answer in ascending order and say
-  *     nothing about having ignored the parameter, which is the defect `GroupSortField` exists to prevent.
+  *     a descending `Id` sort — and `sort=id&order=desc` would then answer in ascending order and say nothing
+  *     about having ignored the parameter, which is the defect `GroupSortField` exists to prevent.
   */
 final class GroupListViewSuite extends KuiIOSuite {
 

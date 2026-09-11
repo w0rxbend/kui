@@ -16,9 +16,9 @@ import kui.testkit.fakes.FakeStructuredLogger
 /** Removing a cluster, and the one removal the deployment's own configuration file forbids.
   *
   * `ClusterWriteUseCase.delete`'s own comment states it — "a cluster this deployment also declares in its
-  * *static* configuration cannot be removed at all: the store record would go, the next resolve would put
-  * the configured profile straight back, and the operator would watch a row they deleted reappear" — and
-  * nothing asserted it. Inverting the guard left `./mill services.cluster.__.test` at 509/509 green.
+  * *static* configuration cannot be removed at all: the store record would go, the next resolve would put the
+  * configured profile straight back, and the operator would watch a row they deleted reappear" — and nothing
+  * asserted it. Inverting the guard left `./mill services.cluster.__.test` at 509/509 green.
   *
   * The other half is asserted beside it, because a refusal-only case would pass just as well against a use
   * case that refused everything: a stored cluster is removed, and the registry no longer resolves it.

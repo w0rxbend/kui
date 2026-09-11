@@ -14,8 +14,8 @@ import kui.http.TestServer
 import kui.kernel.{ClusterId, ServiceId}
 import kui.testkit.fakes.FakeCapabilities
 
-/** That the three endpoints answer the questions they are for, and that a slow or hanging check
-  * cannot turn a degraded service into an unreachable one.
+/** That the three endpoints answer the questions they are for, and that a slow or hanging check cannot turn a
+  * degraded service into an unreachable one.
   */
 final class HealthEndpointsSuite extends CatsEffectSuite {
 
@@ -28,8 +28,8 @@ final class HealthEndpointsSuite extends CatsEffectSuite {
   ): List[ServerEndpoint[sttp.capabilities.fs2.Fs2Streams[IO], IO]] =
     HealthEndpoints.make[IO](checks, capabilities).map(widen)
 
-  /** An endpoint that needs no streaming still has to be typed as though it could be served
-    * alongside one, because that is what the server takes.
+  /** An endpoint that needs no streaming still has to be typed as though it could be served alongside one,
+    * because that is what the server takes.
     */
   private def widen(
       endpoint: ServerEndpoint[Any, IO]

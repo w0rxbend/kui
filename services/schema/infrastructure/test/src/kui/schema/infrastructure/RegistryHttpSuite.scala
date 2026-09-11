@@ -1,9 +1,9 @@
 package kui.schema.infrastructure
 
 import cats.effect.IO
+import sttp.client4.Backend
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.{BackendStub, ResponseStub, StubBody}
-import sttp.client4.Backend
 import sttp.model.StatusCode
 
 import kui.config.SafeUrl
@@ -131,8 +131,9 @@ final class RegistryHttpSuite extends KuiIOSuite {
   }
 
   test("both spellings of the level field are read") {
-    registry { case "/config" => (StatusCode.Ok, """{"compatibilityLevel":"FULL_TRANSITIVE"}""") }
-      .globalCompatibility
+    registry { case "/config" =>
+      (StatusCode.Ok, """{"compatibilityLevel":"FULL_TRANSITIVE"}""")
+    }.globalCompatibility
       .assertEquals(Right(CompatibilityLevel.FullTransitive)) *>
       registry { case "/config" => (StatusCode.Ok, """{"compatibility":"NONE"}""") }.globalCompatibility
         .assertEquals(Right(CompatibilityLevel.None))
@@ -143,8 +144,9 @@ final class RegistryHttpSuite extends KuiIOSuite {
   }
 
   test("a level KUI does not know is a failure naming the seven it does") {
-    registry { case "/config" => (StatusCode.Ok, """{"compatibilityLevel":"SIDEWAYS"}""") }
-      .globalCompatibility
+    registry { case "/config" =>
+      (StatusCode.Ok, """{"compatibilityLevel":"SIDEWAYS"}""")
+    }.globalCompatibility
       .map {
         case Left(error) => assert(clue(error.message).contains("BACKWARD"))
         case Right(found) => fail(s"expected a failure, got $found")

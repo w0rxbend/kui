@@ -86,8 +86,8 @@ final class TrackUseCaseSuite extends KuiIOSuite {
       headersSize = 0
     )
 
-  /** A record source that answers with a different log per topic, so that a track over two topics can be
-    * told apart from a track that read one of them twice.
+  /** A record source that answers with a different log per topic, so that a track over two topics can be told
+    * apart from a track that read one of them twice.
     */
   private def sourceOf(logs: Map[TopicName, List[RawRecord]]): RecordSource[IO] =
     (request, _) => Stream.emits(logs.getOrElse(request.topic, Nil).map(_.asRight[KuiError]))
@@ -114,15 +114,21 @@ final class TrackUseCaseSuite extends KuiIOSuite {
 
   private def run(
       logs: Map[TopicName, List[RawRecord]],
-      query: TrackQuery
+      query: TrackQuery,
+      masking: RecordMasking[IO] = RecordMasking.none[IO]
   ): IO[List[TrackEvent]] =
-    TrackUseCase.make[IO](clusters, serdes, sourceOf(logs)).track(query, budget).compile.toList
+    TrackUseCase
+      .make[IO](clusters, serdes, sourceOf(logs), masking)
+      .track(query, budget)
+      .compile
+      .toList
 
   private def hits(events: List[TrackEvent]): List[(String, String)] =
     events.collect { case TrackEvent.Hit(hit) => (hit.topic.value, hit.record.value.text) }
 
   private def ending(events: List[TrackEvent]): TrackEvent.Finished =
-    events.collectFirst { case finished: TrackEvent.Finished => finished }
+    events
+      .collectFirst { case finished: TrackEvent.Finished => finished }
       .getOrElse(fail("a track must always say how it ended"))
 
   test("a track finds the value in every topic it was given, and says which topic each hit came from") {
@@ -239,5 +245,53 @@ final class TrackUseCaseSuite extends KuiIOSuite {
         case _ => false
       })
     )
+  }
+
+  // ----------------------------------------------------------------------------------- the masking
+
+  test("a track's hits are masked, and a masked value is not trackable") {
+    // A TRACK IS A SECOND WAY OUT OF THIS SERVICE, AND ADR-023 SAYS "BEFORE ANY DTO LEAVES THE SERVICE".
+    // Masking only the browse would leave the same record readable in full through `POST /track`, which
+    // is the shape of defect a per-endpoint rule always takes. It is masked at the decode, so the
+    // matcher sees the mask too: a track that matched on the unmasked text would return the record while
+    // drawing asterisks, which tells the searcher what they were looking for without printing it.
+    val logs = Map(orders -> List(record(0L, "id=ORDER-4711;card=4111111111111111")))
+    val hideEverything: RecordMasking[IO] =
+      (_, _) => IO.pure(hit => hit.copy(value = hit.value.copy(text = "<masked>")))
+
+    for {
+      byMask <- run(logs, queryOver(List(orders), "<masked>"), hideEverything)
+      byOriginal <- run(logs, queryOver(List(orders), "4111111111111111"), hideEverything)
+    } yield {
+      assertEquals(hits(byMask).map(_._2), List("<masked>"))
+      assert(hits(byOriginal).isEmpty, clue = hits(byOriginal))
+    }
+  }
+
+  test("a track over two topics resolves each topic's own mask, so a rule scoped to the second reaches it") {
+    // ONCE PER TOPIC MEANS ONCE PER *THAT* TOPIC. The mask is resolved inside the per-topic loop, and the
+    // topic it is resolved for is the one the loop is on -- resolving it for `query.topics.head` instead
+    // would hand every topic of the track the FIRST topic's rules, which on a six-topic track is five
+    // topics masked by somebody else's rules and, when the first topic has none, five topics not masked
+    // at all. The masking fake beside this one takes `(_, _)` and cannot see that; this one reads its
+    // topic argument, and the two topics are given deliberately different answers. Filed as W9-06/F2.
+    val logs = Map(
+      orders -> List(record(0L, "card=4111111111111111")),
+      shipments -> List(record(0L, "card=4111111111111111"))
+    )
+    val onlyShipments: RecordMasking[IO] =
+      (_, topic) =>
+        IO.pure(
+          if topic == shipments then
+            hit => hit.copy(value = hit.value.copy(text = hit.value.text.replace("4111111111111111", "****")))
+          else RecordMask.identity
+        )
+
+    run(logs, queryOver(List(orders, shipments), "card="), onlyShipments).map { events =>
+      assertEquals(
+        hits(events),
+        List(orders.value -> "card=4111111111111111", shipments.value -> "card=****")
+      )
+    }
   }
 }

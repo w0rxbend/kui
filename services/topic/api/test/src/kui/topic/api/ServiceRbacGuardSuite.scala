@@ -89,8 +89,9 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
     TopicTestServer
       .resource(
         snapshot,
-        detail =
-          Right(Fresh.Live(TopicDetail.of(TopicName.unsafe("secrets"), isInternal = false, partitions = Nil))),
+        detail = Right(
+          Fresh.Live(TopicDetail.of(TopicName.unsafe("secrets"), isInternal = false, partitions = Nil))
+        ),
         rbac = policy("payments\\..*", Action.TopicView)
       )
       .use { server =>
@@ -109,7 +110,9 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
       .resource(
         snapshot,
         detail = Right(
-          Fresh.Live(TopicDetail.of(TopicName.unsafe("payments.orders"), isInternal = false, partitions = Nil))
+          Fresh.Live(
+            TopicDetail.of(TopicName.unsafe("payments.orders"), isInternal = false, partitions = Nil)
+          )
         ),
         rbac = policy("payments\\..*", Action.TopicView)
       )
@@ -125,7 +128,9 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
       .resource(
         snapshot,
         detail = Right(
-          Fresh.Live(TopicDetail.of(TopicName.unsafe("payments.orders"), isInternal = false, partitions = Nil))
+          Fresh.Live(
+            TopicDetail.of(TopicName.unsafe("payments.orders"), isInternal = false, partitions = Nil)
+          )
         ),
         rbac = policy("payments\\..*", Action.TopicView)
       )

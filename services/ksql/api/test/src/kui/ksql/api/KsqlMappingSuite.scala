@@ -74,7 +74,10 @@ final class KsqlMappingSuite extends FunSuite {
       (stream.kind, stream.topic, stream.format, stream.windowed, stream.statement),
       ("stream", Some("orders"), Some("JSON"), None, None)
     )
-    assertEquals((table.kind, table.topic, table.format, table.windowed), ("table", Some("users"), None, Some(true)))
+    assertEquals(
+      (table.kind, table.topic, table.format, table.windowed),
+      ("table", Some("users"), None, Some(true))
+    )
     assertEquals(
       (query.kind, query.name, query.topic, query.sinks, query.statement),
       ("query", "CSAS_0", None, List("X"), Some("SELECT 1;"))
@@ -140,9 +143,8 @@ final class KsqlMappingSuite extends FunSuite {
   }
 
   test("the truncation count survives the mapping, so a cut answer says how much it cut") {
-    val many = (1 to KsqlObjects.MaxObjects + 3).toList.map(index =>
-      KsqlObject.Stream(f"S$index%05d", "t", None)
-    )
+    val many =
+      (1 to KsqlObjects.MaxObjects + 3).toList.map(index => KsqlObject.Stream(f"S$index%05d", "t", None))
     val dto = KsqlMapping.objectsDto(KsqlObjects.of(many, List("BROKEN")))
 
     assertEquals(dto.truncated, 3)

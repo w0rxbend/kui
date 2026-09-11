@@ -2,8 +2,8 @@ package kui.kafka.admin
 
 import scala.jdk.CollectionConverters.*
 
-import org.apache.kafka.clients.admin.KuiTestSynonyms
 import org.apache.kafka.clients.admin as jadmin
+import org.apache.kafka.clients.admin.KuiTestSynonyms
 import org.apache.kafka.common.acl.AclOperation
 import org.apache.kafka.common.errors.KafkaStorageException
 import org.apache.kafka.common.{Node, TopicPartition}
@@ -16,10 +16,10 @@ import kui.testkit.KuiSuite
 
 /** Every rule KUI applies at the Kafka boundary, checked one constructor call at a time.
   *
-  * These are the assertions that would otherwise need a cluster in a specific state to make: a
-  * controller failover, a broker with no rack, a cluster with no authorizer, a disk that has gone
-  * offline, a broker too old to report its disk size. The conversions are pure functions precisely
-  * so that each of those is a value rather than a fixture.
+  * These are the assertions that would otherwise need a cluster in a specific state to make: a controller
+  * failover, a broker with no rack, a cluster with no authorizer, a disk that has gone offline, a broker too
+  * old to report its disk size. The conversions are pure functions precisely so that each of those is a value
+  * rather than a fixture.
   */
 final class AdminConversionsSuite extends KuiSuite {
 
@@ -143,7 +143,10 @@ final class AdminConversionsSuite extends KuiSuite {
     val converted = AdminConversions.configEntry(entry("x", "1", synonyms = synonyms))
 
     assertEquals(converted.synonyms.map(_.name), List("a", "b"))
-    assertEquals(converted.synonyms.map(_.source), List(ConfigSource.StaticBrokerConfig, ConfigSource.DefaultConfig))
+    assertEquals(
+      converted.synonyms.map(_.source),
+      List(ConfigSource.StaticBrokerConfig, ConfigSource.DefaultConfig)
+    )
   }
 
   test("documentationIsNoneRatherThanEmpty") {

@@ -14,8 +14,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** `LoggingAuditSink`'s twin, which had a suite for neither of the two properties its neighbour's has.
   *
-  * This is the shape wave 5 named and did not finish: `LoggingAuditSinkSuite` was written and the sink
-  * beside it, holding the same two rules in the same seven lines, was left alone. It is constructed by
+  * This is the shape wave 5 named and did not finish: `LoggingAuditSinkSuite` was written and the sink beside
+  * it, holding the same two rules in the same seven lines, was left alone. It is constructed by
   * `IdentityWiring` and by nothing else, and `services/identity/app` ships no test source at all, so both
   * rules were executed by no case anywhere — `./mill libs.__.test` and `./mill services.identity.__.test`
   * were 835 and 67 green with `.handleError(_ => ())` deleted, and 835 green with the shared field names

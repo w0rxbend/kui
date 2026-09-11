@@ -46,11 +46,14 @@ final class ConnectUseCasesSuite extends KuiIOSuite {
         val read = reports.head.facts.toOption.map(_.connectors).getOrElse(Nil)
 
         assertEquals(read.map(_.name.value), List("orders-source", "elastic-sink", "archive-sink"))
-        assertEquals(read.map(_.tasks.map(_.state.wire)), List(
-          List("RUNNING", "RUNNING", "RUNNING"),
-          List("RUNNING", "FAILED"),
-          List("PAUSED")
-        ))
+        assertEquals(
+          read.map(_.tasks.map(_.state.wire)),
+          List(
+            List("RUNNING", "RUNNING", "RUNNING"),
+            List("RUNNING", "FAILED"),
+            List("PAUSED")
+          )
+        )
         assertEquals(read.map(_.runningTasks), List(3, 1, 0))
       case other => fail(s"expected a listing over two workers, got $other")
     }

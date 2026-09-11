@@ -7,8 +7,8 @@ import munit.FunSuite
   * Two of the four things this classifier decides gate something real: `push` decides which endpoint may
   * answer, and `destructive` decides whether a plan token is required before a Kafka topic is deleted. So
   * every case below is run in **both directions** — a statement that must be classified one way, and the
-  * near-miss that must not be classified the same way — because a classifier that only ever sees the
-  * positive half is one that could return a constant.
+  * near-miss that must not be classified the same way — because a classifier that only ever sees the positive
+  * half is one that could return a constant.
   */
 final class StatementsSuite extends FunSuite {
 
@@ -130,6 +130,36 @@ final class StatementsSuite extends FunSuite {
     assertEquals(parsed("DROP TABLE IF EXISTS users;").target, Some("USERS"))
     assertEquals(parsed("DROP STREAM `MixedCase` DELETE TOPIC;").target, Some("MixedCase"))
     assertEquals(parsed("SELECT * FROM ORDERS;").target, None)
+  }
+
+  test("only a DROP is destructive, however loudly something else says DELETE TOPIC") {
+    // W9-A1: `destructive` is a conjunction and only the right-hand half was held. Every negative case in
+    // this file gets there by having the words stripped — a comment, a literal — so neutralising
+    // `DropLeading.matches` left all seventeen green. The conjunct is what stops a confirmation being
+    // demanded for a statement that destroys nothing, which the header of this file and
+    // `StatementProblem`'s own scaladoc both argue is how a reader is taught to click past the one that
+    // does.
+    // Double quotes are ksqlDB's *identifier* quotes, so `withoutLiterals` — which blanks single-quoted
+    // literals and nothing else — leaves this text intact and `DELETE\\s+TOPIC` matches inside it. Being a
+    // `CREATE` is the only reason it is harmless, which is precisely the half that was untested.
+    val quoted = """CREATE STREAM AUDIT AS SELECT * FROM EVENTS WHERE NOTE = "DELETE TOPIC";"""
+    assert(!parsed(quoted).destructive)
+    assert(!parsed("""INSERT INTO AUDIT (NOTE) VALUES ("DELETE TOPIC");""").destructive)
+    // And the near-miss in the other direction still is one.
+    assert(parsed("DROP STREAM ORDERS DELETE TOPIC;").destructive)
+  }
+
+  test("the bound admits a statement of exactly MaxLength characters and refuses the one after it") {
+    // W9-A1: `raw.length > MaxLength` had no case at its own boundary — the only long fixture is thirty-six
+    // characters past it, so `>` and `>=` were indistinguishable. A cap whose edge is untested is a cap
+    // whose edge moves silently, and this one is quoted verbatim in the sentence the operator is shown.
+    val prefix = "SELECT 1 FROM ORDERS WHERE NOTE = '"
+    val suffix = "';"
+    val exact = prefix + "x" * (KsqlStatement.MaxLength - prefix.length - suffix.length) + suffix
+    assertEquals(clue(exact.length), KsqlStatement.MaxLength)
+
+    assert(KsqlStatement.parse(exact).isRight, clue = KsqlStatement.parse(exact))
+    assertEquals(KsqlStatement.parse(exact + " "), Left(StatementProblem.TooLong))
   }
 
   test("a DROP whose target cannot be read is still destructive") {

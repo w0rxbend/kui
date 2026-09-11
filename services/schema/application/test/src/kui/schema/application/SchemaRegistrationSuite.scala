@@ -2,8 +2,8 @@ package kui.schema.application
 
 import cats.effect.IO
 
-import kui.kernel.{RoleName, Subject, UserName}
 import kui.kernel.error.ErrorCode
+import kui.kernel.{RoleName, Subject, UserName}
 import kui.schema.domain.*
 import kui.security.{Principal, PrincipalKind}
 import kui.testkit.KuiIOSuite
@@ -14,8 +14,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * The read-only case is the one with teeth, and it asserts the *absence of a request* rather than the code
   * of the refusal. A refusal that still contacted the registry is a write in somebody's proxy log that KUI
-  * then has to explain, and no status code can show whether it happened — only the count of what the
-  * registry was asked.
+  * then has to explain, and no status code can show whether it happened — only the count of what the registry
+  * was asked.
   */
 final class SchemaRegistrationSuite extends KuiIOSuite {
 
@@ -221,8 +221,8 @@ final class SchemaRegistrationSuite extends KuiIOSuite {
 
 object SchemaRegistrationSuite {
 
-  /** 1024 * 1024, written out, because the point of the case that reads it is not to read the constant it
-    * is checking. See `CompatibilityCheckUseCase.MaxDefinitionBytes` for why the bound exists.
+  /** 1024 * 1024, written out, because the point of the case that reads it is not to read the constant it is
+    * checking. See `CompatibilityCheckUseCase.MaxDefinitionBytes` for why the bound exists.
     */
   val OneMebibyte: Int = 1048576
 }

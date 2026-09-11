@@ -7,9 +7,9 @@ import kui.kernel.ClusterId
 
 /** A `CacheMetrics` that records what it was asked to count.
   *
-  * It is in this module's test sources rather than in `libs/testkit` because `CacheMetrics` is a
-  * `libs/cache` type, and a testkit that depended on `libs/cache` would put a cache on the test
-  * classpath of every module in KUI.
+  * It is in this module's test sources rather than in `libs/testkit` because `CacheMetrics` is a `libs/cache`
+  * type, and a testkit that depended on `libs/cache` would put a cache on the test classpath of every module
+  * in KUI.
   */
 final class FakeCacheMetrics[F[_]: Sync] private (
     recorded: Ref[F, List[FakeCacheMetrics.Entry]]

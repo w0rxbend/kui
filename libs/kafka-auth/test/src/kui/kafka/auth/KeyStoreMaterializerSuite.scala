@@ -17,17 +17,17 @@ import kui.kernel.cluster.*
 import kui.kernel.{ClusterId, Secret}
 import kui.testkit.KuiIOSuite
 
-/** That a keystore pasted into configuration becomes a real, openable, private file — and stops
-  * existing the moment the client that needed it does.
+/** That a keystore pasted into configuration becomes a real, openable, private file — and stops existing the
+  * moment the client that needed it does.
   */
 final class KeyStoreMaterializerSuite extends KuiIOSuite {
 
   private val id: ClusterId = ClusterId.unsafe("prod")
   private val storePassword = "changeit".toCharArray
 
-  /** An empty but structurally valid store of the given type, base64-encoded the way an operator
-    * would paste it into YAML. Empty is enough: what is under test is that the bytes survive the
-    * round trip to disk intact, which `KeyStore.load` proves by not failing.
+  /** An empty but structurally valid store of the given type, base64-encoded the way an operator would paste
+    * it into YAML. Empty is enough: what is under test is that the bytes survive the round trip to disk
+    * intact, which `KeyStore.load` proves by not failing.
     */
   private def storeBase64(kind: String): String = {
     val store = KeyStore.getInstance(kind)
@@ -50,8 +50,7 @@ final class KeyStoreMaterializerSuite extends KuiIOSuite {
   private def inlineTruststore(kind: StoreType, base64: String): ClusterSecurity =
     ClusterSecurity.Ssl(
       TlsConfig.default.copy(
-        truststore =
-          Some(TrustStoreRef(StoreSource.Inline(Secret(base64)), Some(Secret("changeit")), kind))
+        truststore = Some(TrustStoreRef(StoreSource.Inline(Secret(base64)), Some(Secret("changeit")), kind))
       )
     )
 
@@ -106,8 +105,7 @@ final class KeyStoreMaterializerSuite extends KuiIOSuite {
     // on disk with a lifetime nobody thought about.
     val security = ClusterSecurity.Ssl(
       TlsConfig.default.copy(
-        truststore =
-          Some(TrustStoreRef(StoreSource.FromPath("/etc/kui/t.p12"), None, StoreType.Pkcs12))
+        truststore = Some(TrustStoreRef(StoreSource.FromPath("/etc/kui/t.p12"), None, StoreType.Pkcs12))
       )
     )
 

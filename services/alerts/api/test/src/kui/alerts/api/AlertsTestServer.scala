@@ -48,14 +48,14 @@ object AlertsTestServer {
 
   val operator: RoleName = RoleName.unsafe("operator")
 
-  /** A store that records every acknowledgement it was **asked** to make, refused or not, and the
-    * `markRead` argument of every read it was asked for.
+  /** A store that records every acknowledgement it was **asked** to make, refused or not, and the `markRead`
+    * argument of every read it was asked for.
     *
-    * That counter is the whole point of this fixture: a stub that answered a constant could not tell a
-    * caller who was refused from one who was never allowed to reach it, and "refused before the store is
-    * written" is a statement about which of those happened. `reads` is there for the same kind of claim
-    * about the read: `markRead` is decoded, validated and documented, and the only way to see that the
-    * route passed it on is to ask the thing on the other side of the route what it was given.
+    * That counter is the whole point of this fixture: a stub that answered a constant could not tell a caller
+    * who was refused from one who was never allowed to reach it, and "refused before the store is written" is
+    * a statement about which of those happened. `reads` is there for the same kind of claim about the read:
+    * `markRead` is decoded, validated and documented, and the only way to see that the route passed it on is
+    * to ask the thing on the other side of the route what it was given.
     */
   final class CountingStore(
       state: Ref[IO, List[AlertEvent]],
@@ -183,7 +183,8 @@ object AlertsTestServer {
     * capability. This builds the whole list so that a case can assert the stream is in it — the shape of
     * orphan this project has shipped once per wave for three waves.
     */
-  def compositionRoutes: IO[List[sttp.tapir.server.ServerEndpoint[sttp.capabilities.fs2.Fs2Streams[IO], IO]]] =
+  def compositionRoutes
+      : IO[List[sttp.tapir.server.ServerEndpoint[sttp.capabilities.fs2.Fs2Streams[IO], IO]]] =
     for {
       logger <- FakeStructuredLogger[IO]
       meter <- MeterProvider.noop[IO].get("kui.alerts")
@@ -270,5 +271,6 @@ object AlertsTestServer {
     )
 
   def body(response: Response[String]): Json =
-    parse(response.body).fold(failure => sys.error(s"not JSON: ${failure.message} in ${response.body}"), identity)
+    parse(response.body)
+      .fold(failure => sys.error(s"not JSON: ${failure.message} in ${response.body}"), identity)
 }

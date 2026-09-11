@@ -65,6 +65,7 @@ import {
   NO_ROWS,
   OFFSET_RESET_NOT_SETTABLE,
 } from "./model.js";
+import { KSQL_ROW_EVENT_NAME } from "./wire.js";
 import {
   describeViolations,
   findViolations,
@@ -434,6 +435,54 @@ describe("the plan phase", () => {
     dispose();
   });
 
+  it("draws the topic-deletion danger from deletesTopic and not from destructive", async () => {
+    /*
+     * W9-A1: the `<Show when={plan().deletesTopic}>` banner was held by nothing. Replacing it with
+     * `false` — so the dialogue draws no danger banner at all — left all 75 cases in this package
+     * green, because the case above reads the dialogue's whole `textContent` and the service's own
+     * warning sentence also contains the words "deletes the Kafka topic".
+     *
+     * The two flags are separate on the wire on purpose (`StatementPlanDto`, ADR-055 §7): every
+     * `DROP` is destructive and only `DROP … DELETE TOPIC` destroys records, and they coincide
+     * today only because ksqlDB has one statement that does the second. So both directions are
+     * asserted against the flag rather than against the words.
+     */
+    const deletes = open(objectsResponse, {
+      grants: MAY_EXECUTE,
+      plan: planDrop,
+      result: resultStatus,
+    });
+    await settle();
+    type(deletes.container, "DROP STREAM ORDERS DELETE TOPIC;");
+    await settle();
+    button(deletes.container, "Run query")?.click();
+    await settle();
+
+    const danger = document.querySelector('[data-testid="ksql-confirm-deletes-topic"]');
+    expect(danger, "a statement that deletes a topic drew no danger banner").not.toBeNull();
+    expect(danger?.textContent).toContain("every record in it");
+    deletes.dispose();
+
+    // A confirmation that is needed and a topic deletion are not the same fact.
+    const drops = open(objectsResponse, {
+      grants: MAY_EXECUTE,
+      plan: { ...planDrop, deletesTopic: false },
+      result: resultStatus,
+    });
+    await settle();
+    type(drops.container, "DROP STREAM ORDERS;");
+    await settle();
+    button(drops.container, "Run query")?.click();
+    await settle();
+
+    expect(document.querySelector('[data-testid="ksql-confirm"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="ksql-confirm-deletes-topic"]'),
+      "a drop that destroys no records was given the records-destroyed banner",
+    ).toBeNull();
+    drops.dispose();
+  });
+
   it("applies the plan's own statement and token when the reader confirms", async () => {
     const { container, stub, dispose } = open(objectsResponse, {
       grants: MAY_EXECUTE,
@@ -736,6 +785,8 @@ interface FakeStream {
   emitColumns: (columns: readonly string[]) => void;
   emitRow: (values: readonly string[]) => void;
   fail: (cause: string) => void;
+  /** A frame this build could not read, which the kernel reports and which must not be terminal. */
+  garble: (cause: string) => void;
 }
 
 function fakeStream(): FakeStream {
@@ -745,11 +796,14 @@ function fakeStream(): FakeStream {
     emitColumns: () => {},
     emitRow: () => {},
     fail: () => {},
+    garble: () => {},
     opener: (_cluster: string, statement: string, subscriber: PushQuerySubscriber) => {
       stream.statements.push(statement);
       stream.emitColumns = (columns) => subscriber.onColumns(columns);
       stream.emitRow = (values) => subscriber.onRow(values);
       stream.fail = (cause) => subscriber.onError({ kind: "transport", cause });
+      stream.garble = (cause) =>
+        subscriber.onError({ kind: "decode", event: KSQL_ROW_EVENT_NAME, cause });
       return {
         connection: () => ({ phase: "open" as const }),
         close: () => {
@@ -841,6 +895,74 @@ describe("a push query's result region", () => {
     expect(region?.textContent).toContain("the stream ended unexpectedly");
     expect(region?.textContent).toContain("eu-west");
     expect(region?.textContent).toContain("1 row before the stream ended.");
+    dispose();
+  });
+
+  it("keeps delivering rows after a frame this build could not read", async () => {
+    /*
+     * W9-A1: `if (error.kind === "decode") return;` in `KsqlRoute`'s `onError` was held by nothing.
+     * Deleting it — so that one unreadable frame ends the query — left all 75 cases in this package
+     * and all 1,904 in the frontend green.
+     *
+     * It is the kernel's rule and `feature-messages` follows it too: a decode failure is
+     * informational, because one malformed frame among thousands must not tear down a push query
+     * that is otherwise delivering good rows. The two terminal kinds are asserted beside it, so the
+     * case fails just as loudly if the guard is widened to swallow those instead.
+     */
+    const { container, stream, dispose } = await running();
+    stream.emitColumns(["REGION"]);
+    stream.emitRow(["eu-west"]);
+    stream.garble("the frame carried no values this build could read");
+    await settle();
+
+    const region = container.querySelector('[data-testid="ksql-result"]');
+    expect(region?.getAttribute("data-kind"), "an unreadable frame ended the query").toBe(
+      "streaming",
+    );
+
+    // And the query really is still live: the next row still arrives and still draws.
+    stream.emitRow(["us-east"]);
+    await settle();
+    expect(container.querySelector('[data-testid="ksql-result"]')?.textContent).toContain(
+      "us-east",
+    );
+
+    // The other direction, in the same case: a transport failure *is* terminal.
+    stream.fail("the stream ended unexpectedly");
+    await settle();
+    expect(container.querySelector('[data-testid="ksql-result"]')?.getAttribute("data-kind")).toBe(
+      "interrupted",
+    );
+    dispose();
+  });
+
+  it("closes the push query already open before it runs the next statement", async () => {
+    /*
+     * W9-A1: the `stopStream()` at the top of `onRun` was held by nothing — deleting it left the
+     * whole frontend suite green. A push query never ends by itself, so a reader who runs a second
+     * statement without it leaves the first one executing on the operator's ksqlDB with nothing
+     * on screen referring to it and no handle left in the browser to close it. `onCleanup` cannot
+     * help: the component is still mounted, and the only reference to the old handle is gone.
+     */
+    const { container, stream, dispose } = await running();
+    stream.emitRow(["eu-west"]);
+    /*
+     * The stream the reader is left holding: `onError` draws `interrupted` and deliberately keeps
+     * the rows, but it does not close the handle — the connection is what failed, not the query,
+     * and the query is still running on the ksqlDB server. `onCancel` closes; this path does not,
+     * which is why the close has to happen on the way in to the next run.
+     */
+    stream.fail("the stream ended unexpectedly");
+    await settle();
+    expect(stream.closes, "the interrupted path closed the handle by itself").toBe(0);
+
+    type(container, "SELECT * FROM PAYMENTS EMIT CHANGES;");
+    await settle();
+    button(container, "Run query")?.click();
+    await settle();
+
+    expect(stream.statements.length, "the second statement did not open a query").toBe(2);
+    expect(stream.closes, "the first push query was left running on the server").toBe(1);
     dispose();
   });
 

@@ -13,8 +13,8 @@ import kui.config.LogFormat
   * on the method states the rule — *"someone who passed `-Dlogback.configurationFile=...` on the command line
   * has said something more specific than a configuration file did"* — and this is where it is checked.
   *
-  * The property is process-global, so each case restores whatever it found. `munit` runs the cases in one
-  * JVM and a leaked property would decide the outcome of the next one.
+  * The property is process-global, so each case restores whatever it found. `munit` runs the cases in one JVM
+  * and a leaked property would decide the outcome of the next one.
   */
 final class LogbackSelectionSuite extends CatsEffectSuite {
 

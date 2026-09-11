@@ -4,8 +4,8 @@ import kui.testkit.KuiSuite
 
 /** The hand-maintained level table.
   *
-  * `tableIsMonotonic` is the one that earns its keep: it is the property a mistyped row breaks, and
-  * a mistyped row would otherwise show an operator a Kafka version their cluster is not running.
+  * `tableIsMonotonic` is the one that earns its keep: it is the property a mistyped row breaks, and a
+  * mistyped row would otherwise show an operator a Kafka version their cluster is not running.
   */
 final class MetadataVersionsSuite extends KuiSuite {
 

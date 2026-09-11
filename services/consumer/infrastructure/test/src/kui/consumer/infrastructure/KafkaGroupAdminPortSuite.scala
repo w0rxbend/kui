@@ -8,7 +8,13 @@ import cats.effect.kernel.Ref
 import kui.consumer.domain.{OffsetWindow, ResetScope}
 import kui.kafka.admin.*
 import kui.kafka.{BatchResult, SkipReason}
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.group.{GroupProtocol, GroupState, LagAnomaly}
 import kui.kernel.{ClusterId, GroupId, Offset, PartitionId, TopicName, TopicPartition}
@@ -40,7 +46,10 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
   private def member(held: Set[Int]): GroupMember =
     GroupMember.of("m-1", None, "client", "10.0.0.7", MemberAssignment(held.map(partition)), None)
 
-  private def description(members: List[GroupMember], state: GroupState = GroupState.Stable): GroupDescription =
+  private def description(
+      members: List[GroupMember],
+      state: GroupState = GroupState.Stable
+  ): GroupDescription =
     GroupDescription(
       groupId = orders,
       isSimple = false,
@@ -61,10 +70,9 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       deleteSkips: Ref[IO, Map[GroupId, SkipReason]],
       /** Every `requireStable` this fake was asked for, newest last.
         *
-        * The flag used to be swallowed, which is why swapping the port's two call sites — `false` on the
-        * read path, `true` when a reset is being planned — left
-        * `./mill services.consumer.infrastructure.test` at 16/16 green. A fixture that cannot express an
-        * argument cannot gate it.
+        * The flag used to be swallowed, which is why swapping the port's two call sites — `false` on the read
+        * path, `true` when a reset is being planned — left `./mill services.consumer.infrastructure.test` at
+        * 16/16 green. A fixture that cannot express an argument cannot gate it.
         */
       val stability: Ref[IO, List[Boolean]]
   ) extends GroupAdmin[IO] {
@@ -87,15 +95,13 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
     def deleteOffsets(conn: ClusterConnection, group: GroupId, partitions: Set[TopicPartition]) =
       IO.pure(Right(()))
 
-    /** What the broker answers a `deleteGroups` with. A skip here is a per-group refusal, which is the
-      * shape `BatchResult` exists to carry and the one a caller most easily reads as success.
+    /** What the broker answers a `deleteGroups` with. A skip here is a per-group refusal, which is the shape
+      * `BatchResult` exists to carry and the one a caller most easily reads as success.
       */
     val deletions: Ref[IO, Map[GroupId, SkipReason]] = deleteSkips
 
     def deleteGroups(conn: ClusterConnection, ids: List[GroupId]) =
-      deletions.get.map(skips =>
-        Right(BatchResult(ids.filterNot(skips.contains).map(_ -> ()).toMap, skips))
-      )
+      deletions.get.map(skips => Right(BatchResult(ids.filterNot(skips.contains).map(_ -> ()).toMap, skips)))
   }
 
   final private class FakeOffsets(
@@ -111,22 +117,38 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
   }
 
   private def rig(
-      described: Either[KuiError, BatchResult[GroupId, GroupDescription]] =
-        Right(BatchResult.complete(Map(orders -> description(List(member(Set(0, 1))))))),
-      committed: Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]] =
-        Right(
-          BatchResult.complete(
-            Map(orders -> List(CommittedOffset(TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)), Offset.unsafe(90L), None, None)))
+      described: Either[KuiError, BatchResult[GroupId, GroupDescription]] = Right(
+        BatchResult.complete(Map(orders -> description(List(member(Set(0, 1))))))
+      ),
+      committed: Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]] = Right(
+        BatchResult.complete(
+          Map(
+            orders -> List(
+              CommittedOffset(
+                TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)),
+                Offset.unsafe(90L),
+                None,
+                None
+              )
+            )
           )
-        ),
-      ends: Either[KuiError, BatchResult[TopicPartition, Offset]] =
-        Right(BatchResult.complete(Map(TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)) -> Offset.unsafe(100L)))),
+        )
+      ),
+      ends: Either[KuiError, BatchResult[TopicPartition, Offset]] = Right(
+        BatchResult.complete(
+          Map(TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)) -> Offset.unsafe(100L))
+        )
+      ),
       endsSkipped: Map[TopicPartition, SkipReason] = Map.empty,
       offline: Set[TopicPartition] = Set.empty
   ): IO[(kui.consumer.domain.GroupAdminPort[IO], FakeAdmin)] =
     for {
       listing <- Ref.of[IO, Either[KuiError, GroupListingResult]](
-        Right(GroupListingResult.complete(List(GroupListing(orders, isSimple = false, GroupState.Stable, GroupProtocol.Classic))))
+        Right(
+          GroupListingResult.complete(
+            List(GroupListing(orders, isSimple = false, GroupState.Stable, GroupProtocol.Classic))
+          )
+        )
       )
       describedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, GroupDescription]]](described)
       committedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]](committed)
@@ -268,7 +290,10 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       (port, admin) = rigged
       _ <- port.applyOffsets(orders, Map(partition(0) -> Offset.unsafe(5L)))
       written <- admin.altered.get
-    } yield assertEquals(written.map((g, offsets) => g -> offsets.values.map(_.value).toList), List(orders -> List(5L)))
+    } yield assertEquals(
+      written.map((g, offsets) => g -> offsets.values.map(_.value).toList),
+      List(orders -> List(5L))
+    )
   }
 
   test("a group the broker refused to delete is a failure, and never an empty success") {

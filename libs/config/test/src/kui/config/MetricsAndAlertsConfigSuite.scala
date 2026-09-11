@@ -10,8 +10,8 @@ import kui.testkit.KuiSuite
 /** That `kui.metrics` and `kui.alerts` load, that they default to something a deployment can live with, and
   * that a file which has never heard of either is unaffected.
   *
-  * Both sections exist before the services that read them, which is the point of testing them here: M7 and
-  * M8 each need a section, and a section invented twice is a section spelled two ways. The case that matters
+  * Both sections exist before the services that read them, which is the point of testing them here: M7 and M8
+  * each need a section, and a section invented twice is a section spelled two ways. The case that matters
   * most is the *absent* one — a cluster with no metrics source is not a misconfiguration, it is the state
   * every metrics card on every screen is designed to render honestly (ADR-032), so "no source" has to be a
   * value the loader produces rather than an error it reports.

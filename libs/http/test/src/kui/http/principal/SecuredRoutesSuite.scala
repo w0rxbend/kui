@@ -11,10 +11,10 @@ import io.circe.{Codec, HCursor, Json}
 import munit.CatsEffectSuite
 import org.typelevel.otel4s.metrics.Counter
 import org.typelevel.otel4s.oteljava.testkit.OtelJavaTestkit
+import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.*
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.StreamBackendStub
-import sttp.capabilities.fs2.Fs2Streams
 import sttp.model.Uri
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
@@ -60,7 +60,9 @@ final class SecuredRoutesSuite extends CatsEffectSuite {
     FakeStructuredLogger[IO].map { logger =>
       val secured = new SecuredRoutes[IO](PrincipalCodec.inProcess[IO], Service, counter, logger)
 
-      TapirStreamStubInterpreter[IO, Fs2Streams[IO]](StreamBackendStub[IO, Fs2Streams[IO]](summon[sttp.monad.MonadError[IO]]))
+      TapirStreamStubInterpreter[IO, Fs2Streams[IO]](
+        StreamBackendStub[IO, Fs2Streams[IO]](summon[sttp.monad.MonadError[IO]])
+      )
         .whenServerEndpointRunLogic(
           secured.withBody(endpoint)(SecuredRoutes.bodyBytes[Echo]) { _ => input =>
             input.asRight[KuiError].pure[IO]
@@ -116,7 +118,10 @@ final class SecuredRoutesSuite extends CatsEffectSuite {
   test("aTokenBoundToTheBodyIsAccepted") {
     post(Echo("orders"), bound).map { response =>
       assertEquals(response.code.code, 200)
-      assertEquals(parse(response.body).toOption.flatMap(_.hcursor.get[String]("text").toOption), Some("orders"))
+      assertEquals(
+        parse(response.body).toOption.flatMap(_.hcursor.get[String]("text").toOption),
+        Some("orders")
+      )
     }
   }
 

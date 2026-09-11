@@ -72,7 +72,7 @@ final class SubjectListRoutesSuite extends KuiIOSuite {
     * use case calls. The registry-wide level is counted separately: it is the call an empty page must not
     * make, and no number of rows can show whether it was made.
     */
-  private final class CountingRegistry(
+  final private class CountingRegistry(
       names: List[String],
       broken: Set[String],
       val enriched: Ref[IO, List[String]],

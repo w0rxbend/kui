@@ -37,10 +37,12 @@ final class TopicConfigUseCaseSuite extends KuiIOSuite {
     FakeTopicAdmin.of(List(topic, lockedTopic), configs = configs).map(TopicConfigUseCase.make[IO])
 
   test("entriesAreSortedByName") {
-    val unsorted = TopicConfigView.Entries(List(entry("retention.ms"), entry("cleanup.policy"), entry("max.bytes")))
+    val unsorted =
+      TopicConfigView.Entries(List(entry("retention.ms"), entry("cleanup.policy"), entry("max.bytes")))
 
     useCase(Map(orders -> unsorted)).flatMap(_.config(FakeTopicAdmin.cluster, orders)).map {
-      case Right(view) => assertEquals(view.entries.map(_.name), List("cleanup.policy", "max.bytes", "retention.ms"))
+      case Right(view) =>
+        assertEquals(view.entries.map(_.name), List("cleanup.policy", "max.bytes", "retention.ms"))
       case Left(error) => fail(error.message)
     }
   }
@@ -109,7 +111,10 @@ final class TopicConfigUseCaseSuite extends KuiIOSuite {
       .flatMap(_.config(FakeTopicAdmin.cluster, orders))
       .map {
         case Right(view) =>
-          assert(view.isPermitted, "'the broker reports nothing' and 'you may not read it' are different tabs")
+          assert(
+            view.isPermitted,
+            "'the broker reports nothing' and 'you may not read it' are different tabs"
+          )
           assertEquals(view.entries, Nil)
         case Left(error) => fail(error.message)
       }

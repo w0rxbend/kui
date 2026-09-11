@@ -12,13 +12,18 @@ import kui.security.Principal
 /** [[InMemorySessionStore]] against the four rules ADR-019 states: two timeouts, a fixation defence, and a
   * bound that cannot be exceeded.
   *
-  * Every timing case runs under `TestControl`, so "thirty minutes have passed" is asserted rather than
-  * waited for — nothing in this suite sleeps, and nothing in it can be flaky on a loaded CI machine.
+  * Every timing case runs under `TestControl`, so "thirty minutes have passed" is asserted rather than waited
+  * for — nothing in this suite sleeps, and nothing in it can be flaky on a loaded CI machine.
   */
 final class InMemorySessionStoreSuite extends CatsEffectSuite {
 
   private val shortConfig: SessionConfig =
-    SessionConfig(idleTimeout = 30.minutes, absoluteTimeout = 12.hours, maxSessions = 10_000, sweepInterval = 1.minute)
+    SessionConfig(
+      idleTimeout = 30.minutes,
+      absoluteTimeout = 12.hours,
+      maxSessions = 10_000,
+      sweepInterval = 1.minute
+    )
 
   test("getReturnsNoneAfterIdleTimeout") {
     // Two independent sessions rather than one touched twice: `get` itself moves `lastSeenAt` forward

@@ -6,7 +6,7 @@
  * destructive confirmation the words are the feature. A dialog that deletes the right records while
  * saying the wrong number is a dialog nobody should trust.
  */
-import { test, expect, CLUSTER, removeTopic, scratchTopic } from "./fixtures";
+import { test, expect, CLUSTER, removeTopic, scratchTopic, type KuiApi } from "./fixtures";
 
 // One shared cluster, and these write to it. Serial, so a create and a delete cannot interleave.
 test.describe.configure({ mode: "serial" });
@@ -413,6 +413,120 @@ test.describe("the topics list's chips and selection", () => {
     await expect(bar.getByRole("button", { name: /^delete$/i })).toBeVisible();
     await expect(bar.getByRole("button", { name: /^empty$/i })).toBeVisible();
   });
+
+  /**
+   * `M14` — the plural receipt, and the last partially-covered screen of the twenty-three.
+   *
+   * Single deletion is covered above and `messages.spec.ts` covers two other toasts, so the toast
+   * *machinery* was proved; **the sentence after a bulk delete was asserted nowhere.** It is not
+   * the same sentence and it is not produced by the same code: `bulkSentence` counts what a set of
+   * plan→token→confirm rounds actually did, pluralises on that count, and appends the refusals when
+   * part of the set failed — so "2 topics deleted" over a selection of two is the one reading here
+   * that establishes both halves of it at once, and a receipt that quietly said "1 topic deleted"
+   * over a pair is precisely the failure mode this suite's header is about.
+   *
+   * Two scratch topics with a shared, timestamped prefix, and the list filtered to them **on the
+   * server**. Ticking `tbody input[type=checkbox]` on an unfiltered list would select whatever the
+   * quickstart's first two rows happen to be, and this case deletes what it selects.
+   */
+  test("a bulk delete says how many it deleted, in the plural", async ({ page, api }) => {
+    /*
+     * Longer than the file's default because of the arrangement below, and *only* because of it:
+     * the assertions are as quick as any other case here. `kui.topics.refreshInterval` is 60s and a
+     * scrape of this cluster takes ten to fifteen seconds under the load this machine runs at, so
+     * the worst case for "both topics are in the service's snapshot" is one in-flight scrape plus
+     * one of this case's own — measured at under a second on a quiet stack and at just over thirty
+     * in a full-file run, which is where the 30s budget it shipped with went red.
+     */
+    test.setTimeout(180_000);
+
+    const prefix = scratchTopic("bulk");
+    const names = [`${prefix}-a`, `${prefix}-b`];
+
+    try {
+      /*
+       * Created over HTTP, and then the list is **made** to catch up rather than waited on.
+       *
+       * `services/topic` serves the list from a `SnapshotCell` on `kui.topics.refreshInterval` (60
+       * seconds by default) and `MutationGuard` asks the cell for an out-of-band refresh after a
+       * write. `SnapshotCell.refresh` is idempotent under concurrency — five asks are one scrape —
+       * so two creates a few milliseconds apart produce **one** scrape, and it is the scrape the
+       * first create started, which ran before the second topic existed. Measured on this stack:
+       * create `-a` and `-b` back to back, then poll `?q=<prefix>`, and the answer is `[-a]` and
+       * only `[-a]` for the whole of the next thirty seconds. The same coalescing swallows a
+       * create made while any earlier case's scrape is in flight, which is why sequencing the two
+       * creates is not enough either — the full-file run reddened where the single-case run passed.
+       *
+       * So each attempt asks `POST …/topics/refresh` — the product's own "read this cluster now"
+       * endpoint, 202 and asynchronous — and then reads. Some attempt's refresh starts after both
+       * topics exist, and that one lands them. On a quiet stack the first attempt is enough; the
+       * budget above is sized for the case where it has to wait out somebody else's scrape first.
+       *
+       * The wait is here rather than on a DOM assertion because the page does not re-fetch on its
+       * own: a table that arrives empty stays empty however long `toHaveCount` retries.
+       */
+      for (const name of names) {
+        await api.post(`/api/v1/clusters/${CLUSTER}/topics`, { name, config: {} });
+      }
+      await expect.poll(() => listedAfterRefresh(api, prefix), SETTLE).toBe(names.length);
+
+      const filtered = page.waitForRequest((request) => request.url().includes(`q=${prefix}`));
+      await page.goto(`/ui/clusters/${CLUSTER}/topics?q=${prefix}`);
+      await filtered;
+
+      /* The filter did what this case depends on, asserted before anything is ticked: two rows and
+         no others. A search that quietly returned the whole cluster would otherwise be discovered
+         by the confirmation dialog listing somebody's production topics. */
+      const ticks = page.locator("tbody input[type=checkbox]");
+      await expect(ticks).toHaveCount(names.length, { timeout: 20_000 });
+      for (let row = 0; row < names.length; row += 1) {
+        await ticks.nth(row).click({ force: true });
+      }
+
+      const bar = page.getByTestId("topic-bulk-bar");
+      await expect(bar).toContainText(`${names.length} topics selected`);
+      await bar.getByRole("button", { name: /^delete$/i }).click();
+
+      /* Named rather than counted, which is `TopicsRoute`'s own rule for this dialog and the whole
+         reason ADR-045 plans before it confirms: a confirmation reading "2 topics" is one the
+         operator cannot check. */
+      const dialog = page.getByTestId("topic-bulk-confirm");
+      await expect(dialog).toBeVisible();
+      for (const name of names) await expect(dialog).toContainText(name);
+
+      await dialog.getByRole("textbox").first().fill("delete");
+      await dialog.getByRole("button", { name: /^delete topics$/i }).click();
+
+      /*
+       * The receipt. Asserted before anything else, because a toast is on a six-second timer.
+       *
+       * The count is `names.length` rather than a literal `2`: what is under test is that the
+       * sentence counts the set, and a literal on both sides of that is a test of nothing. The
+       * plural is in the same assertion — `bulkSentence` picks "topic" or "topics" off the number
+       * it is about to print, so `2 topics deleted` covers both halves of it at once.
+       *
+       * The second reading is taken from the text the first one found rather than as a second
+       * retrying assertion, because a *negative* that retries is satisfied by the toast having
+       * auto-dismissed: six seconds after it appears, `.kui-notice-stack` contains nothing and
+       * every `not.toContainText` in the world passes over it.
+       */
+      const notices = page.locator(".kui-notice-stack");
+      await expect(notices).toContainText(`${names.length} topics deleted`, { timeout: 20_000 });
+      const receipt = await notices.innerText();
+      expect(
+        receipt,
+        "the receipt names a refusal, so the set failed in the middle and the count above is the " +
+          "half that worked",
+      ).not.toContain("refused");
+
+      /* And it deleted them, which is the other half of a receipt being true. The API is asked
+         rather than the screen: the list reloads on its own timing and "the row is gone" is
+         satisfied by a filter that stopped matching. */
+      await expect.poll(() => listedAfterRefresh(api, prefix), SETTLE).toBe(0);
+    } finally {
+      for (const name of names) await removeTopic(api, name);
+    }
+  });
 });
 
 test.describe("the topic's Overview tab", () => {
@@ -471,3 +585,47 @@ test.describe("the topic's Consumers tab", () => {
     }
   });
 });
+
+/**
+ * How long a change of the cluster is given to reach the topic service's own snapshot.
+ *
+ * Sized from the two figures that decide it, both of which are in this repository:
+ * `kui.topics.refreshInterval` is 60 seconds (`libs/config`'s `TopicsConfig`) and one scrape of this
+ * cluster takes ten to fifteen under the load this machine runs at. A read that arrives while
+ * somebody else's scrape is in flight waits that scrape out and then its own, which is where a
+ * 30-second budget went red in a full-file run and passed when the same case ran alone.
+ */
+const SETTLE = { timeout: 90_000, intervals: [500, 500, 1_000, 1_000, 2_000] };
+
+/**
+ * Asks the service to read the cluster now, then counts what it holds under a prefix.
+ *
+ * The refresh is inside the poll rather than before it because `SnapshotCell.refresh` is idempotent
+ * under concurrency — a caller arriving during a scrape joins *that* scrape, which may have started
+ * before the change this is waiting for. Asking again on the next attempt is what eventually starts
+ * one that did not.
+ */
+async function listedAfterRefresh(api: KuiApi, prefix: string): Promise<number> {
+  await api.post(`/api/v1/clusters/${CLUSTER}/topics/refresh`);
+  return (await topicsMatching(api, prefix)).length;
+}
+
+/**
+ * The names the cluster still holds under a prefix, asked of the gateway rather than of the screen.
+ *
+ * A row leaving the table is satisfied by a filter that stopped matching, by a page that moved, and
+ * by a list that failed to reload — three states a receipt saying "deleted" must not be confirmed
+ * by. This asks the same question the operator would ask afterwards.
+ */
+async function topicsMatching(api: KuiApi, prefix: string): Promise<readonly string[]> {
+  const listing = (await api.get(
+    `/api/v1/clusters/${CLUSTER}/topics?q=${encodeURIComponent(prefix)}&page=1&pageSize=32`,
+  )) as {
+    readonly topics?: {
+      readonly data?: { readonly items?: readonly { readonly name?: string }[] };
+    };
+  };
+  return (listing.topics?.data?.items ?? [])
+    .map((topic) => topic.name)
+    .filter((name): name is string => typeof name === "string" && name.startsWith(prefix));
+}

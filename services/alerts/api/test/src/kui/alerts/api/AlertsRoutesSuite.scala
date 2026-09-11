@@ -9,8 +9,8 @@ import kui.kernel.RoleName
 import kui.kernel.error.InfrastructureError
 import kui.security.rbac.*
 
-/** The two routes, answered end to end: the interceptor chain, the principal check, the permission guard,
-  * the use case, the store and the mapping onto the wire.
+/** The two routes, answered end to end: the interceptor chain, the principal check, the permission guard, the
+  * use case, the store and the mapping onto the wire.
   */
 final class AlertsRoutesSuite extends CatsEffectSuite {
 
@@ -41,7 +41,9 @@ final class AlertsRoutesSuite extends CatsEffectSuite {
     }
   }
 
-  test("an acknowledgement by a principal without ALERTS:ACKNOWLEDGE is refused before the store is written") {
+  test(
+    "an acknowledgement by a principal without ALERTS:ACKNOWLEDGE is refused before the store is written"
+  ) {
     // The order is the claim. `SecuredRoutes` runs the guard between "who is this" and "do the work", so a
     // caller holding only `VIEW` never reaches `AlertStore.acknowledge` at all — which is why the fixture
     // counts the calls the store was asked to make rather than reading the events back.

@@ -3,8 +3,8 @@ package kui.consumer.contract
 import java.time.Instant
 
 import kui.consumer.contract.dto.*
-import kui.contracts.capability.ReasonCode
 import kui.contracts.Section
+import kui.contracts.capability.ReasonCode
 import kui.contracts.consumer.*
 import kui.contracts.paging.{PageDto, PageInfo}
 import kui.kernel.group.{GroupProtocol, GroupState, LagAnomaly, ResetTarget}

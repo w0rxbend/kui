@@ -8,12 +8,12 @@ import cats.effect.unsafe.implicits.global
 import kui.kernel.cluster.PropertyValue
 import kui.testkit.KuiSuite
 
-/** That `kui.clusters[]` is read the way the operator documentation says it is, and that a file with
-  * several mistakes in it produces several messages rather than one per restart.
+/** That `kui.clusters[]` is read the way the operator documentation says it is, and that a file with several
+  * mistakes in it produces several messages rather than one per restart.
   *
   * This is the cluster half of M1's "configuration fails at startup with all errors accumulated in one
-  * message" exit criterion. The other half — an unknown key and an invalid URL — is `ValidationSuite`'s,
-  * and `accumulatesEveryClusterProblem` asserts the two halves add up rather than shadowing each other.
+  * message" exit criterion. The other half — an unknown key and an invalid URL — is `ValidationSuite`'s, and
+  * `accumulatesEveryClusterProblem` asserts the two halves add up rather than shadowing each other.
   */
 final class ClusterConfigSuite extends KuiSuite {
 
@@ -170,7 +170,10 @@ final class ClusterConfigSuite extends KuiSuite {
     )
 
     assertEquals(config.clusters.size, 10)
-    assertEquals(config.clusters.map(_.id.value).take(3), List("local-development", "production-eu", "staging-plain"))
+    assertEquals(
+      config.clusters.map(_.id.value).take(3),
+      List("local-development", "production-eu", "staging-plain")
+    )
     assertEquals(config.clusters(1).readOnly, true)
     assertEquals(config.clusters.head.readOnly, false)
   }
@@ -185,7 +188,10 @@ final class ClusterConfigSuite extends KuiSuite {
 
     val mtls = config.clusters.find(_.name == "Mutual TLS").getOrElse(fail("the mTLS cluster is missing"))
 
-    assertEquals(mtls.properties.get("ssl.cipher.suites"), Some(PropertyValue.Plain("TLS_AES_256_GCM_SHA384")))
+    assertEquals(
+      mtls.properties.get("ssl.cipher.suites"),
+      Some(PropertyValue.Plain("TLS_AES_256_GCM_SHA384"))
+    )
     assertEquals(
       mtls.properties.get("ssl.truststore.password").map(_.unsafeValue),
       Some("overridden-secret")

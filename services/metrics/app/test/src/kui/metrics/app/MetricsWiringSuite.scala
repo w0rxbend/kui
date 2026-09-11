@@ -9,11 +9,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.data.NonEmptyList
-import cats.effect.kernel.Resource
 import cats.effect.IO
+import cats.effect.kernel.Resource
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
-import io.circe.parser.parse
 import io.circe.Json
+import io.circe.parser.parse
 import org.typelevel.otel4s.metrics.MeterProvider
 import sttp.client4.*
 import sttp.client4.impl.cats.implicits.*
@@ -47,8 +47,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * The suite was called `ThroughputScrapeLoopSuite` when that sentence was written, and its subject
   * `ThroughputScrapeLoop`; both were renamed when the scrape stopped being about throughput alone. Wave 6
-  * corrected `MT-002`'s note in `docs/FEATURE_MATRIX.md:589-591` for exactly this and missed the copy
-  * here, which is the third time a renamed class has survived in prose that nothing compiles.
+  * corrected `MT-002`'s note in `docs/FEATURE_MATRIX.md:589-591` for exactly this and missed the copy here,
+  * which is the third time a renamed class has survived in prose that nothing compiles.
   *
   * ==Two seams, and why each is used where it is==
   *
@@ -60,10 +60,10 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * ==A real socket, deliberately==
   *
-  * The exporter here is a JDK `HttpServer` on a loopback port, not a stub backend. A stub cannot be late,
-  * and "late" is the whole of what `callTimeout` is about; it also cannot be counted, and a cadence is a
-  * count over a window. Everything below it — the pool, the breaker, the bulkhead, the timeout — is the
-  * production `UpstreamClient`.
+  * The exporter here is a JDK `HttpServer` on a loopback port, not a stub backend. A stub cannot be late, and
+  * "late" is the whole of what `callTimeout` is about; it also cannot be counted, and a cadence is a count
+  * over a window. Everything below it — the pool, the breaker, the bulkhead, the timeout — is the production
+  * `UpstreamClient`.
   */
 final class MetricsWiringSuite extends KuiIOSuite {
 
@@ -82,7 +82,7 @@ final class MetricsWiringSuite extends KuiIOSuite {
   // -----------------------------------------------------------------------------------------------
 
   /** What the fake exporter did while a case was running. */
-  private final class Exporter(val port: Int, val requests: AtomicInteger) {
+  final private class Exporter(val port: Int, val requests: AtomicInteger) {
     def url: SafeUrl = SafeUrl.unsafe(s"http://127.0.0.1:$port/metrics")
     def hits: IO[Int] = IO(requests.get())
   }
@@ -206,9 +206,7 @@ final class MetricsWiringSuite extends KuiIOSuite {
           .response(asStringAlways)
           .send(backendFor(server))
       )
-      .map(response =>
-        parse(response.body).fold(failure => fail(s"not JSON: ${failure.message}"), identity)
-      )
+      .map(response => parse(response.body).fold(failure => fail(s"not JSON: ${failure.message}"), identity))
   }
 
   private def measuredRates(document: Json): List[Double] =
@@ -316,8 +314,8 @@ final class MetricsWiringSuite extends KuiIOSuite {
 
   /** The buffers `make` builds, for the numbers that are only visible through `record`.
     *
-    * The address is a port nothing is listening on, so the scrape loop runs and files nothing: what the
-    * cases below assert is the shape of the window the wiring built, not the timing of a scrape.
+    * The address is a port nothing is listening on, so the scrape loop runs and files nothing: what the cases
+    * below assert is the shape of the window the wiring built, not the timing of a scrape.
     */
   private def buffersFor(metrics: MetricsConfig): Resource[IO, Map[ClusterId, MetricsBuffer[IO]]] =
     Resource.eval(FakeStructuredLogger[IO]).flatMap { log =>
@@ -425,7 +423,8 @@ final class MetricsWiringSuite extends KuiIOSuite {
     // observable in a count or in a duration without making the case a coin toss. Asserted at the
     // decision point instead, which is the value the wiring hands `UpstreamClient` and the only place any
     // of these four is chosen.
-    val settings = MetricsSourceSettings(SafeUrl.unsafe("http://kafka-metrics:5556/metrics"), callTimeout = 7.seconds)
+    val settings =
+      MetricsSourceSettings(SafeUrl.unsafe("http://kafka-metrics:5556/metrics"), callTimeout = 7.seconds)
     val config = MetricsWiring.upstreamConfig(quickstart, settings, UrlPolicy.Dev)
 
     assertEquals(config.maxRetries, 0, "a scrape is a poll: the next one is already scheduled")

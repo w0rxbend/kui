@@ -7,15 +7,15 @@ import sttp.model.Method
 
 /** When a failed call may be tried again, and how long to wait first.
   *
-  * `UpstreamClientSuite` drives the policy through a real client and pins the two rules that decide
-  * *whether* to retry. What it never passes is a `random` outside `[0, 1]`, so `backoff`'s clamp — the line
-  * that keeps the wait inside the interval the caller was promised — was executed by nothing: made
+  * `UpstreamClientSuite` drives the policy through a real client and pins the two rules that decide *whether*
+  * to retry. What it never passes is a `random` outside `[0, 1]`, so `backoff`'s clamp — the line that keeps
+  * the wait inside the interval the caller was promised — was executed by nothing: made
   * `val fraction = random`, `libs.http.test` and the eight other `libs` suites stayed at 835 of 835.
   *
   * The clamp's reachability is honest to state: `backoff`'s default argument is `math.random()`, which is
-  * already in range, so the only caller that can violate it today is a suite. That is exactly why it is
-  * worth a case rather than a deletion — the parameter exists so that a *future* caller can supply the
-  * randomness, and a guard nothing checks is one edit from being wrong on the day one does.
+  * already in range, so the only caller that can violate it today is a suite. That is exactly why it is worth
+  * a case rather than a deletion — the parameter exists so that a *future* caller can supply the randomness,
+  * and a guard nothing checks is one edit from being wrong on the day one does.
   */
 final class RetryPolicySuite extends FunSuite {
 

@@ -10,7 +10,8 @@ import org.scalacheck.Prop.forAll
   *
   * The properties here are all one property said three ways: subtraction saturates. A budget that goes
   * negative silently becomes unbounded, because the next `isExhausted` compares a negative number with zero
-  * and answers "keep going" — and the failure looks like a stream that never ends rather than like arithmetic.
+  * and answers "keep going" — and the failure looks like a stream that never ends rather than like
+  * arithmetic.
   */
 final class PollBudgetSuite extends ScalaCheckSuite {
 

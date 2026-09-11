@@ -37,7 +37,7 @@ final class AlertsStreamSuite extends CatsEffectSuite {
     * It also records how each read was **asked for**, because the third property decided in
     * `AlertsRoutes.changes` is not visible in a frame at all: reading a stream must not mark the feed read.
     */
-  private final class Publishing(published: List[ClusterId], counts: Map[ClusterId, Int])
+  final private class Publishing(published: List[ClusterId], counts: Map[ClusterId, Int])
       extends AlertStore[IO] {
 
     private val asked = scala.collection.mutable.ListBuffer.empty[(Int, Option[Instant])]

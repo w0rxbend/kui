@@ -6,8 +6,8 @@ import munit.ScalaCheckSuite
 import org.scalacheck.Prop.{forAll, propBoolean}
 import org.scalacheck.{Arbitrary, Gen}
 
-import kui.kernel.serde.Target
 import kui.kernel.TopicName
+import kui.kernel.serde.Target
 
 /** DM-001: what an operator writes, and what the reader of a record then sees.
   *
@@ -50,7 +50,10 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
 
   test("remove drops the matching key from every element of an array of objects") {
     assertEquals(
-      maskValue(List(onField(MaskingKind.Remove, "secret")), """{"rows":[{"secret":1},{"secret":2,"a":3}]}"""),
+      maskValue(
+        List(onField(MaskingKind.Remove, "secret")),
+        """{"rows":[{"secret":1},{"secret":2,"a":3}]}"""
+      ),
       """{"rows":[{},{"a":3}]}"""
     )
   }
@@ -81,7 +84,12 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
   test("keep at both ends") {
     assertEquals(
       MaskingEngine
-        .maskText(List(MaskingRule.everything(MaskingKind.Mask("*", KeepEnds(2, 2)))), topic, Target.Value, "abcdefgh"),
+        .maskText(
+          List(MaskingRule.everything(MaskingKind.Mask("*", KeepEnds(2, 2)))),
+          topic,
+          Target.Value,
+          "abcdefgh"
+        ),
       "ab****gh"
     )
   }
@@ -89,7 +97,12 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
   test("the replacement characters cycle, one per input character") {
     assertEquals(
       MaskingEngine
-        .maskText(List(MaskingRule.everything(MaskingKind.Mask("xy", KeepEnds.none))), topic, Target.Value, "abcde"),
+        .maskText(
+          List(MaskingRule.everything(MaskingKind.Mask("xy", KeepEnds.none))),
+          topic,
+          Target.Value,
+          "abcde"
+        ),
       "xyxyx"
     )
   }
@@ -99,7 +112,12 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
     // first looks like it is working.
     assertEquals(
       MaskingEngine
-        .maskText(List(MaskingRule.everything(MaskingKind.Mask("*", KeepEnds(10, 10)))), topic, Target.Value, "abc"),
+        .maskText(
+          List(MaskingRule.everything(MaskingKind.Mask("*", KeepEnds(10, 10)))),
+          topic,
+          Target.Value,
+          "abc"
+        ),
       "abc"
     )
   }
@@ -151,14 +169,19 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
   }
 
   test("a rule with neither fields nor a pattern masks the whole value") {
-    assertEquals(maskValue(List(MaskingRule.everything(MaskingKind.Replace("GONE"))), """{"a":1}"""), """"GONE"""")
+    assertEquals(
+      maskValue(List(MaskingRule.everything(MaskingKind.Replace("GONE"))), """{"a":1}"""),
+      """"GONE""""
+    )
   }
 
   test("a topic pattern scopes a rule to the topics it names") {
     val rule = MaskingRule(stars, Some(NonEmptyList.of("pin")), None, None, Some("payments.*".r))
     assertEquals(maskValue(List(rule), """{"pin":"12"}"""), """{"pin":"12"}""")
     assertEquals(
-      MaskingEngine.maskJson(List(rule), TopicName.unsafe("payments-v2"), Target.Value, json("""{"pin":"12"}""")).noSpaces,
+      MaskingEngine
+        .maskJson(List(rule), TopicName.unsafe("payments-v2"), Target.Value, json("""{"pin":"12"}"""))
+        .noSpaces,
       """{"pin":"**"}"""
     )
   }
@@ -185,7 +208,9 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
     forAll(Gen.oneOf("""{"a":1}""", """{"pin":"12"}""", """[1,2,3]""")) { document =>
       val elsewhere = MaskingRule(stars, Some(NonEmptyList.of("pin")), None, None, Some("payments.*".r))
       val rules = List(elsewhere)
-      !MaskingEngine.applies(rules, topic, Target.Value) ==> (maskValue(rules, document) == json(document).noSpaces)
+      !MaskingEngine.applies(rules, topic, Target.Value) ==> (maskValue(rules, document) == json(
+        document
+      ).noSpaces)
     }
   }
 
@@ -253,7 +278,8 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
   test("a surrogate pair is masked as one character, not as two halves") {
     // Masking half of an emoji produces invalid text, which then fails JSON encoding two layers away — in
     // the response, long after anyone could connect the failure to the rule that caused it.
-    val masked = maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(0, 1)), "pin")), """{"pin":"🎉🎉🎉"}""")
+    val masked =
+      maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(0, 1)), "pin")), """{"pin":"🎉🎉🎉"}""")
     assertEquals(masked, """{"pin":"**🎉"}""")
   }
 
@@ -267,8 +293,10 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
     // ever drives `maskedCount` below zero, which returns the input unchanged — exactly what the clamped
     // path returns. The case above ("keeping more than there is masks everything") covers the reachable
     // half of that pair.
-    val negativePrefix = maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(-1, 0)), "pin")), """{"pin":"1234"}""")
-    val negativeSuffix = maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(0, -1)), "pin")), """{"pin":"1234"}""")
+    val negativePrefix =
+      maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(-1, 0)), "pin")), """{"pin":"1234"}""")
+    val negativeSuffix =
+      maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(0, -1)), "pin")), """{"pin":"1234"}""")
 
     assertEquals(negativePrefix, """{"pin":"****"}""")
     assertEquals(negativeSuffix, """{"pin":"****"}""")

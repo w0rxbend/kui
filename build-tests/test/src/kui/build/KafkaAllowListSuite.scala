@@ -21,15 +21,15 @@ final class KafkaAllowListSuite extends FunSuite {
     assertEquals(withLibrary.filter(_.rule == "A10"), Nil, s"$id was refused kafka-clients")
   }
 
-  test("libs.kafka may hold a Kafka client") { isLegal("libs.kafka") }
+  test("libs.kafka may hold a Kafka client")(isLegal("libs.kafka"))
 
-  test("libs.kafkaAuth may hold a Kafka client") { isLegal("libs.kafkaAuth") }
+  test("libs.kafkaAuth may hold a Kafka client")(isLegal("libs.kafkaAuth"))
 
-  test("libs.config may hold a Kafka client") { isLegal("libs.config") }
+  test("libs.config may hold a Kafka client")(isLegal("libs.config"))
 
-  test("libs.testkit may hold a Kafka client") { isLegal("libs.testkit") }
+  test("libs.testkit may hold a Kafka client")(isLegal("libs.testkit"))
 
-  test("apps.allinone may hold a Kafka client") { isLegal("apps.allinone") }
+  test("apps.allinone may hold a Kafka client")(isLegal("apps.allinone"))
 
   test("any service's infrastructure module may hold a Kafka client") {
     isLegal("services.cluster.infrastructure")

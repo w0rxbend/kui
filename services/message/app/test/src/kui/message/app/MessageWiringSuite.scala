@@ -6,10 +6,10 @@ import kui.testkit.KuiIOSuite
 
 /** The cursor-signing key, and the two numbers this composition root pins.
   *
-  * `services/message/app` declared a test module in `build.mill` and shipped no test source, so the whole
-  * of this file was ungated: a cursor is trusted precisely because it was signed, and a key that was a
-  * literal — or sixteen bytes instead of thirty-two — would let anyone mint a cursor naming any cluster
-  * with every suite in the repository green.
+  * `services/message/app` declared a test module in `build.mill` and shipped no test source, so the whole of
+  * this file was ungated: a cursor is trusted precisely because it was signed, and a key that was a literal —
+  * or sixteen bytes instead of thirty-two — would let anyone mint a cursor naming any cluster with every
+  * suite in the repository green.
   */
 final class MessageWiringSuite extends KuiIOSuite {
 

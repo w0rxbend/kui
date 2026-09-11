@@ -1,10 +1,11 @@
 package kui.kernel.group
 
-import kui.kernel.ValidationError
-import kui.kernel.error.ErrorCode
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+
+import kui.kernel.ValidationError
+import kui.kernel.error.ErrorCode
 
 /** The properties that make the consumer-group vocabulary usable as a contract.
   *

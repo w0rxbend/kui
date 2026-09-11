@@ -8,8 +8,8 @@ import cats.effect.testkit.TestControl
 import kui.cache.Snapshot
 import kui.cluster.application.fakes.FakeClusterAdmin
 import kui.cluster.domain.*
-import kui.kernel.{BrokerId, TopicName}
 import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
+import kui.kernel.{BrokerId, TopicName}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The refresh: what it needs, what it skips, and what happens to the fibers when a cluster goes away.
@@ -140,10 +140,10 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
         _ <- IO.sleep(61.seconds)
         calls <- rig.admin.callsFor(prod.id)
       } yield
-      // Exactly two, not "at least one": the loop's ticks at 30 s and 60 s and nothing else. A
-      // duplicated loop would still pass an at-least assertion and would double every cluster's
-      // admin traffic.
-      assertEquals(calls.count(_ == "describeCluster"), 2)
+        // Exactly two, not "at least one": the loop's ticks at 30 s and 60 s and nothing else. A
+        // duplicated loop would still pass an at-least assertion and would double every cluster's
+        // admin traffic.
+        assertEquals(calls.count(_ == "describeCluster"), 2)
     }
 
     TestControl.executeEmbed(scenario)

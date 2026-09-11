@@ -11,8 +11,8 @@ import kui.security.audit.MutationOutcome
 
 /** The only way a statement runs in this service (ADR-047), driven directly.
   *
-  * Directly, and not through a route, because two of the rules below are about states a route cannot
-  * produce: a cancelled operation, and a read-only refusal in a deployment whose composition root wired
+  * Directly, and not through a route, because two of the rules below are about states a route cannot produce:
+  * a cancelled operation, and a read-only refusal in a deployment whose composition root wired
   * `RbacGuard.allowAll` and therefore has no first refusal at all. `KsqlRoutesSuite` drives the wired pair;
   * this drives the guard on its own, which is what makes both of its refusals reachable rather than
   * decorative.

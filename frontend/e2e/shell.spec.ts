@@ -4,16 +4,44 @@
  *
  * This is the suite's smoke test. If it fails, nothing else in the run means anything.
  */
-import { CLUSTER, test, expect } from "./fixtures";
+import { CLUSTER, test, expect, type KuiApi } from "./fixtures";
 
 test.describe("the shell", () => {
-  test("loads, and reaches the gateway through its own proxy", async ({ page }) => {
+  /**
+   * The smoke test, and it changed this wave for a reason worth writing down.
+   *
+   * It used to be `getByText("Quickstart")`, which worked because the deployment registered exactly
+   * **one** cluster: `soleClusterChoice` selects a sole cluster on arrival, so the drawer head drew
+   * its name and the string was on the page. With a second cluster registered
+   * (`deployment/quickstart/kui-quickstart.yaml`, W9-01) nothing is auto-selected — deliberately,
+   * because choosing for the operator is how somebody ends up acting on the wrong cluster — and
+   * `/ui/` draws "no cluster" at the head. The old assertion was therefore measuring *how many
+   * clusters the deployment happened to have* and calling it "the gateway answered".
+   *
+   * So the assertion is the roster: **every cluster the gateway names has a control in the frame**,
+   * counted from `/api/v1/clusters` rather than written here. That is the same fact the old line
+   * was reaching for — the browser's request went through nginx to the gateway and came back — and
+   * it is true on a deployment with one cluster, with two, or with ten.
+   *
+   * By role and by accessible name throughout, not by `data-testid`: a test selecting on a testid
+   * asserts that a developer wrote an attribute, and the rail's tiles show a single letter, so the
+   * accessible name is what a person on a keyboard or a screen reader actually has to find.
+   */
+  test("loads, and reaches the gateway through its own proxy", async ({ page, api }) => {
+    const registered = await clusters(api);
+    expect(registered.length, "the gateway named no clusters at all").toBeGreaterThan(0);
+
     await page.goto("/ui/");
 
-    // By role and by text, not by `data-testid`. A test that selects on a testid asserts that a
-    // developer wrote an attribute; this asserts that a person can find the thing.
     await expect(page.getByRole("navigation").first()).toBeVisible();
-    await expect(page.getByText("Quickstart", { exact: false }).first()).toBeVisible();
+    const rail = page.getByRole("list", { name: "Environments" });
+    await expect(rail.getByRole("button")).toHaveCount(registered.length);
+    for (const entry of registered) {
+      await expect(
+        rail.getByRole("button", { name: new RegExp(quoted(entry.name)) }),
+        `${entry.id} is registered and the frame offers no way to reach it`,
+      ).toHaveCount(1);
+    }
   });
 
   test("a deep link renders the page it names, not the root", async ({ page }) => {
@@ -297,4 +325,135 @@ test.describe("the shell", () => {
     await expect(popover).toBeHidden();
     await expect(control).toBeFocused();
   });
+
+  /**
+   * `M08`, and it is the last of the twenty-three screens that had never been drawn by a browser.
+   *
+   * Not because anything was hard: **no case had ever switched cluster, because the quickstart
+   * registered one cluster and there was nothing to switch to.** The control, its accessible names,
+   * and `environmentSwitch`'s decision all have unit cases; what none of them can establish is the
+   * thing the capture is a picture of — an operator pressing a second environment and the whole
+   * frame arriving on it, with a receipt naming where they now are.
+   *
+   * `deployment/quickstart/kui-quickstart.yaml` registers the second cluster (W9-01).
+   *
+   * ## The control is the rail, and it is not a menu
+   *
+   * `WAVE-09.md` describes this case as opening *"the cluster selector's menu"*, and there is a
+   * `ClusterSelector` in `shell/src/chrome/` that has exactly such a menu — a listbox, 214 lines,
+   * eight stories, eight cases in `chrome.test.tsx`'s own `describe` for it, and an export from
+   * `shell/src/index.ts`. **Nothing in the product renders it**, which a browser measures in one
+   * line: `[data-testid="cluster-selector-trigger"]` resolves to zero elements on every screen of
+   * a running stack. The shipped switch is `EnvRail`: one always-visible tile per environment in
+   * the 48px column, because a dropdown hides the one fact an operator needs in peripheral vision,
+   * which is which cluster they are about to break (`EnvRail`'s own header says so). So this case
+   * presses a tile. Reported as a finding rather than repaired here: the component is not this
+   * packet's, and deleting it is a decision rather than a chore.
+   *
+   * **This fails rather than skips on a one-cluster deployment**, which is house rule 6 and is the
+   * same choice `connect.spec.ts` made about a Connect worker: a suite that quietly skips its only
+   * uncovered screen is how that screen stayed uncovered for four waves. The four skips this suite
+   * carries are about a *service* a deployment may legitimately not run; a second registered
+   * cluster is a line of configuration this wave's own stack ships.
+   *
+   * Nothing about the second cluster is written down here. Its id and its name are read off
+   * `/api/v1/clusters`, so the case is about the frame following a switch and not about the word
+   * `staging-eu-01` — which is `deployment/`'s to choose and this file's to discover.
+   */
+  test("switching cluster names where you have arrived, and takes the frame with it", async ({
+    page,
+    api,
+  }) => {
+    const registered = await clusters(api);
+    const other = registered.find((entry) => entry.id !== CLUSTER);
+    expect(
+      other,
+      "this deployment registers one cluster, so the environment rail has one tile and there is " +
+        "nothing to switch to, and M08 cannot be drawn. The quickstart registers a second " +
+        "profile — see deployment/quickstart/kui-quickstart.yaml, kui.clusters",
+    ).toBeDefined();
+    if (other === undefined) return;
+
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+
+    /*
+     * One tile per registered cluster, counted from the gateway's own roster rather than from a
+     * literal — a rail that drew only the current environment would have looked exactly like a
+     * working one on the deployment this suite ran against for four waves.
+     *
+     * And each tile is asserted to carry the environment's **full name** in its accessible name.
+     * That is `EnvRail`'s own stated rule and it is load-bearing rather than decorative: the tile
+     * shows one letter, so `prod-kyiv-01` and `prod-eu-02` draw the identical tile, and the
+     * accessible name is the only thing that tells a keyboard or screen-reader user which is
+     * which.
+     */
+    const tiles = page.getByRole("list", { name: "Environments" }).getByRole("button");
+    await expect(tiles).toHaveCount(registered.length);
+    for (const entry of registered) {
+      const tile = page.getByTestId(`env-tile-${entry.id}`);
+      await expect(tile, `no rail tile for ${entry.id}`).toHaveCount(1);
+      await expect(tile).toHaveAttribute("aria-label", new RegExp(quoted(entry.name)));
+    }
+    await expect(page.getByTestId(`env-tile-${CLUSTER}`)).toHaveAttribute("aria-current", "true");
+
+    await page.getByTestId(`env-tile-${other.id}`).click();
+
+    /*
+     * The toast, first, because it is the only thing here on a six-second timer
+     * (`DEFAULT_DURATION_MS`) and because it is what `M08` is a capture of.
+     *
+     * Two assertions and they are different in kind. The **name** is the one only a real second
+     * cluster can supply and it is read off the API above — a rail tile shows an initial, so the
+     * toast is the only place the cluster somebody has just switched to is named in full (§3.11).
+     * The **verb** is the shell's sentence, and it is asserted case-insensitively here because
+     * `shell.test.tsx` pins the wording by literal in the package that owns it; what this case is
+     * responsible for is that a receipt was raised at all, over a real switch, in a browser.
+     */
+    const notices = page.locator(".kui-notice-stack");
+    await expect(notices).toContainText(other.name);
+    await expect(notices).toContainText(/switched to/i);
+
+    /*
+     * And the frame followed. Three readings of the same fact, because each of them can fail on its
+     * own: the address (a switch made from a cluster-scoped page has to rewrite it, or the frame
+     * and the page describe two different clusters), the rail's current tile, and the drawer head —
+     * §2.1's cluster block, which is the head of every screen and would otherwise go on naming the
+     * cluster nobody is looking at.
+     */
+    await expect(page).toHaveURL((url) => url.pathname.startsWith(`/ui/clusters/${other.id}/`));
+    await expect(page.getByTestId(`env-tile-${other.id}`)).toHaveAttribute("aria-current", "true");
+    await expect(page.getByTestId(`env-tile-${CLUSTER}`)).not.toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(page.getByTestId("nav-drawer")).toContainText(other.name);
+  });
 });
+
+/**
+ * A cluster's own name, made safe to put inside a `RegExp`.
+ *
+ * The names come from a YAML file an operator writes, and `Quickstart (local)` — which is the one
+ * this stack ships — is two capture groups and an empty alternation to a regular-expression engine.
+ * A name is matched here rather than compared whole because it sits inside a longer accessible
+ * label; escaping is what keeps that from becoming a match against something else entirely.
+ */
+function quoted(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Every cluster the gateway has registered, in the order it lists them. */
+async function clusters(api: KuiApi): Promise<readonly { id: string; name: string }[]> {
+  const document = (await api.get("/api/v1/clusters")) as {
+    readonly clusters?: {
+      readonly data?: readonly {
+        readonly cluster?: { readonly id?: string; readonly name?: string };
+      }[];
+    };
+  };
+  return (document.clusters?.data ?? [])
+    .map((entry) => entry.cluster)
+    .filter((one): one is { id: string; name: string } =>
+      typeof one?.id === "string" && typeof one.name === "string",
+    );
+}

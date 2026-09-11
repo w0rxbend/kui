@@ -1,5 +1,6 @@
 package kui.topic.infrastructure
 
+import munit.FunSuite
 import org.apache.kafka.common.errors.{
   InvalidConfigurationException,
   InvalidRequestException,
@@ -7,15 +8,14 @@ import org.apache.kafka.common.errors.{
   TopicAuthorizationException,
   UnsupportedVersionException
 }
-import munit.FunSuite
 
 import kui.kernel.TopicName
 import kui.topic.domain as dom
 
 /** How a refused write is told apart from an unreachable cluster, and what KUI is allowed to say about it.
   *
-  * `KafkaTopicWriter` shipped with no suite of its own: every rule in `writeError` was reachable only
-  * through a route that asserts a status code. Three mutations were applied one at a time against
+  * `KafkaTopicWriter` shipped with no suite of its own: every rule in `writeError` was reachable only through
+  * a route that asserts a status code. Three mutations were applied one at a time against
   * `./mill services.topic.__.test`, each leaving it at 298/298 green — making the
   * `UnsupportedVersionException` arm unreachable, appending the exception's own message to a refusal, and
   * turning a configuration `DELETE` into a `SET`. The first two are closed here; the third needs an admin

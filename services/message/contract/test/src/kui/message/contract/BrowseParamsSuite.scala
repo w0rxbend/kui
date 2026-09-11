@@ -5,8 +5,8 @@ import munit.FunSuite
 import sttp.tapir.DecodeResult
 
 import kui.kernel.browse.{Direction, IsolationLevel, SeekMode}
-import kui.message.contract.BrowseParams.given
 import kui.kernel.{Offset, PartitionId}
+import kui.message.contract.BrowseParams.given
 
 /** That a seek written into a URL means the same thing on the stream endpoint and on the page endpoint, and
   * that a seek nobody meant is refused rather than reinterpreted.
@@ -146,7 +146,10 @@ final class BrowseParamsSuite extends FunSuite {
   test("directionAndIsolationRoundTripAndAreCaseInsensitive") {
     Direction.All.foreach { direction =>
       assertEquals(BrowseParams.directionCodec.decode(direction.wire), DecodeResult.Value(direction))
-      assertEquals(BrowseParams.directionCodec.decode(direction.wire.toLowerCase), DecodeResult.Value(direction))
+      assertEquals(
+        BrowseParams.directionCodec.decode(direction.wire.toLowerCase),
+        DecodeResult.Value(direction)
+      )
       assertEquals(BrowseParams.directionCodec.encode(direction), direction.wire)
     }
     IsolationLevel.All.foreach { level =>

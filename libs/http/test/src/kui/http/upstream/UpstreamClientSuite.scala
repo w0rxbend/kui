@@ -10,16 +10,16 @@ import munit.CatsEffectSuite
 import sttp.client4.*
 import sttp.model.{Method, StatusCode}
 
-import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.PositiveInt
+import kui.kernel.error.{InfrastructureError, KuiError}
 
-/** That one slow or dead upstream cannot take a KUI process down, starve another upstream, or hide
-  * the fact that it is failing.
+/** That one slow or dead upstream cannot take a KUI process down, starve another upstream, or hide the fact
+  * that it is failing.
   *
-  * This is the mechanical half of the product's central promise (PLAN §2.1), so the assertions are
-  * mostly about what did *not* happen: calls that never reached the network, concurrency that never
-  * exceeded its cap, latency that did not move. Every case uses `TestControl`, so the delays the
-  * assertions depend on are simulated: no case waits a real second for a real timeout.
+  * This is the mechanical half of the product's central promise (PLAN §2.1), so the assertions are mostly
+  * about what did *not* happen: calls that never reached the network, concurrency that never exceeded its
+  * cap, latency that did not move. Every case uses `TestControl`, so the delays the assertions depend on are
+  * simulated: no case waits a real second for a real timeout.
   *
   * ==The flaky case, and what was actually wrong with it==
   *
@@ -43,10 +43,10 @@ import kui.kernel.PositiveInt
   *
   * That closed the lost-event half of the problem and the raised timeout went with it. It did **not** close
   * all of it, and a whole-repository run on 2026-09-04 failed the second of the two cases again:
-  * `expected 1, obtained 0`. The residual race is a different one. Nothing is lost any more, but the log
-  * line is *written* by the background fiber that drains the subscription, and a test that calls
-  * `logger.entries` in the same breath as the last failing request is asking what the log said before the
-  * writer has had a turn. Whether it had one is up to the scheduler.
+  * `expected 1, obtained 0`. The residual race is a different one. Nothing is lost any more, but the log line
+  * is *written* by the background fiber that drains the subscription, and a test that calls `logger.entries`
+  * in the same breath as the last failing request is asking what the log said before the writer has had a
+  * turn. Whether it had one is up to the scheduler.
   *
   * So both cases now put an `IO.sleep(1.second)` between the requests and the read. That is not the old
   * "order by hope" sleep: every case here runs under `TestControl`, where time is simulated, so the second
@@ -76,19 +76,17 @@ final class UpstreamClientSuite extends CatsEffectSuite {
       Method.DELETE -> 1
     )
 
-    table
-      .traverse { (method, expectedAttempts) =>
-        val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
-          UpstreamFixture.client(UpstreamFixture.single(), stub.backend).use { client =>
-            request(method).send(client.backend).attempt *> stub.calls.map(_ -> method)
-          }
-        }
-
-        TestControl.executeEmbed(program).map { (attempts, m) =>
-          assertEquals(attempts, expectedAttempts, clue = s"$m made $attempts attempts")
+    table.traverse { (method, expectedAttempts) =>
+      val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+        UpstreamFixture.client(UpstreamFixture.single(), stub.backend).use { client =>
+          request(method).send(client.backend).attempt *> stub.calls.map(_ -> method)
         }
       }
-      .void
+
+      TestControl.executeEmbed(program).map { (attempts, m) =>
+        assertEquals(attempts, expectedAttempts, clue = s"$m made $attempts attempts")
+      }
+    }.void
   }
 
   test("doesNotRetryAFourHundredResponse") {
@@ -147,14 +145,13 @@ final class UpstreamClientSuite extends CatsEffectSuite {
   test("bulkheadCapsConcurrency") {
     val config = UpstreamFixture.single().copy(maxConcurrent = PositiveInt.unsafe(4))
 
-    val program = UpstreamFixture.recording(ResponseKind.Slow(1.second, ResponseKind.Ok)).flatMap {
-      stub =>
-        UpstreamFixture.client(config, stub.backend).use { client =>
-          for {
-            _ <- List.fill(100)(request(Method.GET).send(client.backend).attempt).parSequence
-            peak <- stub.peakInFlight
-          } yield peak
-        }
+    val program = UpstreamFixture.recording(ResponseKind.Slow(1.second, ResponseKind.Ok)).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        for {
+          _ <- List.fill(100)(request(Method.GET).send(client.backend).attempt).parSequence
+          peak <- stub.peakInFlight
+        } yield peak
+      }
     }
 
     TestControl.executeEmbed(program).map { peak =>
@@ -168,16 +165,15 @@ final class UpstreamClientSuite extends CatsEffectSuite {
     // that eventually get through are answering questions the user stopped caring about.
     val config = UpstreamFixture.single().copy(maxConcurrent = PositiveInt.unsafe(1))
 
-    val program = UpstreamFixture.recording(ResponseKind.Slow(5.seconds, ResponseKind.Ok)).flatMap {
-      stub =>
-        UpstreamFixture.client(config, stub.backend).use { client =>
-          for {
-            slow <- request(Method.POST).send(client.backend).attempt.start
-            _ <- IO.sleep(100.milliseconds)
-            turnedAway <- request(Method.POST).send(client.backend).attempt.timed
-            _ <- slow.joinWithNever
-          } yield turnedAway
-        }
+    val program = UpstreamFixture.recording(ResponseKind.Slow(5.seconds, ResponseKind.Ok)).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        for {
+          slow <- request(Method.POST).send(client.backend).attempt.start
+          _ <- IO.sleep(100.milliseconds)
+          turnedAway <- request(Method.POST).send(client.backend).attempt.timed
+          _ <- slow.joinWithNever
+        } yield turnedAway
+      }
     }
 
     TestControl.executeEmbed(program).map { (elapsed, outcome) =>
@@ -251,14 +247,14 @@ final class UpstreamClientSuite extends CatsEffectSuite {
     // A caller told "at most ten seconds" gets ten seconds, not ten seconds times the retry count.
     val config = UpstreamFixture.single().copy(callTimeout = 3.seconds, maxRetries = 5)
 
-    val program = UpstreamFixture.recording(ResponseKind.Slow(2.seconds, ResponseKind.Refused)).flatMap {
-      stub =>
+    val program =
+      UpstreamFixture.recording(ResponseKind.Slow(2.seconds, ResponseKind.Refused)).flatMap { stub =>
         UpstreamFixture.client(config, stub.backend).use { client =>
           request(Method.GET).send(client.backend).attempt.timed
         }
-    }
+      }
 
-    TestControl.executeEmbed(program).map { (elapsed, _) => assertEquals(elapsed, 3.seconds) }
+    TestControl.executeEmbed(program).map((elapsed, _) => assertEquals(elapsed, 3.seconds))
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -268,7 +264,10 @@ final class UpstreamClientSuite extends CatsEffectSuite {
   test("a refused address is stepped over and the next one answers") {
     val config = UpstreamFixture.config(
       "registry",
-      NonEmptyList.of(UpstreamFixture.url("http://registry-a:8081"), UpstreamFixture.url("http://registry-b:8081"))
+      NonEmptyList.of(
+        UpstreamFixture.url("http://registry-a:8081"),
+        UpstreamFixture.url("http://registry-b:8081")
+      )
     )
 
     val program = UpstreamFixture.recording(ResponseKind.Ok).flatMap { stub =>
@@ -290,7 +289,10 @@ final class UpstreamClientSuite extends CatsEffectSuite {
   test("when every address refuses, the error is Unreachable") {
     val config = UpstreamFixture.config(
       "registry",
-      NonEmptyList.of(UpstreamFixture.url("http://registry-a:8081"), UpstreamFixture.url("http://registry-b:8081"))
+      NonEmptyList.of(
+        UpstreamFixture.url("http://registry-a:8081"),
+        UpstreamFixture.url("http://registry-b:8081")
+      )
     )
 
     val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
@@ -301,7 +303,9 @@ final class UpstreamClientSuite extends CatsEffectSuite {
 
     TestControl.executeEmbed(program).map { outcome =>
       assertEquals(
-        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.Unreachable) => e.upstream },
+        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.Unreachable) =>
+          e.upstream
+        },
         Some("registry")
       )
     }
@@ -312,7 +316,10 @@ final class UpstreamClientSuite extends CatsEffectSuite {
     // same answer and hides from the operator that the cluster is unwell rather than unreachable.
     val config = UpstreamFixture.config(
       "registry",
-      NonEmptyList.of(UpstreamFixture.url("http://registry-a:8081"), UpstreamFixture.url("http://registry-b:8081"))
+      NonEmptyList.of(
+        UpstreamFixture.url("http://registry-a:8081"),
+        UpstreamFixture.url("http://registry-b:8081")
+      )
     )
 
     val program = UpstreamFixture.recording(ResponseKind.Status(500)).flatMap { stub =>
@@ -474,7 +481,9 @@ final class UpstreamClientSuite extends CatsEffectSuite {
     TestControl.executeEmbed(program).map { (before, after, outcome) =>
       assertEquals(after, before, "a call reached the network while the circuit was open")
       assertEquals(
-        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.CircuitOpen) => e.upstream },
+        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.CircuitOpen) =>
+          e.upstream
+        },
         Some("registry")
       )
     }

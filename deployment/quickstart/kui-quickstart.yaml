@@ -209,4 +209,48 @@ kui:
           - serde: SchemaRegistry
             topicValuesPattern: "orders\\.avro"
 
+    # -------------------------------------------------------------------------------------------
+    # A SECOND REGISTERED CLUSTER, AND IT POINTS AT THE SAME BROKER ON PURPOSE.
+    #
+    # KUI manages more than one cluster and none of the machinery that makes that true had ever been
+    # exercised by anything you can run: the cluster selector in the drawer head has never had a
+    # second entry to show, the "Switched to ..." toast has never been raised by a click, and
+    # `frontend/e2e/traffic.spec.ts` carries a `test.skip` whose reason is literally "this
+    # deployment runs one cluster; there is no second one to ask". One entry here is all of that.
+    #
+    # A SECOND PROFILE OVER ONE BROKER, NOT A SECOND BROKER. `bootstrapServers` is the same
+    # `kafka:9092` the cluster above uses. What the screens need is a second *registered profile* —
+    # two entries in the cluster registry, two ids in `/api/v1/clusters`, two rows in the selector —
+    # and that is a property of this file, not of how many Kafka clusters are running. Starting a
+    # second broker would cost a second container, a second exporter, a second set of seeded topics
+    # and an entirely separate set of things that can be broken, and would prove nothing the screens
+    # ask about that this does not. The consequence to know about is that the two clusters show the
+    # SAME topics, groups and brokers, because they are the same broker: this file registers two
+    # views of one cluster, and says so rather than letting a reader infer two Kafkas.
+    #
+    # THE NAME AND THE ID ARE BOTH `staging-eu-01`, AND THAT IS THE DESIGN'S WORD.
+    # research/design/SCREENS-V4.md §1 captures `M08` as the toast *"Switched to staging-eu-01"* and
+    # `M09` as the brokers screen of `staging-eu-01`. The shell builds that toast as
+    # `Switched to ${name ?? id}` (`frontend/packages/shell/src/App.tsx:1222`), so the *name* is
+    # what a browser case reads back, and a display name of "Staging (EU)" would draw a toast the
+    # design does not have. The id is written out as well rather than derived, for the reason the
+    # cluster above gives: a derived id moves when somebody edits the name, and this id is in a URL,
+    # in a Playwright case and in a screenshot.
+    #
+    # NO `metrics.sources` ENTRY FOR IT, DELIBERATELY, AND IT IS AN ASSERTION RATHER THAN AN
+    # OMISSION. `frontend/e2e/traffic.spec.ts:536` — "says the same thing about a cluster nobody
+    # configured a source for" — is the other half of M7's exit criterion: a second cluster with no
+    # source must answer `not_configured` and the screen must draw the sentence instead of an empty
+    # axis. Adding `staging-eu-01` under `kui.metrics.sources` above would take that case's subject
+    # away again, on the same run that finally gives it one.
+    #
+    # AND NO `schemaRegistry`, `connect` OR `ksql` BLOCK, for the same kind of reason: this profile
+    # is where ADR-032's hide-the-row rule gets a cluster to be true about, on a deployment where
+    # the cluster next to it has all three. Those three features are configured per cluster, so the
+    # quickstart cluster's screens are untouched by this.
+    - name: "staging-eu-01"
+      id: "staging-eu-01"
+      bootstrapServers:
+        - "kafka:9092"
+
   rbac: {}

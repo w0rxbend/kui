@@ -9,10 +9,10 @@ import kui.security.{Principal, PrincipalKind}
 
 /** The six laws ADR-021 names, plus the read-only rule, as properties.
   *
-  * These are laws rather than examples because the interesting failures of an authorization evaluator are
-  * not the cases somebody thought to write down. A worked example proves that deleting `orders` works; a
-  * property proves that no combination of roles, patterns and actions the generators can produce makes a
-  * grant disappear.
+  * These are laws rather than examples because the interesting failures of an authorization evaluator are not
+  * the cases somebody thought to write down. A worked example proves that deleting `orders` works; a property
+  * proves that no combination of roles, patterns and actions the generators can produce makes a grant
+  * disappear.
   */
 final class RbacLawsSuite extends ScalaCheckSuite {
 
@@ -106,7 +106,8 @@ final class RbacLawsSuite extends ScalaCheckSuite {
   // -- Law 4: the default role applies only when no role matches ------------------------------------
 
   test("theDefaultRoleIsUsedWhenThePrincipalHoldsNothingOnThisCluster") {
-    val default = DefaultRole(List(RbacPolicy.permission(Resource.Topic, Some(orders), Set(Action.TopicView))))
+    val default =
+      DefaultRole(List(RbacPolicy.permission(Resource.Topic, Some(orders), Set(Action.TopicView))))
     val policy = RbacPolicy(List(readers), Some(default))
 
     assertEquals(
@@ -118,7 +119,8 @@ final class RbacLawsSuite extends ScalaCheckSuite {
   test("theDefaultRoleIsNotUsedWhenARoleAlreadyGrantsSomethingHere") {
     // `editors` grants `payments` on production and nothing on `orders`. The default role would allow
     // `orders`, and it must not be consulted, because this principal's own roles answered the question.
-    val default = DefaultRole(List(RbacPolicy.permission(Resource.Topic, Some(orders), Set(Action.TopicView))))
+    val default =
+      DefaultRole(List(RbacPolicy.permission(Resource.Topic, Some(orders), Set(Action.TopicView))))
     val policy = RbacPolicy(List(editors), Some(default))
 
     assertEquals(
@@ -234,7 +236,11 @@ final class RbacLawsSuite extends ScalaCheckSuite {
       policy,
       user(RoleName.unsafe("connect-admins")),
       Writable,
-      AccessRequest(Cluster, "editConnector", ResourceAccess.connector("orders", "sink", Action.ConnectorEdit))
+      AccessRequest(
+        Cluster,
+        "editConnector",
+        ResourceAccess.connector("orders", "sink", Action.ConnectorEdit)
+      )
     )
 
     assert(!decision.isAllowed, s"a permission on 'payments' allowed a connector on 'orders': $decision")
@@ -281,7 +287,11 @@ final class RbacLawsSuite extends ScalaCheckSuite {
       RbacPolicy.Disabled,
       user(),
       ReadOnly,
-      AccessRequest(Cluster, "deleteTopic", ResourceAccess.named(Resource.Topic, "orders", Action.TopicDelete))
+      AccessRequest(
+        Cluster,
+        "deleteTopic",
+        ResourceAccess.named(Resource.Topic, "orders", Action.TopicDelete)
+      )
     )
 
     assertEquals(
@@ -457,7 +467,8 @@ final class RbacLawsSuite extends ScalaCheckSuite {
       None
     )
 
-    val fromGithub = Map(Provider.OauthGithub -> IdentityAttributes(Map(SubjectKind.Organization -> Set("acme"))))
+    val fromGithub =
+      Map(Provider.OauthGithub -> IdentityAttributes(Map(SubjectKind.Organization -> Set("acme"))))
     val fromLdap = Map(Provider.Ldap -> IdentityAttributes(Map(SubjectKind.Organization -> Set("acme"))))
 
     assertEquals(Rbac.resolveRoles(policy, fromGithub), Set(RoleName.unsafe("acme")))

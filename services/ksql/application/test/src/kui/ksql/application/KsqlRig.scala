@@ -4,10 +4,9 @@ import cats.effect.{IO, Ref}
 import fs2.Stream
 
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
-import kui.kernel.{ClusterId, Secret}
+import kui.kernel.{ClusterId, Secret, UserName}
 import kui.ksql.domain.*
 import kui.security.audit.MutationOutcome
-import kui.kernel.UserName
 import kui.security.{Principal, PrincipalKind}
 
 /** The fakes every application-layer case in this service is built from.
@@ -23,6 +22,16 @@ object KsqlRig {
   val cluster: ClusterId = ClusterId.unsafe("prod-eu")
   val readOnly: ClusterId = ClusterId.unsafe("prod-us")
   val bare: ClusterId = ClusterId.unsafe("no-ksql")
+
+  /** Configured, writable, and no client is ever built for it.
+    *
+    * W9-A1 added it. The three profiles above cannot express "a KUI wiring failure on a cluster somebody is
+    * allowed to write to": `bare` is not configured, so it never reaches the client lookup, and `readOnly` is
+    * refused by the guard before it gets there. So `execute`'s `notWired` arm had no input that could reach
+    * it and the arm could be replaced by `notConfigured` with the whole repository still green — exactly the
+    * fixture-shaped hole W8-A1's clue names.
+    */
+  val unwired: ClusterId = ClusterId.unsafe("wiring-broken")
 
   val alice: Principal = Principal(UserName.unsafe("alice"), Set.empty, PrincipalKind.Session)
 
@@ -60,7 +69,8 @@ object KsqlRig {
     private val views = List(
       KsqlProfileView(cluster, "Production EU", readOnly = false, configured = true),
       KsqlProfileView(KsqlRig.readOnly, "Production US", readOnly = true, configured = true),
-      KsqlProfileView(bare, "Staging", readOnly = false, configured = false)
+      KsqlProfileView(bare, "Staging", readOnly = false, configured = false),
+      KsqlProfileView(unwired, "Broken wiring", readOnly = false, configured = true)
     )
 
     def profileOf(id: ClusterId): IO[Either[KuiError, KsqlProfileView]] =

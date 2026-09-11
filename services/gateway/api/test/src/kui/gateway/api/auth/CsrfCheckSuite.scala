@@ -5,10 +5,10 @@ import munit.FunSuite
 import kui.contracts.HttpHeaders
 import kui.security.PrincipalKind
 
-/** The full matrix ADR-019 specifies, and the specification itself: {GET, POST} × {cookie, bearer,
-  * anonymous} × {token present/absent/wrong} × {`Sec-Fetch-Site`: same-origin, same-site, cross-site,
-  * absent}. Every row states the expected verdict; a change to [[CsrfCheck.verdict]] that is not reflected
-  * here is a change nobody can see happened.
+/** The full matrix ADR-019 specifies, and the specification itself: {GET, POST} × {cookie, bearer, anonymous}
+  * × {token present/absent/wrong} × {`Sec-Fetch-Site`: same-origin, same-site, cross-site, absent}. Every row
+  * states the expected verdict; a change to [[CsrfCheck.verdict]] that is not reflected here is a change
+  * nobody can see happened.
   *
   * "Anonymous" is folded into the cookie column rather than given a fourth: `PrincipalKind.Anonymous` is
   * authenticated by the anonymous session's own cookie exactly the way `PrincipalKind.Session` is, and
@@ -19,7 +19,7 @@ final class CsrfCheckSuite extends FunSuite {
 
   private val secret = "the-session-secret"
 
-  private final case class Row(
+  final private case class Row(
       method: String,
       authKind: PrincipalKind,
       headerToken: Option[String],
@@ -101,7 +101,9 @@ final class CsrfCheckSuite extends FunSuite {
   )
 
   rows.zipWithIndex.foreach { (row, index) =>
-    test(s"row $index: ${row.method} ${row.authKind} token=${row.headerToken} secFetchSite=${row.secFetchSite}") {
+    test(
+      s"row $index: ${row.method} ${row.authKind} token=${row.headerToken} secFetchSite=${row.secFetchSite}"
+    ) {
       val verdict =
         CsrfCheck.verdict(row.method, row.authKind, row.headerToken, Some(secret), row.secFetchSite)
       assertEquals(verdict, row.expected)
@@ -127,7 +129,13 @@ final class CsrfCheckSuite extends FunSuite {
     // A token that differs only in case is not a match. Loosening this would make the secret effectively
     // shorter — case-insensitive comparison of a base64url string discards real entropy.
     val verdict =
-      CsrfCheck.verdict("POST", PrincipalKind.Session, Some(secret.toUpperCase), Some(secret), Some("same-origin"))
+      CsrfCheck.verdict(
+        "POST",
+        PrincipalKind.Session,
+        Some(secret.toUpperCase),
+        Some(secret),
+        Some("same-origin")
+      )
     assertEquals(verdict, CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token"))
   }
 }

@@ -277,6 +277,7 @@ accepted it. The topic and message services wrote `Failed` here and W6-A1 repair
   count and a state, and never a rate.
 - Every operation is audited under a record type that is scheduled for deletion by a failing test
   rather than by a comment (§10).
+<!-- checked: openapi-totals -- verified by ./scripts/feature-matrix-check.sh -- claims: openapi-document, openapi-totals, residue -->
 - `services/connect/api/openapi.json` is **7 paths, 7 operations and 10 component schemas** — the
   four contract endpoints, each on its own path (`…/connect/connectors`, and one path per verb under
   `…/connect/{connectName}/connectors/{connectorName}/`), plus the three health probes every KUI
@@ -288,6 +289,7 @@ accepted it. The topic and message services wrote `Failed` here and W6-A1 repair
   `jq '[.paths|keys[]|select(test("/connect/"))]|length' docs/api/openapi.json` counts. The two are
   quoted apart here because they have been quoted together, and the merged document's own totals
   belong to ADR-048.
+<!-- /checked -->
 
 ## Alternatives rejected
 

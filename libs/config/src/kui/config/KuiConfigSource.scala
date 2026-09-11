@@ -18,6 +18,7 @@ import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties}
 import kui.kernel.search.SearchMode
 import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, ConnectName, Host, PageSize, Port, PositiveInt, Secret, ServiceId}
+import kui.security.masking.MaskingRule
 import kui.security.rbac.RbacPolicy
 
 /** Loads [[KuiConfig]] from the command line, the environment and YAML files.
@@ -1791,27 +1792,41 @@ object KuiConfigSource {
       connect <- decodeConnectClusters[F](layers, s"$prefix.connect", policy)
       ksql <- decodeKsql[F](layers, s"$prefix.ksql", policy)
       serde <- decodeClusterSerde[F](layers, s"$prefix.serde")
+      masking <- decodeMasking[F](layers, s"$prefix.masking")
       properties = ClientProperties.fromRaw(propertiesUnder(layers, s"$prefix.properties"))
-    } yield (name, servers, readOnly, security, admin, registry, connect, ksql, serde).tupled.andThen {
-      (clusterName, bootstrap, readonly, sec, tuning, schemaRegistry, connectClusters, ksqldb, serdes) =>
-        // The id is derived last, and only from a name that decoded: deriving it from a name that did not
-        // would report the same bad name twice, once under `.name` and once under `.id`.
-        clusterId(layers, prefix, clusterName).map { id =>
-          ClusterConfig(
-            id = id,
-            name = clusterName,
-            bootstrapServers = bootstrap,
-            security = sec,
-            properties = properties,
-            readOnly = readonly,
-            admin = tuning,
-            serde = serdes,
-            schemaRegistry = schemaRegistry,
-            connect = connectClusters,
-            ksql = ksqldb
-          )
-        }
-    }
+    } yield (name, servers, readOnly, security, admin, registry, connect, ksql, serde, masking).tupled
+      .andThen {
+        (
+            clusterName,
+            bootstrap,
+            readonly,
+            sec,
+            tuning,
+            schemaRegistry,
+            connectClusters,
+            ksqldb,
+            serdes,
+            maskingRules
+        ) =>
+          // The id is derived last, and only from a name that decoded: deriving it from a name that did
+          // not would report the same bad name twice, once under `.name` and once under `.id`.
+          clusterId(layers, prefix, clusterName).map { id =>
+            ClusterConfig(
+              id = id,
+              name = clusterName,
+              bootstrapServers = bootstrap,
+              security = sec,
+              properties = properties,
+              readOnly = readonly,
+              admin = tuning,
+              serde = serdes,
+              schemaRegistry = schemaRegistry,
+              connect = connectClusters,
+              ksql = ksqldb,
+              masking = maskingRules
+            )
+          }
+      }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -2181,6 +2196,135 @@ object KuiConfigSource {
           case Right(valid) => valid.validNel
           case Left(problem) =>
             ConfigProblem(entry, problem, ConfigSourceName.Default).invalidNel
+        }
+      )
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // `kui.clusters.<n>.masking`: which fields never leave the service in full (DM-001, ADR-023)
+  // -------------------------------------------------------------------------------------------
+
+  /** The masking block, which is the first thing in this repository that can define a masking rule.
+    *
+    * Absent for almost every cluster, and absent is free: with no rules `MaskingEngine.applies` is false, the
+    * browse takes its fast path and no record is re-walked. That is why this returns [[MaskingConfig.empty]]
+    * for a missing section rather than reporting a problem.
+    *
+    * ==Why the whole rule is built here, at load time==
+    *
+    * Because `MaskingEngine`'s own scaladoc promises it: *"The one dangerous case — a rule that matches
+    * nothing because of a typo — cannot be caught here at all; it is caught at startup, where an unusable
+    * regex is a configuration error."* Until this section existed there was no startup to catch it at. A rule
+    * whose pattern will not compile, whose `kind` is misspelled, or which names both `fields` and
+    * `fieldsNamePattern` now stops the process with the key in the message, instead of loading and protecting
+    * nothing — which is the failure an operator discovers by reading their own protected data on a screen.
+    */
+  private def decodeMasking[F[_]: Async](
+      layers: Layers,
+      prefix: String
+  ): F[Problems[MaskingConfig]] = {
+    val indices = layers.indicesOf(prefix)
+    indices
+      .traverse(index => decodeMaskingRule[F](layers, prefix, index))
+      .map(_.sequence)
+      .map(entries =>
+        (entries, denseListIndex(prefix, "masking rules", indices))
+          .mapN((rules, _) => MaskingConfig(rules))
+      )
+  }
+
+  /** One `masking[]` entry.
+    *
+    * Order is load-bearing exactly as it is for serde patterns, and for a sharper reason: a JSON value gets
+    * **every** matching rule in configuration order, so "replace this field" followed by "mask everything
+    * else" composes, and the two written the other way round do not compose the same way. A gap in the index
+    * is therefore refused rather than renumbered.
+    */
+  private def decodeMaskingRule[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      index: Int
+  ): F[Problems[MaskingRule]] = {
+    val entry = s"$prefix.$index"
+    for {
+      kind <- read[F, MaskingConfig.Kind](
+        field(s"$entry.kind", "one of remove, mask or replace", MaskingConfig.readKind),
+        layers
+      )
+      fields <- readOptional[F, NonEmptyList[String]](
+        field(s"$entry.fields", "a list of field names", MaskingConfig.readFields),
+        layers
+      )
+      fieldsPattern <- readOptional[F, Regex](
+        field(
+          s"$entry.fieldsNamePattern",
+          "a regular expression matching whole field names",
+          MaskingConfig.readPattern
+        ),
+        layers
+      )
+      keys <- readOptional[F, Regex](
+        field(
+          s"$entry.topicKeysPattern",
+          "a regular expression matching whole topic names",
+          MaskingConfig.readPattern
+        ),
+        layers
+      )
+      values <- readOptional[F, Regex](
+        field(
+          s"$entry.topicValuesPattern",
+          "a regular expression matching whole topic names",
+          MaskingConfig.readPattern
+        ),
+        layers
+      )
+      // `readNonEmpty` and not a bare identity: `replacement: ""` is a `remove` written as a `replace`,
+      // and an operator who typed an empty string into a masking rule did not mean "reveal the shape of
+      // the field and nothing else".
+      replacement <- readOptional[F, String](
+        field(s"$entry.replacement", "the literal a matched field becomes", readNonEmpty),
+        layers
+      )
+      replacementChars <- readOptional[F, String](
+        field(
+          s"$entry.maskingCharsReplacement",
+          "the characters a mask cycles through, such as *",
+          readNonEmpty
+        ),
+        layers
+      )
+      keepPrefix <- readOptional[F, Int](
+        field(
+          s"$entry.keep.prefix",
+          s"a whole number between 0 and ${MaskingConfig.MaxKeep}",
+          MaskingConfig.readKeep
+        ),
+        layers
+      )
+      keepSuffix <- readOptional[F, Int](
+        field(
+          s"$entry.keep.suffix",
+          s"a whole number between 0 and ${MaskingConfig.MaxKeep}",
+          MaskingConfig.readKeep
+        ),
+        layers
+      )
+    } yield (
+      kind,
+      fields,
+      fieldsPattern,
+      keys,
+      values,
+      replacement,
+      replacementChars,
+      keepPrefix,
+      keepSuffix
+    ).mapN(MaskingConfig.Draft.apply)
+      .andThen(draft =>
+        MaskingConfig.validate(draft) match {
+          case Right(rule) => rule.validNel
+          case Left(problem) => ConfigProblem(entry, problem, ConfigSourceName.Default).invalidNel
         }
       )
   }
@@ -2737,6 +2881,19 @@ object KuiConfigSource {
       List("kui", "clusters", "*", "serde", "patterns", "*", "serde"),
       List("kui", "clusters", "*", "serde", "patterns", "*", "topicKeysPattern"),
       List("kui", "clusters", "*", "serde", "patterns", "*", "topicValuesPattern"),
+      // `kui.clusters.<n>.masking[]` (DM-001, ADR-023). `fields` is known both as a scalar and as a
+      // sequence for the same reason `bootstrapServers` is: a YAML list of scalars is indexed, and the
+      // loader reads the whole list as one comma-separated value.
+      List("kui", "clusters", "*", "masking", "*", "kind"),
+      List("kui", "clusters", "*", "masking", "*", "fields"),
+      List("kui", "clusters", "*", "masking", "*", "fields", "*"),
+      List("kui", "clusters", "*", "masking", "*", "fieldsNamePattern"),
+      List("kui", "clusters", "*", "masking", "*", "topicKeysPattern"),
+      List("kui", "clusters", "*", "masking", "*", "topicValuesPattern"),
+      List("kui", "clusters", "*", "masking", "*", "replacement"),
+      List("kui", "clusters", "*", "masking", "*", "maskingCharsReplacement"),
+      List("kui", "clusters", "*", "masking", "*", "keep", "prefix"),
+      List("kui", "clusters", "*", "masking", "*", "keep", "suffix"),
       List("kui", "clusters", "*", "properties", "**")
     ) ++ UpstreamAuthConfig
       .keysUnder("kui.clusters.*.connect.*.auth")

@@ -21,8 +21,8 @@ import kui.alerts.contract.dto.*
   * the literal. A decode assertion against `value.asJson` proves that the decoder matches the **encoder**,
   * which is the only thing anybody wanted to know.
   *
-  * The golden files are the third leg: they are what a reviewer reads and what a browser fixture is cut
-  * from, so a field rename is a diff in a file rather than an expectation quietly edited in passing.
+  * The golden files are the third leg: they are what a reviewer reads and what a browser fixture is cut from,
+  * so a field rename is a diff in a file rather than an expectation quietly edited in passing.
   */
 final class AlertResponsesSuite extends FunSuite {
 

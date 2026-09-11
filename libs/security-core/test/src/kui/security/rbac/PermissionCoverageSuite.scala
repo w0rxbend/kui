@@ -13,16 +13,16 @@ import kui.security.{Principal, PrincipalKind}
   * length: *"a permission with no pattern matches only an unnamed access — so a `TOPIC` permission with no
   * `value` grants nothing at all. That is the correct evaluation and a terrible silence at configuration
   * time."* Nothing asserted it. Replacing that one line with `case _ => true` reddened nothing anywhere:
-  * `./mill -k services.gateway.__.test + services.message.api.test + services.topic.api.test` stayed green
-  * at 482 cases over 54 suites, `RbacLawsSuite` stayed green in `libs.securityCore.jvm.test`, and no route
-  * or guard suite in `services/cluster`, `services/consumer` or `services/schema` noticed either.
+  * `./mill -k services.gateway.__.test + services.message.api.test + services.topic.api.test` stayed green at
+  * 482 cases over 54 suites, `RbacLawsSuite` stayed green in `libs.securityCore.jvm.test`, and no route or
+  * guard suite in `services/cluster`, `services/consumer` or `services/schema` noticed either.
   *
   * The mutation is a fail-open: with it, a role whose `TOPIC` permission has no `value` grants **every**
-  * topic, and a role whose `AUDIT` permission carries a leftover `value` grants the audit trail it was
-  * scoped away from.
+  * topic, and a role whose `AUDIT` permission carries a leftover `value` grants the audit trail it was scoped
+  * away from.
   *
-  * Both directions are here on purpose. A suite that only asserted the two refusals would also pass against
-  * a `covers` that returned `false` for everything, which would deny the whole product.
+  * Both directions are here on purpose. A suite that only asserted the two refusals would also pass against a
+  * `covers` that returned `false` for everything, which would deny the whole product.
   */
 final class PermissionCoverageSuite extends FunSuite {
 
@@ -82,8 +82,11 @@ final class PermissionCoverageSuite extends FunSuite {
     assert(audit.covers(Resource.Audit, None))
     assert(topics.covers(Resource.Topic, Some("orders-dlq")))
     // Still a full match, not a search: the pattern above is the one that widens it.
-    assert(!RbacPolicy.permission(Resource.Topic, Some(pattern("orders")), Set(Action.TopicView))
-      .covers(Resource.Topic, Some("orders-dlq")))
+    assert(
+      !RbacPolicy
+        .permission(Resource.Topic, Some(pattern("orders")), Set(Action.TopicView))
+        .covers(Resource.Topic, Some("orders-dlq"))
+    )
   }
 
   test("aPermissionOfAnotherResourceNeverCoversThisOne") {

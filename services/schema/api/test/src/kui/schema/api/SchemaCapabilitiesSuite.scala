@@ -56,9 +56,7 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
     }
 
   private def report(ports: Map[ClusterId, SchemaRegistryPort[IO]]) =
-    FakeStructuredLogger[IO].flatMap(logger =>
-      SchemaCapabilities.make[IO](registries(ports), logger).report
-    )
+    FakeStructuredLogger[IO].flatMap(logger => SchemaCapabilities.make[IO](registries(ports), logger).report)
 
   test("a cluster with no registry is not_configured, not degraded, and says which key to set") {
     report(Map(configured -> port(None))).map { capabilities =>

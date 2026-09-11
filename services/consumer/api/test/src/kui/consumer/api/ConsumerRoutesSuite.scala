@@ -43,7 +43,8 @@ final class ConsumerRoutesSuite extends KuiIOSuite {
     )
 
   test("theLagUrlReachesTheLagUseCaseAndNotTheDetailOne") {
-    val update = LagUpdate(Group, totalLag = Some(9L), pace = None, state = GroupState.Stable, memberCount = 1)
+    val update =
+      LagUpdate(Group, totalLag = Some(9L), pace = None, state = GroupState.Stable, memberCount = 1)
 
     resource(lag = List(update)).use { (server, stubs) =>
       for {

@@ -15,12 +15,11 @@ import kui.kernel.{ClusterId, Secret}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
-/** The seam between the three pieces of this module: the classpath check, the materializer and the
-  * renderer.
+/** The seam between the three pieces of this module: the classpath check, the materializer and the renderer.
   *
-  * Each is tested on its own elsewhere. What is only testable here is the order they run in and the
-  * lifetime they share — that a misconfigured deployment fails before writing a private key, and
-  * that the path in the returned properties is gone when the properties are.
+  * Each is tested on its own elsewhere. What is only testable here is the order they run in and the lifetime
+  * they share — that a misconfigured deployment fails before writing a private key, and that the path in the
+  * returned properties is gone when the properties are.
   */
 final class ConnectionPropertiesSuite extends KuiIOSuite {
 
@@ -160,7 +159,11 @@ final class ConnectionPropertiesSuite extends KuiIOSuite {
     val ours = KeyStoreMaterializer.directoryName(misconfigured, "")
 
     def materializedDirectories: IO[Long] =
-      IO(Using.resource(JFiles.list(temporaryDirectory))(_.filter(_.getFileName.toString.startsWith(ours)).count()))
+      IO(
+        Using.resource(JFiles.list(temporaryDirectory))(
+          _.filter(_.getFileName.toString.startsWith(ours)).count()
+        )
+      )
 
     for {
       before <- materializedDirectories

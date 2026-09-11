@@ -15,10 +15,10 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The cluster context's window onto the metadata store.
   *
-  * Every case here is about a decision the adapter makes rather than about the store, which has its own
-  * suite against a real broker: which key it writes, what a create looks like as opposed to an update, what
-  * happens to one record it cannot read, and what the store's health means to a domain that must not see the
-  * store's own types.
+  * Every case here is about a decision the adapter makes rather than about the store, which has its own suite
+  * against a real broker: which key it writes, what a create looks like as opposed to an update, what happens
+  * to one record it cannot read, and what the store's health means to a domain that must not see the store's
+  * own types.
   */
 final class ClusterConfigStoreAdapterSuite extends KuiIOSuite {
 
@@ -136,7 +136,9 @@ final class ClusterConfigStoreAdapterSuite extends KuiIOSuite {
     // classifies the failure; the adapter carries it through without reinterpreting it.
     adapter { (a, store) =>
       for {
-        _ <- store.failWritesWith(ApplicationError.Remote(ErrorCode.ConfigVersionConflict, "stale version", Nil))
+        _ <- store.failWritesWith(
+          ApplicationError.Remote(ErrorCode.ConfigVersionConflict, "stale version", Nil)
+        )
         result <- a.put(TestProfiles.profile(), ProfileVersion.unsafe(2L))
       } yield assertEquals(result.left.map(_.code), Left(ErrorCode.ConfigVersionConflict))
     }
@@ -263,6 +265,9 @@ final class ClusterConfigStoreAdapterSuite extends KuiIOSuite {
 
   /** Polls until the condition holds, so a test never depends on a fixed sleep being long enough. */
   private def eventually[A](read: IO[A])(holds: A => Boolean): IO[A] =
-    read.flatMap(value => if holds(value) then IO.pure(value) else IO.sleep(10.millis) *> eventually(read)(holds))
+    read
+      .flatMap(value =>
+        if holds(value) then IO.pure(value) else IO.sleep(10.millis) *> eventually(read)(holds)
+      )
       .timeout(5.seconds)
 }

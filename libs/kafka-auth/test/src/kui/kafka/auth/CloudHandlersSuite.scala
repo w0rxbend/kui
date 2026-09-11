@@ -7,8 +7,7 @@ import kui.kernel.error.ErrorCode
 import kui.kernel.{ClusterId, Secret}
 import kui.testkit.KuiIOSuite
 
-/** That a deployment missing an optional login library is told so, at startup, in a sentence it can
-  * act on.
+/** That a deployment missing an optional login library is told so, at startup, in a sentence it can act on.
   */
 final class CloudHandlersSuite extends KuiIOSuite {
 
@@ -17,10 +16,10 @@ final class CloudHandlersSuite extends KuiIOSuite {
 
   /** A class loader that resolves nothing.
     *
-    * The suite drives the check with this rather than with the real classpath, because what the
-    * test classpath happens to contain is not something a test should assert against: `kafka-clients`
-    * is on it, the three cloud SDKs are not, and both of those facts could change without the
-    * behaviour under test changing at all.
+    * The suite drives the check with this rather than with the real classpath, because what the test
+    * classpath happens to contain is not something a test should assert against: `kafka-clients` is on it,
+    * the three cloud SDKs are not, and both of those facts could change without the behaviour under test
+    * changing at all.
     */
   private val resolvesNothing: ClassLoader = new ClassLoader(null) {
     override def loadClass(name: String, resolve: Boolean): Class[?] =

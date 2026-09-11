@@ -31,9 +31,9 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * This is the one property of the composition root that has to hold at three in the morning. The gateway is
   * Core tier (PLAN §15): when it is down, the browser has nowhere to go and shows the single full-screen
-  * "cannot reach gateway" page, so a gateway that refused to start because some service was unreachable
-  * would turn one service's outage into a total blackout — at exactly the moment an operator most needs a
-  * working UI to find out what is wrong.
+  * "cannot reach gateway" page, so a gateway that refused to start because some service was unreachable would
+  * turn one service's outage into a total blackout — at exactly the moment an operator most needs a working
+  * UI to find out what is wrong.
   *
   * AIO-001 extends this suite for the all-in-one process, which wires the same function.
   */
@@ -70,8 +70,8 @@ final class GatewayWiringSuite extends KuiIOSuite {
   /** A listening socket that counts every connection anybody makes to it.
     *
     * The counting is the point, and it is what the previous shape of this suite did not do. That version
-    * bound a socket, wired the gateway, and then called `accept()` once with a 250 ms timeout, reasoning
-    * that a connection opened during wiring would still be sitting in the backlog. It is not: a client that
+    * bound a socket, wired the gateway, and then called `accept()` once with a 250 ms timeout, reasoning that
+    * a connection opened during wiring would still be sitting in the backlog. It is not: a client that
     * connects and then closes — which is what a probe whose call has already failed does — sends a FIN or an
     * RST, and Linux drops such a connection from the accept queue before anybody accepts it. The mutation
     * this suite is named for could therefore be applied with that case still green, which wave 6 measured
@@ -86,6 +86,15 @@ final class GatewayWiringSuite extends KuiIOSuite {
     private val accepted = new ConcurrentLinkedQueue[Socket]()
 
     private val acceptor: Thread = {
+      // The only `// format: off` in the repository, and TD-027 is why. scalafmt's fixed point for
+      // this call packs the thread name onto the line that closes the `catch` — `}, "name"` — and
+      // scalameta, which is the parser `./mill __.fix` uses, rejects that after a *braceless* `try`
+      // even though scalac under `-no-indent` compiles it. The two gates only ever read production
+      // sources before this wave, and no production source writes a braceless `try` as a non-final
+      // argument, so the disagreement had nowhere to show up. Adding braces does not help:
+      // `rewrite.rules = [RedundantBraces]` takes them straight back out. Left in the author's
+      // shape, which both tools accept.
+      // format: off
       val thread = new Thread(
         () =>
           try
@@ -95,12 +104,13 @@ final class GatewayWiringSuite extends KuiIOSuite {
               val _ = counter.incrementAndGet()
             }
           catch {
-            // Closing the socket is how this thread is asked to stop, so anything thrown after that is the
-            // ordinary shutdown path rather than a failure worth reporting.
+            // Closing the socket is how this thread is asked to stop, so anything thrown after that is
+            // the ordinary shutdown path rather than a failure worth reporting.
             case _: Throwable => ()
           },
         "gateway-wiring-acceptor"
       )
+      // format: on
       thread.setDaemon(true)
       thread
     }
@@ -271,15 +281,17 @@ final class GatewayWiringSuite extends KuiIOSuite {
       FakeStructuredLogger[IO].flatMap { logger =>
         GatewayWiring
           .over[IO](idleUpstreams, Telemetry.noop[IO], logger, Resource.pure(wired))
-          .use(gateway => IO {
-            val routes = gateway.routes.filter(_.endpoint.info.name.contains("alerts.stream"))
+          .use(gateway =>
+            IO {
+              val routes = gateway.routes.filter(_.endpoint.info.name.contains("alerts.stream"))
 
-            assertEquals(routes.size, 1)
-            assertEquals(
-              routes.head.endpoint.showPathTemplate(showQueryParam = None),
-              "/api/v1/clusters/{clusterId}/alerts/stream"
-            )
-          })
+              assertEquals(routes.size, 1)
+              assertEquals(
+                routes.head.endpoint.showPathTemplate(showQueryParam = None),
+                "/api/v1/clusters/{clusterId}/alerts/stream"
+              )
+            }
+          )
       }
     }
   }

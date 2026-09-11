@@ -114,8 +114,34 @@ trait KuiJvmModule extends KuiModule
 
 
 
-/** JVM tests. MUnit is the only test framework (ADR-018). */
-trait KuiTests extends TestModule.Munit {
+/** JVM tests. MUnit is the only test framework (ADR-018).
+  *
+  * `ScalafmtModule` and `ScalafixModule` are mixed in here and not inherited from the enclosing
+  * module: Mill's `ScalaTests` is a fresh `ScalaModule` nested inside its target, so it picks up
+  * `scalaVersion` and `scalacOptions` from the outer module but none of the outer module's mixins.
+  * Without this line `./mill __.checkFormat` and `./mill __.fix` resolve one target per production
+  * module and none per test module, which is what TD-027 measured: every `test/src` tree in the
+  * repository sat outside both style gates while three waves of acceptance lists reported totals
+  * that read as if it did not.
+  *
+  * Test sources get `.scalafix-tests.conf`, the third member of the same family as `.scalafix.conf`
+  * and `.scalafix-pure.conf`: same `OrganizeImports`, four `DisableSyntax` rules relaxed with the
+  * site count that justifies each written beside it. The alternative was to rewrite 126 sites in 57
+  * files that pass `null` to a Java API, cast a `java.lang.reflect.Proxy`, or throw out of a
+  * fixture builder — a semantic change to tests, which is the thing TD-027's own instructions say
+  * to file rather than take.
+  */
+trait KuiTests extends TestModule.Munit with ScalafmtModule with ScalafixModule {
+  // `ScalafixModule` drags in `JavaModule`, whose `defaultTask` is `run`, alongside `TestModule`'s,
+  // which is `testForked`. Scala makes the ambiguity a compile error rather than picking one, and
+  // it has to be resolved in favour of `TestModule`'s: `scripts/run-tests.sh` invokes every module
+  // by its bare name (`./mill services.topic.domain.test`) and would otherwise try to `run` 81 test
+  // modules that have no main class. Delegated rather than re-spelled so a Mill upgrade that
+  // renames the task cannot leave this line quietly pointing at a task that no longer resolves.
+  override def defaultTask() = super[Munit].defaultTask()
+
+  def scalafixConfig = Task { Some(mill.api.BuildCtx.workspaceRoot / ".scalafix-tests.conf") }
+
   def mvnDeps = Seq(
     mvn"org.scalameta::munit::${Versions.munit}",
     mvn"org.scalameta::munit-scalacheck::${Versions.munitScalacheck}",

@@ -102,6 +102,112 @@ describe("a connector's state chip", () => {
     expect(connectorChip("UNASSIGNED").label).toBe("unassigned");
     expect(connectorChip("UNKNOWN").label).toBe("state not reported");
   });
+
+  test("the pill publishes the state word beside the sentence, for every state", async () => {
+    /*
+     * The structural half of the finding the case above holds the cheap half of. Pinning the five
+     * labels decides which language a rename reddens in; it cannot stop the copy being made, and
+     * `frontend/e2e/connect.spec.ts` had made it. `data-state` is what lets that spec stop: it
+     * carries the drawn state verbatim, so a browser case compares this attribute to the state the
+     * Connect worker reported and never writes a label down at all.
+     *
+     * Asserted here rather than only in the browser for the reason every kernel case exists: this
+     * is the package that owns the attribute, and a Playwright run against a live stack reports its
+     * loss as a locator that matched nothing.
+     *
+     * The pair is the assertion, not the attribute alone. `data-state` and the pill's own text have
+     * to describe the same connector — an attribute wired to a different prop, or left on a stale
+     * value while the words moved, is worse than no attribute, because the spec that trusts it
+     * would then pass on a screen showing something else. So every state is mounted and both
+     * channels are read off the one element.
+     */
+    for (const state of ["RUNNING", "FAILED", "PAUSED", "UNASSIGNED", "UNKNOWN"] as const) {
+      const { host, dispose } = mount(() => (
+        <ConnectorCard name="orders-sink" kind="sink" state={state} tasks={["running"]} />
+      ));
+      await flush();
+
+      const pill = host.querySelector(".kui-connector__head .kui-pill");
+      expect(pill, `no pill drawn for ${state}`).not.toBeNull();
+      expect(pill?.getAttribute("data-state")).toBe(state);
+      expect(pill?.textContent).toBe(connectorChip(state).label);
+      // AND THE COLOUR, WHICH IS THE THIRD CHANNEL AND THE ONE AN OPERATOR READS FIRST. Hard-coding
+      // the call site's `tone` — `tone="danger"` for every state — draws a RUNNING connector with a
+      // red pill and left both this loop and `e2e/connect.spec.ts` green, because the word and the
+      // attribute were still right. A card whose colour says failing and whose word says running is
+      // read as failing. Filed by W9-04 as its own green mutation and reproduced by W9-03/F5.
+      expect(pill?.className).toContain(`kui-pill--${connectorChip(state).tone}`);
+      dispose();
+    }
+  });
+
+  test("a pill drawn from no reported state says so in both channels", async () => {
+    /*
+     * The one case where the two channels could be made to disagree without anybody noticing, and
+     * the one where it would matter most. `UNKNOWN` is the state this card's header calls the worst
+     * thing to get wrong: a regression drawing it as `RUNNING` in either channel tells an operator
+     * their pipeline is fine on no evidence. The attribute is checked against the *word* rather
+     * than only against the prop, because a `data-state` hard-coded to "RUNNING" would satisfy the
+     * loop above on four of its five passes and this is the fifth.
+     */
+    const { host, dispose } = mount(() => (
+      <ConnectorCard name="orders-sink" kind="sink" state="UNKNOWN" tasks={[]} />
+    ));
+    await flush();
+
+    const pill = host.querySelector(".kui-connector__head .kui-pill");
+    expect(pill?.getAttribute("data-state")).not.toMatch(/RUNNING/i);
+    expect(pill?.textContent).not.toMatch(/running/i);
+    dispose();
+  });
+});
+
+describe("a connector card's facts line", () => {
+  test("counts the tasks that are running and not the tasks that exist", async () => {
+    /*
+     * Found by mutation while this packet was looking for a green one, and it was green: replacing
+     * `taskSummary`'s filter with `tasks.length` — so a connector with one running task and two
+     * failed ones draws "3/3 tasks" — left all 1,900 cases in all 82 frontend test files passing.
+     * It is the same class of defect as the header's `UNKNOWN` rule, one line lower down: a
+     * monitoring screen reporting that everything is fine on evidence that says otherwise.
+     *
+     * It is worse here than a wrong number usually is, because the number has a neighbour.
+     * `feature-connect`'s `ConnectorPanel` prints the *cluster's* own figures beside this one and
+     * its comment says, correctly, that where the two disagree the difference is a fact — KUI was
+     * told about fewer tasks than the connector has. A card that miscounts its own segments
+     * manufactures that disagreement, and the reader is then told a true-sounding thing about the
+     * wrong subject.
+     *
+     * The bar above the line already draws the distinction and `TaskBar`'s own cases gate it. This
+     * is the sentence beside it, which had no case at all.
+     */
+    const { host, dispose } = mount(() => (
+      <ConnectorCard
+        name="elastic-sink"
+        kind="sink"
+        state="FAILED"
+        tasks={["running", "failed", "failed"]}
+      />
+    ));
+    await flush();
+
+    const facts = host.querySelector(".kui-connector__facts");
+    expect(facts?.textContent).toContain("1/3 tasks");
+    dispose();
+  });
+
+  test("a connector with no tasks says so rather than drawing a ratio of nothing", async () => {
+    // "0/0 tasks" is arithmetic, not an answer, and it reads as a connector whose tasks all died.
+    const { host, dispose } = mount(() => (
+      <ConnectorCard name="orders-source" kind="source" state="UNASSIGNED" tasks={[]} />
+    ));
+    await flush();
+
+    const facts = host.querySelector(".kui-connector__facts");
+    expect(facts?.textContent).toContain("no tasks");
+    expect(facts?.textContent).not.toContain("0/0");
+    dispose();
+  });
 });
 
 describe("a connector card that may not be operated", () => {

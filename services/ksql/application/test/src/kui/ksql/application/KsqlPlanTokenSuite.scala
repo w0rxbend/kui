@@ -122,6 +122,55 @@ final class KsqlPlanTokenSuite extends CatsEffectSuite {
     assertEquals(KsqlPlanToken.Operation, "ksql.statement")
   }
 
+  test("a token signed with this key for another operation is refused, key or no key") {
+    // W9-A1: the sentence above was the *whole* of what held `operation == Operation`. Asserting the
+    // constant asserts nothing about `verify`, and the conjunct could be deleted with all twelve cases in
+    // this file and all 4,299 in the repository still green.
+    //
+    // It cannot be driven through `mint`, which writes `Operation` unconditionally — the fixture could not
+    // express the failing input, which is why nobody had. So the payload is forged here in the wire form
+    // this object documents and signed with the *same* key: the deployment shares ADR-026's cursor key
+    // between this token, `TopicPlanToken` and the consumer service's, and the operation string is the only
+    // thing keeping the three apart. A `topic.delete` confirmation that verified here would let a
+    // confirmation given for one destructive act be spent on another.
+    val forged = signed(List("v1", cluster.value, "topic.delete", fingerprint, expiry.toEpochMilli.toString))
+
+    tokens
+      .verify(cluster, statement, forged, now)
+      .map(answer => assertEquals(answer.left.toOption.map(_.code), Some(ErrorCode.Validation), forged))
+  }
+
+  test("a token whose payload announces another version is refused rather than read as this one") {
+    // The same hole one field along, and the reason the version is in the payload at all: a `v2` payload
+    // will mean different fields in different places, and one read with `v1`'s positions is a cluster id
+    // read out of whatever field happens to be second.
+    val forged =
+      signed(List("v2", cluster.value, KsqlPlanToken.Operation, fingerprint, expiry.toEpochMilli.toString))
+
+    tokens
+      .verify(cluster, statement, forged, now)
+      .map(answer => assertEquals(answer.left.toOption.map(_.code), Some(ErrorCode.Validation), forged))
+  }
+
+  /** The fingerprint of the statement these forged payloads claim to be about. */
+  private val fingerprint: String = KsqlPlanToken.fingerprintOf(statement)
+
+  /** One payload in the wire form `KsqlPlanToken` documents, signed with the suite's own key.
+    *
+    * Hand-built on purpose: every field below is one `mint` writes as a constant, so a case that went through
+    * `mint` can only ever produce the payload this service already accepts.
+    */
+  private def signed(fields: List[String]): String = {
+    val payload = fields.mkString("|")
+    val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+    mac.init(new javax.crypto.spec.SecretKeySpec(key.value, "HmacSHA256"))
+
+    val encoder = java.util.Base64.getUrlEncoder.withoutPadding
+    val bytes = payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+
+    s"${encoder.encodeToString(bytes)}.${encoder.encodeToString(mac.doFinal(bytes))}"
+  }
+
   test("the fingerprint of two different statements differs, and of the same statement does not") {
     assertEquals(KsqlPlanToken.fingerprintOf(statement), KsqlPlanToken.fingerprintOf(statement))
     assertNotEquals(

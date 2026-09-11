@@ -13,9 +13,9 @@ import kui.testkit.KuiSuite
   * The strict URL policy is what stops a configured URL from turning the gateway into a way of reading a
   * private network — the address `http://169.254.169.254/` is how a cloud instance hands out its own
   * credentials. It used to be hard-coded, with no switch anywhere, which meant three entirely legitimate
-  * deployments could not start: the gateway and a service run as two local processes on `localhost`, an
-  * OTLP collector on `http://localhost:4317`, and a Kubernetes ClusterIP such as `http://10.96.4.7:8080`.
-  * Both the operations guide and the design note described a relaxation that did not exist.
+  * deployments could not start: the gateway and a service run as two local processes on `localhost`, an OTLP
+  * collector on `http://localhost:4317`, and a Kubernetes ClusterIP such as `http://10.96.4.7:8080`. Both the
+  * operations guide and the design note described a relaxation that did not exist.
   */
 final class MainConfigSuite extends KuiSuite {
 

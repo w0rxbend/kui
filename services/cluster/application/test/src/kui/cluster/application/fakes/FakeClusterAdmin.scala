@@ -13,8 +13,8 @@ import kui.kernel.{BrokerId, ClusterId}
 /** A cluster admin port a suite can drive, and which remembers what it was asked.
   *
   * Two of its controls carry most of the suites above it. `delay` makes every method sleep before answering,
-  * which under virtual time is how "the dashboard never waits on a broker" becomes an assertion rather than
-  * a hope. `calls` records every invocation with the cluster it was for, which is how "the quorum was never
+  * which under virtual time is how "the dashboard never waits on a broker" becomes an assertion rather than a
+  * hope. `calls` records every invocation with the cluster it was for, which is how "the quorum was never
   * asked for" and "the deleted cluster's loop stopped" are assertions about behaviour rather than about
   * timing.
   */

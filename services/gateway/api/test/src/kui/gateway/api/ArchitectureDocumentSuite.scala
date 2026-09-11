@@ -8,15 +8,15 @@ import munit.FunSuite
 
 /** That `ARCHITECTURE.md` §3 describes this repository rather than the one somebody meant to build.
   *
-  * §3 is the document a newcomer is pointed at to learn where a port lives, which layer a service has and
-  * why the gateway may name another service's endpoint value. Every claim in it was prose, read by nothing,
-  * for six milestones — and two of them were repaired in wave 6 only because a wave plan happened to notice
-  * them by eye. This suite is the thing that reads them.
+  * §3 is the document a newcomer is pointed at to learn where a port lives, which layer a service has and why
+  * the gateway may name another service's endpoint value. Every claim in it was prose, read by nothing, for
+  * six milestones — and two of them were repaired in wave 6 only because a wave plan happened to notice them
+  * by eye. This suite is the thing that reads them.
   *
   * It lives in the gateway's test module rather than in `build-tests` because the claims it checks are the
-  * gateway's own subject matter: which services it may depend on, where a relayed endpoint value has to
-  * live, and which layers the gateway itself has. Nothing here imports another service — the assertions are
-  * made against directory names and file text, so no module edge is created by making them.
+  * gateway's own subject matter: which services it may depend on, where a relayed endpoint value has to live,
+  * and which layers the gateway itself has. Nothing here imports another service — the assertions are made
+  * against directory names and file text, so no module edge is created by making them.
   */
 final class ArchitectureDocumentSuite extends FunSuite {
 
@@ -255,9 +255,9 @@ final class ArchitectureDocumentSuite extends FunSuite {
 
   /** The `| service | aggregates | ports | adapters |` rows of §3's per-service table, as (service, ports).
     *
-    * Scoped to the one table by its header row rather than by "a line beginning with a pipe": §9's
-    * caching table is also keyed by service name, and reading its third column as a port list is how the
-    * first draft of this suite failed on a row it had no business looking at.
+    * Scoped to the one table by its header row rather than by "a line beginning with a pipe": §9's caching
+    * table is also keyed by service name, and reading its third column as a port list is how the first draft
+    * of this suite failed on a row it had no business looking at.
     */
   private def serviceRows: List[(String, String)] = {
     val header = "| Service | Key aggregates / value objects | Ports in `domain` | Adapters in"
@@ -271,8 +271,8 @@ final class ArchitectureDocumentSuite extends FunSuite {
       .toList
   }
 
-  /** Every `` `Name[F]` `` in a table cell. The backticks matter: they are what distinguishes an
-    * identifier the tree can be asked about from a sentence explaining that there is nothing to ask.
+  /** Every `` `Name[F]` `` in a table cell. The backticks matter: they are what distinguishes an identifier
+    * the tree can be asked about from a sentence explaining that there is nothing to ask.
     */
   private def identifiersIn(cell: String): List[String] =
     "`([A-Za-z][A-Za-z0-9]*)\\[F\\]`".r.findAllMatchIn(cell).map(_.group(1)).toList
@@ -284,8 +284,8 @@ final class ArchitectureDocumentSuite extends FunSuite {
     sources.flatMap(file => declaration.findAllMatchIn(Files.readString(file)).map(_.group(1))).toSet
   }
 
-  /** The rule ids of §3's `| Rule | What it forbids |` table, which is the only table whose first column
-    * is a bare `A` followed by digits.
+  /** The rule ids of §3's `| Rule | What it forbids |` table, which is the only table whose first column is a
+    * bare `A` followed by digits.
     */
   private def ruleIdsIn(text: String): Set[String] =
     text.linesIterator
@@ -300,8 +300,8 @@ final class ArchitectureDocumentSuite extends FunSuite {
     *
     * The block is closed by **balancing the parentheses** rather than by searching for a closing paren at a
     * particular indentation, which is what the first version did. Indentation is a formatter's business —
-    * `./mill __.checkFormat` may move it at any time and nothing here would be told — and a cut that lands
-    * in the wrong place produces either a region far too large (in which every service's contract module is
+    * `./mill __.checkFormat` may move it at any time and nothing here would be told — and a cut that lands in
+    * the wrong place produces either a region far too large (in which every service's contract module is
     * trivially "present") or one far too small (in which a real edge is reported missing). Balanced parens
     * are a property of the language rather than of the layout, so the region is right or the read fails.
     */

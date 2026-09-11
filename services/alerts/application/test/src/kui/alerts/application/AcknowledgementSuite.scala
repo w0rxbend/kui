@@ -113,7 +113,11 @@ final class AcknowledgementSuite extends CatsEffectSuite {
   test("an acknowledgement on a cluster KUI has never heard of is a 404 and writes no store") {
     for {
       (store, _, alerts) <- rig
-      result <- alerts.acknowledge(caller, kui.kernel.ClusterId.unsafe("nowhere"), event(AlertRule.DiskUsage, "x").id)
+      result <- alerts.acknowledge(
+        caller,
+        kui.kernel.ClusterId.unsafe("nowhere"),
+        event(AlertRule.DiskUsage, "x").id
+      )
       writes <- store.writes.get
     } yield {
       assertEquals(result.left.map(_.code), Left(ErrorCode.ClusterNotFound))

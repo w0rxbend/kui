@@ -6,9 +6,9 @@ import kui.testkit.KuiSuite
 
 /** The defaults, asserted one by one.
   *
-  * Every number here comes from `research/kafka/admin-capabilities.md` §0 or `ARCHITECTURE.md` §9.
-  * The table exists so that changing one is a deliberate act that fails a test, rather than a
-  * one-character edit nobody reviews.
+  * Every number here comes from `research/kafka/admin-capabilities.md` §0 or `ARCHITECTURE.md` §9. The table
+  * exists so that changing one is a deliberate act that fails a test, rather than a one-character edit nobody
+  * reviews.
   */
 final class AdminTuningSuite extends KuiSuite {
 

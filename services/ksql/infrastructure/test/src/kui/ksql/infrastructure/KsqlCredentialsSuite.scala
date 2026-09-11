@@ -23,7 +23,9 @@ final class KsqlCredentialsSuite extends KuiIOSuite {
 
   private def headerOf(credentials: KsqlCredentials[IO]): IO[Option[String]] =
     credentials
-      .authenticate(basicRequest.get(sttp.model.Uri.unsafeParse("http://ksqldb/ksql")).response(asStringAlways))
+      .authenticate(
+        basicRequest.get(sttp.model.Uri.unsafeParse("http://ksqldb/ksql")).response(asStringAlways)
+      )
       .map(_.toOption.flatMap(_.header("Authorization")))
 
   private def streamHeaderOf(credentials: KsqlCredentials[IO]): IO[Option[String]] =
@@ -179,9 +181,11 @@ final class KsqlCredentialsSuite extends KuiIOSuite {
 
     val issuer: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
       .thenRespondF(_ =>
-        IO.pure(ResponseStub.adjust("""{"nothing":"useful"}""", StatusCode.Ok): sttp.client4.Response[
-          StubBody
-        ])
+        IO.pure(
+          ResponseStub.adjust("""{"nothing":"useful"}""", StatusCode.Ok): sttp.client4.Response[
+            StubBody
+          ]
+        )
       )
 
     kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>

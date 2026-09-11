@@ -23,10 +23,10 @@ final class FakeSource(failure: Option[KuiError] = None, scrapedAgo: FiniteDurat
 
   /** The use case's own `now`, as it was handed to this port on the last point-in-time read.
     *
-    * Recorded because it is the only way to pin the instant a `Measured` carries. Comparing that instant
-    * with `Instant.now()` cannot do it: the use case's `now` is always before the assertion runs, so a
-    * reading stamped with the *request* instant reads as "earlier than now" exactly like one stamped with
-    * the scrape's, and the case passes on the defect it was written to catch.
+    * Recorded because it is the only way to pin the instant a `Measured` carries. Comparing that instant with
+    * `Instant.now()` cannot do it: the use case's `now` is always before the assertion runs, so a reading
+    * stamped with the *request* instant reads as "earlier than now" exactly like one stamped with the
+    * scrape's, and the case passes on the defect it was written to catch.
     */
   private val lastAskedAt = new AtomicReference[Option[Instant]](None)
 
@@ -35,8 +35,8 @@ final class FakeSource(failure: Option[KuiError] = None, scrapedAgo: FiniteDurat
   /** Where the scrape behind a reading taken at `asOf` was actually taken. */
   def scrapedAt(asOf: Instant): Instant = asOf.minusNanos(scrapedAgo.toNanos)
 
-  /** When the newest scrape behind the three point-in-time answers was taken, relative to the moment the
-    * port is asked. Zero is a reading taken this instant; anything past the use case's `staleAfter` is
+  /** When the newest scrape behind the three point-in-time answers was taken, relative to the moment the port
+    * is asked. Zero is a reading taken this instant; anything past the use case's `staleAfter` is
     * last-known-good and has to come back as `Stale` rather than as `Measured`.
     */
   private def observed[A](asOf: Instant, value: A): Observed[A] = {
@@ -58,7 +58,9 @@ final class FakeSource(failure: Option[KuiError] = None, scrapedAgo: FiniteDurat
     )
 
   def producers(count: Int, asOf: Instant): IO[Either[KuiError, Observed[TopProducers]]] =
-    IO.pure(failure.toLeft(observed(asOf, TopProducers.of(List(TopicProducer("orders.v1", 98000.0d)), count))))
+    IO.pure(
+      failure.toLeft(observed(asOf, TopProducers.of(List(TopicProducer("orders.v1", 98000.0d)), count)))
+    )
 
   def recordSize(asOf: Instant): IO[Either[KuiError, Observed[RecordSizeReading]]] =
     IO.pure(failure.toLeft(observed(asOf, RecordSizeReading.from(Some(1024.0d), Some(8.0d)))))
@@ -232,7 +234,10 @@ final class MetricsUseCasesSuite extends CatsEffectSuite {
       def producers(count: Int, asOf: Instant) =
         IO.pure(
           Right(
-            Observed(TopProducers(List.tabulate(count)(index => TopicProducer(s"topic-$index", 1.0d)), 0), asOf)
+            Observed(
+              TopProducers(List.tabulate(count)(index => TopicProducer(s"topic-$index", 1.0d)), 0),
+              asOf
+            )
           )
         )
       def recordSize(asOf: Instant) = IO.pure(Right(Observed(RecordSizeReading.Empty, asOf)))

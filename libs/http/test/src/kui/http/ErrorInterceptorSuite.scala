@@ -17,8 +17,8 @@ import kui.kernel.error.{ApplicationError, DomainError, ErrorCode, FieldError, I
 import kui.kernel.{ClusterId, CorrelationId}
 import kui.observability.Correlation
 
-/** That every way a request can fail produces the same body, with the right code, and that nothing
-  * escapes in it that should not.
+/** That every way a request can fail produces the same body, with the right code, and that nothing escapes in
+  * it that should not.
   */
 final class ErrorInterceptorSuite extends CatsEffectSuite {
 
@@ -94,8 +94,8 @@ final class ErrorInterceptorSuite extends CatsEffectSuite {
       .errorOut(jsonBody[ErrorEnvelope])
       .serverLogicSuccess[IO](_ => IO.raiseError(new RuntimeException("a very secret stack trace")))
 
-  /** The shape a service's `api` layer uses: the status travels with the envelope, so the code and
-    * the status can never disagree.
+  /** The shape a service's `api` layer uses: the status travels with the envelope, so the code and the status
+    * can never disagree.
     */
   private val notFound: ServerEndpoint[Fs2Streams[IO], IO] =
     endpoint.get

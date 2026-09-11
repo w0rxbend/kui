@@ -373,7 +373,8 @@ final class TopicResponsesSuite extends FunSuite {
 
     assertEquals(page.totalItems, Some(2L))
     assertEquals(page.pageCount, Some(1))
-    assertEquals(topics.asJson.hcursor.downField("topics").downField("data").downField("page").keys.map(_.toList),
+    assertEquals(
+      topics.asJson.hcursor.downField("topics").downField("data").downField("page").keys.map(_.toList),
       Some(List("page", "pageSize", "totalItems", "pageCount", "nextPageToken"))
     )
   }

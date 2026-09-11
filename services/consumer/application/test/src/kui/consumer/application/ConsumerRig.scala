@@ -73,7 +73,9 @@ object ConsumerRig {
       state.get.map(_.listing)
 
     def describe(ids: List[GroupId]): IO[Either[KuiError, Map[GroupId, ConsumerGroup]]] =
-      state.updateAndGet(s => s.copy(describes = s.describes + 1)).map(_.described.map(_.view.filterKeys(ids.toSet).toMap))
+      state
+        .updateAndGet(s => s.copy(describes = s.describes + 1))
+        .map(_.described.map(_.view.filterKeys(ids.toSet).toMap))
 
     def exists(id: GroupId): IO[Either[KuiError, Boolean]] =
       state.get.map(_.listing.map(_.groups.exists(_.groupId == id)))
@@ -88,7 +90,9 @@ object ConsumerRig {
       state.update(s => s.copy(applied = s.applied :+ (group -> offsets))).as(().asRight[KuiError])
 
     def deleteOffsets(group: GroupId, partitions: Set[TopicPartition]): IO[Either[KuiError, Unit]] =
-      state.update(s => s.copy(deletedOffsets = s.deletedOffsets :+ (group -> partitions))).as(().asRight[KuiError])
+      state
+        .update(s => s.copy(deletedOffsets = s.deletedOffsets :+ (group -> partitions)))
+        .as(().asRight[KuiError])
 
     def deleteGroup(id: GroupId): IO[Either[KuiError, Unit]] =
       state.update(s => s.copy(deletedGroups = s.deletedGroups :+ id)).as(().asRight[KuiError])

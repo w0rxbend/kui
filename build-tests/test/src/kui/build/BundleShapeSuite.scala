@@ -1,7 +1,8 @@
 package kui.build
 
-import kui.build.BundleShape.{Feature, LinkerOutput, Result}
 import munit.FunSuite
+
+import kui.build.BundleShape.{Feature, LinkerOutput, Result}
 
 /** The bundle-shape rules, exercised against synthetic linker output.
   *

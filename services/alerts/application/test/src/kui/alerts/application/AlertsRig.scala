@@ -16,9 +16,9 @@ import kui.security.Principal
 /** The fakes the application suites build on.
   *
   * The store is a real implementation of the port over a `Ref` rather than a stub that answers constants,
-  * because two of the required cases are about what the store was **asked to do** — "refused before the
-  * store is written" and "the open count is the count of open events" — and a stub cannot tell a caller that
-  * was refused from one that was never made.
+  * because two of the required cases are about what the store was **asked to do** — "refused before the store
+  * is written" and "the open count is the count of open events" — and a stub cannot tell a caller that was
+  * refused from one that was never made.
   */
 object AlertsRig {
 

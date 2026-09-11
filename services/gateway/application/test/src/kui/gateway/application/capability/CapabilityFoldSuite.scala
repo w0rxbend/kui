@@ -1,6 +1,7 @@
 package kui.gateway.application.capability
 
 import java.time.Instant
+
 import scala.concurrent.duration.{DurationInt, DurationLong, FiniteDuration}
 
 import org.scalacheck.{Arbitrary, Gen, Prop}
@@ -9,13 +10,13 @@ import kui.contracts.capability.{CapabilityState, ClusterCapability, DegradedRea
 import kui.http.upstream.CircuitState
 import kui.testkit.KuiSuite
 
-/** The executable specification of KU-001: "a broken part of KUI never breaks the rest, and the user is
-  * told which part and why".
+/** The executable specification of KU-001: "a broken part of KUI never breaks the rest, and the user is told
+  * which part and why".
   *
-  * Read this suite against ADR-039 line by line. Every row of the precedence table there is a test here,
-  * and a change to the product's behaviour has to appear in both. It is deliberately a table over a pure
-  * function rather than a set of scenarios over a running registry: scenarios prove that a path works,
-  * tables prove that every combination was considered.
+  * Read this suite against ADR-039 line by line. Every row of the precedence table there is a test here, and
+  * a change to the product's behaviour has to appear in both. It is deliberately a table over a pure function
+  * rather than a set of scenarios over a running registry: scenarios prove that a path works, tables prove
+  * that every combination was considered.
   */
 final class CapabilityFoldSuite extends KuiSuite {
 
@@ -64,7 +65,10 @@ final class CapabilityFoldSuite extends KuiSuite {
       ),
       (
         "not configured outranks an open circuit",
-        inputs(circuit = Some(CircuitState.Open), serviceReport = Some(report(configured = false, "available"))),
+        inputs(
+          circuit = Some(CircuitState.Open),
+          serviceReport = Some(report(configured = false, "available"))
+        ),
         _ == CapabilityState.NotConfigured
       ),
       (
@@ -136,7 +140,12 @@ final class CapabilityFoldSuite extends KuiSuite {
     // life nothing has been polled, and showing every feature as broken would train operators to ignore
     // the one signal that is supposed to mean something.
     val folded = CapabilityFold.fold(None, CapabilityInputs.unknown, now)
-    assertEquals(folded, CapabilityState.Degraded(DegradedReason(ReasonCode.Starting, "waiting for the first readiness check", None, None)))
+    assertEquals(
+      folded,
+      CapabilityState.Degraded(
+        DegradedReason(ReasonCode.Starting, "waiting for the first readiness check", None, None)
+      )
+    )
   }
 
   test("aServiceWithNoInputsAtAllIsStartingRatherThanAvailable") {
@@ -172,11 +181,13 @@ final class CapabilityFoldSuite extends KuiSuite {
   private given Arbitrary[CapabilityInputs] = Arbitrary(
     for {
       readiness <- Gen.option(
-        Gen.oneOf(
-          Gen.const(ReadinessSignal.Ready),
-          Gen.const(ReadinessSignal.Unknown),
-          Gen.const(notReady)
-        ).flatMap(identity)
+        Gen
+          .oneOf(
+            Gen.const(ReadinessSignal.Ready),
+            Gen.const(ReadinessSignal.Unknown),
+            Gen.const(notReady)
+          )
+          .flatMap(identity)
       )
       circuit <- Gen.option(Gen.oneOf(CircuitState.values.toList))
       status <- Gen.oneOf("available", "degraded", "unavailable", "something-from-a-newer-service")

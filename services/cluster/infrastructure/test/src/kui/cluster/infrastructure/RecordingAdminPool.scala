@@ -15,14 +15,14 @@ import kui.kernel.cluster.ClusterConnection
   * only when, the connection is what broke, that a profile whose version moved evicts the client built from
   * the old one, and — for a caller that hands one in — how many round trips the adapter makes to a client.
   *
-  * The two records are kept apart on purpose. `events` is the lifecycle log three suites assert *exactly*,
-  * so a round trip must not appear in it; `runs` is the call log, one entry per `run`, which is what an
+  * The two records are kept apart on purpose. `events` is the lifecycle log three suites assert *exactly*, so
+  * a round trip must not appear in it; `runs` is the call log, one entry per `run`, which is what an
   * assertion like "fifty calls and not ten thousand" is made against.
   *
   * @param client
   *   the `Admin` every `run` is handed. `None` is the original behaviour and the one the lifecycle suites
-  *   want: they assert what the adapter did to the pool, and a call that opened a client would be a call
-  *   this fixture had to answer.
+  *   want: they assert what the adapter did to the pool, and a call that opened a client would be a call this
+  *   fixture had to answer.
   */
 final class RecordingAdminPool(
     val events: Ref[IO, List[String]],
@@ -30,9 +30,9 @@ final class RecordingAdminPool(
     client: Option[Admin]
 ) extends AdminClientPool[IO] {
 
-  /** `IO.defer`, because a Kafka call can throw before it returns a future — an admin client whose
-    * connection has gone throws from the call itself — and the real pool invokes `call` inside a `flatMap`,
-    * so that throw arrives as a failed effect rather than escaping the caller's error handling.
+  /** `IO.defer`, because a Kafka call can throw before it returns a future — an admin client whose connection
+    * has gone throws from the call itself — and the real pool invokes `call` inside a `flatMap`, so that
+    * throw arrives as a failed effect rather than escaping the caller's error handling.
     */
   def run[A](connection: ClusterConnection, operation: String)(call: Admin => IO[A]): IO[A] =
     runs.update(_ :+ operation) *> IO.defer {

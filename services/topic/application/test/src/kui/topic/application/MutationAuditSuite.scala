@@ -56,9 +56,9 @@ final class MutationAuditSuite extends KuiIOSuite {
 
   /** The suite's stand-in for `TopicErrors.toKui`, which the api module owns and rule A3 keeps out of here.
     *
-    * The `Unreachable` arm is not decoration. Until it was added every error this fixture could produce was
-    * a 4xx, so the guard's `if wire.code.httpStatus < 500` was only ever asked about codes on one side of
-    * its own boundary — the shape of hole this wave's clue names: the fixture could not express the failing
+    * The `Unreachable` arm is not decoration. Until it was added every error this fixture could produce was a
+    * 4xx, so the guard's `if wire.code.httpStatus < 500` was only ever asked about codes on one side of its
+    * own boundary — the shape of hole this wave's clue names: the fixture could not express the failing
     * input. It mirrors `TopicErrors`: a non-retryable `Unreachable` is `KUI-UPSTREAM-UNAVAILABLE`, a 503.
     */
   private def toKui(error: TopicError): KuiError = error match {

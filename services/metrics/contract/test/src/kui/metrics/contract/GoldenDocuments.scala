@@ -8,9 +8,9 @@ package kui.metrics.contract
   * message and gateway — and this one did not. Four DTOs went onto the wire with nothing recording what an
   * encoded instance of them looks like, and two of them were read by a browser that had been written against
   * a different shape: the top-level `Section` key matched on both sides, so the decode succeeded, answered an
-  * empty array, and the card drew "the metrics source answered and named no producers" over a source that
-  * had named five. Both sides were unit-tested. Both sides were green. What neither side had was a document
-  * they were both asserted against, which is what these are.
+  * empty array, and the card drew "the metrics source answered and named no producers" over a source that had
+  * named five. Both sides were unit-tested. Both sides were green. What neither side had was a document they
+  * were both asserted against, which is what these are.
   *
   * ==Constants rather than files==
   *
@@ -22,8 +22,8 @@ package kui.metrics.contract
   * ==And the files matter beyond this module==
   *
   * `frontend/packages/shell/src/overview/wire.golden.test.ts` reads three of them off disk and runs them
-  * through the browser's own fetchers. That is the assertion M7's exit criterion was rewritten to require:
-  * a document rendered by the **server's own encoder** decoding in the **browser**, rather than two
+  * through the browser's own fetchers. That is the assertion M7's exit criterion was rewritten to require: a
+  * document rendered by the **server's own encoder** decoding in the **browser**, rather than two
   * hand-written literals that agree with the code beside them and with nothing else.
   */
 object GoldenDocuments {
@@ -31,8 +31,8 @@ object GoldenDocuments {
   /** A throughput answer with a gap in it, which is the shape the whole screen is built around.
     *
     * Three buckets of an axis: a measured rate, a step nobody sampled, and a measured **zero**. The middle
-    * one is `null` and the third is `0.0`, and they are different claims — "KUI was not looking" against
-    * "the cluster was idle" — which no reader can invent from a number.
+    * one is `null` and the third is `0.0`, and they are different claims — "KUI was not looking" against "the
+    * cluster was idle" — which no reader can invent from a number.
     */
   val throughputResponse: String =
     """{
@@ -104,8 +104,8 @@ object GoldenDocuments {
 
   /** The request-handlers document, and the one the browser was reading wrongly.
     *
-    * Two ratios in `0..1` and a list of queue lengths — not a `readings` array of `{id, label, ratio}`,
-    * which is what `metrics.ts` decoded for a whole milestone while every suite on both sides stayed green.
+    * Two ratios in `0..1` and a list of queue lengths — not a `readings` array of `{id, label, ratio}`, which
+    * is what `metrics.ts` decoded for a whole milestone while every suite on both sides stayed green.
     */
   val requestHandlersResponse: String =
     """{

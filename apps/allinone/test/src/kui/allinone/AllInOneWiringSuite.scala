@@ -10,8 +10,8 @@ import cats.syntax.all.*
 
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
-  AlertsConfig,
   AlertThresholds,
+  AlertsConfig,
   AuthConfig,
   ClusterConfig,
   ConsumersConfig,
@@ -53,9 +53,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
   ): Resource[IO, (GatewayServer[IO], FakeStructuredLogger[IO])] =
     Resource
       .eval(FakeStructuredLogger[IO])
-      .flatMap(logger =>
-        AllInOneWiring.resource[IO](config, Telemetry.noop[IO], logger).tupleRight(logger)
-      )
+      .flatMap(logger => AllInOneWiring.resource[IO](config, Telemetry.noop[IO], logger).tupleRight(logger))
 
   /** The public path of every route the process would serve, which is the honest answer to "what does this
     * listener expose".
@@ -67,9 +65,9 @@ final class AllInOneWiringSuite extends KuiIOSuite {
     *
     * Both inputs have to be read, and it is worth saying why. A prefix applied with `prependIn` — which is
     * how `BasePath.prefixAll` puts `/api/v1` in front of the shared health endpoints — lands on the
-    * *security* input, while the endpoint's own path stays on the ordinary one. Reading only the second
-    * would report the gateway's `/api/v1/health/live` as a bare `/health/live`, which is exactly the
-    * unprefixed service path the next test asserts is absent, and the test would fail on its own blind spot.
+    * *security* input, while the endpoint's own path stays on the ordinary one. Reading only the second would
+    * report the gateway's `/api/v1/health/live` as a bare `/health/live`, which is exactly the unprefixed
+    * service path the next test asserts is absent, and the test would fail on its own blind spot.
     */
   private def servedPaths(gateway: GatewayServer[IO]): List[String] =
     gateway.routes.map { route =>
@@ -453,8 +451,8 @@ final class AllInOneWiringSuite extends KuiIOSuite {
   /** One cluster, so that the metrics service has a row to have an answer about.
     *
     * `ConfiguredClusterSources.profilesOf` maps over `kui.clusters[]`, so a deployment with no cluster
-    * reports nothing about metrics whatever `kui.metrics.sources` says — which would make the two cases
-    * above pass for the wrong reason. Nothing here contacts the broker: the address exists to be a legal
+    * reports nothing about metrics whatever `kui.metrics.sources` says — which would make the two cases above
+    * pass for the wrong reason. Nothing here contacts the broker: the address exists to be a legal
     * `ClusterConfig`, and the metrics section is keyed by this cluster's id.
     */
   private val unmeasuredCluster: ClusterConfig =

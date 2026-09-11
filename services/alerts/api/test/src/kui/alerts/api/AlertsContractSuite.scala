@@ -54,7 +54,10 @@ final class AlertsContractSuite extends FunSuite {
   }
 
   test("every endpoint is classified: the write carries the mutation marker and the read does not") {
-    assertEquals(AlertsEndpoints.all.filter(KuiEndpoint.isMutation).flatMap(_.info.name), List("alerts.acknowledge"))
+    assertEquals(
+      AlertsEndpoints.all.filter(KuiEndpoint.isMutation).flatMap(_.info.name),
+      List("alerts.acknowledge")
+    )
   }
 
   test("the write's marker names the same operation the audit line writes") {

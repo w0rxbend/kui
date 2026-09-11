@@ -20,7 +20,8 @@ final class ClusterWiringSuite extends CatsEffectSuite {
 
   private def wiring =
     FakeStructuredLogger[IO].toResource.flatMap(logger =>
-      ClusterWiring.make[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], PrincipalCodec.inProcess[IO], logger)
+      ClusterWiring
+        .make[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], PrincipalCodec.inProcess[IO], logger)
     )
 
   test("wiringProducesEveryEndpointInTheContract") {

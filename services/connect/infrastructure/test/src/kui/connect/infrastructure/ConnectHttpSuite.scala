@@ -1,9 +1,9 @@
 package kui.connect.infrastructure
 
 import cats.effect.{IO, Ref}
+import sttp.client4.Backend
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.{BackendStub, ResponseStub, StubBody}
-import sttp.client4.Backend
 import sttp.model.{Method, StatusCode}
 
 import kui.config.SafeUrl
@@ -41,8 +41,8 @@ final class ConnectHttpSuite extends KuiIOSuite {
   /** The trace an Elasticsearch sink writes when its cluster is unreachable, as JSON escapes it.
     *
     * Held apart from the document below only so that neither line runs past this codebase's column limit:
-    * `\\n` and `\\t` here are the two characters JSON wants, not a real newline, so the fixture is a
-    * document a worker could actually have sent.
+    * `\\n` and `\\t` here are the two characters JSON wants, not a real newline, so the fixture is a document
+    * a worker could actually have sent.
     */
   private val elasticTrace: String =
     "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01:9200" +
@@ -52,8 +52,8 @@ final class ConnectHttpSuite extends KuiIOSuite {
     *
     * ==Every order in it is deliberately wrong==
     *
-    * Circe hands back the worker's own key order and a Connect herder is under no obligation to keep one,
-    * so the three orderings this client imposes have to be visible in what it answers. The keys here are
+    * Circe hands back the worker's own key order and a Connect herder is under no obligation to keep one, so
+    * the three orderings this client imposes have to be visible in what it answers. The keys here are
     * `elastic-sink, orders-source, archive-sink`, whose reverse (`archive, orders, elastic`) is *not* the
     * sorted order (`archive, elastic, orders`) — while the previous fixture's keys reversed to exactly the
     * sorted list, so `.sortBy(_.name.value)` could be replaced with `.reverse` and all 129 cases stayed
@@ -280,8 +280,8 @@ final class ConnectHttpSuite extends KuiIOSuite {
   }
 
   test("a connector whose expanded entry has no status is unreadable rather than absent") {
-    worker {
-      case "/connectors" => (StatusCode.Ok, """{"elastic-sink":{"info":{"name":"elastic-sink"}}}""")
+    worker { case "/connectors" =>
+      (StatusCode.Ok, """{"elastic-sink":{"info":{"name":"elastic-sink"}}}""")
     }.connectors.map {
       case Right(facts) =>
         assertEquals(facts.connectors, Nil)
@@ -319,8 +319,8 @@ final class ConnectHttpSuite extends KuiIOSuite {
     // answers 404 to anything it does not match, so naming only `/connectors` is that refusal.
     for {
       fromExpanded <- worker { case "/connectors" => (StatusCode.Ok, undescribable) }.connectors
-      fromList <- worker {
-        case "/connectors" => (StatusCode.Ok, """["elastic-sink","orders-source","archive-sink"]""")
+      fromList <- worker { case "/connectors" =>
+        (StatusCode.Ok, """["elastic-sink","orders-source","archive-sink"]""")
       }.connectors
     } yield (fromExpanded, fromList) match {
       case (Right(expandedFacts), Right(listedFacts)) =>
@@ -342,13 +342,12 @@ final class ConnectHttpSuite extends KuiIOSuite {
   test("a task list KUI cannot read makes the connector unreadable rather than a connector with 0 tasks") {
     // All or nothing per connector: a connector drawn with three of its four tasks reports `3/3 tasks`
     // over a cluster with four, and the task quietly dropped is the one that was failing.
-    worker {
-      case "/connectors" =>
-        (
-          StatusCode.Ok,
-          """{"elastic-sink":{"status":{"connector":{"state":"RUNNING"},""" +
-            """"tasks":[{"id":-1,"state":"RUNNING"}]}}}"""
-        )
+    worker { case "/connectors" =>
+      (
+        StatusCode.Ok,
+        """{"elastic-sink":{"status":{"connector":{"state":"RUNNING"},""" +
+          """"tasks":[{"id":-1,"state":"RUNNING"}]}}}"""
+      )
     }.connectors.map {
       case Right(facts) =>
         assertEquals(facts.connectors, Nil)

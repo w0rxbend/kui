@@ -108,7 +108,8 @@ final class TopicOverviewDtoSuite extends FunSuite {
       topic = Section.Unavailable(ReasonCode.UpstreamUnavailable, "kui-topic: connection refused", Some(at)),
       consumerGroups = Section.Unavailable(ReasonCode.CircuitOpen, "breaker open", Some(at)),
       connectors = Section.Forbidden,
-      acls = Section.Stale(List(Json.obj("principal" -> Json.fromString("User:kui"))), at, ReasonCode.UpstreamTimeout),
+      acls = Section
+        .Stale(List(Json.obj("principal" -> Json.fromString("User:kui"))), at, ReasonCode.UpstreamTimeout),
       schemas = Section.NotConfigured,
       generatedAt = generatedAt
     )

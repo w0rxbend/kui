@@ -7,10 +7,16 @@ import org.apache.kafka.clients.admin.{GroupListing as KafkaGroupListing, ListGr
 import org.apache.kafka.common.errors.{CoordinatorNotAvailableException, UnsupportedVersionException}
 import org.apache.kafka.common.{GroupState as KafkaGroupState, GroupType, KafkaFuture}
 
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.ClusterId
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.error.ErrorCode
 import kui.kernel.group.GroupState
-import kui.kernel.ClusterId
 import kui.testkit.KuiIOSuite
 
 /** What `listGroups` does with what a cluster actually sends back.
@@ -99,7 +105,10 @@ final class ListGroupsSuite extends KuiIOSuite {
 
   test("a broker that refuses the state filter is answered by filtering in memory instead") {
     for {
-      pool <- StubAdmin.failingOnce(new UnsupportedVersionException("no state filter"), admin(List(stable, empty)))
+      pool <- StubAdmin.failingOnce(
+        new UnsupportedVersionException("no state filter"),
+        admin(List(stable, empty))
+      )
       answer <- KafkaGroupAdmin[IO](pool).listGroups(connection, Set(GroupState.Empty))
     } yield answer match {
       case Right(listed) => assertEquals(listed.groups.map(_.groupId.value), List("audit"))

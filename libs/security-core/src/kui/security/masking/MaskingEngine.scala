@@ -1,16 +1,18 @@
 package kui.security.masking
 
-import io.circe.{Json, JsonObject}
+import io.circe.{parser, Json, JsonObject}
 
 import kui.kernel.TopicName
-import kui.kernel.serde.Target
+import kui.kernel.serde.{PayloadKind, Target}
 
 /** The masking rules, applied. Pure functions over `Json` and `String`, with no effect and no failure path.
   *
   * Every function here is total and the identity is a legal result, which is why none of them returns an
   * `Either`. The one dangerous case — a rule that matches nothing because of a typo — cannot be caught here
-  * at all; it is caught at startup, where an unusable regex is a configuration error, and
-  * `docs/operations/masking.md` tells the operator to check a rule against a real record before trusting it.
+  * at all; it is caught at startup, where an unusable regex is a configuration error
+  * (`kui.clusters[].masking[]`, `MaskingConfig`). There is no operator guide for it yet: the sentence that
+  * used to stand here named `docs/operations/masking.md`, and that file has never existed in this repository
+  * — a comment naming a document nobody can open is worth less than one that says so.
   *
   * ## The application order
   *
@@ -50,6 +52,45 @@ object MaskingEngine {
   /** The first matching rule's string form, for a payload that is not JSON. */
   def maskText(rules: List[MaskingRule], topic: TopicName, target: Target, text: String): String =
     rules.find(scopeMatches(_, topic, target)).fold(text)(rule => maskString(rule.kind, text))
+
+  /** One decoded payload's text, masked, whichever of the two forms the serde said it is in.
+    *
+    * This is the entry point a *service* calls, and it exists so that a caller does not have to hold circe in
+    * order to mask a record. `services/message` sees a `Decoded(text, kind, …)` and nothing else; making it
+    * parse the text itself would put the parse, the fallback below and the re-serialisation in a layer that
+    * ADR-041 rule A3 forbids JSON to, and would put a second copy of the choice between [[maskJson]] and
+    * [[maskText]] next to every caller.
+    *
+    * ==Why the kind decides, and not a parse attempt==
+    *
+    * Trying `parse` first and treating anything that succeeds as JSON is wrong for a payload the serde
+    * already called text: `42` and `true` are valid JSON documents, so a plain-text topic whose records
+    * happen to be numbers would take the document path, and a whole-value rule would then render `42` as
+    * `"**"` — quotes and all — where the text path renders `**`. The serde has already decided what it
+    * produced; re-deciding here is how two layers come to disagree about the same record.
+    *
+    * ==The fallback, which is the part that matters==
+    *
+    * A payload labelled JSON that will not parse still gets the **text** form rather than being returned
+    * untouched. That case is reachable — a serde reporting a kind it did not verify, a truncated document —
+    * and the alternative is publishing in full the field the rule exists to hide, which is the one outcome
+    * masking may never have. Masking too much is recoverable; masking nothing is not.
+    */
+  def maskPayload(
+      rules: List[MaskingRule],
+      topic: TopicName,
+      target: Target,
+      kind: PayloadKind,
+      text: String
+  ): String =
+    kind match {
+      case PayloadKind.Text => maskText(rules, topic, target, text)
+      case PayloadKind.Json =>
+        parser.parse(text) match {
+          case Right(json) => maskJson(rules, topic, target, json).noSpaces
+          case Left(_) => maskText(rules, topic, target, text)
+        }
+    }
 
   /** Header values, masked by header name against the same field rules.
     *

@@ -15,6 +15,16 @@
  * must not: a page of announcing pills announces nothing useful, because a screen reader queues
  * them and the operator hears a paragraph of state every time anything changes. The default is
  * silent (SPEC §4.7).
+ *
+ * ## `dataState` is for a machine, and the words are for a person
+ *
+ * The text is the product's vocabulary and it is allowed to change — "state not reported" was
+ * chosen over "unknown" because of what it says to a reader, and a future wave may say it better.
+ * A browser case that asserts a pill by its words therefore has to transcribe them, and
+ * `frontend/e2e/connect.spec.ts`'s `wordFor` is what that looks like: five labels copied out of a
+ * component into a spec, correct on the day they were copied and gated by nothing after it.
+ * `dataState` is the other channel — the machine word the drawing came *from* — so a case can
+ * compare what is on the screen to what the API said without knowing a single label.
  */
 import type { JSX } from "@solidjs/web";
 import { Show, merge } from "solid-js";
@@ -32,6 +42,15 @@ export interface StatusPillProps {
   readonly icon?: IconName | undefined;
   /** Announce changes to this pill's text without moving focus. Use sparingly. */
   readonly live?: boolean | undefined;
+  /**
+   * The machine word this pill was drawn from, published as `data-state`. See the header.
+   *
+   * Never rendered and never read by this component: it exists so that a caller drawing a state
+   * out of a wire can publish the wire's own word beside the sentence it chose for it. Absent when
+   * the pill is a label rather than a drawing of a reported state, in which case there is no such
+   * word and inventing one would be a claim.
+   */
+  readonly dataState?: string | undefined;
   /** Renders as a `<button>`: LIVE / PAUSED is a toggle, not a label. */
   readonly onClick?: (() => void) | undefined;
   readonly disabled?: boolean | undefined;
@@ -67,6 +86,7 @@ export function StatusPill(props: StatusPillProps): JSX.Element {
             class={classes()}
             role={props.live === true ? "status" : undefined}
             title={props.title}
+            data-state={props.dataState}
           >
             {body()}
           </span>
@@ -78,6 +98,7 @@ export function StatusPill(props: StatusPillProps): JSX.Element {
           aria-pressed={props.pressed === undefined ? undefined : props.pressed ? "true" : "false"}
           disabled={props.disabled === true}
           title={props.title}
+          data-state={props.dataState}
           onClick={() => props.onClick?.()}
         >
           {body()}

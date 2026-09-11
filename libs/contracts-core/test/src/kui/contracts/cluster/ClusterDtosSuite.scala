@@ -5,8 +5,8 @@ import java.time.Instant
 import io.circe.parser.parse
 import io.circe.syntax.*
 import munit.ScalaCheckSuite
-import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
+import org.scalacheck.{Arbitrary, Gen}
 
 import kui.contracts.Section
 import kui.contracts.capability.ReasonCode

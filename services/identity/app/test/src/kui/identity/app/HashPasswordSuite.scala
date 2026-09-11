@@ -6,10 +6,10 @@ import kui.testkit.KuiIOSuite
 
 /** The one rule this tool exists to enforce: the password does not travel as an argument.
   *
-  * An argument is visible in `ps` to every user on the machine and is written into the shell's history
-  * file, which is why `HashPassword` reads standard input and refuses everything else. The refusal was
-  * carried by no case at all — this module shipped a test target with no test source — so the check could
-  * have been dropped, or inverted, with the whole repository green.
+  * An argument is visible in `ps` to every user on the machine and is written into the shell's history file,
+  * which is why `HashPassword` reads standard input and refuses everything else. The refusal was carried by
+  * no case at all — this module shipped a test target with no test source — so the check could have been
+  * dropped, or inverted, with the whole repository green.
   */
 final class HashPasswordSuite extends KuiIOSuite {
 

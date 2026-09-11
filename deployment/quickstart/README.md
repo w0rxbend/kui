@@ -28,23 +28,35 @@ deployment/quickstart/quickstart.sh down
 
 ## What you actually see today, honestly
 
-**KUI does not connect to Kafka yet.** Milestone 0 — the build, the gateway, the service topology,
-the images, the user-interface shell — is finished, and Kafka connectivity is Milestone 1, which is
-being planned as this is written. There is no Kafka client in the product yet at all.
+This section said **"KUI does not connect to Kafka yet"** and described the Milestone 0 shell, which
+stopped being true eight milestones ago and stayed written here. Re-measured against the stack this
+command starts, on 2026-09-11, with `curl` beside the browser rather than from memory:
 
-So what you get when you open the URL is:
+```
+$ curl -s localhost:8080/api/v1/clusters | jq -r '.clusters.data[].cluster.id'
+quickstart
+staging-eu-01
+```
 
-- the KUI shell: the navigation drawer, the header, the settings and gallery pages, all working;
-- a home page that says *"Nothing to show yet — this is the KUI shell. Cluster overviews appear
-  here once the clusters feature is installed."*;
-- a broker that is genuinely running, seeded with topics, JSON messages and a consumer group that is
-  behind, that you can point your own tools at on `localhost:9092`.
+- **Two registered clusters**, and they are two profiles over the **same** broker rather than two
+  Kafkas — see the `kui.clusters` block in `kui-quickstart.yaml`, which says so at length. The
+  second one exists so that the cluster selector in the drawer head has something to select and the
+  *"Switched to staging-eu-01"* toast has something to name.
+- **Real data behind both.** The topics screen lists **12** topics (18 counting the internal ones
+  the "show internal topics" switch hides) and **4** consumer groups, one of them genuinely live
+  and behind; the message browser decodes the one Avro topic through the registry
+  beside the broker; the Connect screen lists `quickstart-file-source` off a real worker; the ksqlDB
+  screen lists `QUICKSTART_ORDERS` off a real server; the dashboard's traffic cards read a real JMX
+  exporter. Every one of those is a container in the table below and can be asked the same question
+  by hand on a published port.
+- **`staging-eu-01` is deliberately thinner**, and that is the other thing the quickstart now
+  demonstrates: it has no metrics source, no Schema Registry, no Connect worker and no ksqlDB
+  server, so its dashboard says *"not configured"* where the first cluster draws a figure and its
+  drawer hides the three feature rows entirely (ADR-032). A deployment where every cluster has
+  everything cannot show that half of the product.
 
-That is the truth about the release this file was written against and not a bug in this quickstart.
-The reason the whole thing is built now anyway is a standing requirement: as soon as cluster
-connectivity lands, `quickstart.sh` must show real clusters, topics and lag with nothing new for
-anybody to type. The broker, the seed data and the cluster entry in the configuration are already
-here waiting for it.
+The counts above are this stack's, not promises: re-run the `curl` and count them yourself. The
+broker is still yours to point your own tools at on `localhost:9092`.
 
 ## What it starts
 
@@ -215,7 +227,8 @@ docker image rm kui-allinone:0.1.0-SNAPSHOT apache/kafka:4.3.1
 - [`../docker/`](../docker/README.md) documents the three published images and the conventions every
   one of them follows.
 - [`kui-quickstart.yaml`](kui-quickstart.yaml) is this quickstart's own configuration, a copy of the
-  all-in-one example with the quickstart's broker added under `kui.clusters`. Nothing reads that
-  section yet — the configuration loader accepts everything under `kui.clusters` and ignores it, on
-  purpose, so that a file written for the version you are about to upgrade to still loads on the one
-  you are running.
+  all-in-one example with **two** entries under `kui.clusters`: the broker this stack starts, and a
+  second registered profile (`staging-eu-01`) over that same broker. The sentence that stood here
+  said *"nothing reads that section yet"*, which was true of the release this file was written
+  against and has not been true since M1 — the section is read at start-up, refused if it is
+  malformed, and is where every cluster id in every URL comes from.

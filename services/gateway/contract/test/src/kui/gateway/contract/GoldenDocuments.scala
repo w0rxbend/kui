@@ -36,9 +36,9 @@ object GoldenDocuments {
       |  }
       |}""".stripMargin
 
-  /** The dashboard with the cluster service gone: the outer section is stale and carries the rows the
-    * gateway last saw, one of which was already unreachable when they arrived. Two levels of failure in one
-    * document, which is the shape the whole endpoint exists to produce.
+  /** The dashboard with the cluster service gone: the outer section is stale and carries the rows the gateway
+    * last saw, one of which was already unreachable when they arrived. Two levels of failure in one document,
+    * which is the shape the whole endpoint exists to produce.
     */
   val clusterOverview: String =
     """{

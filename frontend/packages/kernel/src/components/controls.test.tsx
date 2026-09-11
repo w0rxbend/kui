@@ -499,6 +499,41 @@ describe("StatusPill", () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
+  it("carries the reported state on the toggle branch too, not only on the label", () => {
+    // HALF A SHIPPED ATTRIBUTE IS WORSE THAN NONE. `data-state` is rendered on both branches of
+    // this component, and the only caller passing it — ConnectorCard — never passes `onClick`,
+    // so the `<button>` copy has never been rendered by a case in this workspace. The browser
+    // suite has started reading this attribute instead of transcribing the kernel's words, and
+    // the first toggle pill that wants a state would inherit a line nothing has seen work.
+    // Filed as W9-04/5.1.
+    const container = render(() => (
+      <StatusPill tone="success" dot pressed dataState="PAUSED" onClick={() => {}}>
+        paused
+      </StatusPill>
+    ));
+    expect(container.querySelector("button.kui-pill")?.getAttribute("data-state")).toBe("PAUSED");
+  });
+
+  it("publishes no state at all when it was drawn from none, on either branch", () => {
+    // THE RULE THE PROP'S OWN DOC STATES AND NOTHING HELD IT TO: "absent when the pill is a
+    // label rather than a drawing of a reported state, in which case there is no such word and
+    // inventing one would be a claim". `data-state={props.dataState ?? "RUNNING"}` is one edit,
+    // and under it every label pill in this workspace — including feature-connect's
+    // NotDescribedPanel pill, which exists to say *state not reported* — publishes RUNNING into
+    // the machine channel the browser suite now trusts. That is the failure ConnectorCard's own
+    // header calls the single worst thing a monitoring screen can do, committed where no eye
+    // reads it. Absence is the assertion. Filed as W9-04/5.2.
+    const label = render(() => <StatusPill tone="neutral">1,536 partitions</StatusPill>);
+    expect(label.querySelector("span.kui-pill")?.hasAttribute("data-state")).toBe(false);
+
+    const toggle = render(() => (
+      <StatusPill tone="success" pressed onClick={() => {}}>
+        LIVE
+      </StatusPill>
+    ));
+    expect(toggle.querySelector("button.kui-pill")?.hasAttribute("data-state")).toBe(false);
+  });
+
   it("has no accessibility violations across its tones", async () => {
     const container = render(() => (
       <>

@@ -4,8 +4,8 @@ import io.circe.parser.decode
 import io.circe.syntax.*
 import io.circe.{Codec, Json}
 import munit.ScalaCheckSuite
-import org.scalacheck.Prop.forAll
 import org.scalacheck.Gen
+import org.scalacheck.Prop.forAll
 import sttp.tapir.DecodeResult
 
 import kui.contracts.KernelCodecs.given
@@ -14,9 +14,9 @@ import kui.kernel.*
 
 /** That a kernel type survives the wire, and that an invalid one does not get on it.
   *
-  * The properties are one per identifier because a shared helper would have proved that the helper
-  * works. The interesting assertions are the negative ones: a decoder that accepts anything is worse
-  * than no decoder, because it moves the failure from the edge to somewhere deep inside a service.
+  * The properties are one per identifier because a shared helper would have proved that the helper works. The
+  * interesting assertions are the negative ones: a decoder that accepts anything is worse than no decoder,
+  * because it moves the failure from the edge to somewhere deep inside a service.
   */
 final class KernelCodecsSuite extends ScalaCheckSuite {
 
@@ -51,11 +51,11 @@ final class KernelCodecsSuite extends ScalaCheckSuite {
 
   /** The largest integer a browser's `JSON.parse` reproduces exactly: 2^53 - 1.
     *
-    * Beyond it, a JavaScript number is a double and the last digits are lost — a fact about the
-    * platform, not about circe. Kafka offsets and byte counts are far below it (2^53 records in one
-    * partition is not a number that happens), so KUI keeps them as JSON numbers rather than
-    * stringifying every offset. The boundary is asserted below so that the limit is a documented,
-    * tested property rather than a surprise found in M3.
+    * Beyond it, a JavaScript number is a double and the last digits are lost — a fact about the platform, not
+    * about circe. Kafka offsets and byte counts are far below it (2^53 records in one partition is not a
+    * number that happens), so KUI keeps them as JSON numbers rather than stringifying every offset. The
+    * boundary is asserted below so that the limit is a documented, tested property rather than a surprise
+    * found in M3.
     */
   private val MaxExactJsonInteger: Long = 9007199254740991L
 

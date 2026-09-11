@@ -81,9 +81,9 @@ object ClusterProfileFixtures {
 
   /** An arbitrary profile over the shared connection generators.
     *
-    * Its secrets are whatever those generators produced, and `ClusterGenerators.secretsOfSecurity` reads
-    * them back — which is what lets a redaction property assert against the exact strings that went in
-    * rather than against a guess at what a password looks like.
+    * Its secrets are whatever those generators produced, and `ClusterGenerators.secretsOfSecurity` reads them
+    * back — which is what lets a redaction property assert against the exact strings that went in rather than
+    * against a guess at what a password looks like.
     */
   given arbitraryProfile: Arbitrary[ClusterProfile] = Arbitrary(
     for {

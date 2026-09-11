@@ -38,7 +38,7 @@ final class LiveTopicSnapshotsSuite extends KuiIOSuite {
   private val start = Instant.parse("2026-09-06T09:00:00Z")
 
   /** A `TopicAdmin` that answers `scrape` from a script, one entry per call. */
-  private final class ScriptedAdmin(remaining: Ref[IO, List[Either[TopicError, ScrapeResult]]])
+  final private class ScriptedAdmin(remaining: Ref[IO, List[Either[TopicError, ScrapeResult]]])
       extends TopicAdmin[IO] {
 
     def scrape(cluster: ClusterId): IO[Either[TopicError, ScrapeResult]] =
@@ -60,7 +60,7 @@ final class LiveTopicSnapshotsSuite extends KuiIOSuite {
     * module this packet does not own. The instants are what the produce rate is divided by, so a rate is
     * asserted as a number here instead of merely as "present".
     */
-  private final class StoppedClock(at: Ref[IO, Instant]) extends Clock[IO] {
+  final private class StoppedClock(at: Ref[IO, Instant]) extends Clock[IO] {
     def applicative: Applicative[IO] = Applicative[IO]
     def monotonic: IO[FiniteDuration] = realTime
     def realTime: IO[FiniteDuration] = at.get.map(now => FiniteDuration(now.toEpochMilli, MILLISECONDS))
@@ -91,8 +91,8 @@ final class LiveTopicSnapshotsSuite extends KuiIOSuite {
 
   /** Runs the script through `scrape`, ten seconds apart, keeping whatever each pass produced.
     *
-    * A scrape that failed raises a `SnapshotLoadFailure`, which is what the cell would catch, so it is
-    * caught here the same way and appears as a `None` in the result.
+    * A scrape that failed raises a `SnapshotLoadFailure`, which is what the cell would catch, so it is caught
+    * here the same way and appears as a `None` in the result.
     */
   private def scrapes(script: List[Either[TopicError, ScrapeResult]]): IO[List[Option[TopicSnapshot]]] =
     for {

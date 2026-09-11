@@ -22,8 +22,8 @@ import kui.message.domain.TimestampType
   * neither is visible in a suite that has one.
   *
   * It polls one record at a time on purpose. A consumer that handed the whole assignment back in a single
-  * poll would let a termination bug pass unnoticed: the loop would happen to have everything it needed
-  * before its stopping condition was ever consulted.
+  * poll would let a termination bug pass unnoticed: the loop would happen to have everything it needed before
+  * its stopping condition was ever consulted.
   */
 final class FakeBrowseConsumer(
     log: Ref[IO, Map[PartitionId, Vector[RawRecord]]],
@@ -106,7 +106,8 @@ final class FakeBrowseConsumer(
         val at = current.getOrElse(partition, 0L)
         records.getOrElse(partition, Vector.empty).find(_.offset.value == at).map(partition -> _)
       })
-      _ <- next.traverse_((partition, record) => positions.update(_.updated(partition, record.offset.value + 1L)))
+      _ <- next
+        .traverse_((partition, record) => positions.update(_.updated(partition, record.offset.value + 1L)))
     } yield next.map(_._2).toList.asRight[KuiError])
 
   /** How many polls this browse made, for the suite that asserts a bounded read stops. */
@@ -158,12 +159,12 @@ object FakeBrowseConsumer {
         .make(of(log))(_ => closed.set(true))
         .map(consumer => (consumer: BrowseConsumer[IO]).asRight[KuiError])
 
-  /** The consumer as it behaves in the first moments after an assignment: several polls that return
-    * nothing at all, and only then the records.
+  /** The consumer as it behaves in the first moments after an assignment: several polls that return nothing
+    * at all, and only then the records.
     *
-    * This is not a pathological case. A real consumer returns empty polls while it discovers the leaders
-    * for its assignment, which is why `BrowseTuning.emptyPollsBeforeEnd` is not zero -- and why a suite
-    * whose fake answers on the first poll cannot see that constant being wrong.
+    * This is not a pathological case. A real consumer returns empty polls while it discovers the leaders for
+    * its assignment, which is why `BrowseTuning.emptyPollsBeforeEnd` is not zero -- and why a suite whose
+    * fake answers on the first poll cannot see that constant being wrong.
     */
   def openingSilentAtFirst(
       log: Map[PartitionId, Vector[RawRecord]],
@@ -202,11 +203,11 @@ object FakeBrowseConsumer {
   /** The log as it stood when the browse planned, plus one record written the moment it had.
     *
     * A bounded browse resolves each partition's window against the end of the log at the instant it plans,
-    * and producers do not stop while it reads. This fake writes `appended` immediately after `endOffsets`
-    * has answered, so that record sits at exactly the window's upper bound -- the one offset a half-open
-    * `[low, high)` range has to exclude. Without this arrangement no fixture in the suite can put a record
-    * at `high` at all: every other log here is complete before the browse starts, so `high` is one past the
-    * last record that exists and the bound is never actually tested.
+    * and producers do not stop while it reads. This fake writes `appended` immediately after `endOffsets` has
+    * answered, so that record sits at exactly the window's upper bound -- the one offset a half-open
+    * `[low, high)` range has to exclude. Without this arrangement no fixture in the suite can put a record at
+    * `high` at all: every other log here is complete before the browse starts, so `high` is one past the last
+    * record that exists and the bound is never actually tested.
     */
   def openingThatGrowsAfterPlanning(
       initial: Map[PartitionId, Vector[RawRecord]],

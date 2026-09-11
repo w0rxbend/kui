@@ -4,10 +4,10 @@ import munit.FunSuite
 
 /** The rule table of ADR-041, one synthetic module graph per rule.
   *
-  * These are unit tests over `ArchitectureRules.check`, not over the real build. That split is on
-  * purpose: `./mill checkArchitecture` feeds the real module graph into the same function, so this
-  * suite can prove each rule fires — and, just as importantly, that it does not fire on the cases
-  * that are legal — without anyone having to add a forbidden dependency to the actual project.
+  * These are unit tests over `ArchitectureRules.check`, not over the real build. That split is on purpose:
+  * `./mill checkArchitecture` feeds the real module graph into the same function, so this suite can prove
+  * each rule fires — and, just as importantly, that it does not fire on the cases that are legal — without
+  * anyone having to add a forbidden dependency to the actual project.
   */
 final class ArchitectureSuite extends FunSuite {
 
@@ -24,7 +24,10 @@ final class ArchitectureSuite extends FunSuite {
   private def expectViolations(from: String, to: String)(rules: String*)(modules: ModuleFacts*): Unit = {
     val violations = ArchitectureRules.check(modules.toList)
 
-    assertEquals(violations.map(v => (v.rule, v.module, v.offendingDep)).sorted, rules.sorted.toList.map(rule => (rule, from, to)))
+    assertEquals(
+      violations.map(v => (v.rule, v.module, v.offendingDep)).sorted,
+      rules.sorted.toList.map(rule => (rule, from, to))
+    )
   }
 
   /** Asserts that a graph produces exactly one violation, of the expected rule and edge. */
@@ -120,7 +123,10 @@ final class ArchitectureSuite extends FunSuite {
 
     // The very same edges, from a service that does own a domain, are not.
     val violations = ArchitectureRules.check(List(module("services.cluster.domain"), domainOwningEdge))
-    assertEquals(violations.map(v => (v.rule, v.offendingDep)).sorted, List("A3" -> "libs.contractsCore.jvm", "A3" -> "libs.http").sorted)
+    assertEquals(
+      violations.map(v => (v.rule, v.offendingDep)).sorted,
+      List("A3" -> "libs.contractsCore.jvm", "A3" -> "libs.http").sorted
+    )
   }
 
   test("A3 starts applying to the gateway the day the gateway grows a domain module") {

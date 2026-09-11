@@ -21,14 +21,14 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** That a stream stops costing anything the moment the client goes away.
   *
-  * This is the one property that cannot be checked without a real socket, and it is the one that
-  * matters most operationally. If a closed browser tab left its producer running, every tab anyone
-  * ever opened would leak a Kafka consumer, and the service would die of exhaustion hours later
-  * with nothing in the log to explain it.
+  * This is the one property that cannot be checked without a real socket, and it is the one that matters most
+  * operationally. If a closed browser tab left its producer running, every tab anyone ever opened would leak
+  * a Kafka consumer, and the service would die of exhaustion hours later with nothing in the log to explain
+  * it.
   *
-  * Cancellation itself was measured at 8 ms on this server before Netty was adopted, which is why
-  * there is no idle-timeout guard anywhere in `libs/http`. What this suite adds is that KUI's own
-  * wrapping — the buffer, the heartbeats, the metrics — does not break that chain.
+  * Cancellation itself was measured at 8 ms on this server before Netty was adopted, which is why there is no
+  * idle-timeout guard anywhere in `libs/http`. What this suite adds is that KUI's own wrapping — the buffer,
+  * the heartbeats, the metrics — does not break that chain.
   */
 final class SseCancellationSuite extends CatsEffectSuite {
 

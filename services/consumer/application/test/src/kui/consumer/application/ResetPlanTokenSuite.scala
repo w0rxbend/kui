@@ -19,18 +19,18 @@ import kui.testkit.fakes.FakeStructuredLogger
   * against `./mill services.consumer.application.test` (48 cases, 5 suites), which stayed green for all
   * three.
   *
-  *   - **`PlanToken.render` sorts the partitions it signs.** The comment on it says why — *"the token is
-  *     only as good as the guarantee that the same plan renders to the same bytes"* — and dropping the
-  *     `sortBy` left the suite green, because the planner happens to hand it a sorted list today. A token is
-  *     a signature over text: the moment anything mints one from a plan assembled elsewhere, two identical
+  *   - **`PlanToken.render` sorts the partitions it signs.** The comment on it says why — *"the token is only
+  *     as good as the guarantee that the same plan renders to the same bytes"* — and dropping the `sortBy`
+  *     left the suite green, because the planner happens to hand it a sorted list today. A token is a
+  *     signature over text: the moment anything mints one from a plan assembled elsewhere, two identical
   *     plans sign to two different strings and a confirm compares unequal.
   *   - **`OffsetResetUseCase.TokenTtl` is five minutes.** Nothing read the constant. Setting it to five days
   *     left the suite green, and the expiry cases in `MutationSuite` pass their own instants, so the figure
   *     the comment argues for was checked by nothing (house rule 11).
-  *   - **The audit record's `before` is the planned partitions only.** `currentOffsets` filters the window
-  *     it read down to `plan.offsets.keySet`; removing that filter left the suite green, because the fake
-  *     port answers every `offsetWindow` with a window covering exactly the planned partition. A record
-  *     whose `before` names partitions the reset did not touch says a reset moved offsets it never wrote.
+  *   - **The audit record's `before` is the planned partitions only.** `currentOffsets` filters the window it
+  *     read down to `plan.offsets.keySet`; removing that filter left the suite green, because the fake port
+  *     answers every `offsetWindow` with a window covering exactly the planned partition. A record whose
+  *     `before` names partitions the reset did not touch says a reset moved offsets it never wrote.
   */
 final class ResetPlanTokenSuite extends KuiIOSuite {
 

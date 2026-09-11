@@ -20,10 +20,15 @@ import org.apache.kafka.common.{
 }
 
 import kui.kafka.SkipReason
-import kui.kernel.ClusterId
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.group.{GroupProtocol, GroupState}
-import kui.kernel.{GroupId, PartitionId, TopicName, TopicPartition}
+import kui.kernel.{ClusterId, GroupId, PartitionId, TopicName, TopicPartition}
 import kui.testkit.KuiIOSuite
 
 /** What a describe does with the three answers a real cluster gives: a group, a group that is not there, and
@@ -101,21 +106,24 @@ final class DescribeGroupsSuite extends KuiIOSuite {
   }
 
   /** A `KafkaFuture` that is already broken, which is what a per-group failure arrives as. */
-  final private class KafkaFutureImplLike extends org.apache.kafka.common.internals.KafkaFutureImpl[ConsumerGroupDescription]
+  final private class KafkaFutureImplLike
+      extends org.apache.kafka.common.internals.KafkaFutureImpl[ConsumerGroupDescription]
 
   test("a group that does not exist describes as a dead group, not an error") {
-    port(Map("ghost" -> failed(new GroupIdNotFoundException("ghost")))).describeGroups(
-      connection,
-      List(ghost),
-      includeAuthorizedOperations = false
-    ).map {
-      case Right(result) =>
-        val fabricated = result.values(ghost)
-        assertEquals(fabricated.state, GroupState.Dead)
-        assertEquals(fabricated.members, Nil)
-        assertEquals(result.skipped, Map.empty[GroupId, SkipReason])
-      case Left(error) => fail(s"the invariant was not applied: $error")
-    }
+    port(Map("ghost" -> failed(new GroupIdNotFoundException("ghost"))))
+      .describeGroups(
+        connection,
+        List(ghost),
+        includeAuthorizedOperations = false
+      )
+      .map {
+        case Right(result) =>
+          val fabricated = result.values(ghost)
+          assertEquals(fabricated.state, GroupState.Dead)
+          assertEquals(fabricated.members, Nil)
+          assertEquals(result.skipped, Map.empty[GroupId, SkipReason])
+        case Left(error) => fail(s"the invariant was not applied: $error")
+      }
   }
 
   test("a group the caller may not see costs its own row, not the batch") {

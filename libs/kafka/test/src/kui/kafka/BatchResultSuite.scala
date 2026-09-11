@@ -8,9 +8,9 @@ import kui.testkit.KuiSuite
 
 /** The one invariant that makes `BatchResult` worth having: a key cannot vanish.
   *
-  * The reference implementations return an empty map when a per-key call fails, which leaves a
-  * caller unable to tell "this broker has no log directories" from "this broker would not say".
-  * Those are different screens, and only one of them should start an investigation.
+  * The reference implementations return an empty map when a per-key call fails, which leaves a caller unable
+  * to tell "this broker has no log directories" from "this broker would not say". Those are different
+  * screens, and only one of them should start an investigation.
   */
 final class BatchResultSuite extends KuiSuite {
 
@@ -22,8 +22,8 @@ final class BatchResultSuite extends KuiSuite {
     SkipReason.Failed(ErrorCode.InvalidState, "offline")
   )
 
-  /** A result whose two halves are disjoint by construction, which is the only kind an adapter is
-    * allowed to build.
+  /** A result whose two halves are disjoint by construction, which is the only kind an adapter is allowed to
+    * build.
     */
   private val genResult: Gen[BatchResult[Int, String]] = for {
     keys <- Gen.listOfN(8, Gen.chooseNum(0, 40)).map(_.distinct)

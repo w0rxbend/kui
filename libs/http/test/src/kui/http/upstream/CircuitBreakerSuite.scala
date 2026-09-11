@@ -12,8 +12,8 @@ import kui.kernel.PositiveInt
 
 /** That KUI stops calling something that is plainly down, and finds out when it is back.
   *
-  * Every case runs under `TestControl`, so the reset timer is asserted rather than waited for:
-  * there is no `sleep` in this suite and nothing in it can be flaky on a loaded CI machine.
+  * Every case runs under `TestControl`, so the reset timer is asserted rather than waited for: there is no
+  * `sleep` in this suite and nothing in it can be flaky on a loaded CI machine.
   */
 final class CircuitBreakerSuite extends CatsEffectSuite {
 

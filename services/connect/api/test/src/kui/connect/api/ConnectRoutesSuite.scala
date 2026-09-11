@@ -49,7 +49,12 @@ final class ConnectRoutesSuite extends CatsEffectSuite {
 
       assertEquals(workers.downN(0).get[String]("connect"), Right("payments"))
       assertEquals(
-        workers.downN(0).downField("connectors").downField("data").downField("items").downN(0)
+        workers
+          .downN(0)
+          .downField("connectors")
+          .downField("data")
+          .downField("items")
+          .downN(0)
           .get[String]("name"),
         Right("elastic-sink")
       )

@@ -14,25 +14,25 @@ import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.{Endpoint, PublicEndpoint}
 
 import kui.cluster.contract.dto.ClustersResponse
+import kui.config.UpstreamServiceConfig
 import kui.consumer.contract.dto.GroupsResponse
+import kui.contracts.capability.{CapabilityKey, CapabilityState, DegradedReason, ReasonCode}
+import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
 import kui.contracts.consumer.GroupSummaryDto
 import kui.contracts.paging.{PageDto, PageInfo}
 import kui.contracts.topic.TopicRowDto
-import kui.kernel.group.{GroupProtocol, GroupState}
-import kui.topic.contract.dto.TopicsResponse
-import kui.config.UpstreamServiceConfig
-import kui.contracts.capability.{CapabilityKey, CapabilityState, DegradedReason, ReasonCode}
-import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
 import kui.contracts.{ErrorEnvelope, Section}
 import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
+import kui.kernel.group.{GroupProtocol, GroupState}
 import kui.kernel.{ClusterId, CorrelationId, GroupId, ServiceId, TopicName}
 import kui.observability.Telemetry
 import kui.security.{Principal, SignedPrincipal}
 import kui.testkit.fakes.FakeStructuredLogger
+import kui.topic.contract.dto.TopicsResponse
 
 /** The milestone's headline promise, asserted where it is decided.
   *
@@ -257,18 +257,17 @@ final class ClusterOverviewUseCaseSuite extends CatsEffectSuite {
   }
 
   test("aFailedCallWithNoCacheIsAnUnavailableOuterSectionAndAnEmptyList") {
-    using(client(Left(InfrastructureError.Unreachable("cluster", "connection refused")))) {
-      (overview, _) =>
-        overview.overview(caller, correlationId).map { dto =>
-          assertEquals(dto.clusters.status, "unavailable")
-          assertEquals(dto.clusters.toOption, None)
-          dto.clusters match {
-            case Section.Unavailable(reason, message, _) =>
-              assertEquals(reason, ReasonCode.UpstreamUnavailable)
-              assert(message.contains("cluster"), message)
-            case other => fail(s"expected an unavailable section: $other")
-          }
+    using(client(Left(InfrastructureError.Unreachable("cluster", "connection refused")))) { (overview, _) =>
+      overview.overview(caller, correlationId).map { dto =>
+        assertEquals(dto.clusters.status, "unavailable")
+        assertEquals(dto.clusters.toOption, None)
+        dto.clusters match {
+          case Section.Unavailable(reason, message, _) =>
+            assertEquals(reason, ReasonCode.UpstreamUnavailable)
+            assert(message.contains("cluster"), message)
+          case other => fail(s"expected an unavailable section: $other")
         }
+      }
     }
   }
 
@@ -472,7 +471,10 @@ final class ClusterOverviewUseCaseSuite extends CatsEffectSuite {
         assertEquals(totals.groupCount, 2L)
         assertEquals(totals.totalLag, None)
         assertEquals(totals.groupsWithoutLag, 1)
-        assertEquals(totals.byState.map(entry => entry.state.wire -> entry.count), List("STABLE" -> 1, "EMPTY" -> 1))
+        assertEquals(
+          totals.byState.map(entry => entry.state.wire -> entry.count),
+          List("STABLE" -> 1, "EMPTY" -> 1)
+        )
       }
     }
   }

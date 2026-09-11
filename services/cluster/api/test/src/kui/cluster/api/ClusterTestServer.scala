@@ -7,14 +7,14 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.kernel.Resource
-import io.circe.parser.parse
 import io.circe.Json
+import io.circe.parser.parse
 import org.typelevel.otel4s.metrics.Counter
 import org.typelevel.otel4s.oteljava.testkit.OtelJavaTestkit
 import sttp.capabilities.fs2.Fs2Streams
+import sttp.client4.StreamBackend
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.StreamBackendStub
-import sttp.client4.StreamBackend
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
 import kui.cluster.application.{CapabilityReportUseCase, ClusterService}

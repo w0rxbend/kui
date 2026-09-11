@@ -14,7 +14,13 @@ final class StoreKeySuite extends KuiSuite {
 
   private val sections: Gen[StoreSection] =
     Gen.oneOf(
-      Gen.oneOf(StoreSection.Cluster, StoreSection.Settings, StoreSection.Rbac, StoreSection.Masking, StoreSection.File),
+      Gen.oneOf(
+        StoreSection.Cluster,
+        StoreSection.Settings,
+        StoreSection.Rbac,
+        StoreSection.Masking,
+        StoreSection.File
+      ),
       Gen.identifier.map(raw => StoreSection.Other(raw.toLowerCase))
     )
 

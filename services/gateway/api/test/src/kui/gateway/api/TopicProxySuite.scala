@@ -38,9 +38,9 @@ import kui.topic.contract.{GoldenDocuments, TopicEndpoints, TopicListParams, Top
   * suite asserts against its committed golden files, on both the JVM and Node. One document, three readers,
   * and a drift between any two of them fails a build.
   *
-  * The gateway's proxy is generic — it decodes with the endpoint's own codec and re-encodes with the same
-  * one — so what these tests really assert is that the generic path does not lose or reshape anything on the
-  * way through, including the parts of a response that are *not* the happy case.
+  * The gateway's proxy is generic — it decodes with the endpoint's own codec and re-encodes with the same one
+  * — so what these tests really assert is that the generic path does not lose or reshape anything on the way
+  * through, including the parts of a response that are *not* the happy case.
   */
 final class TopicProxySuite extends CatsEffectSuite {
 
@@ -51,10 +51,10 @@ final class TopicProxySuite extends CatsEffectSuite {
     *
     * The input is kept as its rendered form rather than as `Any`. Tapir erases an endpoint's input type the
     * moment it is put in a `List[AnyEndpoint]`, so a recording stub cannot name the type it received without
-    * a cast; the decoded query is a case class, and its rendering names every field and every value, which
-    * is exactly what these assertions are about.
+    * a cast; the decoded query is a case class, and its rendering names every field and every value, which is
+    * exactly what these assertions are about.
     */
-  private final case class Recorded(context: CallContext, input: String)
+  final private case class Recorded(context: CallContext, input: String)
 
   private def recorded(document: String): TopicsResponse =
     parse(document)
@@ -306,7 +306,8 @@ final class TopicProxySuite extends CatsEffectSuite {
     // A 404 says something about the request, not about the service, which answered correctly and
     // promptly. Reporting it would let anybody dim a feature for everyone else by typing a bad URL
     // (ADR-039 §6).
-    val missing = kui.kernel.error.ApplicationError.NotFound("topic", "nope", kui.kernel.error.ErrorCode.TopicNotFound)
+    val missing =
+      kui.kernel.error.ApplicationError.NotFound("topic", "nope", kui.kernel.error.ErrorCode.TopicNotFound)
 
     serving(Left(missing)) { (server, _, signal) =>
       for {
@@ -357,6 +358,9 @@ final class TopicProxySuite extends CatsEffectSuite {
     assertEquals(topic.value, "topic")
     assert(ServiceContracts.byService.contains(topic))
     assertEquals(CapabilityKey(topic, None).service, topic)
-    assertNotEquals(CapabilityState.Available: CapabilityState, CapabilityState.NotConfigured: CapabilityState)
+    assertNotEquals(
+      CapabilityState.Available: CapabilityState,
+      CapabilityState.NotConfigured: CapabilityState
+    )
   }
 }

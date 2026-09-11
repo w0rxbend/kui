@@ -23,15 +23,8 @@ import kui.http.sse.{Sse, SseEvent}
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.KuiError
 import kui.kernel.{ClusterId, ServiceId}
-import kui.security.rbac.{
-  Action,
-  ClusterFlags,
-  DefaultRole,
-  Permission,
-  RbacPolicy,
-  Resource as RbacResource
-}
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, ClusterFlags, DefaultRole, Permission, RbacPolicy, Resource as RbacResource}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The alerts stream's gateway-specific promises, exercised through a real listener. */
@@ -41,7 +34,7 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
   private val cluster = ClusterId.unsafe("prod-eu")
   private val path = "/api/v1/clusters/prod-eu/alerts/stream"
 
-  private final case class Opened(endpoint: String, path: String, context: CallContext)
+  final private case class Opened(endpoint: String, path: String, context: CallContext)
 
   private def client(
       source: Stream[IO, SseEvent]
@@ -62,15 +55,17 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
             endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[IO, Byte], Fs2Streams[IO]],
             input: I
         )(ctx: CallContext): Stream[IO, SseEvent] =
-          Stream.eval(
-            opened.update(
-              _ :+ Opened(
-                endpoint.info.name.getOrElse("<unnamed>"),
-                endpoint.showPathTemplate(),
-                ctx
+          Stream
+            .eval(
+              opened.update(
+                _ :+ Opened(
+                  endpoint.info.name.getOrElse("<unnamed>"),
+                  endpoint.showPathTemplate(),
+                  ctx
+                )
               )
             )
-          ).drain ++ source
+            .drain ++ source
 
         def circuitStates: Stream[IO, CircuitEvent] = Stream.empty
       }
@@ -88,10 +83,10 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
   /** The status, and whatever body arrives within [[BodyWindow]].
     *
     * A refusal's envelope is a finite body and arrives whole, so the window costs the passing path nothing:
-    * `compile` returns the moment the stream ends. A *subscription* never ends, so a case asserting a
-    * refusal must not read to completion — under a widened permission requirement the caller is let
-    * through, the body stays open, and the case fails as a wall-clock timeout naming nothing instead of on
-    * the `403` assertion it was written for. Interrupting turns that back into an assertion failure.
+    * `compile` returns the moment the stream ends. A *subscription* never ends, so a case asserting a refusal
+    * must not read to completion — under a widened permission requirement the caller is let through, the body
+    * stays open, and the case fails as a wall-clock timeout naming nothing instead of on the `403` assertion
+    * it was written for. Interrupting turns that back into an assertion failure.
     */
   private def boundedRead(server: GatewayTestServer.Running): IO[(Int, String)] =
     basicRequest
@@ -106,8 +101,8 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
           .map(bytes => response.code.code -> new String(bytes, StandardCharsets.UTF_8))
       )
 
-  /** Long enough for a refusal envelope to cross a loopback listener, short enough that a stream left open
-    * by a permission mistake is reported in seconds rather than at the suite's 30-second ceiling.
+  /** Long enough for a refusal envelope to cross a loopback listener, short enough that a stream left open by
+    * a permission mistake is reported in seconds rather than at the suite's 30-second ceiling.
     */
   private val BodyWindow: FiniteDuration = 2.seconds
 
@@ -171,12 +166,14 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
     // finishes. There is no `done` and no `error`, which is exactly the state ADR-035 forbids a client from
     // having to interpret, and the assertion is made on the bytes that left the gateway rather than on any
     // intermediate value, because the byte stream is the whole of what a relay produces.
-    val source = Stream.emit(
-      SseEvent.data(
-        AlertsStreamEndpoint.EventName,
-        AlertChangeDto(cluster.value, 4, Instant.parse("2026-09-08T09:58:00Z")).asJson
+    val source = Stream
+      .emit(
+        SseEvent.data(
+          AlertsStreamEndpoint.EventName,
+          AlertChangeDto(cluster.value, 4, Instant.parse("2026-09-08T09:58:00Z")).asJson
+        )
       )
-    ).covary[IO]
+      .covary[IO]
 
     for {
       built <- client(source)
@@ -269,12 +266,14 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
       logger <- FakeStructuredLogger[IO]
       // One frame and then silence. `Stream.never` alone would leave the allowed half waiting on a byte
       // that is never produced, which reads as a hang rather than as a refusal.
-      source = Stream.emit(
-        SseEvent.data(
-          AlertsStreamEndpoint.EventName,
-          AlertChangeDto(cluster.value, 2, Instant.EPOCH).asJson
+      source = Stream
+        .emit(
+          SseEvent.data(
+            AlertsStreamEndpoint.EventName,
+            AlertChangeDto(cluster.value, 2, Instant.EPOCH).asJson
+          )
         )
-      ).covary[IO] ++ Stream.never[IO]
+        .covary[IO] ++ Stream.never[IO]
       built <- client(source)
       (upstream, opened) = built
       check = (policy: RbacPolicy) =>
@@ -316,8 +315,8 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
   /** Every action on every resource except the alerts ones, held through the default role.
     *
     * `Resource.Alerts` is excluded whole rather than by naming `AlertsView`, because `AlertsAcknowledge`
-    * implies `AlertsView` (`Action.implied`): a policy that granted the acknowledgement and withheld the
-    * read would still open this stream, and the case would then be asserting something it does not mean.
+    * implies `AlertsView` (`Action.implied`): a policy that granted the acknowledgement and withheld the read
+    * would still open this stream, and the case would then be asserting something it does not mean.
     */
   private val everythingButAlerts: RbacPolicy =
     RbacPolicy(

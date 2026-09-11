@@ -22,7 +22,7 @@ final class MetricsCapabilitiesSuite extends CatsEffectSuite {
   private val local = ClusterId.unsafe("local")
   private val prod = ClusterId.unsafe("prod")
 
-  private final class Sources(profiles: List[SourceProfile]) extends ClusterSources[IO] {
+  final private class Sources(profiles: List[SourceProfile]) extends ClusterSources[IO] {
     def all: IO[List[SourceProfile]] = IO.pure(profiles)
     def profile(cluster: ClusterId): IO[Option[SourceProfile]] =
       IO.pure(profiles.find(_.cluster == cluster))

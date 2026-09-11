@@ -37,8 +37,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * than through `ContractRouting`. That makes this service's own check the enforcement point for the single
   * endpoint in KUI that hands back the contents of a topic.
   *
-  * And even where the gateway does check — produce, resend, purge — the second check is what stands between
-  * a topic's records and anything that can reach this service's port with a signed principal. A KUI service
+  * And even where the gateway does check — produce, resend, purge — the second check is what stands between a
+  * topic's records and anything that can reach this service's port with a signed principal. A KUI service
   * listens on its own port and trusts a signed token; the gateway is a door, not a wall (ADR-021).
   *
   * So every request below goes straight to this service's own routes, with a valid principal and no gateway
@@ -68,12 +68,17 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
         stringFilter: Option[String],
         limits: BrowseLimits
     ): IO[Either[KuiError, BrowseRequest]] =
-      IO.pure(Left(kui.kernel.error.ApplicationError.NotFound("cursor", cursor, kui.kernel.error.ErrorCode.TopicNotFound)))
+      IO.pure(
+        Left(
+          kui.kernel.error.ApplicationError
+            .NotFound("cursor", cursor, kui.kernel.error.ErrorCode.TopicNotFound)
+        )
+      )
   }
 
-  /** Thirty-two bytes, the shortest key HS256 accepts. A real codec, because a fake one would verify a
-    * token by agreeing with itself and would pass just as happily against a service that had stopped
-    * checking signatures.
+  /** Thirty-two bytes, the shortest key HS256 accepts. A real codec, because a fake one would verify a token
+    * by agreeing with itself and would pass just as happily against a service that had stopped checking
+    * signatures.
     */
   private val key: SigningKey =
     SigningKey("test-1", Secret(Array.fill[Byte](32)(7)), Instant.parse("2020-01-01T00:00:00Z"))
@@ -151,10 +156,10 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
 
   /** A browse that is expected to be *refused*: its body is an ordinary JSON error envelope.
     *
-    * There are two of these rather than one because Tapir's stub backend hands a body back in the shape
-    * the caller asked for and will not convert between the two. A refusal never opens the stream — that
-    * is the whole point of checking before the logic runs — so it arrives as bytes, while a browse that
-    * is allowed arrives as server-sent events.
+    * There are two of these rather than one because Tapir's stub backend hands a body back in the shape the
+    * caller asked for and will not convert between the two. A refusal never opens the stream — that is the
+    * whole point of checking before the logic runs — so it arrives as bytes, while a browse that is allowed
+    * arrives as server-sent events.
     */
   private def refused(
       backend: StreamBackend[IO, Fs2Streams[IO]],

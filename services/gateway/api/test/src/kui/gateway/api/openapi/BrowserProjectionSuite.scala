@@ -25,8 +25,8 @@ import kui.gateway.api.EdgeHeaders
   *
   * The **function** group calls `BrowserProjection.project` and reads the answer. It exists because the
   * committed-file group cannot fail for a broken projection: breaking `keep` so that every reserved header
-  * survives leaves every assertion above green, since the file on disk was projected by yesterday's code.
-  * The two answer different questions — "is the published document clean?" and "does the rule that cleans it
+  * survives leaves every assertion above green, since the file on disk was projected by yesterday's code. The
+  * two answer different questions — "is the published document clean?" and "does the rule that cleans it
   * work?" — and until wave 5 only the first was ever asked.
   */
 final class BrowserProjectionSuite extends FunSuite {
@@ -82,7 +82,9 @@ final class BrowserProjectionSuite extends FunSuite {
     * not the header having quietly disappeared from the contract altogether.
     */
   test("theServiceDocumentStillDeclaresTheReservedHeaders") {
-    val reserved = headerParameters(serviceDocument).filter { case (name, _) => EdgeHeaders.isForbidden(name) }
+    val reserved = headerParameters(serviceDocument).filter { case (name, _) =>
+      EdgeHeaders.isForbidden(name)
+    }
     assert(
       reserved.values.sum > 0,
       "docs/api/openapi.json declares no X-Kui-* header, so BrowserProjection is no longer removing anything"
@@ -96,7 +98,9 @@ final class BrowserProjectionSuite extends FunSuite {
     * turns it red for the right one.
     */
   test("theHeadersABrowserReallySendsSurviveUnchanged") {
-    val service = headerParameters(serviceDocument).filterNot { case (name, _) => EdgeHeaders.isForbidden(name) }
+    val service = headerParameters(serviceDocument).filterNot { case (name, _) =>
+      EdgeHeaders.isForbidden(name)
+    }
     assertEquals(headerParameters(browserDocument), service)
     assert(service.getOrElse("X-Csrf-Token", 0) > 0, "no operation requires CSRF; the session model changed")
   }

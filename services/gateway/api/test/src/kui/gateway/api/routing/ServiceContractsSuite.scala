@@ -36,8 +36,8 @@ final class ServiceContractsSuite extends FunSuite {
   /** The public address of one endpoint, including its path parameters.
     *
     * `ContractRouting.publicPathOf` reports fixed segments only, so it cannot tell `/api/v1/clusters` from
-    * `/api/v1/clusters/{clusterId}` — and a collision between those two is exactly what a caller would see
-    * as one route shadowing another. The template plus the method is the address.
+    * `/api/v1/clusters/{clusterId}` — and a collision between those two is exactly what a caller would see as
+    * one route shadowing another. The template plus the method is the address.
     */
   private def address(endpoint: AnyEndpoint): String = {
     val method = endpoint.method.map(_.method).getOrElse("GET")
@@ -175,7 +175,11 @@ final class ServiceContractsSuite extends FunSuite {
     // of a `Map`.
     val addresses = ServiceContracts.byService.values.flatten.toList.map(address)
 
-    assertEquals(addresses.distinct.size, addresses.size, addresses.groupBy(identity).filter(_._2.sizeIs > 1).keys.toString)
+    assertEquals(
+      addresses.distinct.size,
+      addresses.size,
+      addresses.groupBy(identity).filter(_._2.sizeIs > 1).keys.toString
+    )
   }
 
   test("no proxied endpoint would be shadowed by an aggregation the gateway serves itself") {

@@ -39,6 +39,27 @@ WORKDIR /build
 
 # The manifests first, so a source change does not re-run the install. Each package's own manifest
 # has to be here for `pnpm install --frozen-lockfile` to resolve the workspace.
+#
+# THIS LIST IS A HAND-WRITTEN ROSTER AND IT HAD DRIFTED BY THREE. `frontend/packages/` holds eleven
+# packages; this list named eight. `feature-alerts`, `feature-connect` and `feature-ksql` — added in
+# waves 7 and 8 by packets that did not own this file — were missing, and nothing anywhere noticed:
+# the image still built and still carried all eight feature chunks. Which later step recovered the
+# omission I did not establish and am not going to guess at — `COPY frontend/ ./` below does bring
+# the three manifests in, and that is where to start looking. What is measured is that the list was
+# wrong for two waves with every gate green, which is this repository's most-repeated defect.
+#
+# It cannot be a glob: `COPY frontend/packages/*/package.json` flattens the matches into one
+# directory and there is no Docker form that preserves the per-package path. It is therefore a
+# roster, and a roster has to be checked by a reader. THE CHECK IS ONE COMMAND, and the two numbers
+# it prints must be equal:
+#
+#   ls frontend/packages | wc -l
+#   grep -c '^COPY frontend/packages/' deployment/frontend/Dockerfile
+#
+# 11 and 11 as this is written (2026-09-11). What drifting costs when it is not benign: the install
+# layer resolves a *different* workspace from the one the lockfile describes, so `--frozen-lockfile`
+# is being asked a question about a tree that is not the tree, and the layer-cache win this ordering
+# exists for is lost for the packages it omits.
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 COPY frontend/packages/api/package.json ./packages/api/
 COPY frontend/packages/kernel/package.json ./packages/kernel/
@@ -48,6 +69,9 @@ COPY frontend/packages/feature-topics/package.json ./packages/feature-topics/
 COPY frontend/packages/feature-messages/package.json ./packages/feature-messages/
 COPY frontend/packages/feature-consumers/package.json ./packages/feature-consumers/
 COPY frontend/packages/feature-schemas/package.json ./packages/feature-schemas/
+COPY frontend/packages/feature-alerts/package.json ./packages/feature-alerts/
+COPY frontend/packages/feature-connect/package.json ./packages/feature-connect/
+COPY frontend/packages/feature-ksql/package.json ./packages/feature-ksql/
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store \
     pnpm config set store-dir /pnpm-store && \

@@ -10,8 +10,8 @@ import kui.gateway.api.search.SearchRig.{Behaviour, Call, Data}
 import kui.gateway.api.{GatewayTestServer, SearchRoutes}
 import kui.gateway.application.client.CallContext
 import kui.gateway.application.search.{SearchSource, SearchUseCase}
-import kui.gateway.contract.dto.{SearchAnswerDto, SearchResultsDto}
 import kui.gateway.contract.SearchQuery
+import kui.gateway.contract.dto.{SearchAnswerDto, SearchResultsDto}
 import kui.kernel.group.GroupState
 import kui.kernel.{ClusterId, CorrelationId, ServiceId}
 import kui.security.Principal
@@ -29,13 +29,16 @@ final class SearchSuite extends CatsEffectSuite {
     *
     * Only `aTopicSearchReturnsNoMoreHitsThanTheCallerAskedFor` needs it — it is the one case that drives a
     * `SearchSource` directly, because the cap it asserts is the gateway's own `.take` and the fold's
-    * out-going cut hides its absence completely. Everything else goes through the route, which builds its
-    * own context from the request. The case is named rather than counted: this comment said "the two cases"
-    * for two waves after the second one stopped existing, and a count with nothing behind it drifts.
+    * out-going cut hides its absence completely. Everything else goes through the route, which builds its own
+    * context from the request. The case is named rather than counted: this comment said "the two cases" for
+    * two waves after the second one stopped existing, and a count with nothing behind it drifts.
     */
   private val context: CallContext =
-    CallContext(Principal.Anonymous, CorrelationId.unsafe("00000000-0000-4000-8000-000000000001"),
-      Some(SearchRig.Cluster))
+    CallContext(
+      Principal.Anonymous,
+      CorrelationId.unsafe("00000000-0000-4000-8000-000000000001"),
+      Some(SearchRig.Cluster)
+    )
 
   private val allThree: Set[ServiceId] =
     Set(SearchRig.TopicService, SearchRig.ConsumerService, SearchRig.SchemaService)
@@ -352,9 +355,9 @@ final class SearchSuite extends CatsEffectSuite {
     // The bound is checked at both ends, so a refusal cannot be mistaken for the endpoint refusing
     // everything long.
     serve() { (server, _) =>
-      server.get(s"/api/v1/search?q=${"o" * 200}").map(response =>
-        assertEquals(response.code.code, 200, response.body)
-      )
+      server
+        .get(s"/api/v1/search?q=${"o" * 200}")
+        .map(response => assertEquals(response.code.code, 200, response.body))
     }
   }
 

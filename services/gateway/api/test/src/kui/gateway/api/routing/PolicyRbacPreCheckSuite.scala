@@ -21,8 +21,6 @@ import kui.http.upstream.CircuitEvent
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{ClusterId, RoleName, ServiceId, UserName}
 import kui.metrics.contract.MetricsEndpoints
-import kui.security.PrincipalKind
-import kui.topic.contract.TopicEndpoints
 import kui.security.rbac.{
   Action,
   ClusterFlags,
@@ -33,8 +31,9 @@ import kui.security.rbac.{
   ResourcePattern,
   Role
 }
-import kui.security.{Principal, SignedPrincipal}
+import kui.security.{Principal, PrincipalKind, SignedPrincipal}
 import kui.testkit.fakes.FakeStructuredLogger
+import kui.topic.contract.TopicEndpoints
 
 /** The gateway's real permission check, constructed.
   *
@@ -45,8 +44,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * upstream service — with the whole gateway suite green.
   *
   * The two halves are asserted together on purpose. A suite that only ever watched a refusal would pass just
-  * as well against a check that refuses everything, and a gateway that refuses everything is not a
-  * permission model, it is an outage.
+  * as well against a check that refuses everything, and a gateway that refuses everything is not a permission
+  * model, it is an outage.
   */
 final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
 
@@ -82,8 +81,8 @@ final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
   /** A policy whose *default* role grants exactly that, so an anonymous browser request carries it.
     *
     * Through the default role rather than a named one because the route-driven cases go through the real
-    * session middleware, which attaches `Principal.Anonymous` when nobody has signed in. The named-role
-    * shape is exercised directly below, so both paths into `Rbac.effectivePermissions` are covered.
+    * session middleware, which attaches `Principal.Anonymous` when nobody has signed in. The named-role shape
+    * is exercised directly below, so both paths into `Rbac.effectivePermissions` are covered.
     */
   private val patternScoped: RbacPolicy =
     RbacPolicy(Nil, Some(DefaultRole(List(topicPermission(ordersPattern)))))

@@ -10,8 +10,8 @@ import org.scalacheck.{Arbitrary, Gen, Prop}
 
 import kui.testkit.KuiSuite
 
-/** That every secret in a store payload is encrypted before it can reach a topic, that it can be read
-  * back, and that each of the ways this goes wrong in practice fails by name instead of quietly.
+/** That every secret in a store payload is encrypted before it can reach a topic, that it can be read back,
+  * and that each of the ways this goes wrong in practice fails by name instead of quietly.
   *
   * The milestone's security exit criterion — a console-consumer dump of `__kui_config` containing no
   * plaintext password — is this suite plus STORE-009's dump against a real broker.
@@ -49,9 +49,9 @@ final class FieldCryptoSuite extends KuiSuite {
       )
     )
 
-  /** The alphabet that breaks naive implementations: quotes, backslashes, line breaks, `=`, and
-    * characters outside the basic multilingual plane. It is the same alphabet KAFKA-002's JAAS property
-    * test uses, because a password that breaks one usually breaks the other.
+  /** The alphabet that breaks naive implementations: quotes, backslashes, line breaks, `=`, and characters
+    * outside the basic multilingual plane. It is the same alphabet KAFKA-002's JAAS property test uses,
+    * because a password that breaks one usually breaks the other.
     */
   private val nastyStrings: Gen[String] = {
     val chars = Gen.oneOf(Gen.alphaNumChar, Gen.oneOf('"', '\\', '\n', '\r', '=', ' ', '\t', 'é', '☃'))
@@ -92,7 +92,8 @@ final class FieldCryptoSuite extends KuiSuite {
   }
 
   test("payloadWithNoMarkerIsUnchanged") {
-    val payload = Json.obj("displayName" -> Json.fromString("Production EU"), "brokers" -> Json.arr(Json.fromInt(1)))
+    val payload =
+      Json.obj("displayName" -> Json.fromString("Production EU"), "brokers" -> Json.arr(Json.fromInt(1)))
     assertEquals(crypto.encryptPayload(recordKey, payload).unsafeRunSync(), payload)
     assertEquals(crypto.decryptPayload(recordKey, payload).unsafeRunSync(), Right(payload))
   }
@@ -143,7 +144,10 @@ final class FieldCryptoSuite extends KuiSuite {
 
   test("tamperedCiphertextFailsAuthentication") {
     val blob = crypto
-      .encryptBytes(FieldCrypto.aad(recordKey, "security.password"), "hunter2".getBytes(StandardCharsets.UTF_8))
+      .encryptBytes(
+        FieldCrypto.aad(recordKey, "security.password"),
+        "hunter2".getBytes(StandardCharsets.UTF_8)
+      )
       .unsafeRunSync()
     val bytes = Base64.getDecoder.decode(blob.ct)
     bytes(0) = (bytes(0) ^ 0x01).toByte
@@ -188,7 +192,10 @@ final class FieldCryptoSuite extends KuiSuite {
     // Rewritten under k2, and then k1 is dropped: still readable.
     val reencrypted = rotated.encryptPayload(recordKey, payloadWith("hunter2", "trustme")).unsafeRunSync()
     val k2Only = FieldCrypto[IO](keyring("k2", "k2" -> k2Material))
-    assertEquals(k2Only.decryptPayload(recordKey, reencrypted).unsafeRunSync(), Right(payloadWith("hunter2", "trustme")))
+    assertEquals(
+      k2Only.decryptPayload(recordKey, reencrypted).unsafeRunSync(),
+      Right(payloadWith("hunter2", "trustme"))
+    )
     // But a record still written under k1 is now unreadable, by name rather than by silence.
     assertEquals(
       k2Only.decryptPayload(recordKey, encrypted).unsafeRunSync(),

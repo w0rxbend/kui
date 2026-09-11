@@ -18,7 +18,13 @@ import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.errors.TopicAuthorizationException
 import org.apache.kafka.common.{KafkaFuture, Node, TopicCollection, TopicPartition, Uuid}
 
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.{ClusterId, TopicName}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger

@@ -7,8 +7,8 @@ import munit.CatsEffectSuite
 
 import kui.config.{ClusterConfig, StoreConfig}
 import kui.http.health.HealthEndpoints
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
 import kui.kernel.ClusterId
+import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
 import kui.observability.Telemetry
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -16,8 +16,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * against.
   *
   * The store-less path is the one a first run takes and the one the all-in-one deployment uses, so it is
-  * asserted here in process. The Kafka-backed path - topic bootstrap, replay, the bounded replay failure -
-  * is asserted against a real broker by the store's own integration suite, which owns those behaviours;
+  * asserted here in process. The Kafka-backed path - topic bootstrap, replay, the bounded replay failure - is
+  * asserted against a real broker by the store's own integration suite, which owns those behaviours;
   * duplicating them here would be a second container per build for a second copy of the same assertions.
   */
 final class ClusterBootstrapSuite extends CatsEffectSuite {

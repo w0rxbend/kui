@@ -4,10 +4,9 @@ import munit.FunSuite
 
 /** That the metric names in the code are the ones the documentation promises.
   *
-  * This suite is the contract between `ARCHITECTURE.md` §13 and what KUI
-  * actually emits. The expected list below is written out in full rather than derived from
-  * `MetricNames.all`, which is the entire point: a name that changes has to be changed in two
-  * places, and the second place is a test whose diff a reviewer reads.
+  * This suite is the contract between `ARCHITECTURE.md` §13 and what KUI actually emits. The expected list
+  * below is written out in full rather than derived from `MetricNames.all`, which is the entire point: a name
+  * that changes has to be changed in two places, and the second place is a test whose diff a reviewer reads.
   */
 final class MetricNamesSuite extends FunSuite {
 

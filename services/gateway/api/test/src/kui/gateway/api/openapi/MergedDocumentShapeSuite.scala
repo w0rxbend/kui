@@ -13,10 +13,10 @@ import kui.ksql.contract.KsqlEndpoints
 
 /** That the published description of KUI's API describes the API a browser can actually call.
   *
-  * `openApiCheck` already fails on any byte difference between the committed document and a freshly
-  * generated one, and it is the regeneration gate. This suite asserts the properties a byte diff cannot
-  * express: that every path is claimed once, that nothing internal leaked, and that the one endpoint which
-  * is deliberately absent is absent for that reason rather than by accident.
+  * `openApiCheck` already fails on any byte difference between the committed document and a freshly generated
+  * one, and it is the regeneration gate. This suite asserts the properties a byte diff cannot express: that
+  * every path is claimed once, that nothing internal leaked, and that the one endpoint which is deliberately
+  * absent is absent for that reason rather than by accident.
   */
 final class MergedDocumentShapeSuite extends FunSuite {
 

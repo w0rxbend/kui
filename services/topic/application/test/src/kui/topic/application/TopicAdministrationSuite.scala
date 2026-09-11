@@ -136,9 +136,9 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       refreshes
     )
 
-  /** The api module's mapping is not visible from here (rule A3), and none of these assertions depends on
-    * the exact codes, only on the refusal reaching the caller. This is the smallest total function that
-    * satisfies the parameter.
+  /** The api module's mapping is not visible from here (rule A3), and none of these assertions depends on the
+    * exact codes, only on the refusal reaching the caller. This is the smallest total function that satisfies
+    * the parameter.
     */
   private def toKui(error: TopicError): KuiError =
     kui.kernel.error.ApplicationError.InvalidState(error.message)
@@ -197,7 +197,8 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
     // topic they just made for up to a minute — which reads as a create that silently failed.
     for {
       f <- fixture()
-      spec = NewTopicSpec.of(TopicName.unsafe("new.topic"), Some(3), Some(1), Map.empty)
+      spec = NewTopicSpec
+        .of(TopicName.unsafe("new.topic"), Some(3), Some(1), Map.empty)
         .getOrElse(fail("spec"))
       answer <- f.admin.create(Caller, cluster, spec)
       records <- f.records.get

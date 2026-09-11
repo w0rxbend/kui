@@ -10,11 +10,11 @@ import kui.security.{Principal, PrincipalKind}
 /** The identity a log line may carry, pinned against a digest this file computes for itself.
   *
   * There is a case for this rule already — `services/cluster/api`'s `PrincipalVerificationSuite` drives a
-  * real request and reads `user.id` off the line — but it builds its expectation by *calling
-  * `hashedUserId`*, so it passes at every value of the truncation: `.take(16)` made `.take(48)` left
-  * `libs.http.test` and `services.cluster.api.test` at 259 of 259 green. That case is still the better test
-  * of the seam; this one is the test of the figure, and the expectation is computed here from the algorithm
-  * the scaladoc names rather than from the function under test.
+  * real request and reads `user.id` off the line — but it builds its expectation by *calling `hashedUserId`*,
+  * so it passes at every value of the truncation: `.take(16)` made `.take(48)` left `libs.http.test` and
+  * `services.cluster.api.test` at 259 of 259 green. That case is still the better test of the seam; this one
+  * is the test of the figure, and the expectation is computed here from the algorithm the scaladoc names
+  * rather than from the function under test.
   *
   * Sixteen is not arbitrary. It is eight bytes of the digest — far more than enough to tell the users of one
   * deployment apart, and short enough to read — and the reason the log carries a hash at all is that a log

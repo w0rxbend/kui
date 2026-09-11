@@ -112,7 +112,10 @@ abstract class PortContractSuite extends KuiIOSuite {
           case Right(detail) =>
             assert(detail.partitions.exists(_.isLeaderless))
             assertEquals(detail.summary.messageCount, None)
-            assert(detail.summary.offlinePartitions > 0, "the screen must be able to explain the missing count")
+            assert(
+              detail.summary.offlinePartitions > 0,
+              "the screen must be able to explain the missing count"
+            )
         }
     }
   }
@@ -128,6 +131,8 @@ abstract class PortContractSuite extends KuiIOSuite {
           }
         }
       }
-      .map(_.foreach(result => assert(result.isRight, s"the port raised instead of returning a Left: $result")))
+      .map(
+        _.foreach(result => assert(result.isRight, s"the port raised instead of returning a Left: $result"))
+      )
   }
 }

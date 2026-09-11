@@ -8,14 +8,14 @@ import cats.syntax.all.*
 
 import kui.testkit.KuiIOSuite
 
-/** That a writer parks until its own record comes back around the log, and is always woken — by the
-  * record arriving, by the timeout, or by the follower dying.
+/** That a writer parks until its own record comes back around the log, and is always woken — by the record
+  * arriving, by the timeout, or by the follower dying.
   *
-  * The one that earns this file its existence is `awaitCompletesImmediatelyWhenTheOffsetIsAlreadyPast`.
-  * The follower can win the race against the writer that produced the record, and a waiter that checked
-  * "has it arrived?" outside the same atomic step that registers it would park for ever against a record
-  * that has already gone by. That bug does not fail a happy-path test; it fails in production, once a
-  * month, as an unexplained write timeout.
+  * The one that earns this file its existence is `awaitCompletesImmediatelyWhenTheOffsetIsAlreadyPast`. The
+  * follower can win the race against the writer that produced the record, and a waiter that checked "has it
+  * arrived?" outside the same atomic step that registers it would park for ever against a record that has
+  * already gone by. That bug does not fail a happy-path test; it fails in production, once a month, as an
+  * unexplained write timeout.
   */
 final class WriteWaiterSuite extends KuiIOSuite {
 

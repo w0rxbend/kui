@@ -26,8 +26,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * Measured one mutation at a time against `./mill services.identity.__.test + apps.allinone.test`, which
   * stayed at 98/98 green for each:
   *
-  *   - `ConfiguredUserDirectory.key` losing its `toLowerCase`, so a person who signed in as `Admin` on
-  *     Monday and `admin` on Tuesday is two people and the second has no account;
+  *   - `ConfiguredUserDirectory.key` losing its `toLowerCase`, so a person who signed in as `Admin` on Monday
+  *     and `admin` on Tuesday is two people and the second has no account;
   *   - `ConfiguredUserDirectory.update` answering `Right(())`, so a password change against a file-backed
   *     deployment reports success and is gone at the next restart — the exact failure the refusal's own
   *     message was written to prevent;
@@ -227,7 +227,7 @@ final class UserDirectoriesSuite extends KuiIOSuite {
         IO.raiseError(new RuntimeException("the metadata store is not reachable"))
     }
 
-  private abstract class StubStore extends ConfigStore[IO] {
+  abstract private class StubStore extends ConfigStore[IO] {
     def get(key: StoreKey): IO[Option[StoreRecord]] = IO.pure(None)
     def list(section: StoreSection): IO[List[StoreRecord]] = IO.pure(Nil)
 

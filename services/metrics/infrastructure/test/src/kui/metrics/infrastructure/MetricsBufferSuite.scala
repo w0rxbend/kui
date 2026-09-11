@@ -160,7 +160,8 @@ final class MetricsBufferSuite extends KuiIOSuite {
     IO.defer(MetricsBuffer.create[IO](cluster, 1.hour, 1.minute, 5000, noon, CacheMetrics.noop[IO]))
       .attempt
       .map {
-        case Left(refusal) => assert(refusal.getMessage.contains("must be at least one step"), refusal.toString)
+        case Left(refusal) =>
+          assert(refusal.getMessage.contains("must be at least one step"), refusal.toString)
         case Right(_) => fail("the pair the loader refuses must not be silently widened here")
       }
   }
@@ -254,7 +255,8 @@ final class MetricsBufferSuite extends KuiIOSuite {
     buffer().flatMap { held =>
       List(600L, 300L, 60L).traverse_(ago => held.record(sample(noon.minusSeconds(ago), 20.0))) *>
         held.latency(range, noon).map {
-          case Left(failure) => assert(failure.message.contains("request-latency percentile"), failure.message)
+          case Left(failure) =>
+            assert(failure.message.contains("request-latency percentile"), failure.message)
           case Right(series) => fail(s"a family no scrape carried must be named; got ${series.buckets.size}")
         }
     }

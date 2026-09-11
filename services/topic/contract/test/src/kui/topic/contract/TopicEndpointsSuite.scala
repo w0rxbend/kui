@@ -150,7 +150,10 @@ final class TopicEndpointsSuite extends FunSuite {
     val paths = TopicEndpoints.all.map(pathTemplate)
 
     List("replication-factor", "partitions/increase", "clone", "purge", "recreate").foreach { forbidden =>
-      assert(!paths.exists(_.contains(forbidden)), s"$forbidden is an administration path and belongs in TopicAdminEndpoints")
+      assert(
+        !paths.exists(_.contains(forbidden)),
+        s"$forbidden is an administration path and belongs in TopicAdminEndpoints"
+      )
     }
   }
 
@@ -179,6 +182,8 @@ final class TopicEndpointsSuite extends FunSuite {
     val paths = TopicEndpoints.all.map(pathTemplate)
 
     List("messages", "consumer-groups", "analysis", "producers", "acls", "connectors", "schemas")
-      .foreach(forbidden => assert(!paths.exists(_.contains(forbidden)), s"$forbidden belongs to another service"))
+      .foreach(forbidden =>
+        assert(!paths.exists(_.contains(forbidden)), s"$forbidden belongs to another service")
+      )
   }
 }

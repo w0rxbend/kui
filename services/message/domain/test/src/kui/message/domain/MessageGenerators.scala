@@ -2,10 +2,11 @@ package kui.message.domain
 
 import java.time.Instant
 
+import org.scalacheck.{Arbitrary, Gen}
+
 import kui.kernel.browse.{Direction, IsolationLevel, SeekMode}
 import kui.kernel.serde.{PayloadKind, SerdeName, Target}
 import kui.kernel.{ClusterId, Offset, OffsetRange, PartitionId, TopicName}
-import org.scalacheck.{Arbitrary, Gen}
 
 /** Generators for every type the message domain declares.
   *
@@ -53,7 +54,8 @@ object MessageGenerators {
 
   val matchOperator: Gen[MatchOperator] = Gen.oneOf(MatchOperator.All)
 
-  /** Never `Regex`, so that a property about windows or topics is not also a property about pattern syntax. */
+  /** Never `Regex`, so that a property about windows or topics is not also a property about pattern syntax.
+    */
   val plainMatch: Gen[TrackMatch] =
     for {
       source <- matchSource

@@ -14,12 +14,12 @@ import sttp.tapir.server.interceptor.metrics.MetricsRequestInterceptor
 import sttp.tapir.server.stub4.TapirStubInterpreter
 import sttp.tapir.server.tracing.otel4s.Otel4sTracing
 
-/** That every endpoint is traced and measured without anyone instrumenting it, and that the three
-  * things an incident needs — the span, the log and the response — all carry the same id.
+/** That every endpoint is traced and measured without anyone instrumenting it, and that the three things an
+  * incident needs — the span, the log and the response — all carry the same id.
   *
-  * The interceptors run through Tapir's stub interpreter rather than a bound port. What is under
-  * test here is the interceptor chain itself, and the stub runs exactly that chain; a real socket
-  * would add several seconds per case and prove nothing extra.
+  * The interceptors run through Tapir's stub interpreter rather than a bound port. What is under test here is
+  * the interceptor chain itself, and the stub runs exactly that chain; a real socket would add several
+  * seconds per case and prove nothing extra.
   */
 final class KuiInterceptorsSuite extends CatsEffectSuite {
 
@@ -282,7 +282,9 @@ final class KuiInterceptorsSuite extends CatsEffectSuite {
     assert(!KuiInterceptors.isMeasured(unnamedProbe))
 
     // Nothing else is swept up: neither a route that merely ends in a similar word nor a real endpoint.
-    assert(KuiInterceptors.isMeasured(endpoint.get.in("clusters" / "health" / "livez").name("cluster.health")))
+    assert(
+      KuiInterceptors.isMeasured(endpoint.get.in("clusters" / "health" / "livez").name("cluster.health"))
+    )
     assert(KuiInterceptors.isMeasured(listTopics.endpoint))
   }
 }

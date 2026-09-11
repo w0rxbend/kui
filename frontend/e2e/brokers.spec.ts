@@ -347,7 +347,118 @@ test.describe("the brokers screen", () => {
     // empty configuration block reads as "this broker has no settings", which is never true.
     await expect(card.locator(".kui-config-chip").first()).toBeVisible();
   });
+
+  /**
+   * `M09` — the brokers screen of the **second** cluster, reached by changing cluster.
+   *
+   * The ten cases above cover this screen; every one of them drives `quickstart`. What none of them
+   * could establish until this wave is that the screen is a screen *of a cluster* rather than a
+   * screen of the deployment — the quickstart registered one cluster, so every reading on this page
+   * had exactly one possible source and a route that ignored its `clusterId` altogether would have
+   * drawn the same picture. `deployment/quickstart/kui-quickstart.yaml` now registers a second
+   * profile (W9-01), and this asks the second one the same questions.
+   *
+   * The two clusters may point at one broker — a second *registered profile* is what the screens
+   * need and it is the cheap shape — so the figures on the two screens can legitimately be
+   * identical. That is why nothing here compares the two clusters' numbers to each other. What it
+   * compares is **this** screen against **this** cluster's own endpoints: the voice line against
+   * `/clusters/<other>`'s summary, the cards against `/clusters/<other>/brokers`. A route pinned to
+   * the first cluster's document reddens on the identity assertions whatever the figures say.
+   *
+   * Fails rather than skips on a one-cluster deployment, for the reason `shell.spec.ts`'s `M08`
+   * case does.
+   */
+  test("follows a cluster change into the second cluster's brokers screen", async ({
+    page,
+    api,
+  }) => {
+    const other = await secondCluster(api);
+    expect(
+      other,
+      "this deployment registers one cluster, so there is no second brokers screen to draw and " +
+        "M09's second-cluster clause cannot be proved. See deployment/quickstart/" +
+        "kui-quickstart.yaml, kui.clusters",
+    ).toBeDefined();
+    if (other === undefined) return;
+
+    /* Start on the first cluster's brokers screen, so the change is a change and not an arrival.
+       The environment rail's tile is the shipped switch — see `shell.spec.ts`'s `M08` case for why
+       it is not the `ClusterSelector` menu the plan describes. */
+    await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
+    await expect(page.locator(".kui-brkcard").first()).toBeVisible();
+
+    await page.getByTestId(`env-tile-${other.id}`).click();
+
+    /*
+     * A switch made from a cluster-scoped page rewrites the address, and that is the behaviour
+     * being pinned: leaving the reader on `/clusters/<first>/brokers` while the frame said
+     * `<second>` would be the frame and the page describing two different clusters — which is the
+     * exact failure `setRouteCluster(undefined)` in `App.tsx` exists to prevent, and which no
+     * deployment in this repository could ever exhibit until there were two clusters to confuse.
+     */
+    await expect(page).toHaveURL((url) => url.pathname.startsWith(`/ui/clusters/${other.id}/`));
+
+    /*
+     * And now the screen itself, opened at the second cluster's own address rather than clicked to
+     * through the cluster list. That is deliberate: the list's rows are a different screen with
+     * their own cases, and routing this one through them would make a slow or changed list redden
+     * a case about brokers. What the switch above establishes is that the change propagated; what
+     * follows establishes that this screen is the second cluster's.
+     */
+    await page.goto(`/ui/clusters/${other.id}/brokers`);
+
+    const document = (await api.get(`/api/v1/clusters/${other.id}`)) as ClusterDocument;
+    const summary = dataOf(document.cluster?.summary);
+    const count = summary?.underReplicatedPartitionCount ?? null;
+
+    const voice = page.locator('[data-testid="brokers-head"]');
+    await expect(voice).toBeVisible();
+    if (count === null) {
+      await expect(voice).toContainText(/not claiming there are none/i);
+    } else if (count === 0) {
+      await expect(voice).toContainText(/Zero under-replicated partitions/i);
+    } else {
+      await expect(voice).toContainText(
+        new RegExp(`${count} partitions? (is|are) under-replicated`),
+      );
+    }
+
+    /* One card per broker the *second* cluster's own list reports. */
+    const brokers = (await api.get(`/api/v1/clusters/${other.id}/brokers`)) as BrokersDocument;
+    const rows = dataOf(brokers.brokers) ?? [];
+    expect(rows.length, `${other.id} reports no brokers, so there is no screen to draw`)
+      .toBeGreaterThan(0);
+    await expect(page.locator(".kui-brkcard")).toHaveCount(rows.length);
+
+    /* The frame, which is the half `M09` is a capture of: §2.1's cluster block at the drawer head
+       names the cluster whose brokers are on screen, and the rail's current tile agrees with it. */
+    await expect(page.getByTestId("nav-drawer")).toContainText(other.name);
+    await expect(page.getByTestId(`env-tile-${other.id}`)).toHaveAttribute("aria-current", "true");
+  });
 });
+
+/**
+ * A cluster this deployment registers that is not the one every other case here drives.
+ *
+ * Read off the gateway rather than written down, so this file learns the second cluster's id and
+ * name from the deployment instead of from `deployment/quickstart/kui-quickstart.yaml` by hand —
+ * the same rule `connect.spec.ts` follows for the Connect wire.
+ */
+async function secondCluster(api: KuiApi): Promise<{ id: string; name: string } | undefined> {
+  const registered = (await api.get("/api/v1/clusters")) as {
+    readonly clusters?: {
+      readonly data?: readonly {
+        readonly cluster?: { readonly id?: string; readonly name?: string };
+      }[];
+    };
+  };
+  return (registered.clusters?.data ?? [])
+    .map((entry) => entry.cluster)
+    .find(
+      (one): one is { id: string; name: string } =>
+        typeof one?.id === "string" && one.id !== CLUSTER && typeof one.name === "string",
+    );
+}
 
 /** Whether this deployment's log directories carry a filesystem size to measure against. */
 async function capacityIsReported(api: KuiApi): Promise<boolean> {

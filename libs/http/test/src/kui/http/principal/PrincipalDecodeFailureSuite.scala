@@ -1,20 +1,19 @@
 package kui.http.principal
 
 import munit.FunSuite
-
 import sttp.tapir.{header, query, EndpointInput}
 
 import kui.contracts.KuiEndpoint
 
 /** Which decode failure `PrincipalInterceptor` converts into a 401, asserted in the module that owns it.
   *
-  * The rule is gated — `services/cluster/api`'s `PrincipalVerificationSuite` and
-  * `services/consumer/api`'s `ConsumerRoutesSuite` both go red when it breaks — but it was gated **nowhere
-  * in `libs/http`**, which is where the interceptor lives and where a reader changing it would look.
-  * Inverting `isPrincipalHeader`'s comparison to `!=` left every one of the 258 cases over 24 suites that
-  * `./mill -k libs.http.test + libs.securityCore.jvm.test` held before this file existed green, and
-  * reddened only once three services' route suites were run — `PrincipalVerificationSuite`,
-  * `ClusterWriteRoutesSuite`, `ConsumerRoutesSuite` and `ConsumerBodyDigestSuite`.
+  * The rule is gated — `services/cluster/api`'s `PrincipalVerificationSuite` and `services/consumer/api`'s
+  * `ConsumerRoutesSuite` both go red when it breaks — but it was gated **nowhere in `libs/http`**, which is
+  * where the interceptor lives and where a reader changing it would look. Inverting `isPrincipalHeader`'s
+  * comparison to `!=` left every one of the 258 cases over 24 suites that
+  * `./mill -k libs.http.test + libs.securityCore.jvm.test` held before this file existed green, and reddened
+  * only once three services' route suites were run — `PrincipalVerificationSuite`, `ClusterWriteRoutesSuite`,
+  * `ConsumerRoutesSuite` and `ConsumerBodyDigestSuite`.
   *
   * That distance is the defect this file closes. `libs/http` is the module a second, third and eleventh
   * service inherit this behaviour from; a rule whose only gate is downstream is a rule the next service can

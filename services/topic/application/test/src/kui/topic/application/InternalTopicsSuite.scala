@@ -1,7 +1,7 @@
 package kui.topic.application
 
-import org.scalacheck.{Gen, Prop}
 import org.scalacheck.Prop.forAll
+import org.scalacheck.{Gen, Prop}
 
 import kui.kernel.TopicName
 import kui.testkit.KuiSuite

@@ -19,14 +19,13 @@ final class ClientPropertiesSuite extends KuiSuite {
   }
 
   property("overrideLayerWinsForEveryGeneratedPair") {
-    forAll(ClusterGenerators.genClientProperties, ClusterGenerators.genClientProperties) {
-      (left, right) =>
-        val merged = left ++ right
+    forAll(ClusterGenerators.genClientProperties, ClusterGenerators.genClientProperties) { (left, right) =>
+      val merged = left ++ right
 
-        right.keys.foreach(key => assertEquals(merged.get(key).map(_.redacted), right.get(key).map(_.redacted)))
-        (left.keys -- right.keys).foreach(key =>
-          assertEquals(merged.get(key).map(_.redacted), left.get(key).map(_.redacted))
-        )
+      right.keys.foreach(key => assertEquals(merged.get(key).map(_.redacted), right.get(key).map(_.redacted)))
+      (left.keys -- right.keys).foreach(key =>
+        assertEquals(merged.get(key).map(_.redacted), left.get(key).map(_.redacted))
+      )
     }
   }
 
