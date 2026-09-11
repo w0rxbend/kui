@@ -147,6 +147,38 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     }
   }
 
+  test("the size limit is exactly the size limit, in both directions") {
+    /*
+     * Ungated until now: widening the comparison to `bytes > limits.maxSourceBytes * 2` left
+     * `./mill libs.filter.test` green, because the case above sends 808 bytes against a limit of 64 — more
+     * than twelve times over, so any multiple of the limit short of twelve still refuses it. The boundary
+     * itself was asserted in neither direction.
+     *
+     * Both halves matter, and for different reasons. A limit that is quietly larger than it says is a
+     * denial of service the configuration cannot fix: the check exists *before* parsing precisely so that
+     * a megabyte of text is refused without being parsed. A limit that is quietly smaller refuses filters
+     * an operator has been told are legal.
+     */
+    val limits = generous.copy(maxSourceBytes = 64)
+
+    // `true && '<padding>' != ''` — a legal CEL boolean whose length is the padding plus sixteen.
+    def sourceOf(bytes: Int): String = s"true && '${"x" * (bytes - 16)}' != ''"
+
+    engine(limits).use { port =>
+      for {
+        exact <- port.register(sourceOf(64))
+        over <- port.register(sourceOf(65))
+      } yield {
+        assertEquals(sourceOf(64).getBytes("UTF-8").length, 64, clue = "the fixture's arithmetic is wrong")
+        assert(exact.isRight, s"a source of exactly the limit was refused: $exact")
+        assert(
+          over.swap.exists(_.message.contains("65 bytes")),
+          s"a source one byte over the limit was accepted: $over"
+        )
+      }
+    }
+  }
+
   test("an AST over the node limit is rejected") {
     val limits = FilterLimits.default.copy(maxAstNodes = 5)
     engine(limits).use { port =>

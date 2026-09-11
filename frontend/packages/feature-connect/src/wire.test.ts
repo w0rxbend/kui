@@ -102,6 +102,77 @@ describe("decoding a connectors document", () => {
     expect(elastic?.taskCount).toBe(2);
   });
 
+  it("reads no running count as none running, and never as all of them", () => {
+    /* Filed by W8-04's verification pass as F1, at the seam rather than at the panel. The two
+       fallbacks on the line above and below each other are not the same kind of statement:
+       `taskCount ?? tasks.length` is a count of what the document carries, and
+       `runningTasks ?? tasks.length` would be an assertion about state that nothing in the
+       document supports. Both tasks below are FAILED. */
+    const answer = decodeWorkerSection({
+      status: "ok",
+      data: {
+        items: [
+          {
+            connect: "payments",
+            name: "elastic-sink",
+            state: "RUNNING",
+            failed: true,
+            tasks: [
+              { id: 0, state: "FAILED", workerId: "10.0.0.1:8083" },
+              { id: 1, state: "FAILED", workerId: "10.0.0.2:8083" },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(answer.kind).toBe("ok");
+    if (answer.kind !== "ok") return;
+    const decoded = answer.page.items[0];
+    expect(decoded?.runningTasks).toBe(0);
+    // The count fallback is the honest one and stays: it counts objects that are really there.
+    expect(decoded?.taskCount).toBe(2);
+  });
+
+  it("gives a task the worker did not number an id no real task can have", () => {
+    /* W8-04 disclosed this one itself and nobody had closed it: `id: asNumber(record["id"]) ?? -1`
+       could become `?? 0` with all 75 cases green.
+
+       A task id is not decoration here. `ConnectorPanel` prints `Task ${found().task} reported
+       this, and these are the worker's words:` above a trace, so the number is how an operator
+       finds the rest of that trace in the worker's own log. Defaulting to `0` names task 0 — a
+       task that exists on every connector — as the reporter of a failure it may have had nothing
+       to do with, and there is no way to tell from the screen that the number was invented.
+       `-1` is a sentinel rather than a fix, and it is what this build does: it cannot collide
+       with a real task, so a number that arrives on a card is either the worker's or is visibly
+       not a task number at all.
+
+       The stronger close — dropping an unidentified task the way `decodeConnector` drops a
+       nameless connector, or printing "a task the worker did not number" — is a production change
+       in `wire.ts` and `ConnectorPanel.tsx`, filed to their owner. This case holds the sentinel
+       so that whichever way that lands, `?? 0` cannot be it. */
+    const answer = decodeWorkerSection({
+      status: "ok",
+      data: {
+        items: [
+          {
+            connect: "payments",
+            name: "elastic-sink",
+            state: "RUNNING",
+            failed: true,
+            tasks: [{ state: "FAILED", workerId: "10.0.0.1:8083", reason: "boom" }],
+          },
+        ],
+      },
+    });
+
+    expect(answer.kind).toBe("ok");
+    if (answer.kind !== "ok") return;
+    const unnumbered = answer.page.items[0]?.tasks[0];
+    expect(unnumbered?.id).toBe(-1);
+    expect(unnumbered?.id).toBeLessThan(0);
+  });
+
   it("carries the worker's own reason and its whole trace", () => {
     const failedTask = allConnectors(listing(responseDocument))
       .find((one) => one.name === "elastic-sink")

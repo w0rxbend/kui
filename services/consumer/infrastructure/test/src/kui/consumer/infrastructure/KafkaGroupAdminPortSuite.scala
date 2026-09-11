@@ -58,7 +58,15 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       val described: Ref[IO, Either[KuiError, BatchResult[GroupId, GroupDescription]]],
       val committed: Ref[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]],
       val altered: Ref[IO, List[(GroupId, Map[TopicPartition, Offset])]],
-      deleteSkips: Ref[IO, Map[GroupId, SkipReason]]
+      deleteSkips: Ref[IO, Map[GroupId, SkipReason]],
+      /** Every `requireStable` this fake was asked for, newest last.
+        *
+        * The flag used to be swallowed, which is why swapping the port's two call sites — `false` on the
+        * read path, `true` when a reset is being planned — left
+        * `./mill services.consumer.infrastructure.test` at 16/16 green. A fixture that cannot express an
+        * argument cannot gate it.
+        */
+      val stability: Ref[IO, List[Boolean]]
   ) extends GroupAdmin[IO] {
 
     def listGroups(conn: ClusterConnection, states: Set[GroupState]) = listing.get
@@ -71,7 +79,7 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
         groups: List[GroupId],
         partitions: Option[Set[TopicPartition]],
         requireStable: Boolean
-    ) = committed.get
+    ) = stability.update(_ :+ requireStable) *> committed.get
 
     def alterOffsets(conn: ClusterConnection, group: GroupId, offsets: Map[TopicPartition, Offset]) =
       altered.update(_ :+ (group -> offsets)).as(Right(()))
@@ -124,7 +132,8 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       committedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]](committed)
       altered <- Ref.of[IO, List[(GroupId, Map[TopicPartition, Offset])]](Nil)
       deleteSkips <- Ref.of[IO, Map[GroupId, SkipReason]](Map.empty)
-      admin = new FakeAdmin(listing, describedRef, committedRef, altered, deleteSkips)
+      stability <- Ref.of[IO, List[Boolean]](Nil)
+      admin = new FakeAdmin(listing, describedRef, committedRef, altered, deleteSkips, stability)
       lookup = new FakeOffsets(ends.map(batch => BatchResult(batch.values, endsSkipped)), ends, offline)
       logger <- FakeStructuredLogger[IO]
     } yield (KafkaGroupAdminPort.make[IO](admin, lookup, connection, logger), admin)
@@ -283,6 +292,29 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       assertEquals(refused.left.toOption.map(_.code), Some(kui.kernel.error.ErrorCode.Forbidden))
       // The other direction, so the case cannot pass by refusing everything.
       assertEquals(accepted, Right(()))
+    }
+  }
+
+  test("a reset is planned against stable offsets, and a page is not made to wait for one") {
+    /*
+     * Ungated until now: swapping the two `requireStable` arguments in `KafkaGroupAdminPort` left
+     * `./mill services.consumer.infrastructure.test` at 16/16 green, because `FakeAdmin.committedOffsets`
+     * dropped the flag on the floor. The two call sites want opposite things and both matter. A plan is
+     * signed into a token and applied minutes later (ADR-045), so it must not be computed from an offset
+     * an open transaction can still roll back; the list and detail pages, by contrast, must not block
+     * behind a producer's in-flight transaction to draw a lag column.
+     */
+    for {
+      rigged <- rig()
+      (port, admin) = rigged
+      _ <- port.describe(List(orders))
+      afterRead <- admin.stability.get
+      _ <- admin.stability.set(Nil)
+      _ <- port.offsetWindow(orders, ResetScope(topic, Set(partition(0))), None)
+      afterPlan <- admin.stability.get
+    } yield {
+      assertEquals(afterRead, List(false), clue = "a read path asked for stable offsets and would block")
+      assertEquals(afterPlan, List(true), clue = "a reset was planned from offsets a transaction can undo")
     }
   }
 

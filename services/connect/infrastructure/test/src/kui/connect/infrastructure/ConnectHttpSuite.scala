@@ -290,6 +290,55 @@ final class ConnectHttpSuite extends KuiIOSuite {
     }
   }
 
+  test("the connectors KUI could not describe are listed in name order too, by both readers") {
+    // The fourth ordering in this file, and the one that had no case. W8-02 rebuilt the fixtures for the
+    // three orderings above — the expanded document's connectors, one connector's tasks, and
+    // `perConnector`'s roster — and `unreadable`'s own `.sorted` one line below the first of them stayed
+    // measured by nothing: replacing it with `.reverse` left all 138 connect cases green.
+    //
+    // The list is not decoration. It is the *"KUI could not describe it"* row on the connectors screen,
+    // and it reshuffles between polls for exactly the reason the connectors list does: circe hands back
+    // the worker's own key order and a Connect herder rebuilds its status map on every rebalance.
+    //
+    // Three names, in an order that is neither the sorted one nor its reverse: the document reads
+    // `elastic, orders, archive`, sorted reads `archive, elastic, orders`, the document reversed reads
+    // `archive, orders, elastic` and the sort reversed reads `orders, elastic, archive`. No two of the
+    // four agree, which is what it takes for `.sorted` to be the only expression that answers.
+    //
+    // Both readers are driven here because they reach `unreadable` by different routes — `expanded`
+    // sorts the list it collected, `perConnector` inherits the order from `names.sorted` — and a rule
+    // held in one reader and not the other is the shape §3.14 is about: two screens reading one worker.
+    val undescribable =
+      """{
+        |  "elastic-sink": { "info": { "name": "elastic-sink" } },
+        |  "orders-source": { "info": { "name": "orders-source" } },
+        |  "archive-sink": { "info": { "name": "archive-sink" } }
+        |}""".stripMargin
+
+    // The bare-list worker refuses every status request: three names, no connector readable. The stub
+    // answers 404 to anything it does not match, so naming only `/connectors` is that refusal.
+    for {
+      fromExpanded <- worker { case "/connectors" => (StatusCode.Ok, undescribable) }.connectors
+      fromList <- worker {
+        case "/connectors" => (StatusCode.Ok, """["elastic-sink","orders-source","archive-sink"]""")
+      }.connectors
+    } yield (fromExpanded, fromList) match {
+      case (Right(expandedFacts), Right(listedFacts)) =>
+        assertEquals(expandedFacts.connectors, Nil)
+        assertEquals(listedFacts.connectors, Nil)
+
+        List(expandedFacts.unreadable, listedFacts.unreadable).foreach { unreadable =>
+          assert(
+            unreadable.indexOf("archive-sink") < unreadable.indexOf("elastic-sink"),
+            s"the worker's own order survived into the unreadable list: $unreadable"
+          )
+          assertEquals(unreadable, unreadable.sorted)
+          assertEquals(unreadable, List("archive-sink", "elastic-sink", "orders-source"))
+        }
+      case (other, another) => fail(s"expected two sets of facts, got $other and $another")
+    }
+  }
+
   test("a task list KUI cannot read makes the connector unreadable rather than a connector with 0 tasks") {
     // All or nothing per connector: a connector drawn with three of its four tasks reports `3/3 tasks`
     // over a cluster with four, and the task quietly dropped is the one that was failing.

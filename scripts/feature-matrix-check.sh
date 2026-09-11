@@ -132,6 +132,39 @@
 # because a claim about one's own gate is measured, not asserted, and this file is where the
 # project learned that.
 #
+# WHY A LEDGER WAS NOT ENOUGH EITHER, WHICH IS SECTION 6
+# ------------------------------------------------------
+# Wave 7's rebuild -- the ledger, the fourth column and the audit -- was published as costing two
+# edits to defeat. Re-measured on 2026-09-11 against the same file with the documents true, it cost
+# **one**:
+#
+#   claim "$kind-operations" "$tok" "${BASH_REMATCH[2]}" "$fact"   ->   ... "$fact" "$fact"
+#
+# one call site in `check_document_region`, after which ADR-048 and
+# `frontend/packages/api/README.md` published `X-Csrf-Token on 59 operations` against a document
+# carrying it on 26, and the run
+# printed `256 claims checked, all true` and exited 0. Every gate agreed and each was right to: the
+# kind was `csrf-operations`, the marker declared it, the count was 256, the residue saw the figure
+# struck out, and the ledger pair was `26>26` -- which is precisely what the audit re-derives from
+# the document, because it *is* the document's figure. **A comparison of a fact with itself is a
+# true statement about nothing, and every fixture in this file read one side of it.**
+#
+# Two things are new, and both are about the *claimed* side:
+#
+#   1. `claim` refuses a claimed figure that does not appear in the text it struck out of the
+#      block, so the left-hand side of every comparison has to have been read out of the document;
+#   2. `audit_document_facts` re-reads each block out of its file and requires every figure the
+#      ledger says that block published to be in it -- a second reading of the claimed side that
+#      does not go through `claim` at all.
+#
+# And the refusals themselves are now driven. Section 6 is there because six guards in wave 7's
+# file were mutated one at a time on 2026-09-11 and the run stayed green for every one: a refusal
+# whose failing case never arrives in this repository is a line nothing distinguishes from `true`.
+# The failing cases are fixtures now.
+#
+# The cheapest attack on the finished file is **two lines**, both in this file, and it is published
+# with its measurement in `TECH_DEBT.md` TD-023. Two is not a large number. It is the measured one.
+#
 # The per-section counts are kept beside the registry rather than instead of it. A count still says
 # something the kinds do not -- that a section compared *fewer instances* of a kind it still
 # compares, such as one npm dependency's row going missing -- and it is the cheaper half of the two.
@@ -199,6 +232,7 @@ manifests=(
   frontend/packages/feature-clusters/package.json
   frontend/packages/feature-connect/package.json
   frontend/packages/feature-consumers/package.json
+  frontend/packages/feature-ksql/package.json
   frontend/packages/feature-messages/package.json
   frontend/packages/feature-schemas/package.json
   frontend/packages/feature-topics/package.json
@@ -233,13 +267,15 @@ declare -A registry=(
   [self-check]="comparator-agrees comparator-disagrees percent-rounding"
   [rows]="capability-rows delivered-percent in-scope-delivered out-of-scope-rows residue\
  state-total"
-  [merged-document]="csrf-operations document-fact document-facts header-table\
+  [merged-document]="csrf-operations document-claim document-fact document-facts header-table\
  if-match-operations openapi-version paths-and-schemas principal-operations principal-paths\
  residue"
   [dependencies]="manifest npm-version"
   [milestones]="milestone-line milestone-p0 milestone-p1 milestone-rows total-line total-p0\
  total-p1 total-rows total-split"
   [adr-index]="adr-file adr-row"
+  [guard-fixtures]="claim-refuses-noncomparison claimed-side-read count-assertion\
+ empty-block-refused fact-independence figure-published header-kind-inverse marker-list-refused"
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -398,6 +434,37 @@ reconcile_region() {
        "compared but not declared is a check the document does not know about."
 }
 
+# Every marked block of one kind in one file, in one place. Sections 1 and 2 ran two copies of this
+# loop, and the three refusals inside it -- an empty block, a marker with no `claims:` list, and a
+# file carrying no block at all -- had to be mutated twice to be silenced, which is a discount and
+# not a gate. There is one copy now, and `verify_marked_block_refusals` drives *this* function over
+# fixture files that carry each of those shapes, because no real document does: the comment above
+# the emptiness test conceded "No file has carried an empty marked region yet", which is precisely
+# why `if [[ -z ${text// /} ]]` -> `if false` was green in both loops on 2026-09-11.
+#
+# `blocks` counts before the emptiness test and not after it. Until 2026-09-10 an empty marked
+# block was skipped without counting, so `declared_lists` -- which `region_claims` yields one entry
+# per *marker*, empty or not -- was read one index short from that point on, and every later block
+# in the same file was reconciled against the previous block's `claims:` list.
+check_marked_file() {
+  local kind=$1 file=$2 handler=$3 blocks=0 text
+  local -a declared_lists=()
+  mapfile -t declared_lists < <(region_claims "$kind" "$file")
+  while IFS= read -r text; do
+    blocks=$(( blocks + 1 ))
+    if [[ -z ${text// /} ]]; then
+      fail "$file: the \`checked: $kind\` block #$blocks publishes nothing, so no comparison can" \
+           "be made inside it; a marked block that yields no assertion is a failure, not a pass."
+      continue
+    fi
+    scope "$kind" "$file#$blocks"
+    "$handler" "$file (checked: $kind #$blocks)" "$text"
+    reconcile_region "$file (checked: $kind #$blocks)" "${declared_lists[$(( blocks - 1 ))]:-}"
+  done < <(regions "$kind" "$file")
+  (( blocks > 0 )) ||
+    fail "$file carries no \`<!-- checked: $kind -->\` block; its figures are unguarded."
+}
+
 # The residue: digits the block publishes that no comparison consumed. `consume` is how a
 # comparison says which fragment it read.
 consume() {
@@ -427,7 +494,40 @@ claim() {
          "the block without comparing anything. A claim that does not compare is not a claim."
     return
   fi
-  while (( $# > 0 )); do
+  # `>= 3` and `> 0` are the same condition on every input the refusal above lets through, and the
+  # difference is what a fixture sees when that refusal is the thing being mutated: with `> 0`, a
+  # two-argument call reaches `fail "$3"` and `set -u` ends the run with nothing printed, which is a
+  # red that says nothing. With `>= 3` the mutated refusal simply compares nothing, and
+  # `verify_claim_refuses_noncomparison` names it.
+  # **The claimed side has to have been read out of the document.** Measured on 2026-09-11 against
+  # this file with all six fixtures above in place: rewriting one call site from
+  # `claim "$kind-operations" "$tok" "${BASH_REMATCH[2]}" "$fact"` to
+  # `claim "$kind-operations" "$tok" "$fact" "$fact"` -- **one line** -- let ADR-048 and
+  # `frontend/packages/api/README.md` publish `X-Csrf-Token on 59 operations` against a document
+  # carrying it on 26, with the run printing `264 claims checked, all true` and exiting 0. Nothing
+  # could see it: the kind was right, the marker declared it, the count was right, the figure was
+  # struck out of the residue, and the ledger pair `26>26` is exactly what `audit_document_facts`
+  # re-derives from the document, because it *is* the document's own figure. A comparison of the
+  # fact with itself is a true statement about nothing.
+  #
+  # The one thing that attack cannot fake is the text it struck out: `$matched` is the fragment the
+  # regular expression took from the block, and the sentence the document actually published is
+  # inside it. So every claimed value has to appear there. A caller that wants to compare something
+  # no document said passes an empty `matched`, and then the residue check is the gate instead --
+  # the figure it did not strike out is left unclaimed and printed.
+  if [[ -n $matched ]]; then
+    local -a groups=("$@")
+    local at
+    for (( at = 0; at < ${#groups[@]}; at += 3 )); do
+      [[ $matched == *"${groups[$at]}"* ]] && continue
+      fail "${where-a comparison}: the \`$kind\` claim compared \`${groups[$at]}\` as the figure" \
+           "the document publishes, and the text it struck out of the block --" \
+           "\`$matched\` -- does not contain it. The claimed side of a comparison has to be read" \
+           "out of the document, or a comparison of the fact with itself passes while the" \
+           "sentence beside it says whatever it likes."
+    done
+  fi
+  while (( $# >= 3 )); do
     pairs+="${pairs:+|}$1>$2"
     same "$1" "$2" || fail "$3"
     shift 3
@@ -650,30 +750,11 @@ check_rows_region() {
   report_unclaimed_figures "$where" "$text"
 }
 
-# `blocks` counts before the emptiness test and not after it. Until 2026-09-10 an empty marked
-# block was skipped without counting, so `declared_lists` -- which `region_claims` yields one entry
-# per *marker*, empty or not -- was read one index short from that point on, and every later block
-# in the same file was reconciled against the previous block's `claims:` list. No file has carried
-# an empty marked region yet, which is the only reason it has never fired.
 for file in "$matrix" README.md; do
-  blocks=0
-  mapfile -t declared_lists < <(region_claims rows "$file")
-  while IFS= read -r text; do
-    blocks=$(( blocks + 1 ))
-    if [[ -z ${text// /} ]]; then
-      fail "$file: the \`checked: rows\` block #$blocks publishes nothing, so no comparison can" \
-           "be made inside it; a marked block that yields no assertion is a failure, not a pass."
-      continue
-    fi
-    scope rows "$file#$blocks"
-    check_rows_region "$file (checked: rows #$blocks)" "$text"
-    reconcile_region "$file (checked: rows #$blocks)" "${declared_lists[$(( blocks - 1 ))]:-}"
-  done < <(regions rows "$file")
-  (( blocks > 0 )) ||
-    fail "$file carries no \`<!-- checked: rows -->\` block; its totals are unguarded."
+  check_marked_file rows "$file" check_rows_region
 done
 
-close_section rows 17
+close_section rows 18
 
 # ---------------------------------------------------------------------------------------------
 # 2. The merged OpenAPI document against the figures published about it.
@@ -745,6 +826,11 @@ done < <(jq -r '
 # read `header_ops`: a table this script filled is not independent of the claims it filled, and the
 # whole finding is that a claim compared against something other than the document cannot be seen
 # by a fixture that reads the same something.
+# The third argument is the document, defaulted rather than fixed, so that
+# `verify_fact_independence` can put this function over a fixture document whose answer no table in
+# this run holds. A body rewritten to read `header_ops` -- the one mutation this function exists to
+# make impossible, and green on 2026-09-11 -- answers the real document's figure for a fixture that
+# contains one operation, and is named there.
 header_fact_from_document() {
   jq -r --arg name "$1" --arg mode "$2" '
     [ .paths | to_entries[] as $p | $p.value | to_entries[] as $o
@@ -752,7 +838,7 @@ header_fact_from_document() {
       | $p.key ] as $hits
     | if $mode == "paths" then ($hits | unique | length) else ($hits | length) end
     | if . == 0 then "absent" else tostring end
-  ' docs/api/openapi.json
+  ' "${3-docs/api/openapi.json}"
 }
 
 # The claim kind a published sentence about a header makes, and the header a kind is about. The
@@ -892,6 +978,15 @@ check_document_region() {
 # claim was compared with. A comparison edited to compare a published figure with itself -- the
 # cheapest attack left once the facts are looked up by the name the prose gives them -- records the
 # false figure in the fact column, and is named here with both sides printed.
+# Is this figure one the block actually publishes? A whole token, so that `26` is not found inside
+# `126` and a claim cannot be satisfied by a digit belonging to another sentence.
+figure_is_published() {
+  if printf '%s' "$1" | grep -qE "(^|[^0-9.])$(printf '%s' "$2" | sed 's/[.]/[.]/g')([^0-9%]|%|$)"
+  then printf 'published'
+  else printf 'not published'
+  fi
+}
+
 audit_document_facts() {
   local line a b c pairs pair fact expected header index complaint audited=0
   local recorded
@@ -940,6 +1035,38 @@ audit_document_facts() {
     done < <(printf '%s\n' "${pairs//|/$'\n'}")
   done
 
+  # The claimed side, against the block it was read out of, by a path that does not go through
+  # `claim`'s own bookkeeping. `claim` refuses a claimed figure absent from the fragment it struck
+  # out; a caller that strikes the fragment itself and then passes an empty fragment escapes that
+  # refusal, which was the cheapest attack left on 2026-09-11 at two lines. This is the second
+  # reading: whatever the ledger says a document claimed, the document's own block has to publish.
+  local region_file region_index block
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c pairs <<< "$line"
+    [[ $a == merged-document ]] || continue
+    [[ $c == residue ]] && continue
+    # Only the scopes that are a block of a document: `the header table` and this ledger's own
+    # scope are this script reading itself, and neither is a sentence anybody published.
+    [[ $b == *#* ]] || continue
+    region_file=${b%#*}
+    region_index=${b##*#}
+    # Read out of the file again rather than kept from the first pass. A copy taken while the
+    # block was being read is one assignment away from being widened -- measured on 2026-09-11:
+    # storing the block text with this script's own header table appended to it, one line, made
+    # every figure in the table count as published and took the cheapest attack back to two lines.
+    # Re-reading has no such line. Widening `regions` instead puts the extra digits into the text
+    # the comparisons run over, where the residue check reports them as figures nothing claimed.
+    block=$(regions merged-document "$region_file" | sed -n "${region_index}p")
+    while IFS= read -r pair; do
+      [[ -z $pair ]] && continue
+      claim document-claim "" \
+        "$(figure_is_published "$block" "${pair%%>*}")" "published" \
+        "the \`$c\` claim in $b says the block publishes \`${pair%%>*}\`, and the block does not\
+ contain that figure. A comparison whose claimed side was not read out of the document is a true\
+ statement about nothing, beside a sentence that can say anything."
+    done < <(printf '%s\n' "${pairs//|/$'\n'}")
+  done
+
   claim document-facts "" \
     "$audited" "$recorded" \
     "this audit re-derived the facts behind $audited of the merged-document section's $recorded\
@@ -947,27 +1074,11 @@ audit_document_facts() {
 }
 
 for file in "$adr048" "$apireadme"; do
-  blocks=0
-  mapfile -t declared_lists < <(region_claims merged-document "$file")
-  while IFS= read -r text; do
-    blocks=$(( blocks + 1 ))
-    if [[ -z ${text// /} ]]; then
-      fail "$file: the \`checked: merged-document\` block #$blocks publishes nothing, so no" \
-           "comparison can be made inside it; a marked block that yields no assertion is a" \
-           "failure, not a pass."
-      continue
-    fi
-    scope merged-document "$file#$blocks"
-    check_document_region "$file (checked: merged-document #$blocks)" "$text"
-    reconcile_region "$file (checked: merged-document #$blocks)" \
-                     "${declared_lists[$(( blocks - 1 ))]:-}"
-  done < <(regions merged-document "$file")
-  (( blocks > 0 )) ||
-    fail "$file carries no \`<!-- checked: merged-document -->\` block; its figures are unguarded."
+  check_marked_file merged-document "$file" check_document_region
 done
 
 audit_document_facts
-close_section merged-document 34
+close_section merged-document 50
 
 # ---------------------------------------------------------------------------------------------
 # 3. Every pinned npm dependency against DEPENDENCY_MATRIX.md.
@@ -1072,7 +1183,7 @@ while IFS=$'\t' read -r name version; do
 done <<< "$dep_rows"
 
 reconcile_manifest_claims "closing \`dependencies\`"
-close_section dependencies 36
+close_section dependencies 37
 
 # ---------------------------------------------------------------------------------------------
 # 4. The milestone table against the Milestone and Priority columns of the rows it counts.
@@ -1288,7 +1399,290 @@ for id in "${!adr_row_link[@]}"; do
  file in this repository."
 done
 
-close_section adr-index 108
+close_section adr-index 112
+
+# ---------------------------------------------------------------------------------------------
+# 6. The fixtures: six refusals this file makes that nothing in it could drive.
+# ---------------------------------------------------------------------------------------------
+#
+# Sections 0 to 5 check documents. This one checks the refusals, and it exists because on
+# 2026-09-11 six of them were mutated one at a time against the green tree and the run stayed at
+# `all true`, exit 0:
+#
+#   `header_fact_from_document`'s body -> a read of `header_ops`       green -- and the audit and
+#                                                                     the header table become one
+#                                                                     expression checking itself
+#   `claim`'s `if (( $# == 0 || $# % 3 != 0 ))` -> `if false`          green
+#   the empty-block refusal, `if [[ -z ${text// /} ]]` -> `if false`   green, in both loops
+#   `reconcile_region`'s no-`claims:`-list refusal                     green
+#   `close_section`'s `==` -> `<=`, one character                      green
+#   `header_for_kind`'s `csrf)` -> `X-Kui-Principal`                   green, and with one edit at
+#                                                                     the claim site it published
+#                                                                     `X-Csrf-Token on 59
+#                                                                     operations` in two documents
+#
+# Every one of them is a refusal, and a refusal is only ever exercised by input this repository
+# does not contain: no document has ever carried an empty marked block, no marker has ever lacked
+# its `claims:` list, no comparison has ever been written without a pair, and no section has ever
+# closed at the wrong count -- because the moment one did, a person repaired the document rather
+# than leaving it there for the script to be tested against. A guard whose failing case never
+# arrives is a guard nothing distinguishes from `true`. So the failing cases are built here.
+#
+# Each fixture drives the **shipped** function -- not a copy of its logic -- over input written for
+# the occasion, and asserts the number of disagreements it reports. Asserting the number rather
+# than merely "it failed" is what catches the opposite mutation: a guard rewritten to refuse
+# everything fails the agreeing case in the same claim.
+
+fixtures=$(mktemp -d)
+trap 'rm -rf "$fixtures"' EXIT
+
+# Runs one of this file's guards over a fixture and answers how many disagreements it reported.
+# A command substitution, so the subshell keeps a fixture's complaints off the terminal and a
+# fixture's claims out of the ledger, and `failures` is shadowed besides: a guard firing here is
+# the fixture passing, not the run failing.
+drive() {
+  local failures=0
+  "$@" >/dev/null 2>&1 || true
+  printf '%s' "$failures"
+}
+
+# The same drive, reading what the guard *said* rather than how many times it said something. Two
+# refusals in `reconcile_region` answer the same count for the same fixture -- a marker with no
+# `claims:` list fails either as "names no claims: list" or, once that branch is gone, as "declares
+# [] and compared [residue]" -- so a count alone cannot tell the refusal from its absence. This
+# reads the sentence.
+drive_says() {
+  local pattern=$1
+  shift
+  local failures=0 output
+  output=$("$@" 2>&1 >/dev/null || true)
+  if [[ $output == *"$pattern"* ]]; then printf 'reported'; else printf 'not reported'; fi
+}
+
+# Fixture 1: `header_fact_from_document` reads the document, and not the table it exists to be
+# independent of. The fixture document declares `X-Kui-Principal` on exactly one operation of
+# exactly one path; the real document carries it on 59 over 48, and so does `header_ops`. A body
+# rewritten to read the table therefore answers 59 here, and a body rewritten to read
+# `docs/api/openapi.json` regardless of its argument answers 59 too. Both are named below.
+verify_fact_independence() {
+  local doc=$fixtures/one-operation.json ops paths absent
+  cat > "$doc" <<'JSON'
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/fixture": {
+      "get": {
+        "parameters": [ { "in": "header", "name": "X-Kui-Principal", "required": true } ]
+      }
+    }
+  },
+  "components": { "schemas": {} }
+}
+JSON
+  ops=$(header_fact_from_document X-Kui-Principal operations "$doc")
+  paths=$(header_fact_from_document X-Kui-Principal paths "$doc")
+  absent=$(header_fact_from_document X-Csrf-Token operations "$doc")
+  scope guard-fixtures "header_fact_from_document"
+  claim fact-independence "" \
+    "$ops" "1" \
+    "header_fact_from_document answers $ops operations for a fixture document with one; it is\
+ reading something other than the document it was handed, which makes the header table and the\
+ audit two readings of one place." \
+    "$paths" "1" \
+    "header_fact_from_document answers $paths paths for a fixture document with one; the audit\
+ and the header table are no longer independent of each other." \
+    "$absent" "absent" \
+    "header_fact_from_document answers $absent for a header the fixture document does not\
+ declare; an absent header must be equal to no figure, or a claim about one can be answered by\
+ another's count."
+}
+
+# Fixture 2: `claim` refuses to record and consume without comparing. This is the refusal that
+# makes every other comparison in the file safe to write as one call, so it is driven in all three
+# of its states: no group at all, a group that is not a whole triple, and a well-formed agreeing
+# pair that must be allowed through.
+verify_claim_refuses_noncomparison() {
+  local none partial agreeing
+  none=$(drive claim fixture-kind "")
+  partial=$(drive claim fixture-kind "" 1 2)
+  agreeing=$(drive claim fixture-kind "" 1 1 "a fixture pair that agrees")
+  scope guard-fixtures "claim"
+  claim claim-refuses-noncomparison "" \
+    "$none" "1" \
+    "\`claim\` called with no group at all reported $none disagreement(s); recording a claim and\
+ striking a figure out of a block without comparing anything is the defect this refusal exists\
+ for." \
+    "$partial" "1" \
+    "\`claim\` called with two arguments where a group is three reported $partial\
+ disagreement(s); a truncated group would otherwise compare nothing and count as a claim." \
+    "$agreeing" "0" \
+    "\`claim\` refused a well-formed agreeing pair, reporting $agreeing disagreement(s); a\
+ refusal that refuses everything reports nothing about the run."
+}
+
+# Fixture 3: the empty marked block, in both of the kinds `check_marked_file` is called with. The
+# comment this refusal used to carry -- "No file has carried an empty marked region yet" -- was the
+# whole reason `if false` was green in both loops: the branch had no input in this repository.
+# It has one now.
+verify_marked_block_refusals() {
+  local rows_block=$fixtures/empty-rows.md doc_block=$fixtures/empty-merged.md rows_seen doc_seen
+  printf '%s\n' '<!-- checked: rows -- claims: residue -->' '' '<!-- /checked -->' > "$rows_block"
+  printf '%s\n' '<!-- checked: merged-document -- claims: residue -->' '' '<!-- /checked -->' \
+    > "$doc_block"
+  rows_seen=$(drive check_marked_file rows "$rows_block" check_rows_region)
+  doc_seen=$(drive check_marked_file merged-document "$doc_block" check_document_region)
+  scope guard-fixtures "the empty marked block"
+  claim empty-block-refused "" \
+    "$rows_seen" "1" \
+    "a \`checked: rows\` block that publishes nothing drew $rows_seen disagreement(s); a marked\
+ block that yields no assertion is a failure, not a pass, and a block emptied of its prose is how\
+ a paragraph of figures stops being checked without a marker moving." \
+    "$doc_seen" "1" \
+    "a \`checked: merged-document\` block that publishes nothing drew $doc_seen disagreement(s);\
+ the same refusal has to hold for every kind \`check_marked_file\` is called with."
+}
+
+# Fixture 4: a marker with no `claims:` list, and one with a list, through the same function. A
+# block that does not say what it expects checked cannot notice a check that stopped happening,
+# which is fixture 1 of the four this file reconciles against going quiet.
+verify_marker_list_refusal() {
+  local bare=$fixtures/no-claims.md declared=$fixtures/with-claims.md
+  local bare_seen bare_said declared_seen
+  local prose='This fixture block publishes no figure at all.'
+  printf '%s\n' '<!-- checked: rows -->' "$prose" '<!-- /checked -->' > "$bare"
+  printf '%s\n' '<!-- checked: rows -- claims: residue -->' "$prose" '<!-- /checked -->' \
+    > "$declared"
+  bare_seen=$(drive check_marked_file rows "$bare" check_rows_region)
+  bare_said=$(drive_says 'marker names no `claims:` list' \
+                check_marked_file rows "$bare" check_rows_region)
+  declared_seen=$(drive check_marked_file rows "$declared" check_rows_region)
+  scope guard-fixtures "the marker's claims: list"
+  claim marker-list-refused "" \
+    "$bare_said" "reported" \
+    "a marked block whose marker names no \`claims:\` list was $bare_said as one. Deleting this\
+ refusal leaves the block failing for a different reason with the same count -- [] against\
+ [residue] -- so the count cannot tell the refusal from its absence and the sentence has to." \
+    "$bare_seen" "1" \
+    "a marked block whose marker names no \`claims:\` list drew $bare_seen disagreement(s); the\
+ list is the document's own statement of what it expects compared inside it, and without one a\
+ comparison that stopped comparing is invisible from the document's side." \
+    "$declared_seen" "0" \
+    "a marked block whose marker declares exactly the claims the run made drew $declared_seen\
+ disagreement(s); this refusal must pass the case it is written to allow."
+}
+
+# Fixture 5: `close_section`'s count assertion, driven in all three directions at once. Two claims
+# are made and the section is closed claiming two, three and one: `==` answers 0, 1, 1, while the
+# one-character weakening to `<=` answers 0, 0, 1 and `>=` answers 0, 1, 0. A single figure cannot
+# tell those apart, which is why there are three.
+close_section_fixture() {
+  local made=$1 published=$2 index
+  scope guard-fixtures-count "the close_section fixture"
+  for (( index = 0; index < made; index++ )); do
+    claim fixture-claim "" "1" "1" "a fixture claim that agrees"
+  done
+  close_section guard-fixtures-count "$published"
+}
+
+verify_count_assertion() {
+  local exact over under
+  exact=$(drive close_section_fixture 2 2)
+  over=$(drive close_section_fixture 2 3)
+  under=$(drive close_section_fixture 2 1)
+  scope guard-fixtures "close_section"
+  claim count-assertion "" \
+    "$exact" "0" \
+    "a section that compared two claims and published two drew $exact disagreement(s);\
+ \`close_section\` is refusing the case it exists to allow." \
+    "$over" "1" \
+    "a section that compared two claims and published three drew $over disagreement(s); a\
+ section count weakened from \`==\` to \`<=\` accepts a comparison that has been deleted, which is\
+ the mutation that made every number in this file advisory once before." \
+    "$under" "1" \
+    "a section that compared two claims and published one drew $under disagreement(s); a count\
+ weakened to \`>=\` accepts a comparison added and never declared anywhere."
+}
+
+# Fixture 6: `kind_for_header` and `header_for_kind` are inverses, and this run proves it rather
+# than assuming it. They are what makes a claim about a header be compared against *that* header:
+# the prose names the header, `kind_for_header` turns it into the claim kind, and the audit turns
+# the kind back into a header to re-derive the fact. Editing `header_for_kind` alone -- `csrf)` ->
+# `X-Kui-Principal` -- made the audit re-derive the principal header's count for a claim about the
+# CSRF header, and with one edit at the claim site two documents published `X-Csrf-Token on 59
+# operations` with the run green. Editing both consistently instead renames the claim kind, which
+# `reconcile_registry` and both markers report -- measured here on 2026-09-11 by swapping `csrf` and
+# `principal` in both functions at once: **4 disagreements**, two from the markers and two from the
+# registry, in both of its call sites. This fixture closes the half that was not covered.
+verify_header_kind_inverse() {
+  local kind header round_trip
+  scope guard-fixtures "the header/kind pair"
+  for kind in principal csrf if-match; do
+    header=$(header_for_kind "$kind")
+    round_trip=$(kind_for_header "$header")
+    claim header-kind-inverse "" \
+      "$round_trip" "$kind" \
+      "\`header_for_kind $kind\` answers \`$header\` and \`kind_for_header $header\` answers\
+ \`$round_trip\`; the two are no longer inverses, so the fact the audit re-derives for a\
+ \`$kind\` claim is not about the header the published sentence names."
+  done
+}
+
+# Fixture 7: `claim` refuses a claimed figure that is not in the text it struck out. This is the
+# refusal that closes the one-line attack recorded above `claim`'s loop, and it has the same
+# problem every other refusal in this file has: no call site in this repository has ever violated
+# it, so nothing distinguishes it from `true`. Both states are driven -- a figure that is in the
+# struck text, and one that is not.
+verify_claimed_side_is_read() {
+  local read_from_text invented
+  # `claim` strikes the matched fragment out of the block it is reading, and the block is the
+  # caller's `text`. A fixture that hands `claim` a fragment has to hand it a block to strike it
+  # out of, so the drive below is a faithful one: shadowed here, restored by the next assignment.
+  local text='`X-Csrf-Token` on 26 operations, `If-Match` on 2 operations'
+  read_from_text=$(drive claim fixture-kind '`X-Csrf-Token` on 26 operations' \
+                     26 26 'a fixture pair that agrees')
+  text='`X-Csrf-Token` on 59 operations, `If-Match` on 2 operations'
+  invented=$(drive claim fixture-kind '`X-Csrf-Token` on 59 operations' \
+               26 26 'a fixture pair that agrees')
+  scope guard-fixtures "the claimed side"
+  claim claimed-side-read "" \
+    "$read_from_text" "0" \
+    "a claim whose claimed figure is the one the struck text publishes drew $read_from_text\
+ disagreement(s); this refusal must pass the case every real call site is." \
+    "$invented" "1" \
+    "a claim that struck out a sentence publishing 59 and compared 26 with 26 drew $invented\
+ disagreement(s); that is the one-line attack this refusal exists for -- a comparison of the\
+ document's own fact with itself, beside a sentence that says something else."
+}
+
+verify_fact_independence
+verify_claim_refuses_noncomparison
+verify_marked_block_refusals
+verify_marker_list_refusal
+verify_count_assertion
+# Fixture 8: `figure_is_published` reads a whole figure and not a digit inside another. It is the
+# comparison the claimed-side audit is made of, and its "not published" answer is, like every other
+# refusal in this section, one no document in this repository has ever produced.
+verify_figure_is_published() {
+  local block='`X-Csrf-Token` on 26 operations, 126 schemas, about 39% delivered'
+  scope guard-fixtures "figure_is_published"
+  claim figure-published "" \
+    "$(figure_is_published "$block" 26)" "published" \
+    "a figure the block publishes was read as absent; the claimed-side audit would then report\
+ every true claim as unread." \
+    "$(figure_is_published "$block" 59)" "not published" \
+    "a figure the block does not publish was read as present; the claimed-side audit would then\
+ pass a comparison whose claimed side came from this script rather than from the document." \
+    "$(figure_is_published "$block" 12)" "not published" \
+    "\`12\` was found inside \`126\`; a figure has to be matched whole or a claim can be\
+ satisfied by digits belonging to another sentence." \
+    "$(figure_is_published "$block" 39)" "published" \
+    "a percentage the block publishes was read as absent because of the \`%\` beside it."
+}
+
+verify_header_kind_inverse
+verify_claimed_side_is_read
+verify_figure_is_published
+close_section guard-fixtures 10
 
 # ---------------------------------------------------------------------------------------------
 
@@ -1323,8 +1717,8 @@ printf '  self-check: %d, rows: %d, merged-document: %d, milestones: %d, adr-ind
   "${section_counts[self-check]}" "${section_counts[rows]}" \
   "${section_counts[merged-document]}" \
   "${section_counts[milestones]}" "${section_counts[adr-index]}"
-printf ' dependencies: %d over %d named manifests.\n' \
-  "${section_counts[dependencies]}" "${#manifests[@]}"
+printf ' guard-fixtures: %d, dependencies: %d over %d named manifests.\n' \
+  "${section_counts[guard-fixtures]}" "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \
   "$matrix" "$rows" "$complete" "$in_scope" "$percent"
 printf '  docs/api/openapi.json: %d paths, %d operations, %d schemas;' \

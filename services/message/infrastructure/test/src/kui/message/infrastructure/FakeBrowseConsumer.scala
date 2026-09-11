@@ -199,6 +199,45 @@ object FakeBrowseConsumer {
         }
     }
 
+  /** The log as it stood when the browse planned, plus one record written the moment it had.
+    *
+    * A bounded browse resolves each partition's window against the end of the log at the instant it plans,
+    * and producers do not stop while it reads. This fake writes `appended` immediately after `endOffsets`
+    * has answered, so that record sits at exactly the window's upper bound -- the one offset a half-open
+    * `[low, high)` range has to exclude. Without this arrangement no fixture in the suite can put a record
+    * at `high` at all: every other log here is complete before the browse starts, so `high` is one past the
+    * last record that exists and the bound is never actually tested.
+    */
+  def openingThatGrowsAfterPlanning(
+      initial: Map[PartitionId, Vector[RawRecord]],
+      appended: RawRecord,
+      closed: Ref[IO, Boolean]
+  ): (ClusterId, IsolationLevel) => Resource[IO, Either[KuiError, BrowseConsumer[IO]]] =
+    (_, _) =>
+      Resource
+        .make(of(initial).map(growingAfterPlanning(_, appended)))(_ => closed.set(true))
+        .map(_.asRight[KuiError])
+
+  private def growingAfterPlanning(
+      underlying: FakeBrowseConsumer,
+      appended: RawRecord
+  ): BrowseConsumer[IO] =
+    new BrowseConsumer[IO] {
+      def partitions(topic: TopicName) = underlying.partitions(topic)
+      def beginningOffsets(topic: TopicName, ids: List[PartitionId]) = underlying.beginningOffsets(topic, ids)
+
+      /** The write lands here, between the plan reading the end of the log and the first poll. */
+      def endOffsets(topic: TopicName, ids: List[PartitionId]) =
+        underlying.endOffsets(topic, ids).flatTap(_ => underlying.append(appended))
+
+      def offsetsForTimes(topic: TopicName, ids: List[PartitionId], millis: Long) =
+        underlying.offsetsForTimes(topic, ids, millis)
+      def assign(topic: TopicName, ids: List[PartitionId]) = underlying.assign(topic, ids)
+      def seek(topic: TopicName, partition: PartitionId, offset: Long) =
+        underlying.seek(topic, partition, offset)
+      def poll(timeout: FiniteDuration): IO[Either[KuiError, List[RawRecord]]] = underlying.poll(timeout)
+    }
+
   /** The same thing over a log the test can still write to after the browse has started.
     *
     * A live tail cannot be tested against a fixed log: the records it exists to deliver are the ones written

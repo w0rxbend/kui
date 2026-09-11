@@ -120,14 +120,14 @@ largest cost of leaving Scala.js, and the only acceptable answer is a mechanism 
 
 <!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -- claims: paths-and-schemas, openapi-version, csrf-operations, principal-operations, principal-paths, if-match-operations, residue -->
 **The source document.** The committed OpenAPI documents are the asset: `docs/api/openapi.json`
-(61 paths and 156 schemas, OpenAPI 3.1.0) is emitted by
+(65 paths and 160 schemas, OpenAPI 3.1.0) is emitted by
 `kui.gateway.api.openapi.OpenApiDocument` from the gateway's Tapir endpoints, and each service
 emits its own beside it. They are regenerated and diff-checked by the build already
 (`openApi` / `openApiCheck`), so they cannot drift from the server.
 
 **They cannot be used directly, and finding out why is the reason this section exists.** The
-committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 56 of
-its 72 operations, across 45 of its 61 paths, and `If-Match` on 2 operations more. But ADR-020
+committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 59 of
+its 76 operations, across 48 of its 65 paths, and `If-Match` on 2 operations more. But ADR-020
 makes that header a signed statement the **gateway** mints, and ADR-040 makes the gateway **strip
 every inbound `X-Kui-*` header from browsers at the edge**. Generating a browser client from that
 document produces types that oblige every call site to supply an internal trust header the
@@ -140,7 +140,7 @@ So:
 - The gateway's existing generator gains a second output, **`docs/api/openapi.browser.json`** —
   the *edge view*: the aggregate with every `X-Kui-*` header parameter removed, produced by the
   same projection that `EdgeHeaders.strip` applies at runtime, in the same module, from the
-  same list. `X-Csrf-Token` on 24 operations and `If-Match` on 2 operations **stay**, because the
+  same list. `X-Csrf-Token` on 26 operations and `If-Match` on 2 operations **stay**, because the
   browser genuinely does send those and the types should force it to.
 - It is committed and `--check`ed exactly like the existing documents, so a contract change that
   is not regenerated fails CI.

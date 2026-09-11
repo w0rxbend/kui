@@ -45,13 +45,19 @@ documentation, and — through the committed OpenAPI documents the browser's typ
 **It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
 of it flows from Kafka to the browser without buffering whole topics in memory.
 
-**It can be one process or nine.** The same modules compose into a single JVM for local use, or
-into a gateway and eight services in separate containers for production. No code changes between the
+**It can be one process or ten.** The same modules compose into a single JVM for local use, or
+into a gateway and nine services in separate containers for production. No code changes between the
 two: `deployment/compose/docker-compose.yml` runs the second shape, and
-`deployment/compose/smoke.sh` stops one of its containers and shows the other seven carrying on.
-Seven, because the script derives that list from `ServiceContracts.byService` — eight contracted
+`deployment/compose/smoke.sh` stops one of its containers and shows the other eight carrying on.
+Eight, because the script derives that list from `ServiceContracts.byService` — nine contracted
 services — and checks every one of them except the container it stopped; it said five while there
-were six, and the count is now read out of the script rather than remembered.
+were six, and the count is now read out of the script rather than remembered. The tenth and
+eleventh directories under `services/` are the gateway itself and `identity`, which has no routed
+contract yet.
+
+**New here?** `docs/overview/README.md` is one document that describes the eleven services, the
+eight feature packages, the two deployment shapes and the gates, for somebody who has never opened
+this repository before.
 
 ## What is built, and what is not
 
@@ -284,7 +290,7 @@ including the CI machine — builds with the same tool.
 ./mill devStart                   # the same, in the background, so you can re-link while it runs
 ./mill devStop                    # stop the background one
 
-./mill deployment.docker.__.build # the seven container images
+./mill deployment.docker.__.build # the eleven container images
 ```
 
 ### The quality gates

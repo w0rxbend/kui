@@ -23,8 +23,11 @@ dropped silently.
   (`shell`, `kernel`, `feature-clusters`, `feature-topics`, `feature-messages`,
   `feature-consumers`, `feature-schemas`, `feature-connect`, `feature-ksql`,
   `feature-security`, `feature-metrics`, `feature-admin`). `—` means backend-only.
-  The first seven exist in `frontend/packages/`; the rest are names reserved by this
-  matrix for milestones that have not started.
+  `feature-alerts` exists too and no row names it: the alerts feed is reached from the shell's
+  bell rather than from a row of its own, which is a gap in this column and not in the product.
+  Nine of the twelve named above exist in `frontend/packages/` as of 2026-09-11; `feature-security`,
+  `feature-metrics` and `feature-admin` are names reserved by this matrix for milestones that have
+  not started.
 - **Milestone** — `M0`..`M9` from `docs/ROADMAP.md`. `—` only for rejected rows.
 
 > **Frontend evidence predating 2026-09-05 names deleted code.** ADR-048 replaced the Scala.js and
@@ -75,8 +78,8 @@ state today. They are marked `IMPLEMENTING`, never `COMPLETE`, because what they
 rather than a new implementation.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, out-of-scope-rows, in-scope-delivered, delivered-percent, residue -->
-**Counts as of the 2026-09-07 wave-6 recount** (189 capability rows): 70 `COMPLETE`, 18 `REVIEW`,
-8 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 79 `RESEARCHING` (not started),
+**Counts as of the 2026-09-11 wave-8 recount** (189 capability rows): 70 `COMPLETE`, 18 `REVIEW`,
+7 `TESTING`, 8 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 72 `RESEARCHING` (not started),
 7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. Excluding the 11 deferred and rejected rows,
 **70 of 178 in-scope capabilities are delivered — 39%**.
 <!-- /checked -->
@@ -264,12 +267,12 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| KC-001 | List Connect clusters with connector / task counts | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | RESEARCHING | Partial by design: per-connect `status`. |
-| KC-002 | List all connectors across connects: sorted, searched, paged | Kafbat, Provectus | P0 | connect | feature-connect | M7 | M | RESEARCHING | Paging added (Kafbat has none). |
+| KC-001 | List Connect clusters with connector / task counts | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | TESTING | Partial by design: per-connect `status`. **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** wave 7 named this row as the read half that had shipped and left it `RESEARCHING`, which this file's own key says means *nothing is built*. `GET /api/v1/clusters/{clusterId}/connect/connectors` is in the merged document and `@kui/feature-connect` is registered (`registry.ts:165`). **A browser has now drawn it:** `docs/plan/verification/W8-04.md` records `pnpm -C frontend e2e e2e/connect.spec.ts` at **4 passed, 0 skipped, 0 failed** against a quickstart stack built from this tree with `quickstart-file-source` deployed on its Connect worker, asserting *every connector the API named is a card, in the state the API reported* and *each card carries the service's task figures and no throughput at all*. It is still not `COMPLETE`, and the reason is this row's own wording rather than the evidence: the capability is listing Connect **clusters** with their connector and task counts, and what has been driven is the connector list of the single worker the quickstart configures. |
+| KC-002 | List all connectors across connects: sorted, searched, paged | Kafbat, Provectus | P0 | connect | feature-connect | M7 | M | TESTING | Paging added (Kafbat has none). **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** same evidence as `KC-001`; the paging is in the connector list endpoint. Not driven from a browser in this pass. |
 | KC-003 | Connector create / get / delete | Kafbat, Provectus | P0 | connect | feature-connect | M7 | M | RESEARCHING | 409 rebalance → `KUI-CONNECT-REBALANCING`. |
 | KC-004 | Connector config editor (get / set) | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | RESEARCHING | |
-| KC-005 | Connector state actions (restart, restart all/failed tasks, pause, resume, stop) | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | RESEARCHING | `POST .../actions/{action}`. |
-| KC-006 | Tasks list with trace, restart task | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | RESEARCHING | |
+| KC-005 | Connector state actions (restart, restart all/failed tasks, pause, resume, stop) | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | TESTING | `POST .../actions/{action}`. **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** `pause`, `resume` and `restart` are contracted endpoints and are the three the browser offers. **Restart-all-tasks, restart-failed-tasks and stop are not built at all**, so this row is not a candidate for `COMPLETE` even after a driven pass until they are. |
+| KC-006 | Tasks list with trace, restart task | Kafbat, Provectus | P0 | connect | feature-connect | M7 | S | TESTING | **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** the connector list carries each task with its state and the worker's own failure trace, and `model.ts:145` draws the task bar from `tasks.length` rather than from `taskCount`. **Restart-one-task is not built**; there is no per-task endpoint in `ConnectEndpoints`. |
 | KC-007 | Reset connector offsets | Kafbat | P1 | connect | feature-connect | M7 | S | RESEARCHING | Connect ≥ 3.6. |
 | KC-008 | Plugins list and connector config validation (guided create) | Kafbat, Provectus | P1 | connect | feature-connect | M7 | M | RESEARCHING | RBAC gap closed by KU-022. |
 | KC-009 | Connector topics tab | Kafbat | P2 | connect | feature-connect | M7 | S | RESEARCHING | |
@@ -279,9 +282,9 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| KS-001 | Execute statement → query id → SSE result stream | Kafbat, Provectus | P1 | ksql | feature-ksql | M7 | L | RESEARCHING | Two-step design kept (EventSource cannot POST); push queries stream until disconnect. |
-| KS-002 | List tables / streams | Kafbat, Provectus | P1 | ksql | feature-ksql | M7 | S | RESEARCHING | |
-| KS-003 | Query editor UI with streams properties and result table | Kafbat, Provectus | P1 | — | feature-ksql | M7 | M | RESEARCHING | CodeMirror SQL mode (ADR-025). |
+| KS-001 | Execute statement → query id → SSE result stream | Kafbat, Provectus | P1 | ksql | feature-ksql | M7 | L | TESTING | Two-step design kept (EventSource cannot POST); push queries stream until disconnect. **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** `services/ksql` and `frontend/packages/feature-ksql` landed in wave 8, the statement and push-query endpoints are in `docs/api/openapi.json`, and `@kui/feature-ksql` is registered in the shell's feature registry (`registry.ts:187`). Not `COMPLETE`: no pass has driven a ksqlDB query from a browser against a stack built from this tree. `frontend/e2e/ksql.spec.ts` exists and is the pass that would move it. |
+| KS-002 | List tables / streams | Kafbat, Provectus | P1 | ksql | feature-ksql | M7 | S | TESTING | **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** the object list is one `POST /ksql` over four `SHOW` statements (ADR-055 §2) and the pane draws it. Not driven from a browser in this pass. |
+| KS-003 | Query editor UI with streams properties and result table | Kafbat, Provectus | P1 | — | feature-ksql | M7 | M | TESTING | CodeMirror SQL mode (ADR-025). **Moved `RESEARCHING` → `TESTING` on 2026-09-11:** `KsqlRoute.tsx`, `KsqlResult.tsx` and `ConfirmStatement.tsx` ship the editor, the result region ADR-056 specifies and the ADR-045 confirmation. CodeMirror is not used; the editor is a plain control, which is a note this row's own Notes column should carry when somebody re-reads ADR-025. Not driven from a browser in this pass. |
 | KS-004 | ksql auth (basic) and SSL | Kafbat, Provectus | P1 | ksql | feature-admin (form in M8) | M7 | S | RESEARCHING | |
 
 ## ACLs (AC)
@@ -605,6 +608,58 @@ claim that nothing shipped. The two documents this pass *did* re-derive are
 operations and 154 schemas to **61 paths, 72 operations and 156 schemas**; the figures published
 about them in ADR-048 and `frontend/packages/api/README.md` moved with them and are compared by
 `./scripts/feature-matrix-check.sh`.
+
+**A record of the wave-8 pass, 2026-09-11:** 189 rows, of which 72 `RESEARCHING`, 70 `COMPLETE`,
+18 `REVIEW`, 7 `TESTING`, 8 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`,
+4 `REJECTED`, and no `BLOCKED` row. **Seven rows moved, all of them out of `RESEARCHING` and none
+of them into `COMPLETE`, and the distinction is the whole of what this pass can honestly say.**
+`RESEARCHING` is defined at the top of this file as meaning one thing — *nothing is built* — and it
+was false of seven rows. Wave 8 shipped `services/ksql` and `frontend/packages/feature-ksql`, so
+`KS-001`, `KS-002` and `KS-003` have a service, a contract in `docs/api/openapi.json`, a screen and
+a registration in the shell's feature registry. `KC-001`, `KC-002`, `KC-005` and `KC-006` are the
+four wave 7 named as the read half that had shipped and then left at `RESEARCHING`, which published
+*nothing is built* about a package with eleven rows pointing at it. All seven are `TESTING`: built,
+gated by their packages' own suites, reachable by a route the shell registers, and **not driven by
+a person in a browser against a stack built from this tree**, which is the only thing that moves a
+row to `COMPLETE` here. Two of them carry a further limit in their Notes, because the capability
+their row describes is larger than what shipped: `KC-005` has pause, resume and restart and has no
+restart-all-tasks, restart-failed-tasks or stop, and `KC-006` draws the task bar and has no
+per-task restart endpoint at all. **No row moved into `COMPLETE` and the delivered figure did not
+move: 70 of 178, 39%**, unchanged since the wave-6 recount. The other document this pass re-derived
+is the merged OpenAPI pair, which went from 61 paths, 72 operations and 156 schemas to **65 paths,
+76 operations and 160 schemas**; the figures published about them in ADR-048 and
+`frontend/packages/api/README.md` moved with them and are compared by
+`./scripts/feature-matrix-check.sh`.
+
+## The twenty-three screens, and how much of them a browser covers
+
+M10 asks for a browser suite covering all twenty-three screens of
+`research/design/SCREENS-V4.md` §1. **The mapping from screen to spec to case had never been
+published**; it was taken for the first time on 2026-09-11 and is in
+`docs/plan/verification/W8-07.md` §1, screen by screen, with the case name that covers each one. It
+is not copied here, because a table in two places drifts in one of them. What belongs here is the
+count, and the scope it is true under.
+
+**21 of 23 covered, 1 partial, 1 uncovered**, re-counted on 2026-09-11 from the spec files on disk.
+A screen counts as covered when a browser case asserts the content that capture is a picture of,
+not when a case merely visits the address.
+
+* `M20` (ksqlDB) was scored **uncovered** when the mapping was taken, because
+  `frontend/e2e/ksql.spec.ts` had not landed. It has: the directory now holds twelve spec files
+  rather than eleven, and the ksqlDB screen has four cases including *every stream and table the
+  server named is a row, with its kind beside it*. Two of its six are `test.skip`-guarded on a
+  deployment that configures ksqlDB.
+* `M14` (the plural receipt after a **bulk** topic delete) is the partial. Single deletion is
+  covered and the toast machinery is proved elsewhere; this specific receipt is asserted nowhere.
+* `M08` (the toast raised when the cluster selector switches clusters) is the uncovered one, and it
+  has never had a spec, because there is nothing to switch **to**: the quickstart registers one
+  cluster. `M09`'s second-cluster clause is blocked on the same thing. Both need a second registered
+  cluster in the stack, not a case in a spec.
+
+**This count was not re-run here.** The specs were read on disk and the per-screen mapping was taken
+by W8-07 against a running stack; running the suite needs a quickstart built from this tree, which
+this pass did not stand up. A reader who wants the number defended rather than reported should
+re-run `pnpm -C frontend e2e` and re-count.
 
 Every P0 and P1 row has a milestone. After editing rows, run the checker rather than recounting by
 hand:

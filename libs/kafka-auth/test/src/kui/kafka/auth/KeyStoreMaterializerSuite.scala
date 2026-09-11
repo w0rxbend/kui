@@ -144,6 +144,64 @@ final class KeyStoreMaterializerSuite extends KuiIOSuite {
       }
   }
 
+  test("a materialized store is overwritten before it is unlinked, not merely deleted") {
+    /*
+     * Ungated until now: dropping the zero-fill from `cleanUp` — deleting the directory without
+     * overwriting anything first — left `./mill libs.kafkaAuth.test` green. The directory goes in the same
+     * release, so every other case here can only observe that it is gone, which it is either way.
+     *
+     * A second hard link to the same inode, taken while the resource is open, is what makes the overwrite
+     * observable without a seam in the production class. Unlinking the materialized path leaves the inode
+     * alive under the second name, and what is in it is whatever the last write left there. That is not a
+     * contrivance: it is the shape of the failure the overwrite exists for. `cleanUp`'s own comment names
+     * the two — "a container image layer or a heap dump taken while the process is still running" — and
+     * both are second references to bytes KUI believes it has deleted.
+     *
+     * The link is made inside the base directory the materializer was given rather than in a second
+     * temporary one, so it is certainly on the same filesystem; `deleteRecursively` removes the
+     * materializer's own directory under it and not the base.
+     */
+    val security = inlineTruststore(StoreType.Pkcs12, storeBase64("PKCS12"))
+
+    for {
+      base <- temporaryBase
+      link = base.toNioPath.resolve("witness")
+      original <- KeyStoreMaterializer
+        .resource[IO](connection(security), Some(base))
+        .use {
+          case Left(error) => IO(fail(error.message))
+          case Right(paths) =>
+            IO {
+              val file = JPath.of(paths.getOrElse(StoreRole.TrustStore, fail("no path")))
+              // A filesystem with no hard links cannot answer the question this case asks, and a
+              // failure there would be a fact about the filesystem rather than about KUI.
+              val linked =
+                try { val _ = JFiles.createLink(link, file); true }
+                catch { case _: UnsupportedOperationException => false }
+
+              assume(linked, "this filesystem does not support hard links")
+              JFiles.readAllBytes(file).toList
+            }
+        }
+      survived <- IO(JFiles.readAllBytes(link).toList)
+    } yield {
+      assert(original.nonEmpty, "the fixture wrote no bytes at all, so the case would pass vacuously")
+      assert(
+        original.exists(_ != 0.toByte),
+        "an empty PKCS12 store is already all zeroes, so this case could not tell the two apart"
+      )
+      assertEquals(
+        survived.length,
+        original.length,
+        "the file was truncated rather than overwritten, which leaves the old bytes in the freed blocks"
+      )
+      assert(
+        survived.forall(_ == 0.toByte),
+        "the keystore's bytes survived the release under a second reference to the same inode"
+      )
+    }
+  }
+
   test("filesAreDeletedOnRelease") {
     val security = inlineTruststore(StoreType.Pkcs12, storeBase64("PKCS12"))
 

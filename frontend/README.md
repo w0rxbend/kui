@@ -33,7 +33,7 @@ can only import what its own `package.json` declares.
 | `@kui/api` | types **generated** from `docs/api/openapi.browser.json`, and the typed client. Nothing *inside this package* mirrors a server type by hand; outside it, `shell/src/overview/metrics.ts` still does, for the five metrics payloads generation answers `unknown` for (`TECH_DEBT.md` TD-024) |
 | `@kui/kernel` | design system, query cache, SSE wrappers, capability and permission stores, theme |
 | `@kui/shell` | router, layout, navigation, feature registry, error pages |
-| `@kui/feature-clusters` … `-connect` | one feature microfrontend each: clusters, topics, messages, consumers, schemas, alerts, connect |
+| `@kui/feature-clusters` … `-ksql` | one feature microfrontend each, eight of them: clusters, topics, messages, consumers, schemas, alerts, connect, ksql |
 
 Two rules about those edges:
 

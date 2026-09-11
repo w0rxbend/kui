@@ -18,6 +18,7 @@ import {
   type LogDir,
   brokerHealth,
   controllerNote,
+  diskShare,
   inSyncPercent,
   lagPill,
   overviewLede,
@@ -40,7 +41,7 @@ import {
 import type { KuiApiClient } from "@kui/api";
 import { segmentTone } from "./StorageByBroker.jsx";
 import { INTERNAL_GROUP, OTHER_GROUP } from "../nav/prefixes.js";
-import { pending, unknown, value } from "./reading.js";
+import { combineReadings, notCollected, pending, unknown, value } from "./reading.js";
 
 const healthy: ClusterSummary = {
   version: "3.7.0",
@@ -486,6 +487,43 @@ describe("the storage card's attribution", () => {
     expect(storageBreakdown(value(brokers), unknown("no")).kind).toBe("unknown");
   });
 
+  it("says a figure it will never have rather than waiting for it forever", () => {
+    /* Filed by W8-07's verification pass as V3-3. `combineReadings` has a three-step precedence
+       spelled out in its own doc comment, and only the two *value*-paired steps were asserted —
+       both by the case above, both of which survive moving `pending` above `notCollected`. That
+       swap left all 536 shell cases green.
+
+       The swapped order is not a subtly different answer, it is a card that never finishes. A
+       deployment that collects no log-dir metrics reports `notCollected` forever and no request is
+       outstanding, so `pending` means a skeleton that animates until the tab is closed. The doc
+       comment says it in a sentence — *"if either half is something KUI never measures, the
+       combination is never measurable, and waiting for it is pointless — say so immediately rather
+       than spinning forever"* — and the sentence was the only thing enforcing it.
+
+       Both argument positions, because the guard is two lines and swapping either one alone is the
+       same defect for half the inputs; and the `pending`-over-`unknown` step too, whose direction
+       is the opposite argument: a half-answer that may still turn out fine must not be called
+       broken early. */
+    expect(combineReadings(notCollected("no metrics source"), pending(), () => 1).kind).toBe(
+      "notCollected",
+    );
+    expect(combineReadings(pending(), notCollected("no metrics source"), () => 1).kind).toBe(
+      "notCollected",
+    );
+
+    // And the reason travels with it: a derived figure that reports its own vague "unavailable"
+    // throws away the only sentence that would have explained the card.
+    const combined = combineReadings(notCollected("no metrics source"), pending(), () => 1);
+    expect(combined.kind === "notCollected" ? combined.why : undefined).toBe("no metrics source");
+
+    expect(combineReadings(pending(), unknown("the broker did not answer"), () => 1).kind).toBe(
+      "pending",
+    );
+    expect(combineReadings(unknown("the broker did not answer"), pending(), () => 1).kind).toBe(
+      "pending",
+    );
+  });
+
   it("keeps the counts adding up when the cap drops a group", () => {
     // Seven prefixes and a cap of five: the two smallest have to survive as `other`, or the card's
     // legend would total less than the disks it is drawn over.
@@ -539,6 +577,41 @@ describe("the Storage tab's voice", () => {
   it("does not describe a picture that has not arrived", () => {
     expect(storageLede(pending())).toBe("Adding up what is on the disks.");
     expect(storageLede(unknown("the cluster service is not answering"))).not.toContain("budget");
+  });
+});
+
+describe("the one division the whole screen shares", () => {
+  it("refuses a disk whose size is not a size, and not only one whose size is zero", () => {
+    /* Filed by W8-07's verification pass as V3-2. `diskShare` is the single arithmetic behind both
+       the broker-health bar and the storage row — the two used to divide separately and disagreed
+       about a zero-byte disk, which is why there is now one of them — and its guard is
+       `total <= 0`. Narrowing it to `total === 0` left all 536 shell cases green, because every
+       fixture that exercises the refusal reports exactly zero.
+
+       The comment two lines above the guard is the rule, and it was the only thing holding it:
+       *"`total <= 0` rather than `total === 0`, because a directory reporting a negative size is
+       the same question and a worse answer: dividing by it would draw a bar pointing the other way
+       instead of saying that the figure makes no sense."* Under `=== 0` a negative capacity makes
+       it all the way through as a `value`, and a negative percentage on a `ProgressBar` is not a
+       refusal an operator can see — it is a bar that renders as empty and a caption claiming a
+       measured figure, on the card that answers "how full is this broker".
+
+       A negative capacity is not hypothetical arithmetic: `usableBytes` and `totalBytes` arrive as
+       longs off a `DescribeLogDirs` response, a directory KUI cannot stat contributes a sentinel,
+       and the subtraction that produces `used` has underflowed in this codebase before. The
+       refusal's *rendering* is already asserted where the screen draws it —
+       `overview.render.test`'s "says so in the storage row, rather than printing a pair of
+       zeroes" — so what is added here is the predicate, the half nothing measured. */
+    expect(diskShare(10, -1)).toEqual({
+      kind: "unknown",
+      why: "this broker reported a zero-byte disk",
+    });
+    expect(diskShare(0, 0)).toEqual({
+      kind: "unknown",
+      why: "this broker reported a zero-byte disk",
+    });
+    // And the positive direction, so the guard declines nonsense rather than declining the feature.
+    expect(diskShare(250, 1000)).toEqual({ kind: "value", value: 25 });
   });
 });
 

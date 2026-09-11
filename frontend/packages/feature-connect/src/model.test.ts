@@ -210,8 +210,41 @@ describe("the failure reason (SCREENS-V4 §7.7)", () => {
     expect(failureReason(held ?? connector())).toBeDefined();
   });
 
-  it("has none for a connector that is not failing", () => {
+  it("has none for a connector that is not failing, even when a reason survived on it", () => {
+    /* Filed by W8-04's verification pass as F3. The case that stood here asserted only
+       `failureReason(connector())`, whose fixture carries `reason: undefined` — so it came back
+       undefined for the wrong reason, and deleting `if (!connector.failed) return undefined;`
+       left all 75 cases green. A guard whose every fixture also satisfies the line below it is
+       not measured by that fixture.
+
+       The second connector here is the document that separates them, and the service does send
+       it: `reason` is the worker's own line and it survives a recovery, so a connector that
+       failed, was restarted and is now RUNNING carries a stale reason with `failed: false`.
+       Today the only thing keeping that line off the card is `ConnectorPanel`'s
+       `<Show when={props.connector.failed}>`, one level above — but `failureReason` is exported
+       from `index.tsx` as public API promising *"or `undefined` when it is not failing"*, and a
+       second caller, or that `Show` widening by one word, draws a resolved fault under a green
+       pill. The promise is held here, in the function that makes it. */
     expect(failureReason(connector())).toBeUndefined();
+    expect(
+      failureReason(
+        connector({
+          failed: false,
+          state: "RUNNING",
+          reason: "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01",
+          tasks: [
+            {
+              id: 0,
+              state: "RUNNING",
+              workerId: "10.0.0.1:8083",
+              reason:
+                "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01",
+              trace: "  at org.apache.kafka.connect.runtime.WorkerSinkTask.poll\n",
+            },
+          ],
+        }),
+      ),
+    ).toBeUndefined();
   });
 
   it("does not promise a trace for a task whose trace is whitespace", () => {

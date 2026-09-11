@@ -4,6 +4,7 @@ import scala.concurrent.duration.*
 
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
+import cats.syntax.all.*
 
 import kui.cache.CacheMetrics
 import kui.config.SafeUrl
@@ -39,6 +40,31 @@ final class CachingSchemaRegistrySuite extends KuiIOSuite {
       urls = NonEmptyList.one(SafeUrl.unsafe("http://registry:8081")),
       subjectCacheTtl = ttl
     )
+
+  /** The same configuration with a TTL long enough that a few hundred lookups cannot straddle it.
+    *
+    * The bound cases below are about size and nothing else; a 50 ms TTL would let an expiry decide their
+    * outcome and they would be measuring the clock instead.
+    */
+  private def roomyConfig: SchemaRegistryConfig =
+    SchemaRegistryConfig(
+      urls = NonEmptyList.one(SafeUrl.unsafe("http://registry:8081")),
+      subjectCacheTtl = 1.minute
+    )
+
+  /** Which cache each read was attributed to, in order.
+    *
+    * `CacheMetrics.noop` is what this suite used, so the `cache` attribute — the only thing that tells a
+    * dashboard whose hit rate it is looking at — was read by nothing at all. Swapping the two names left
+    * every case here green while turning the schema cache's hit rate into the subject cache's.
+    */
+  final private class Naming(seen: Ref[IO, List[(String, String)]]) extends CacheMetrics[IO] {
+    def hit(cache: String, cluster: ClusterId): IO[Unit] = seen.update(_ :+ (cache -> "hit"))
+    def miss(cache: String, cluster: ClusterId): IO[Unit] = seen.update(_ :+ (cache -> "miss"))
+    def staleRead(cache: String, cluster: ClusterId): IO[Unit] = seen.update(_ :+ (cache -> "stale"))
+    def refreshFailed(cache: String, cluster: ClusterId): IO[Unit] =
+      seen.update(_ :+ (cache -> "refreshFailed"))
+  }
 
   /** Counts what reached the registry rather than what the caller asked for. */
   final private class Counting(calls: Ref[IO, Int]) extends SchemaRegistry[IO] {
@@ -89,5 +115,105 @@ final class CachingSchemaRegistrySuite extends KuiIOSuite {
         } yield assertEquals(made, 1, clue = "a schema id was asked about twice")
       }
     } yield ()
+  }
+
+  test("each cache is counted under its own name, so a hit rate belongs to the cache it came from") {
+    /*
+     * Ungated until now: exchanging the values of `SchemaCacheName` and `SubjectCacheName` left
+     * `./mill libs.serdeConfluent.test` green. Both names reach `BoundedCache` as the `cache` metric
+     * attribute and nothing else; with `CacheMetrics.noop` in every fixture, no assertion had ever read
+     * one.
+     *
+     * What that costs is not a test failure but an operator's conclusion. The by-id cache is the one that
+     * carries a page of five hundred records on one lookup, so its hit rate is near one; the subject cache
+     * expires on a timer and its hit rate is low by design. Swapped, a dashboard says the throughput cache
+     * is missing constantly and the produce form's cache never expires, and the obvious remedy — raise
+     * `schemaCacheSize` — is applied to the wrong cache.
+     */
+    for {
+      calls <- Ref.of[IO, Int](0)
+      seen <- Ref.of[IO, List[(String, String)]](Nil)
+      _ <- CachingSchemaRegistry
+        .resource[IO](new Counting(calls), config, cluster, new Naming(seen))
+        .use(registry =>
+          registry.schemaById(42) >> registry.schemaById(42) >> registry.latestForSubject("orders-value")
+        )
+      events <- seen.get
+    } yield {
+      // The two ids are one miss and one hit, and both belong to the by-id cache.
+      assertEquals(
+        events.filter(_._1 == CachingSchemaRegistry.SchemaCacheName).map(_._2),
+        List("miss", "hit"),
+        clue = s"the by-id cache's reads were not attributed to it: $events"
+      )
+      assertEquals(events.filter(_._1 == CachingSchemaRegistry.SubjectCacheName).map(_._2), List("miss"))
+      // And the constants are the documented strings, so exchanging the two values is caught even though
+      // the wiring above would still be self-consistent after the swap.
+      assertEquals(CachingSchemaRegistry.SchemaCacheName, "serde.registry.schemas")
+      assertEquals(CachingSchemaRegistry.SubjectCacheName, "serde.registry.subjects")
+    }
+  }
+
+  test("the by-id cache is built with the size the operator configured, not one this class chose") {
+    /*
+     * Ungated until now: replacing `config.schemaCacheSize` with a literal `512L` left
+     * `./mill libs.serdeConfluent.test` green, because the configured value reached nothing any case read.
+     *
+     * Only the reliable direction of Caffeine's bound is asserted. Caffeine evicts *approximately* at
+     * `maximumSize`, so "the entry after the bound is evicted" is not a safe assertion — but "a cache
+     * bounded at a thousand still holds a thousand" is, because a bound is never enforced early. A
+     * hard-coded 512 therefore shows up as misses on ids the operator paid for room to keep, and an
+     * operator whose registry holds forty thousand schemas has no way to fix it from configuration.
+     */
+    val configured: Long = 1000L
+
+    for {
+      calls <- Ref.of[IO, Int](0)
+      _ <- CachingSchemaRegistry
+        .resource[IO](
+          new Counting(calls),
+          roomyConfig.copy(schemaCacheSize = configured),
+          cluster,
+          CacheMetrics.noop[IO]
+        )
+        .use { registry =>
+          val ids = (1 to configured.toInt).toList
+          ids.traverse_(registry.schemaById) >> ids.traverse_(registry.schemaById)
+        }
+      made <- calls.get
+    } yield assertEquals(
+      made,
+      configured.toInt,
+      clue = "a schema id was fetched twice: the cache was built smaller than the configuration asked for"
+    )
+  }
+
+  test("the subject cache holds the topics an operator browses inside one TTL window") {
+    /*
+     * Ungated until now: `maxSize = 512L` -> `5L` for the subject cache left
+     * `./mill libs.serdeConfluent.test` green, because every case used exactly one subject.
+     *
+     * The bound's own comment says what it is for — "to stop an unbounded walk of a ten-thousand-topic
+     * cluster from holding every subject at once, not because the entries are large" — which is a
+     * statement about how many subjects must fit. A bound of five would send the produce form back to the
+     * registry on nearly every keystroke while the TTL, the thing this cache exists to enforce, still
+     * looked perfectly healthy.
+     */
+    val browsed: Int = 400
+
+    for {
+      calls <- Ref.of[IO, Int](0)
+      _ <- CachingSchemaRegistry
+        .resource[IO](new Counting(calls), roomyConfig, cluster, CacheMetrics.noop[IO])
+        .use { registry =>
+          val subjects = (1 to browsed).toList.map(index => s"topic-$index-value")
+          subjects.traverse_(registry.latestForSubject) >> subjects.traverse_(registry.latestForSubject)
+        }
+      made <- calls.get
+    } yield assertEquals(
+      made,
+      browsed,
+      clue = "a subject was asked for twice inside one TTL window: the cache is bounded too tightly"
+    )
   }
 }

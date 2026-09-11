@@ -123,6 +123,28 @@ final class ConnectorsSuite extends FunSuite {
     assertEquals(bad.copy(trace = None).reason, Some("task 1 said"))
   }
 
+  test("a task that is not failed lends no reason, however loud the trace it kept") {
+    // The other half of `reason`'s sentence — *"the first **failed** task's reason, in task-id order"* —
+    // and the half the id-order case above cannot reach, because every task in that fixture is failed.
+    // W8-02 closed the `sortBy` half of this one expression and left the `filter` half measured by
+    // nothing: dropping `.filter(_.state.isFailed)` kept all 138 connect cases green.
+    //
+    // A RUNNING task carrying a `trace` is a document a worker really sends. Connect keeps the trace of a
+    // task that failed and was restarted, so the trace outlives the failure it describes. Read as the
+    // connector's reason it prints a fault the operator already cleared as the live one, underneath a red
+    // pill that came from a different task entirely — and [[ConnectorTask.reason]]'s own promise is
+    // *"never a reason invented"*.
+    //
+    // Task 1 sorts first, so the filter is the only thing standing between the stale trace and the card.
+    // The id-order case beside it stays green under the same mutation, which is why this is its own case.
+    val stale = List(
+      task(1, "RUNNING", Some("stale trace from a restart")),
+      task(2, "FAILED", Some("task 2 said"))
+    )
+
+    assertEquals(connector("RUNNING", stale).reason, Some("task 2 said"))
+  }
+
   test("a healthy connector has no reason at all") {
     assertEquals(connector("RUNNING", List(task(0, "RUNNING"))).reason, None)
     assert(!connector("RUNNING", List(task(0, "RUNNING"))).isFailed)

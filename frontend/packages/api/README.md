@@ -36,7 +36,7 @@ Three build failures, and a browser never enters into it. Measured, not asserted
 
 <!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -- claims: principal-operations, principal-paths, csrf-operations, if-match-operations, residue -->
 `docs/api/openapi.json` describes the contract KUI's *services* speak, and that contract requires
-`X-Kui-Principal` on 56 of its 72 operations, across 45 of its 61 paths. Those are two figures and
+`X-Kui-Principal` on 59 of its 76 operations, across 48 of its 65 paths. Those are two figures and
 not one: a path with a `GET` and a `DELETE` carries the header on both operations and is still one
 path. This paragraph used to pair the *operation* count with the *path* total as though they were
 the same denominator, which is why it is now checked rather than maintained. The gateway mints that
@@ -47,7 +47,7 @@ security boundary.
 
 `docs/api/openapi.browser.json` is the edge view: the same document with those headers removed, by
 the same rule `EdgeHeaders.isForbidden` applies at runtime, in the same module, from the same list.
-`X-Csrf-Token` on 24 operations and `If-Match` on 2 operations stay, because the browser really does
+`X-Csrf-Token` on 26 operations and `If-Match` on 2 operations stay, because the browser really does
 send them and the types should force it to. It is computed, never maintained: `BrowserProjection` in
 `services/gateway/api` produces it and `openApiCheck` keeps it honest.
 <!-- /checked -->

@@ -223,6 +223,65 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
     }
   }
 
+  test("a backward merge breaks a timestamp tie the same way twice") {
+    /*
+     * Ungated until now: dropping the partition and offset from `Newest` -- leaving
+     * `Ordering.by[RawRecord, Long](_.timestamp.toEpochMilli).reverse` -- left
+     * `./mill services.message.__.test` at 1442/1442 green. The case above reads only
+     * `offsets(records).map(_._2)`, and both orderings give it `List(3, 3, 2, 2)`; which *partition* the
+     * newest record came from was asserted by nothing.
+     *
+     * Records sharing a millisecond are ordinary -- one producer batch is written inside one -- and a sort
+     * on the timestamp alone falls back to the order the round happened to accumulate in, which is the
+     * order the partitions were assigned. Two replicas that assigned them differently would then hand the
+     * same page back in two different orders, and the cursor minted from it names a record that is no
+     * longer where the next page expects it.
+     */
+    val log = Map(FakeBrowseConsumer.partition(0, 4), FakeBrowseConsumer.partition(1, 4))
+
+    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 4)).map { records =>
+      // Timestamps here are the offsets, so 3 and 3 tie and 2 and 2 tie. The tie is broken by the
+      // partition, descending, which is what `Newest` says and what nothing has been reading.
+      assertEquals(offsets(records), List((1, 3L), (0, 3L), (1, 2L), (0, 2L)))
+    }
+  }
+
+  test("a bounded browse stops at the end of the log as it stood when it planned") {
+    /*
+     * Ungated until now: `record.offset.value < _` -> `<=` in `inside` left
+     * `./mill services.message.__.test` at 1442/1442 green, because every log in this suite is complete
+     * before the browse starts -- so a window's `high` is one past the last record that exists and no
+     * fixture could put a record *at* the bound. `FakeBrowseConsumer.openingThatGrowsAfterPlanning` writes
+     * one between the plan and the first poll, which is what a producer does.
+     *
+     * The bound is half-open for the reason the backward walk is: a page shows the records the plan
+     * resolved, and the cursor minted from it starts the next page at `high`. A page that also showed the
+     * record at `high` would show it twice, once at the bottom of this page and once at the top of the
+     * next.
+     *
+     * The second partition is load-bearing. `reachedEnd` ends the loop as soon as *every* partition has
+     * reached its window, so on a one-partition log the record at `high` is never even polled and `inside`
+     * decides nothing. With a longer partition still being read, the short one keeps polling — and the
+     * bound is the only thing standing between the caller and a record written after the plan.
+     */
+    val initial = Map(FakeBrowseConsumer.partition(0, 3), FakeBrowseConsumer.partition(1, 8))
+
+    for {
+      closed <- Ref.of[IO, Boolean](false)
+      source = new KafkaRecordSource[IO](
+        FakeBrowseConsumer.openingThatGrowsAfterPlanning(initial, FakeBrowseConsumer.record(0, 3L), closed),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source
+        .browse(request(SeekMode.Beginning, Direction.Forward, limit = 50), budget)
+        .compile
+        .toList
+    } yield assertEquals(
+      offsets(records),
+      List((0, 0L), (0, 1L), (0, 2L)) ++ (0L until 8L).map(offset => (1, offset)).toList
+    )
+  }
+
   test("a browse of a partition subset reads only those partitions") {
     val log = Map(
       FakeBrowseConsumer.partition(0, 3),

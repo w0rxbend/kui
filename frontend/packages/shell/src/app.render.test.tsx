@@ -1092,6 +1092,139 @@ describe("the frame, given a cluster in the address", () => {
    * assertion is the address, because the address is what the wiring produces — the create flow
    * lives inside the topics screen and this button is the route to it.
    */
+  /**
+   * The cluster half of a race whose search half is gated twice.
+   *
+   * Filed by W8-07's verification pass as V3-1. `App.tsx`'s overview effect carries a `cancelled`
+   * flag and a cleanup that sets it, and the comment beside it states the rule: *"Switching cluster
+   * while five requests are in flight must not let the old cluster's answers land on the new
+   * cluster's screen — the most convincing kind of wrong number there is."* Replacing
+   * `if (cancelled) return;` with `if (false) return;` left all 536 shell cases green.
+   *
+   * The search field's copy of this rule has two cases — the older query's rows, and the emptied
+   * box — and both go red when their guard is defeated. The dashboard's copy had none, and it is
+   * the worse of the two failures: a stale search result is a list of topic names that visibly do
+   * not match what is in the box, while a stale broker count is a plain correct-looking number on
+   * the tile an operator reads first, under the name of a cluster it is not about. Nothing on the
+   * screen contradicts it and nothing ever will — the figure simply stays wrong until the next
+   * poll, and the two clusters this product is designed around are production and staging.
+   *
+   * The interval is the whole of the case, which is why the first cluster's answer is held on a
+   * deferred rather than stubbed: with an immediate stub there is no window for a switch to happen
+   * in, and every existing case in this file has run inside that empty window.
+   */
+  it("keeps the new cluster's figures when the old one's answer lands later", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+
+    let releaseProd: () => void = () => undefined;
+    const prodHeld = new Promise<void>((resolve) => {
+      releaseProd = resolve;
+    });
+
+    const summaryFor = (id: string, brokerCount: number) => ({
+      cluster: {
+        id,
+        name: id,
+        summary: ok({
+          version: "3.7.0",
+          brokerCount,
+          offlinePartitionCount: 0,
+          underReplicatedPartitionCount: 0,
+        }),
+      },
+    });
+
+    /* The staging cluster answers everything the overview asks for, immediately; the production
+       cluster answers everything immediately **except** its own summary, which is the one request
+       held open across the switch. Holding one of the overview's reads holds `fetchOverview`, which
+       is the await the guard protects. */
+    const answers: Readonly<Record<string, unknown>> = {
+      ...CLUSTER,
+      "/api/v1/clusters/prod-kyiv-01": summaryFor("prod-kyiv-01", 3),
+      "/api/v1/clusters/staging-eu-01": summaryFor("staging-eu-01", 7),
+      "/api/v1/clusters/staging-eu-01/brokers": {
+        brokers: ok([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }, { id: 7 }]),
+      },
+      "/api/v1/clusters/staging-eu-01/log-dirs": { logDirs: ok([]) },
+      "/api/v1/clusters/staging-eu-01/topics": {
+        topics: ok({ items: [], page: { totalItems: 4 } }),
+        incompleteTopics: 0,
+      },
+      "/api/v1/clusters/staging-eu-01/topics/names": { names: ok([]) },
+    };
+
+    vi.stubGlobal("EventSource", SilentEventSource);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const href =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const path = new URL(href, "http://kui.test").pathname;
+        if (path.includes("/auth/me")) {
+          return new Response(JSON.stringify(SESSION), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (path === "/api/v1/clusters/prod-kyiv-01") await prodHeld;
+        const body = answers[path];
+        if (body !== undefined) {
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (path.includes("/auth/settings")) {
+          return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ code: "KUI-ROUTE-NOT-FOUND", message: "no route", details: [] }),
+          { status: 404, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const app = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01", "staging-eu-01"));
+    await settled();
+
+    const brokerFigure = (): string =>
+      app.host.querySelector("[data-testid='stat-brokers']")?.textContent ?? "";
+
+    /* `finally` rather than a plain sequence: an assertion that throws before `releaseProd()` would
+       leave this case's fetch stub awaiting a promise nobody ever settles, and the next case in the
+       file would inherit a suspended request against a global that `afterEach` has already
+       unstubbed. A failing case must fail loudly here, not quietly somewhere below. */
+    try {
+      // Production's read is still open, so its figure has not arrived and must not be invented.
+      expect(brokerFigure()).not.toContain("3");
+
+      const tile = app.host.querySelector<HTMLButtonElement>(
+        "[data-testid='env-tile-staging-eu-01']",
+      );
+      expect(tile).not.toBeNull();
+      tile!.click();
+      await settled();
+
+      expect(brokerFigure()).toContain("7");
+
+      // And now the loser: production's answer, arriving after the operator has left it.
+      releaseProd();
+      await settled();
+      await settled();
+
+      expect(brokerFigure()).toContain("7");
+      expect(brokerFigure()).not.toContain("3");
+    } finally {
+      releaseProd();
+      app.dispose();
+    }
+  });
+
   it("takes the dashboard's Create topic button to the cluster's topic list", async () => {
     window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
     stubCluster();

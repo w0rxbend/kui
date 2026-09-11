@@ -799,6 +799,81 @@ describe("a field the service did not send", () => {
     dispose();
   });
 
+  it("counts no task as running when the service sent no figure, never all of them", async () => {
+    /*
+     * Filed by W8-04's verification pass as F1, and the exact mirror of the `taskCount` case above:
+     * the fallback `?? 0` on `runningTasks` was measured by nothing, so `?? tasks.length` was one
+     * edit away and left all 75 cases green.
+     *
+     * The two fallbacks are not symmetric and that is the whole finding. `taskCount` falling
+     * back to `tasks.length` is a *count of things the document actually carries* — a true
+     * figure about a shorter document. `runningTasks` falling back to `tasks.length` is a
+     * *claim about state*, and one nothing in the document supports: this fixture's three tasks
+     * are RUNNING, RESTARTING and FAILED, and the domain is explicit that RESTARTING is not
+     * running. The panel would read
+     * "3 of 3 tasks running" over a connector with a dead task, which is the most convincing
+     * kind of wrong number there is — §3.14's *Absent* rule exists because an unmeasured
+     * figure invented as a healthy one is worse than no figure at all.
+     *
+     * Zero is the honest answer here rather than a bare zero the design forbids: the sentence still
+     * carries the denominator and the three tasks are still drawn with their own states beside it.
+     */
+    const { container, dispose } = open(
+      withConnector((one) => {
+        delete one["runningTasks"];
+        one["taskCount"] = 3;
+        one["tasks"] = [
+          { id: 0, state: "RUNNING", workerId: "10.0.0.1:8083" },
+          { id: 1, state: "RESTARTING", workerId: "10.0.0.2:8083" },
+          { id: 2, state: "FAILED", workerId: "10.0.0.3:8083" },
+        ];
+      }),
+    );
+    await settle();
+
+    const sentence = panel(container, "payments/orders-source")?.querySelector(
+      '[data-testid="connector-tasks"]',
+    );
+    expect(sentence?.textContent).toContain("0 of 3 tasks running");
+    expect(sentence?.textContent).not.toContain("3 of 3");
+
+    dispose();
+  });
+
+  it("says a connector has no tasks rather than drawing a zero over a zero", async () => {
+    /*
+     * Filed by W8-04's verification pass as F2, and this case is a *restoration*. `model.test.ts`
+     * carried `says a connector has no tasks rather than drawing 0/0` before this wave; W8-04's
+     * correction item 14 deleted `taskCaption()` and took the case with it, moved the sentence into
+     * `ConnectorPanel.taskSentence`, and left the promise gated by nothing. Deleting the
+     * `taskCount === 0` line from `taskSentence` left all 75 cases green.
+     *
+     * What it draws under the mutation is `0 of 0 tasks running.` — the bare zero over a bare zero
+     * that this product's own rule forbids, on the one panel where it is also *ambiguous*: a
+     * connector that is paused with no tasks assigned and a connector whose worker described
+     * none of its tasks produce the same two zeroes, and the sentence is the only thing that
+     * distinguishes "there is nothing to run" from "KUI was told nothing". A paused or freshly
+     * created connector genuinely sends no task list, so this is a document the quickstart
+     * itself can produce.
+     */
+    const { container, dispose } = open(
+      withConnector((one) => {
+        one["taskCount"] = 0;
+        one["runningTasks"] = 0;
+        one["tasks"] = [];
+      }),
+    );
+    await settle();
+
+    const sentence = panel(container, "payments/orders-source")?.querySelector(
+      '[data-testid="connector-tasks"]',
+    );
+    expect(sentence?.textContent).toBe("This connector has no tasks.");
+    expect(sentence?.textContent).not.toContain("0 of 0");
+
+    dispose();
+  });
+
   it("says a failure reported with no reason is exactly that, never an empty block", async () => {
     /*
      * The fallback is the whole of the rule: a failed connector's reason area is red, and a red
@@ -870,6 +945,58 @@ describe("what the whole listing says when the server would not give it", () => 
       "the last list KUI received",
     );
     expect(panels(container)).toHaveLength(3);
+
+    dispose();
+  });
+
+  it("a worker whose last answer named none still says the worker named none", async () => {
+    /*
+     * W8-04 disclosed this one itself and nobody had closed it: narrowing `answered()` from
+     * `kind === "ok" || kind === "stale"` to `kind === "ok"` left all 75 cases green, because the
+     * only stale fixture in the file carries three connectors and so never reaches the fallback the
+     * predicate guards.
+     *
+     * The staleness that matters here is the **worker's own** section and not the listing's — the
+     * outer one is the banner above, and `answered` reads `worker.page.kind`. A Connect cluster
+     * whose connectors were all deleted answers exactly this document and then stops answering, so
+     * stale-and-empty is a real sequence rather than a contrived one.
+     *
+     * The two halves of the stale state pull in opposite directions and both have to hold. The case
+     * above proves a stale answer's *rows* are drawn — hiding them would throw away the only list
+     * there is. This proves a stale answer's *emptiness* is drawn too, and that is the half the
+     * narrowing removes: with `stale` no longer counting as having answered, the sentence
+     * disappears and the operator is shown a page with nothing on it at all, where the product
+     * knows, and could say, what this worker last told it. §3.14's rule is that an unmeasured
+     * figure says so in words; a measured emptiness suppressed is the same failure with more
+     * information thrown away.
+     */
+    const staleAndEmpty = {
+      connectors: {
+        status: "ok",
+        data: {
+          workers: [
+            {
+              connect: "payments",
+              connectors: {
+                status: "stale",
+                reason: "UPSTREAM_TIMEOUT",
+                message: "The Connect cluster did not answer, so this is the last list KUI had.",
+                data: { items: [], unreadable: [] },
+                fetchedAt: "2026-09-03T10:11:12.000Z",
+              },
+            },
+          ],
+        },
+        fetchedAt: "2026-09-03T10:11:12.000Z",
+      },
+    };
+    const { container, dispose } = open(staleAndEmpty);
+    await settle();
+
+    expect(container.querySelector('[data-testid="connect-empty"]')?.textContent).toContain(
+      "answered and named no connectors",
+    );
+    expect(panels(container)).toHaveLength(0);
 
     dispose();
   });

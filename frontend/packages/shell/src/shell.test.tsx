@@ -14,7 +14,13 @@ import { deriveFeatureState, type FeatureRegistration, type FeatureState } from 
 
 import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, FailuresBeforeGivingUp, backoffAfter, MaxBackoffMs } from "./health.js";
-import { destinationFor, navigationGroups, stillWorking, type FeatureStatus } from "./nav/navigation.js";
+import {
+  degradedLabels,
+  destinationFor,
+  navigationGroups,
+  stillWorking,
+  type FeatureStatus,
+} from "./nav/navigation.js";
 import { clusterInUrl, createShellRouter, landingFor } from "./routing/routes.jsx";
 import {
   clusterSummaries,
@@ -207,6 +213,52 @@ describe("the navigation's five states", () => {
     ];
     expect(stillWorking(features, "topics")).toEqual(["Clusters"]);
     expect(stillWorking(features, "clusters")).toEqual([]);
+  });
+
+  it("lists both sentences in declared order, whatever order the frame handed them in", () => {
+    /* Filed by W8-07 as its own two disclosed findings, and they are one rule in two functions:
+       deleting the `.sort((a, b) => a.registration.order - b.registration.order)` from *both*
+       `stillWorking` and `degradedLabels` left all 536 shell cases green. The reason is a fixture
+       problem rather than a missing file — every existing input to either function is already in
+       declared order, so the sort has never once had something to sort.
+
+       Three features, declared 300, 100, 200 and handed over in exactly that wrong order, is what
+       it takes: two would leave `reverse` and the sort agreeing, which is the defect the connect
+       suites record by name.
+
+       The rule is `navigation.ts`'s own module header — *"Order is fixed, and that is a correctness
+       property rather than a nicety… they aim at the position their muscle memory learned."* These
+       two lists are the only places an operator reads the features in prose rather than down the
+       drawer, and both sit inches from the drawer while it is on screen. A list in one order beside
+       a list in another is not read as the same list re-sorted; it is read as a different set, and
+       the fallback panel's whole job is to tell somebody whether the trip was wasted.
+
+       `navigationGroups`' own sort is a third copy and is gated twice already — W8-07 measured that
+       deleting it reddens two cases — so this closes the pair it does not cover and no more. */
+    const declaredOutOfOrder: readonly FeatureStatus[] = [
+      {
+        registration: { ...topics, id: "schemas", label: "Schema Registry", order: 300 },
+        state: ready,
+      },
+      { registration: { ...clusters, label: "Clusters", order: 100 }, state: ready },
+      { registration: { ...topics, id: "topics", label: "Topics", order: 200 }, state: ready },
+    ];
+
+    expect(stillWorking(declaredOutOfOrder, "nothing")).toEqual([
+      "Clusters",
+      "Topics",
+      "Schema Registry",
+    ]);
+
+    const degraded: FeatureState = {
+      kind: "degraded",
+      code: ReasonCodes.UpstreamTimeout,
+      message: "reading the cluster is taking 4s",
+      suggestedPollIntervalMs: undefined,
+    };
+    const allDegraded = declaredOutOfOrder.map((feature) => ({ ...feature, state: degraded }));
+
+    expect(degradedLabels(allDegraded)).toEqual(["Clusters", "Topics", "Schema Registry"]);
   });
 });
 
@@ -688,6 +740,21 @@ describe("the top band's trail", () => {
        `Ksql`, which is a word this product does not use anywhere a person can see. */
     const ksql = topCrumbs(clusters, "prod", "/ui/clusters/prod/ksql", "/ui", router);
     expect(ksql.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "ksqlDB"]);
+
+    /* Filed by W8-07's verification pass as V3-4. `settings` is the one row in `LABELS` that is not
+       a feature id — it is the shell's own destination, reachable from the drawer's foot on every
+       page — and it was the one row with no assertion: deleting `settings: "Settings",` left all
+       536 shell cases green, and the top band on the settings page silently lost its second crumb.
+
+       Silently is the word that matters. `LABELS` is typed `Record<string, string>`, so a lookup
+       that misses yields `undefined`, the `if` below it declines to push, and the trail comes back
+       as the cluster name alone — which is exactly the trail the *dashboard* draws. The failure is
+       not a blank crumb an eye would catch; it is a correct-looking trail for a different page.
+       The structural half of this — typing the table over the feature ids so the ninth feature's
+       missing crumb is a compile error rather than an empty band, the way `landingFor`'s exhaustive
+       switch made `ksql` impossible to forget — is a production change, filed to its owner. */
+    const settings = topCrumbs(clusters, "prod", "/ui/settings", "/ui", router);
+    expect(settings.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Settings"]);
   });
 });
 

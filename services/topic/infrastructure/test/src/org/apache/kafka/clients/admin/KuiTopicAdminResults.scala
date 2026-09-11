@@ -6,8 +6,8 @@ import org.apache.kafka.common.KafkaFuture
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.internals.KafkaFutureImpl
 
-/** Factories for the admin result types a topic scrape reads, whose constructors Kafka keeps
-  * package-private.
+/** Factories for the admin result types a topic scrape reads and a topic mutation is answered with, whose
+  * constructors Kafka keeps package-private or protected.
   *
   * It lives in Kafka's own package for that one reason, and it is the same device the
   * `KuiTopicTestSynonyms` beside it uses. Without it, the behaviour argued at length in
@@ -35,6 +35,37 @@ object KuiTopicAdminResults {
       values: JMap[Integer, KafkaFuture[JMap[String, LogDirDescription]]]
   ): DescribeLogDirsResult =
     new DescribeLogDirsResult(values)
+
+  /** `createTopics`, whose constructor is `protected` and whose futures carry a metadata record.
+    *
+    * The suite that needs it is not interested in the answer at all — it is interested in the `NewTopic`
+    * that was handed over, because that is where "absent partitions mean the broker's `num.partitions`"
+    * either holds or does not. An answer still has to exist for the adapter to read.
+    */
+  def createTopics(
+      values: JMap[String, KafkaFuture[CreateTopicsResult.TopicMetadataAndConfig]]
+  ): CreateTopicsResult =
+    new CreateTopicsResult(values)
+
+  /** The metadata a broker returns for a topic it has just created. */
+  def created(partitions: Int, replicationFactor: Int): CreateTopicsResult.TopicMetadataAndConfig =
+    new CreateTopicsResult.TopicMetadataAndConfig(
+      org.apache.kafka.common.Uuid.randomUuid(),
+      partitions,
+      replicationFactor,
+      new Config(java.util.List.of[ConfigEntry]())
+    )
+
+  /** `incrementalAlterConfigs`, whose constructor is package-private. */
+  def alterConfigs(values: JMap[ConfigResource, KafkaFuture[java.lang.Void]]): AlterConfigsResult =
+    new AlterConfigsResult(values)
+
+  /** A `KafkaFuture[Void]` that has completed.
+    *
+    * `java.lang.Void` has exactly one value and it is `null`; Kafka's own clients complete these futures
+    * the same way. It is confined to this test-only file for that reason.
+    */
+  val completedVoid: KafkaFuture[java.lang.Void] = KafkaFuture.completedFuture(null)
 
   /** A future that has already failed — how Kafka reports a resource the caller may not describe. */
   def failed[A](failure: Throwable): KafkaFuture[A] = {

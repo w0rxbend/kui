@@ -209,6 +209,53 @@ final class PrometheusExpositionSuite extends FunSuite {
     assertEquals(sample.networkProcessorIdleRatio, Some(0.7104))
   }
 
+  test("a cumulative count is not the one-minute rate, whichever view the exporter printed first") {
+    // The other half of the same three-line `find` predicate. W8-02 closed `dimensionsOf(sample).isEmpty`
+    // on the line below and `rated`'s own suffix requirement, one line above it, reddened nothing:
+    // relaxing `endsWith(RateSuffix)` to `nonEmpty` left every metrics case SUCCESS.
+    //
+    // `rated = true` is passed for both saturation gauges, and the flag exists because a JMX exporter
+    // publishes several views of one meter under names that differ only in suffix — `_count`, `_total`,
+    // `_meanrate`, `_oneminuterate`. `_count` here is `88123`, a cumulative tally of requests handled
+    // since the broker started. Drawn on a 0..1 ring it is not a wrong ratio, it is not a ratio at all:
+    // the arc pins at full and stays there for the life of the broker, and a reader is told a saturated
+    // pool is idle. The refusal direction below is the same rule with nothing to fall back to.
+    //
+    // The non-rate views are written **first** on purpose, for the reason the dimension case above states:
+    // `ratioOf` answers with the first line that matches, so a fixture whose `_oneminuterate` came first
+    // would be green under any guard and gate nothing.
+    //
+    // Only the request-handler family carries the decoys. `networkProcessorIdleRatio` is read with
+    // `rated = false` — the socket server's gauge is published unsuffixed by every exporter shipping
+    // today — so a `_count` line under *that* family is a different argument, and putting one here would
+    // make this case fail against correct code rather than against the mutation it is aimed at. It rides
+    // along undecorated to prove the mutation is confined to the rated reader.
+    val countFirst =
+      """kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_count 88123
+        |kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_meanrate 0.4410
+        |kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate 0.8912
+        |kafka_network_socketserver_networkprocessoravgidlepercent 0.7104
+        |""".stripMargin
+
+    val sample = sampleOf(countFirst)
+
+    assertEquals(sample.requestHandlerIdleRatio, Some(0.8912))
+    assertEquals(sample.networkProcessorIdleRatio, Some(0.7104))
+
+    // And the refusal: a body carrying only the cumulative view has no rate to read at all, so the gauge
+    // is absent and §3.14 draws its dash. This is the failure above with no correct line beside it that
+    // a suffix-blind `find` could have stumbled onto by luck of ordering.
+    val countOnly =
+      """kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate 124800.5
+        |kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_count 88123
+        |""".stripMargin
+
+    val counted = sampleOf(countOnly)
+
+    assertEquals(counted.bytesInPerSecond, Some(124800.5))
+    assertEquals(counted.requestHandlerIdleRatio, None)
+  }
+
   test("a broker that published only a per-slice idle ratio has no broker-wide one to draw") {
     // The other direction, and the one that makes the rule a refusal rather than a preference. With no
     // undimensioned line there is no pool figure, and §3.14's *Absent* paragraph says an unmeasured ring
@@ -259,6 +306,44 @@ final class PrometheusExpositionSuite extends FunSuite {
          |""".stripMargin
 
     assertEquals(sampleOf(dimensioned).purgatory, List(PurgatoryQueue("Fetch", 481L)))
+  }
+
+  test("purgatory queues arrive in the broker's own name order and not in the exposition's") {
+    // `purgatoryOf`'s scaladoc, one line above the `.sortBy(_.operation)` it describes: *"Sorted rather
+    // than left in document order, so that two scrapes of the same broker put the same queue in the same
+    // place on a card."* Deleting that sort left every metrics case SUCCESS — the same rule W8-02 spent
+    // its item 6 closing three copies of one service over, in the same pair of services it was auditing.
+    //
+    // A JMX exporter walks its MBean server; that iteration order is not a promise and does change
+    // between scrapes. The purgatory rows on a broker card are a short list an operator reads by
+    // position, and a list that reorders under the pointer between two polls is read as a *different*
+    // list — the reader concludes the broker's work changed shape when only the map did.
+    //
+    // Three operations, in an order that is neither the sorted one nor its reverse: the document reads
+    // `Fetch, Produce, DeleteRecords`, sorted reads `DeleteRecords, Fetch, Produce` and the document
+    // reversed reads `DeleteRecords, Produce, Fetch`. Two entries would not do it — with two, `reverse`
+    // and `sortBy` can agree, which is the fixture defect that let three orderings ship ungated in
+    // `ConnectorsSuite` and is recorded there by name.
+    val family = "kafka_server_delayedoperationpurgatory_value"
+    val unordered =
+      s"""$family{delayedoperation="Fetch",name="PurgatorySize"} 481.0
+         |$family{delayedoperation="Produce",name="PurgatorySize"} 0.0
+         |$family{delayedoperation="DeleteRecords",name="PurgatorySize"} 12.0
+         |""".stripMargin
+
+    val operations = sampleOf(unordered).purgatory.map(_.operation)
+
+    // Two positions rather than the whole list, so this is a statement about *order* and not about which
+    // queues the fixture happens to name; the whole-list assertion beside it then pins the values too.
+    assert(
+      operations.indexOf("DeleteRecords") < operations.indexOf("Fetch"),
+      s"the exposition's own order survived into the card's rows: $operations"
+    )
+    assertEquals(operations, operations.sorted)
+    assertEquals(
+      sampleOf(unordered).purgatory,
+      List(PurgatoryQueue("DeleteRecords", 12L), PurgatoryQueue("Fetch", 481L), PurgatoryQueue("Produce", 0L))
+    )
   }
 
   test("the same purgatory queue is not read twice from its NumDelayedOperations sibling") {

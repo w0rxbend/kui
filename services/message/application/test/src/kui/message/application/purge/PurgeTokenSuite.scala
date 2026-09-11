@@ -86,6 +86,34 @@ final class PurgeTokenSuite extends munit.CatsEffectSuite {
     }
   }
 
+  test("theSamePlanInAnyOrderMintsTheSameTokenByteForByte") {
+    /*
+     * Ungated until now: removing `.sortBy(_.partition.value)` from `PurgeToken.render` left
+     * `./mill services.message.__.test` at 1442/1442 green, because every case in this file passes
+     * `planned`, which is already in partition order, and nothing compared two mintings of one plan.
+     *
+     * The canonical rendering is what makes the token a statement about a *plan* rather than about the
+     * order a list happened to arrive in. `KafkaRecordDeleter.watermarks` builds its partitions from a
+     * `describeTopics` answer and `PurgePlan.of` sorts them, but the token is minted from whatever list it
+     * is handed; an unsorted rendering means two replicas that resolved the same partitions in different
+     * orders mint two different tokens for one plan, and a plan read on one cannot be confirmed against
+     * the other.
+     */
+    for {
+      ordered <- tokens.mint(cluster, topic, planned, at.plusSeconds(300))
+      reversed <- tokens.mint(cluster, topic, planned.reverse, at.plusSeconds(300))
+      verified <- tokens.verify(cluster, topic, reversed, later)
+    } yield {
+      assertEquals(
+        reversed,
+        ordered,
+        clue = "one plan minted two tokens: the rendering is not canonical"
+      )
+      // And the offsets come back in the canonical order too, so the receipt reads the same either way.
+      assertEquals(verified, Right(planned))
+    }
+  }
+
   test("somethingThatIsNotATokenAtAllIsRefusedRatherThanCrashing") {
     // A codec that parses before it verifies is one an attacker can drive with a payload they never had to
     // sign; a codec that throws on rubbish is one a stray request turns into a 500.
