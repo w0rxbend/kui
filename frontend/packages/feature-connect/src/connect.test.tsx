@@ -34,10 +34,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { flush } from "solid-js";
+import { ErrorCodes } from "@kui/api";
 import { KuiProvider, createQueryRegistry, type PermissionGrant } from "@kui/kernel";
 
 import { ConnectScreen } from "./ConnectRoute.jsx";
-import { NO_CONNECTORS } from "./model.js";
+import { NO_CONNECTORS, NO_REASON_REPORTED, THROUGHPUT_NOT_MEASURED } from "./model.js";
 import {
   describeViolations,
   findViolations,
@@ -374,9 +375,16 @@ describe("what a failed connector says", () => {
     const { container, dispose } = open(responseDocument);
     await settle();
 
-    // §3.14's *Absent* paragraph: a literal `0 msg/s` on a paused connector is a measured zero, and
-    // an unmeasured one must never look like it. There is no rate on this wire at all.
-    expect(container.textContent).toContain("throughput not measured");
+    /*
+     * §3.14's *Absent* paragraph: a literal `0 msg/s` on a paused connector is a measured zero, and
+     * an unmeasured one must never look like it. There is no rate on this wire at all.
+     *
+     * Asserted against `THROUGHPUT_NOT_MEASURED` rather than against a third literal, because the
+     * words on the screen come from `@kui/kernel`'s `ConnectorCard` and this package cannot hand
+     * them in — the card is given no `throughput` prop and decides the sentence itself. Comparing
+     * the two copies here is the only join available across a boundary a feature may not cross.
+     */
+    expect(container.textContent).toContain(THROUGHPUT_NOT_MEASURED);
     expect(container.textContent).not.toContain("msg/s");
 
     dispose();
@@ -390,7 +398,9 @@ describe("what a failed connector says", () => {
 /** The golden listing with one connector edited, so the panel is the thing under test. */
 function withConnector(edit: (one: Record<string, unknown>) => void): unknown {
   const copy = structuredClone(responseDocument) as {
-    connectors: { data: { workers: { connectors: { data?: { items: Record<string, unknown>[] } } }[] } };
+    connectors: {
+      data: { workers: { connectors: { data?: { items: Record<string, unknown>[] } } }[] };
+    };
   };
   const items = copy.connectors.data.workers[0]?.connectors.data?.items ?? [];
   const target = items.find((one) => one["name"] === "orders-source");
@@ -437,7 +447,7 @@ describe("what the panel says about the tasks it was told about", () => {
     dispose();
   });
 
-  it("says the worker did not say what kind of connector it is, and never guesses one", async () => {
+  it("says the worker did not say what kind of connector it is, and never guesses", async () => {
     /* Filed by W7-A3, and it is §7.2's rule — do not infer a cart from the word orders. `kind` is
        empty on every Connect release before 2.0; a panel that filled it in from the connector's
        name would print `source · on payments` as though the worker had said so. Replacing the
@@ -541,6 +551,26 @@ describe("the three commands", () => {
     dispose();
   });
 
+  it("sends the restart path, which is a third endpoint and not pause with a verb", async () => {
+    const { container, stub, dispose } = open(responseDocument);
+    await settle();
+
+    control(panel(container, "payments/orders-source"), "Restart")?.click();
+    await settle();
+
+    /* The address as a literal, for the same reason the pause case spells it out: comparing it
+       against `RESTART_PATH` would assert that a constant equals itself. Pause, resume and restart
+       are three endpoints, three audit operation names and three separately refusable mutations,
+       so the last segment of each is a contract and not a detail. */
+    expect(stub.calls.find((call) => call.method === "post")).toEqual({
+      method: "post",
+      path: "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/restart",
+      params: { clusterId: "quickstart", connectName: "payments", connectorName: "orders-source" },
+    });
+
+    dispose();
+  });
+
   it("re-reads the list after a command the cluster accepted", async () => {
     // Connect answers 202 with an empty body and changes state when its workers agree, so the
     // screen asks again rather than painting an outcome it was not told.
@@ -562,7 +592,13 @@ describe("the three commands", () => {
         ok: false,
         error: {
           kind: "envelope",
-          code: "KUI-CONNECT-REBALANCING",
+          /* The generated constant, not the string. `ErrorCodes` is rendered from the server's own
+             `ErrorCode` enum, so a rename on that side reddens this case instead of leaving a
+             browser quietly matching a code nothing sends any more. The product does not branch on
+             this code — a refused command shows whoever refused it their own sentence and that is
+             the whole of `sentenceOf` — so this case is its only reader, which is why the constant
+             belongs here rather than a copy of its text. */
+          code: ErrorCodes.ConnectRebalancing,
           message: "The Kafka Connect cluster is rebalancing and cannot answer yet.",
           status: 409,
         },
@@ -585,6 +621,43 @@ describe("the three commands", () => {
     dispose();
   });
 
+  it("clears the last refusal when the next command is sent: one sentence, one press", async () => {
+    /*
+     * Also found by mutation here: deleting `setFailure(undefined)` from `onCommand` left all 73
+     * cases green, and under it the sentence from a refused pause sits under the card while a
+     * restart is in flight — so the operator reads a server's refusal of something they are no
+     * longer doing, beside a spinner, and has no way to tell which press it belongs to.
+     */
+    let attempt = 0;
+    const { container, dispose } = open(responseDocument, {
+      write: async () => {
+        attempt += 1;
+        if (attempt === 1) {
+          return {
+            ok: false,
+            error: { kind: "envelope", code: "KUI-FORBIDDEN", message: "Refused.", status: 403 },
+          };
+        }
+        return await new Promise<unknown>(() => {});
+      },
+    });
+    await settle();
+
+    const card = (): HTMLElement | undefined => panel(container, "payments/orders-source");
+    control(card(), "Pause")?.click();
+    await settle();
+    expect(card()?.querySelector('[data-testid="connector-failure"]')?.textContent).toContain(
+      "Refused.",
+    );
+
+    control(card(), "Restart")?.click();
+    await settle();
+
+    expect(card()?.querySelector('[data-testid="connector-failure"]')).toBeNull();
+
+    dispose();
+  });
+
   it("does not re-read the list after a command that was refused", async () => {
     /* A refused command leaves the card as it was with the reason beneath it. Re-reading would
        replace the reason with a spinner and then with the same card, which reads as though nothing
@@ -602,6 +675,310 @@ describe("the three commands", () => {
     await settle();
 
     expect(stub.calls.filter((call) => call.method === "get").length).toBe(before);
+
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * The voice line, which is the page's heading and was carried by nothing
+ * ---------------------------------------------------------------------------------------------- */
+
+describe("the sentence under the page title", () => {
+  it("counts the rows this browser is holding, and says how many are failing", async () => {
+    /*
+     * Found by mutation after the eleven filed rules were closed, and it is the twelfth: replacing
+     * `voiceOf(connectors.state())` with `undefined` in `ConnectRoute` deleted `SCREENS-V4` §4.14's
+     * whole heading — `4 connectors · 1 failed and sulking` — and left all 73 cases green.
+     * `connectVoice` itself is gated five ways in `model.test.ts`; nothing asserted that the route
+     * puts its answer on the page, which is the shape this package's own header warns about in the
+     * other direction.
+     */
+    const { container, dispose } = open(responseDocument);
+    await settle();
+
+    const header = container.querySelector('[data-testid="connect-header"]');
+    expect(header?.textContent).toContain("3 connectors");
+    // Counted from the wire's `failed` flag and not from the state word: `elastic-sink`'s own state
+    // is RUNNING and its task 1 has failed, and a heading counting state words calls that healthy.
+    expect(header?.textContent).toContain("1 failed and sulking");
+    // And the count is marked partial, because one of the two workers is rebalancing and a
+    // confident "3 connectors" over a cluster nobody has finished reading is a smaller number in
+    // the reassuring direction.
+    expect(header?.textContent).toContain("from the workers that answered");
+
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A command in flight, which is the only thing stopping a duplicate mutation
+ * ---------------------------------------------------------------------------------------------- */
+
+/** A server that never answers, so the page stays in the state a click puts it in. */
+function neverAnswers(): () => Promise<unknown> {
+  return () => new Promise<unknown>(() => {});
+}
+
+/** Whether a control is marked busy. `Button` marks it with `aria-busy` and swallows the click. */
+function isBusy(button: HTMLButtonElement | undefined): boolean {
+  return button?.getAttribute("aria-busy") === "true";
+}
+
+describe("a command in flight", () => {
+  it("marks the connector it was sent against, and no other card on the page", async () => {
+    /*
+     * `pendingFor` keys on `connectorLabel`, and its twin `failureFor` — which is gated — keys the
+     * same way. Without the subject comparison one pause marks every card on the page busy, and a
+     * page of cards is exactly what this screen is: an operator watching a restart on one connector
+     * finds the controls of every other one dead for as long as it takes.
+     */
+    const { container, dispose } = open(TWO_CLUSTERS, { write: neverAnswers() });
+    await settle();
+
+    control(panel(container, "payments/orders-source"), "Pause")?.click();
+    await settle();
+
+    expect(isBusy(control(panel(container, "payments/orders-source"), "Pause"))).toBe(true);
+    expect(isBusy(control(panel(container, "analytics/es-sink"), "Pause"))).toBe(false);
+    expect(isBusy(control(panel(container, "analytics/es-sink"), "Restart"))).toBe(false);
+
+    dispose();
+  });
+
+  it("makes that connector's controls swallow a second press: one click, one POST", async () => {
+    /*
+     * This is not cosmetic and it is the packet's mutation line. `busy` reaches the kernel
+     * `Button`, whose `inert()` is what swallows the click — and nothing else between the pointer
+     * and `POST /pause` stops a second one. Connect answers all three commands `202 Accepted` with
+     * an empty body, so the card cannot show the outcome and a second press looks reasonable.
+     */
+    const { container, stub, dispose } = open(TWO_CLUSTERS, { write: neverAnswers() });
+    await settle();
+
+    const card = (): HTMLElement | undefined => panel(container, "payments/orders-source");
+    control(card(), "Pause")?.click();
+    await settle();
+    control(card(), "Pause")?.click();
+    control(card(), "Restart")?.click();
+    await settle();
+
+    expect(isBusy(control(card(), "Pause"))).toBe(true);
+    expect(isBusy(control(card(), "Restart"))).toBe(true);
+    expect(stub.calls.filter((call) => call.method === "post")).toHaveLength(1);
+
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * The figures and sentences a missing field would turn into a false statement
+ * ---------------------------------------------------------------------------------------------- */
+
+describe("a field the service did not send", () => {
+  it("counts the tasks the worker described rather than saying there are none", async () => {
+    /*
+     * `taskCount` is the service's own figure and `tasks.length` is the fallback for a document
+     * that omits it. Defaulting to zero instead draws "This connector has no tasks." over a
+     * described task list — a sentence an operator acts on, by going to look for a connector
+     * somebody deleted, on a connector that is running three tasks.
+     */
+    const { container, dispose } = open(
+      withConnector((one) => {
+        delete one["taskCount"];
+      }),
+    );
+    await settle();
+
+    const sentence = panel(container, "payments/orders-source")?.querySelector(
+      '[data-testid="connector-tasks"]',
+    );
+    expect(sentence?.textContent).toContain("3 of 3 tasks running");
+    expect(sentence?.textContent).not.toContain("no tasks");
+
+    dispose();
+  });
+
+  it("says a failure reported with no reason is exactly that, never an empty block", async () => {
+    /*
+     * The fallback is the whole of the rule: a failed connector's reason area is red, and a red
+     * area with nothing in it reads as "KUI knows and will not say". The true fact — a failure the
+     * worker reported without a reason — is itself something an operator needs, because it points
+     * at the worker's log rather than at KUI.
+     */
+    const { container, dispose } = open(
+      withConnector((one) => {
+        one["failed"] = true;
+        one["reason"] = null;
+      }),
+    );
+    await settle();
+
+    const block = panel(container, "payments/orders-source")?.querySelector(
+      '[data-testid="connector-reason"]',
+    );
+    expect(block?.textContent).toContain(NO_REASON_REPORTED);
+
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * The outer section's refusals, which are not interchangeable with each other
+ * ---------------------------------------------------------------------------------------------- */
+
+describe("what the whole listing says when the server would not give it", () => {
+  it("tells a principal without CONNECT:VIEW it is a permission, not an empty list", async () => {
+    /*
+     * Three empty screens are three different facts and only one of them is a reason to ask
+     * somebody for a grant. A page that drew this as "nothing is deployed" would send an operator
+     * to look at a Connect worker that is running perfectly well.
+     */
+    const { container, dispose } = open({ connectors: { status: "forbidden" } });
+    await settle();
+
+    const refusal = container.querySelector('[data-testid="connect-forbidden"]');
+    expect(refusal?.textContent).toContain("CONNECT:VIEW");
+    expect(container.querySelector('[data-testid="connect-empty"]')).toBeNull();
+    expect(container.querySelector('[data-testid="connect-not-configured"]')).toBeNull();
+    // No retry: a permission decision does not change because somebody pressed a button.
+    const labels = [...container.querySelectorAll("button")].map((one) => one.textContent);
+    expect(labels).not.toContain("Retry");
+
+    dispose();
+  });
+
+  it("marks a stale listing, so an old answer is not read as this morning's", async () => {
+    /*
+     * A stale section is an answer with a badge on it: the connectors are still drawn, because
+     * hiding them would lose the only list there is, and the badge is what stops the screen being
+     * read as current. There is a story for this state and, until now, no case.
+     */
+    const stale = {
+      connectors: {
+        status: "stale",
+        reason: "UPSTREAM_TIMEOUT",
+        message: "The Connect clusters did not answer, so this is the last list KUI received.",
+        data: (responseDocument as { connectors: { data: unknown } }).connectors.data,
+        fetchedAt: "2026-09-03T10:11:12.000Z",
+      },
+    };
+    const { container, dispose } = open(stale);
+    await settle();
+
+    expect(container.querySelector('[data-testid="connect-stale"]')?.textContent).toContain(
+      "the last list KUI received",
+    );
+    expect(panels(container)).toHaveLength(3);
+
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * One worker's row, and the rows there is no honest way to draw
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The two-cluster listing with the `analytics` worker's own inner section replaced. */
+function withSecondWorker(section: unknown): unknown {
+  const copy = structuredClone(TWO_CLUSTERS) as {
+    connectors: { data: { workers: { connectors: unknown }[] } };
+  };
+  const worker = copy.connectors.data.workers[1];
+  if (worker === undefined) throw new Error("the two-cluster fixture lost its second worker");
+  worker.connectors = section;
+  return copy;
+}
+
+/** The two-cluster listing with one more worker row appended, exactly as a server could send it. */
+function withExtraWorker(entry: unknown): unknown {
+  const copy = structuredClone(TWO_CLUSTERS) as {
+    connectors: { data: { workers: unknown[] } };
+  };
+  copy.connectors.data.workers.push(entry);
+  return copy;
+}
+
+/** The two-cluster listing with one more entry in the `payments` worker's item list. */
+function withExtraConnector(entry: unknown): unknown {
+  const copy = structuredClone(TWO_CLUSTERS) as {
+    connectors: { data: { workers: { connectors: { data: { items: unknown[] } } }[] } };
+  };
+  const worker = copy.connectors.data.workers[0];
+  if (worker === undefined) throw new Error("the two-cluster fixture lost its first worker");
+  worker.connectors.data.items.push(entry);
+  return copy;
+}
+
+describe("one Connect cluster's own row", () => {
+  it("names a Connect cluster the principal may not see, and keeps the ones it may", async () => {
+    /*
+     * One worker refusing costs one row rather than the screen. But the row has to be *said*: a
+     * list that silently dropped the refused worker would be a short list drawn as a complete one,
+     * and an operator would conclude that the connectors on it had been deleted.
+     */
+    const { container, dispose } = open(withSecondWorker({ status: "forbidden" }));
+    await settle();
+
+    const notice = container.querySelector('[data-testid="connect-worker-forbidden"]');
+    expect(notice?.textContent).toContain("analytics");
+    expect(notice?.textContent).toContain("missing from this list");
+    // And the worker that did answer is drawn in full.
+    expect(panels(container).map((one) => one.dataset["connector"])).toEqual([
+      "payments/orders-source",
+    ]);
+
+    dispose();
+  });
+
+  it("drops a worker row that names no Connect cluster rather than drawing a blank", async () => {
+    /*
+     * A row this build cannot name is a row it cannot ask a permission question about either:
+     * `operateSubject()` would hand the empty string to `kui.permits`, and the banner would open
+     * with a colon — ": the cluster is rebalancing" — over a worker nobody can identify or act on.
+     */
+    const { container, dispose } = open(
+      withExtraWorker({
+        connectors: {
+          status: "unavailable",
+          reason: "STARTING",
+          message: "the Kafka Connect cluster is rebalancing",
+        },
+      }),
+    );
+    await settle();
+
+    expect(container.querySelector('[data-testid="connect-worker-rebalancing"]')).toBeNull();
+    // The two workers that did name themselves are untouched by the one that did not.
+    expect(panels(container)).toHaveLength(2);
+
+    dispose();
+  });
+
+  it("drops a connector the worker did not name, not a card nobody can act on", async () => {
+    /*
+     * Every control on a card names the connector to the server, so a card drawn for a nameless
+     * entry posts a name that does not exist — `connectorName: "(unnamed)"` — and reports the
+     * server's refusal as though the operator had done something wrong. A row nobody can act on is
+     * furniture; the name is what makes it a row.
+     */
+    const { container, dispose } = open(
+      withExtraConnector({
+        connect: "payments",
+        kind: "source",
+        state: "RUNNING",
+        failed: false,
+        runningTasks: 1,
+        taskCount: 1,
+        tasks: [{ id: 0, state: "RUNNING", workerId: "10.0.0.1:8083" }],
+      }),
+    );
+    await settle();
+
+    expect(panels(container).map((one) => one.dataset["connector"])).toEqual([
+      "payments/orders-source",
+      "analytics/es-sink",
+    ]);
 
     dispose();
   });

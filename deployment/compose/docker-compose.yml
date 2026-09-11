@@ -1,4 +1,4 @@
-# KUI in its distributed shape: the interface, the gateway and all eight services as separate
+# KUI in its distributed shape: the interface, the gateway and all nine services as separate
 # containers.
 #
 # The count is prose. `docker compose -f deployment/compose/docker-compose.yml config --services`
@@ -448,7 +448,7 @@ services:
   # exactly the reason `schema-registry` is: the capability document folds the per-cluster rows into
   # one verdict per service (ADR-039 §2, `NotConfigured` beats everything), so a deployment where no
   # cluster names a Connect worker reports the whole service as `not_configured` -- correct, and it
-  # would have meant teaching `smoke.sh` to expect a different answer for one of the eight. Bending
+  # would have meant teaching `smoke.sh` to expect a different answer for one of the eleven. Bending
   # the check to fit an incomplete deployment is the wrong repair, which is the sentence
   # `schema-registry` was added under and it has not changed.
   #
@@ -456,6 +456,51 @@ services:
   # a real worker was asked and named none -- and it is a different answer from `not_configured`
   # (no address configured) and from an upstream that will not answer, which is the distinction this
   # whole product exists to keep. A connector planted to make a screen look busy would destroy it.
+  # The ksql service: ksqlDB's streams, tables and queries, one statement at a time, and a push
+  # query that is a stream rather than a call.
+  #
+  # It is the eleventh service and the second whose subject is an HTTP upstream that is neither the
+  # broker nor the registry. `ksqldb-server` below is that upstream, and it is here for the reason
+  # `schema-registry` and `kafka-connect` are: the capability document folds per-cluster rows into
+  # one verdict per service (ADR-039 §2, `NotConfigured` beats everything), so a stack that
+  # configured no ksqlDB would report the whole service `not_configured` and `smoke.sh` would have
+  # to be taught a different expectation for one of the eleven. Bending the check to fit an
+  # incomplete deployment is the wrong repair, and this is the third service that sentence covers.
+  #
+  # NO `depends_on` ON `ksqldb-server`, and that is a decision rather than an omission. KUI calls
+  # ksqlDB when a ksqlDB screen is opened, not at start-up, so ordering the two would change what
+  # the first thirty seconds look like and nothing else -- which is exactly what wave 6 measured
+  # `kui-metrics`' `depends_on` to be, and it called it headroom. `kui-connect` is in the same
+  # position beside `kafka-connect` and also has none. If a ksqlDB screen is opened while the
+  # server is still starting, the section says the upstream did not answer, which is true.
+  kui-ksql:
+    image: kui-ksql:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-ksql
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Carried for the reason the other six that mount this file carry it -- the file resolves
+      # `kui.streaming.cursorKey` from this variable, so a container without it fails the load --
+      # and for one of this service's own: a statement that drops a stream or a topic is
+      # destructive, so it is an ADR-045 plan->token->confirm mutation and this key is what signs
+      # the token. It is the first optional service in this stack that actually signs one.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
   kui-connect:
     image: kui-connect:${KUI_VERSION:-0.1.0-SNAPSHOT}
     container_name: kui-connect
@@ -601,7 +646,15 @@ services:
     restart: unless-stopped
 
   # A Kafka Connect worker, for the reason the registry above it is here: `kui-connect` reports what
-  # a worker tells it, and a stack with no worker makes the whole service report `not_configured`.
+  # a worker tells it, and without one there is nothing in this stack for it to report.
+  #
+  # THAT SENTENCE USED TO SAY "a stack with no worker makes the whole service report
+  # `not_configured`", AND IT IS FALSE. `not_configured` comes from `kui-service.yaml` naming no
+  # `connect:` entry, not from the container being absent. Measured: with this service deleted from
+  # this file and both `connect.url` entries left in place, the capability document still reports
+  # `connect: available` and the read still answers HTTP 200 with outer status `ok` -- the refusal
+  # is reported one level down, in the per-worker section, which is what `smoke.sh` now asserts on
+  # and what it could not see while it read the outer status.
   #
   # It is the stock `apache/kafka` image running `connect-distributed.sh`, which is the same image
   # this file already pulls for the broker -- so it adds a container and no download. The shipped
@@ -615,10 +668,16 @@ services:
   # connectors on its classpath are the MirrorMaker ones the image ships, none of which is started.
   # Without it the worker logs a migration error about plugins it does not have.
   #
-  # NOTHING PRODUCES A CONNECTOR HERE AND NOTHING SHOULD. `GET /connectors?expand=status` answers
-  # `{}` and that is the honest state of a worker nobody has configured; `smoke.sh` asserts that the
-  # connect service reports it as `ok` rather than that it found something, exactly as the alerts
-  # feed is asserted on `evaluatedAt` and its rule list rather than on having opened an event.
+  # NOTHING PRODUCES A CONNECTOR HERE AND NOTHING SHOULD -- in THIS stack. `GET
+  # /connectors?expand=status` answers `{}` and that is the honest state of a worker nobody has
+  # configured; `smoke.sh` asserts that every worker this cluster names answered `ok` rather than
+  # that it found something, exactly as the alerts feed is asserted on `evaluatedAt` and its rule
+  # list rather than on having opened an event.
+  #
+  # The quickstart is the other half of that pair and it does register one, because the two positive
+  # cases in `frontend/e2e/connect.spec.ts` -- a connector's rows, a task's state -- had nothing to
+  # run against and skipped. The empty-worker answer is this stack's to keep; the busy-worker answer
+  # is the quickstart's. Seeding one HERE would leave the empty state covered nowhere.
   kafka-connect:
     image: apache/kafka:4.3.1
     container_name: kui-compose-kafka-connect
@@ -664,6 +723,58 @@ services:
       timeout: 5s
       retries: 36
       start_period: 15s
+    networks:
+      - kui
+    restart: unless-stopped
+
+  # A ksqlDB server, for the reason `kafka-connect` above it is here: `kui-ksql` reports what a
+  # ksqlDB server tells it, and without one there is nothing in this stack for it to report.
+  #
+  # THE IMAGE IS NOT APACHE-2.0 AND THAT IS WORTH SAYING OUT LOUD. ADR-014 Amendment 1 chose
+  # Apicurio over Confluent's Schema Registry precisely to keep this repository's runnable stacks on
+  # Apache-licensed images, and it could do that because two implementations of that API exist.
+  # There is no second implementation of ksqlDB: `confluentinc/ksqldb-server` under the Confluent
+  # Community License is the only thing that speaks it. So this container is the one exception, it
+  # is a development stack rather than anything shipped, and KUI's own code has no dependency on
+  # which server answers -- it speaks the REST API and would speak to any other implementation of
+  # it, if one existed.
+  #
+  # `KSQL_KSQL_SERVICE_ID` is not decoration: it prefixes the internal command topic, and two
+  # servers sharing one broker with the same id would share a command topic and be one cluster.
+  # `KSQL_KSQL_STREAMS_*_REPLICATION_FACTOR` and the min-ISR are here because this broker is a
+  # single node and the defaults are 1 for replication but not for the internal topic's ISR, which
+  # otherwise refuses to create it.
+  ksqldb-server:
+    image: confluentinc/ksqldb-server:0.29.0
+    container_name: kui-compose-ksqldb
+    # ORDERED AFTER THE BROKER, copied from the Connect worker above, and NOT re-measured for this
+    # container. The worker's block records a measurement in both directions -- with and without the
+    # `depends_on`, three cold `up -d --wait` runs each -- and concludes it is headroom, not a
+    # repair. The same argument applies here (ksqlDB's clients retry, and `smoke.sh` asks nothing of
+    # this server until the stack is up), but the same argument is not the same measurement, and
+    # house rule 9 is that a root cause is not established until it has been run in both directions.
+    # So: this line is headroom by inheritance, it has not been shown to be one here, and whoever
+    # wants to remove it should run it rather than reason about it.
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KSQL_BOOTSTRAP_SERVERS: kafka:9092
+      KSQL_LISTENERS: http://0.0.0.0:8088
+      KSQL_KSQL_SERVICE_ID: kui-compose-
+      KSQL_KSQL_STREAMS_REPLICATION_FACTOR: 1
+      KSQL_KSQL_INTERNAL_TOPIC_REPLICAS: 1
+      KSQL_KSQL_INTERNAL_TOPIC_MIN_INSYNC_REPLICAS: 1
+    healthcheck:
+      # A real GET of `/info`, which is the resource KUI's adapter reads first, rather than a port
+      # check: Jetty accepts connections well before ksqlDB has finished starting its engine, and a
+      # port check passes inside that window. This image is Debian-based and carries curl, unlike
+      # the Kafka image two blocks up.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8088/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 20s
     networks:
       - kui
     restart: unless-stopped

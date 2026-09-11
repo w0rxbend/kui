@@ -26,6 +26,7 @@ import kui.gateway.api.{
   EdgeHeaders,
   GatewayApi,
   InfoRoutes,
+  KsqlStreamRoutes,
   MessageStreamRoutes,
   SearchRoutes,
   TopicOverviewRoutes
@@ -229,6 +230,11 @@ object GatewayWiring {
       // The alerts change stream follows the same relay path. Its feed and acknowledgement are ordinary
       // derived proxy routes; only the event stream needs this client to be mounted separately.
       alerts = clients.all.find(_.service == AlertsServiceId)
+      // The ksqlDB push query, relayed for the same reason and on the same terms: a deployment with no
+      // ksql service configured has no client and therefore no stream route, so the address 404s rather
+      // than opening a subscription that could only ever end in an error. Its object listing, plan and
+      // apply are ordinary derived proxy routes and are unaffected by this line.
+      ksql = clients.all.find(_.service == KsqlServiceId)
       // The identity service, which the sign-in routes call one hop inward. It is the one service whose
       // contract the gateway does *not* proxy: a login is the moment a browser is given a session, and
       // sessions live here, so `AuthRoutes` serves `/api/v1/auth/*` itself and calls this client.
@@ -247,6 +253,7 @@ object GatewayWiring {
           search.toList.flatMap(SearchRoutes[F](_)) ++
           messages.toList.flatMap(MessageStreamRoutes[F](_)) ++
           alerts.toList.flatMap(AlertsStreamRoutes[F](_, rbac)) ++
+          ksql.toList.flatMap(KsqlStreamRoutes[F](_, rbac)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath)),
         identity
@@ -396,6 +403,12 @@ object GatewayWiring {
     * contract-derived proxy routes.
     */
   val AlertsServiceId: ServiceId = ServiceId.unsafe("alerts")
+
+  /** The service whose push query is relayed. Its object listing, statement plan and statement apply remain
+    * ordinary contract-derived proxy routes; only the unbounded query result needs this client mounted
+    * separately, because a route that decoded and re-encoded it would never answer.
+    */
+  val KsqlServiceId: ServiceId = ServiceId.unsafe("ksql")
 
   /** Which search source a client answers for, or none when the search does not fold over that service.
     *

@@ -37,6 +37,42 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
   private def opening(events: List[AlertEvent]): Evaluation =
     Evaluation(events, Nil, Nil, AlertRuleState.empty, AlertRule.All.map(RuleReport(_, RuleOutcome.evaluated)))
 
+  /** Two clusters nobody asserts about, which is what makes the publication cases exact. */
+  private val warmUp = ClusterId.unsafe("warm-up")
+  private val sentinel = ClusterId.unsafe("sentinel")
+
+  /** Every frame `writes` caused for [[cluster]], and no other frame at all.
+    *
+    * ==Three timing assumptions, all removed==
+    *
+    * These cases used to count frames against a baseline read at a moment chosen by a sleep, and one of
+    * them **failed under load**: measured here, `an acknowledgement publishes a frame` failed inside
+    * `./mill services.connect.__.test + services.alerts.__.test + services.metrics.__.test` and passed
+    * when `services.alerts.infrastructure.test` ran alone. The cause was not the store. It was that the
+    * seeding loop can publish more than once before the first frame is observed, so the baseline is taken
+    * with frames still in the subscriber's queue and the case that expects `before + 1` sees `before + 2`.
+    *
+    * So: `changes` subscribes when its stream is *pulled* and `.start` only schedules the fibre, so the
+    * subscription is confirmed live by recording on `warmUp` until a `warmUp` frame arrives. Whatever that
+    * loop published is on a cluster this method filters out. `writes` then runs on [[cluster]]. Finally a
+    * record on `sentinel` closes the sequence and the wait is for **that** frame: fs2's `Topic` delivers to
+    * one subscriber in publication order, so a sentinel frame in hand proves every earlier frame is in
+    * hand too. Counting [[cluster]]'s frames after that is exact rather than a sleep-and-look, and a
+    * publication that was dropped fails the count rather than a timeout.
+    */
+  private def framesFor(held: InMemoryAlertStore[IO])(writes: IO[Unit]): IO[List[ClusterId]] =
+    for {
+      seen <- Ref.of[IO, List[ClusterId]](Nil)
+      watching <- held.changes.evalMap(id => seen.update(_ :+ id)).compile.drain.start
+      _ <- (held.record(warmUp, opening(List(event("warm-up:/probe", at))), at) >> IO.sleep(20.millis))
+        .untilM_(seen.get.map(_.contains(warmUp)))
+      _ <- writes
+      _ <- held.record(sentinel, opening(List(event("sentinel:/probe", at))), at)
+      _ <- IO.sleep(10.millis).untilM_(seen.get.map(_.contains(sentinel)))
+      frames <- seen.get
+      _ <- watching.cancel
+    } yield frames.filter(_ == cluster)
+
   test("an event older than the retention window is dropped on the next pass") {
     val stale = event("broker-1:/old", at.minusMillis(retention.toMillis + 1000L))
     val fresh = event("broker-1:/new", at)
@@ -205,30 +241,98 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
 
   test("an acknowledgement publishes a frame, so the bell moves without a reload") {
     // The service's one write, and the only thing an SSE subscriber can be woken by that is not a rule
-    // pass. `record`'s publication has a case above; dropping `acknowledge`'s left every case green,
-    // which means acknowledging on one tab would leave every other tab's bell showing the old count
-    // until its next poll.
+    // pass. `record`'s publication has two cases of its own in this file; dropping `acknowledge`'s left
+    // every case green, which means acknowledging on one tab would leave every other tab's bell showing
+    // the old count until its next poll.
     //
-    // Deterministic in the same way as the case above: the subscription is confirmed live by recording
-    // until a frame arrives, and only then is the acknowledgement made. The wait is bounded so that a
-    // store which publishes nothing fails on the count rather than on the suite's timeout.
+    // The event is seeded *before* the subscription, so the only write this cluster's frames can come
+    // from is the acknowledgement. See `framesFor` for why no part of this is timed.
     val open = event("broker-1:/var", at)
 
     store.use { held =>
       for {
-        seen <- Ref.of[IO, List[ClusterId]](Nil)
-        watching <- held.changes.evalMap(id => seen.update(_ :+ id)).compile.drain.start
-        _ <- (held.record(cluster, opening(List(open)), at) >> IO.sleep(20.millis))
-          .untilM_(seen.get.map(_.nonEmpty))
-        before <- seen.get.map(_.size)
-        closed <- held.acknowledge(cluster, open.id, at.plusSeconds(30), "ada")
-        _ <- IO.sleep(20.millis).untilM_(seen.get.map(_.size > before)).timeoutTo(2.seconds, IO.unit)
-        after <- seen.get
-        _ <- watching.cancel
+        _ <- held.record(cluster, opening(List(open)), at)
+        closed <- Ref.of[IO, Option[Boolean]](None)
+        frames <- framesFor(held)(
+          held.acknowledge(cluster, open.id, at.plusSeconds(30), "ada").flatMap { answer =>
+            closed.set(answer.map(_.isOpen).toOption)
+          }
+        )
+        acknowledged <- closed.get
       } yield {
-        assertEquals(closed.map(_.isOpen), Right(false))
-        assertEquals(after.size, before + 1, clue = "the acknowledgement woke no subscriber")
-        assertEquals(after.distinct, List(cluster))
+        assertEquals(acknowledged, Some(false))
+        assertEquals(frames, List(cluster), clue = "the acknowledgement woke no subscriber")
+      }
+    }
+  }
+
+  test("a pass that only resolves an event publishes a frame, so a cleared bell clears itself") {
+    // **The rule this packet owns.** `record`'s publication is guarded by
+    // `opened.nonEmpty || resolved.nonEmpty`, and every other case that records only ever *opens* an
+    // event — so deleting
+    // the `|| evaluation.resolved.nonEmpty` half left every alerts task SUCCESS. Under that deletion the
+    // condition clearing itself is the one thing an operator never sees without a reload: the pill stays
+    // red and the bell stays lit on a cluster whose disk went back under the threshold, until the next
+    // pass happens to open something else.
+    //
+    // The event is seeded before the subscription, so the only write this cluster's frames can come from
+    // is the resolving pass. See `framesFor` for why no part of this is timed.
+    val open = event("broker-1:/var", at)
+
+    store.use { held =>
+      for {
+        _ <- held.record(cluster, opening(List(open)), at)
+        // Nothing opened, nothing refreshed: the only change this pass carries is the resolution.
+        frames <- framesFor(held)(
+          held.record(
+            cluster,
+            Evaluation(Nil, Nil, List(open.id), AlertRuleState.empty, Nil),
+            at.plusSeconds(60)
+          )
+        )
+        feed <- held.feed(cluster, ada, 100, None)
+      } yield {
+        assertEquals(feed.openCount, 0, clue = "the fixture did not actually resolve the event")
+        assertEquals(frames, List(cluster), clue = "a pass that only resolved an event woke no subscriber")
+      }
+    }
+  }
+
+  test("the read-marker cache holds the bound it was built with, so a marker survives a full cache") {
+    // **The rule this packet owns.** `MaxReadMarkers` is handed to `BoundedCache.make` and nothing
+    // observed it: lowering it from 2000 to 2 left every alerts task SUCCESS, and under that a deployment
+    // with three people watching alert feeds would have the third read evict the first person's marker and
+    // relight a bell they had already cleared.
+    //
+    // Written from *both* directions, because only one of them can be behavioural. The lower direction is:
+    // a marker written first is still readable after `MaxReadMarkers` distinct principals have written
+    // theirs — Caffeine evicts nothing while the entry count is at or under the maximum, so this is exact
+    // rather than approximate, and it fails for any bound the store actually passes that is smaller than
+    // the constant. The upper direction cannot be behavioural here: Caffeine evicts *approximately*
+    // (`BoundedCache.make`'s own scaladoc) and this store exposes no `stats`, so a raised bound is caught by
+    // the literal instead — 2000 written out, not `MaxReadMarkers` compared with itself, which is the
+    // mistake `MaxEventsPerCluster`'s case above names.
+    val principals =
+      (1 until InMemoryAlertStore.MaxReadMarkers.toInt).toList
+        .map(index => Principal(UserName.unsafe(s"reader-$index"), Set.empty, PrincipalKind.Session))
+
+    store.use { held =>
+      for {
+        _ <- held.record(cluster, opening(List(event("broker-1:/var", at))), at)
+        // ada is the first of exactly `MaxReadMarkers` principals to write a marker.
+        _ <- held.feed(cluster, ada, 0, Some(at.plusSeconds(60)))
+        _ <- principals.foldLeft(IO.unit)((written, reader) =>
+          written >> held.feed(cluster, reader, 0, Some(at.plusSeconds(60))).void
+        )
+        hers <- held.feed(cluster, ada, 100, None)
+      } yield {
+        assertEquals(InMemoryAlertStore.MaxReadMarkers, 2000L)
+        assertEquals(
+          hers.lastReadAt,
+          Some(at.plusSeconds(60)),
+          clue = s"${principals.size + 1} markers evicted the first one, so the bound is not 2000"
+        )
+        assertEquals(hers.unreadCount, 0)
       }
     }
   }
@@ -299,27 +403,16 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
   }
 
   test("a pass that changed nothing publishes no frame, so an idle cluster does not wake every bell") {
-    // Deterministic rather than timed. The subscription is confirmed live by publishing until a frame
-    // arrives; then a no-change pass and a change are published in that order, and the Topic delivers in
-    // order — so if the no-change pass had published, the count would have risen by two by the time the
-    // change's frame arrived. A sleep-and-look would have given a false pass on a loaded machine, which is
-    // what this case did on its first run under `./scripts/run-tests.sh`.
+    // A no-change pass and a change, published in that order on the same cluster. `framesFor` waits for
+    // the sentinel, which fs2's `Topic` delivers after both, so the answer is the complete list: one
+    // frame if only the change published, two if the empty pass published as well. A sleep-and-look
+    // would have given a false pass on a loaded machine, which is what this case did on its first run
+    // under `./scripts/run-tests.sh`.
     store.use { held =>
-      for {
-        seen <- Ref.of[IO, List[ClusterId]](Nil)
-        watching <- held.changes.evalMap(id => seen.update(_ :+ id)).compile.drain.start
-        _ <- (held.record(cluster, opening(List(event("broker-1:/probe", at))), at) >> IO.sleep(20.millis))
-          .untilM_(seen.get.map(_.nonEmpty))
-        before <- seen.get.map(_.size)
-        _ <- held.record(cluster, Evaluation(Nil, Nil, Nil, AlertRuleState.empty, Nil), at)
-        _ <- held.record(cluster, opening(List(event("broker-1:/var", at))), at)
-        _ <- IO.sleep(20.millis).untilM_(seen.get.map(_.size > before))
-        after <- seen.get
-        _ <- watching.cancel
-      } yield {
-        assertEquals(after.size, before + 1)
-        assertEquals(after.distinct, List(cluster))
-      }
+      framesFor(held)(
+        held.record(cluster, Evaluation(Nil, Nil, Nil, AlertRuleState.empty, Nil), at) >>
+          held.record(cluster, opening(List(event("broker-1:/var", at))), at)
+      ).map(frames => assertEquals(frames, List(cluster)))
     }
   }
 }

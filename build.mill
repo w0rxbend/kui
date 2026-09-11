@@ -534,7 +534,11 @@ object libs extends Module {
         // The registry is stubbed rather than run: every promise this module makes about a registry
         // that answers 404, answers rubbish or does not answer at all is a promise about a response,
         // and a real registry is the slowest possible way to produce one.
-        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}"
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        // `TestControl`, for a deterministic TTL clock. W8-A1 asked for this edge in wave 7 and could
+        // not land it, because `build.mill` belonged to no packet that wave; it is landed here with the
+        // wave's other edges (house rule 15) rather than by the packet that needs it.
+        mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
       )
     }
   }
@@ -1476,6 +1480,12 @@ object services extends Module {
         // built, the row was written, and the edge between them was nobody's. A partition over files does
         // not partition the edges between them.
         connect.contract.jvm,
+        // The ksql service's contract, and the eleventh entry. Landed by the packet that owns
+        // `build.mill` **before** any of its own work, like the tenth, and for the same reason: the
+        // edge between a service's module and the gateway's routing row belonged to no packet in wave 6
+        // and `services/alerts` shipped complete and unroutable. The push query's endpoint is in this
+        // module's JVM half so that the gateway can hold the value its relay is written against.
+        ksql.contract.jvm,
         // The identity service's contract. Alone among them it is *not* proxied: `AuthRoutes` calls its
         // login, password and OpenID Connect endpoints itself, because a sign-in has to end in a session
         // cookie and sessions live at the gateway.
@@ -3103,6 +3113,226 @@ object services extends Module {
     }
   }
 
+  /** `kui-ksql-service`: ksqlDB's streams, tables and queries, one statement at a time, and a push query
+    * that is genuinely a stream.
+    *
+    * The **eleventh** and last new service in this plan, written against `services/connect` as the worked
+    * example because the two have the same shape: an optional HTTP upstream per cluster, no Kafka client of
+    * its own, and nothing remembered between requests. It differs from it in exactly two ways, and both are
+    * visible in the module list below.
+    *
+    * It has a **stream**, and the stream's endpoint therefore lives in the contract module's JVM half —
+    * `services/alerts` and `services/message` are in the same position and for the same reason: the gateway
+    * may see a service only through its published contract (rules A4, A11), and a relay has to be written
+    * against an endpoint value the gateway can hold. House rule 16 is what makes that a requirement rather
+    * than a preference.
+    *
+    * It has a **destructive mutation**, so `application` carries a plan token (ADR-045) and needs a signing
+    * key — `services/topic` is the shape that was copied, down to reusing ADR-026's cursor key so that a
+    * deployment configures one secret rather than two.
+    */
+  object ksql extends Module {
+
+    /** What a ksqlDB object and a ksqlDB statement *are*, and nothing that can perform I/O.
+      *
+      * Rule A1 allows it `libs/kernel` and cats-core. The statement classifier lives here rather than in
+      * `infrastructure` because "is this a push query" and "does this drop a topic" are decisions the whole
+      * service is shaped around — the first decides which endpoint answers, the second decides whether a
+      * plan token is required — and a decision taken in an adapter is one the use case cannot assert.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The use cases: list the objects, run one statement, plan a destructive one, and open a push query.
+      *
+      * `libs.securityCore.jvm` is here for `Principal`, `MutationOutcome` and `AuditPrincipal`, which ADR-047
+      * declares once for every service that writes an audit record. `fs2` is here because a push query *is* a
+      * stream of rows and the use case is what produces it; the SSE framing stays in `api`.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.kernel.jvm, libs.securityCore.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The adapters: ksqlDB's REST API, the credentials it wants, and the audit line a statement writes.
+      *
+      * `libs.config` carries `KsqlSettings`, which is the only place a ksqlDB address exists. There is no
+      * `libs.cache` and no `libs.kafka`: nothing here is remembered between requests and nothing here speaks
+      * to a broker.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps = Seq(domain, application, libs.config, libs.kernel.jvm, libs.http, libs.observability)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification, the
+      * SSE framing and the OpenAPI document. It starts nothing.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.ksql.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.ksql.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // The stub interpreter runs the real interceptor chain and the real routes without a socket,
+          // which is the only way to assert that a permission refusal happens *before* the ksqlDB server
+          // is called rather than that a use case would have refused if it had been reached.
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the ksql service that constructs anything concrete. */
+    object app extends KuiJvmModule {
+      def moduleDeps = Seq(api, infrastructure, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code, and all are needed by a process with a `main`.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The published wire shape of `kui-ksql-service`, cross-compiled so the browser decodes exactly what
+      * this service encodes, from one source (ADR-003).
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        // `src-jvm` holds the one endpoint that cannot be cross-compiled: the push query, whose body is
+        // an event stream and therefore needs `fs2` and a stream capability. It is in the *contract*
+        // module rather than in `api` because the gateway may see a service only through its published
+        // contract (rules A4 and A11), and the gateway is what has to hold this endpoint value in order
+        // to relay it — `services/alerts` and `services/message` are in the same position. The browser
+        // loses nothing: it opens the address with `EventSource`, and the frames' DTOs are declared in
+        // the shared sources.
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"co.fs2::fs2-core::${Versions.fs2}",
+          // For `sttp.capabilities.fs2.Fs2Streams`. It arrives through the sttp client's fs2 module,
+          // which is the coordinate this build already pins for it everywhere else.
+          mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}"
+        )
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+    }
+  }
+
 }
 
 /** Deployable processes assembled out of the modules above.
@@ -3165,6 +3395,13 @@ object apps extends Module {
       // an edge with no owner is invisible to every gate here (house rule 15).
       services.connect.app,
       services.connect.api,
+      // The ksql service, the eleventh. Same argument as the connect service's, plus one of its own: it
+      // is the only optional service in this binary that serves a *stream*, so a deployment that left it
+      // out would draw a ksqlDB screen whose push query opens a socket to nothing. The edge is landed
+      // with the module rather than by the packet that writes the `AllInOneWiring` entry, because that
+      // packet does not own `build.mill` (house rule 15).
+      services.ksql.app,
+      services.ksql.api,
       libs.config,
       libs.observability,
       libs.http
@@ -3596,6 +3833,21 @@ object deployment extends Module {
       def entryClass       = "kui.connect.app.Main"
       def livenessPath     = "/health/live"
       def imageDescription = "KUI Kafka Connect service"
+    }
+
+    /** The ksqlDB service: the objects, one statement at a time, and the push query.
+      *
+      * Packaged like every other service even though most deployments configure no ksqlDB at all, for the
+      * connect image's reason: running it then answers `not_configured` per cluster, which is the fact the
+      * browser needs in order to hide the row rather than draw one that can never fill. The image target is
+      * named here because the packet that adds the container cannot edit this file (house rule 15).
+      */
+    object ksql extends KuiImage {
+      def deployable       = services.ksql.app
+      def imageName        = "kui-ksql"
+      def entryClass       = "kui.ksql.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI ksqlDB service"
     }
 
     /** The whole product in one process (ADR-005). */

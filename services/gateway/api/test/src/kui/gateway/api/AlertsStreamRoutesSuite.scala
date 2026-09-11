@@ -1,8 +1,9 @@
 package kui.gateway.api
 
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.effect.{Deferred, IO, Ref}
 import fs2.Stream
@@ -84,6 +85,32 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
       .send(server.backend)
       .flatMap(response => response.body.compile.to(Array).map(response.code.code -> _))
 
+  /** The status, and whatever body arrives within [[BodyWindow]].
+    *
+    * A refusal's envelope is a finite body and arrives whole, so the window costs the passing path nothing:
+    * `compile` returns the moment the stream ends. A *subscription* never ends, so a case asserting a
+    * refusal must not read to completion — under a widened permission requirement the caller is let
+    * through, the body stays open, and the case fails as a wall-clock timeout naming nothing instead of on
+    * the `403` assertion it was written for. Interrupting turns that back into an assertion failure.
+    */
+  private def boundedRead(server: GatewayTestServer.Running): IO[(Int, String)] =
+    basicRequest
+      .get(server.at(path))
+      .response(asStreamAlwaysUnsafe(Fs2Streams[IO]))
+      .send(server.backend)
+      .flatMap(response =>
+        response.body
+          .interruptAfter(BodyWindow)
+          .compile
+          .to(Array)
+          .map(bytes => response.code.code -> new String(bytes, StandardCharsets.UTF_8))
+      )
+
+  /** Long enough for a refusal envelope to cross a loopback listener, short enough that a stream left open
+    * by a permission mistake is reported in seconds rather than at the suite's 30-second ceiling.
+    */
+  private val BodyWindow: FiniteDuration = 2.seconds
+
   test("the public route keeps the alerts endpoint identity and rewrites only its prefix") {
     val internal = AlertsStreamEndpoint.endpoint[IO]
     val public = AlertsStreamRoutes.publicEndpoint[IO]
@@ -131,6 +158,53 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
       assertEquals(calls.map(_.endpoint), List("alerts.stream"))
       assertEquals(calls.map(_.path), List("/internal/v1/clusters/{clusterId}/alerts/stream"))
       assertEquals(calls.flatMap(_.context.cluster), List(cluster))
+    }
+  }
+
+  test("an alerts stream that ends without a terminal event reaches the browser as an error frame") {
+    // The one product promise in `AlertsStreamRoutes`: a browser never sees an SSE connection just stop.
+    // `StreamProxySuite` exercises `withTerminalEvent` in isolation and nothing asserted that the relay
+    // *uses* it — replacing `StreamProxy.withTerminalEvent(upstream, …)` in `relay` with a bare `upstream`
+    // left the whole gateway suite green, so the rule the file is written around was held by nobody.
+    //
+    // The upstream here ends the way a killed alerts process ends: one real event, then the body simply
+    // finishes. There is no `done` and no `error`, which is exactly the state ADR-035 forbids a client from
+    // having to interpret, and the assertion is made on the bytes that left the gateway rather than on any
+    // intermediate value, because the byte stream is the whole of what a relay produces.
+    val source = Stream.emit(
+      SseEvent.data(
+        AlertsStreamEndpoint.EventName,
+        AlertChangeDto(cluster.value, 4, Instant.parse("2026-09-08T09:58:00Z")).asJson
+      )
+    ).covary[IO]
+
+    for {
+      built <- client(source)
+      (upstream, _) = built
+      answer <- GatewayTestServer
+        .resource(extraRoutes = AlertsStreamRoutes[IO](upstream, RbacPreCheck.allowAll[IO]))
+        .use(request)
+      (status, body) = answer
+    } yield {
+      assertEquals(status, 200)
+
+      val frames = SseFrames.parse(body)
+      assertEquals(
+        frames.map(_.name),
+        List(AlertsStreamEndpoint.EventName, "error"),
+        "the upstream's own event must be relayed unchanged and the missing terminal supplied after it"
+      )
+
+      val envelope = SseFrames.terminalError(body)
+      // The upstream is named, because "something went away" and "the alerts service went away" are
+      // different sentences to the person reading the bell, and `AlertsStreamRoutes.Upstream` is what
+      // decides which one they get.
+      assertEquals(envelope.code, "KUI-UPSTREAM-UNAVAILABLE")
+      assert(
+        envelope.message.contains(AlertsStreamRoutes.Upstream),
+        s"the terminal frame does not say which upstream went away: ${envelope.message}"
+      )
+      assert(envelope.retryable, "an upstream that went away is worth reconnecting to")
     }
   }
 
@@ -205,9 +279,15 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
       (upstream, opened) = built
       check = (policy: RbacPolicy) =>
         new PolicyRbacPreCheck[IO](policy, _ => IO.pure(ClusterFlags.Writable), logger)
+      // Read as a *stream*, and only the first frame of it. `_.get(path)` reads the body to completion,
+      // which is fine for a 403 — the envelope is one short body — and a hang for a 200, because the
+      // allowed shape of this route is a subscription that stays open. So the failure a widened
+      // requirement produced was `TimeoutException: test timed out after 31 seconds` rather than the
+      // `403`/`KUI-FORBIDDEN` assertion below: the rule was gated, and the sentence a maintainer got was
+      // "timeout". Bounding the read costs the case nothing and makes the diagnosis the assertion.
       refused <- GatewayTestServer
         .resource(extraRoutes = AlertsStreamRoutes[IO](upstream, check(everythingButAlerts)))
-        .use(_.get(path))
+        .use(boundedRead)
       afterRefusal <- opened.get
       allowedResponse <- GatewayTestServer
         .resource(extraRoutes = AlertsStreamRoutes[IO](upstream, check(alertsViewOnly)))
@@ -220,8 +300,9 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
         }
       afterAllowance <- opened.get
     } yield {
-      assertEquals(refused.code.code, 403, refused.body)
-      val envelope = decode[ErrorEnvelope](refused.body).fold(error => fail(error.getMessage), identity)
+      val (refusedStatus, refusedBody) = refused
+      assertEquals(refusedStatus, 403, refusedBody)
+      val envelope = decode[ErrorEnvelope](refusedBody).fold(error => fail(error.getMessage), identity)
       assertEquals(envelope.code, "KUI-FORBIDDEN")
       // The point of the case: the subscription is never opened, so a caller who may not read the feed
       // costs the alerts service nothing at all — no connection, no fiber, no `Topic` subscriber to leak.

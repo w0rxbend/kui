@@ -25,7 +25,7 @@ final class ArchitectureDocumentSuite extends FunSuite {
   /** The one file `checkArchitecture` derives its rule set from. */
   private val ruleSource: String = read("build-tests/src/kui/build/ArchitectureRules.scala")
 
-  private val gatewayModuleDeps: String = moduleDepsOfGatewayApi()
+  private val gatewayModuleDeps: List[String] = moduleDepsOfGatewayApi()
 
   /** Every `services/<name>` directory, which is the roster every claim below is measured against. */
   private val services: List[String] =
@@ -65,6 +65,59 @@ final class ArchitectureDocumentSuite extends FunSuite {
             "service that does not exist has to say so in words"
         )
     }
+  }
+
+  test("everyPortTraitInAServicesDomainIsNamedInItsRow") {
+    // The other direction, and the one the check above structurally cannot make. It reads the row and asks
+    // the tree; nothing asked the tree and read the row, so *omission* was invisible: deleting
+    // `ClusterFactsPort[F]` from the alerts row left this suite 6/6 green and the emptied cell then read as
+    // a service with no outbound ports at all. That is the identical failure mode `ServiceContracts`' own
+    // comments call out for endpoint lists — a list that is missing an entry looks exactly like a list that
+    // never had one — and a table of ports is a worse place for it than a list of endpoints, because a
+    // missing route 404s and a missing row just misleads a newcomer.
+    val rows = serviceRows.toMap
+
+    otherServices.foreach { service =>
+      val domain = repositoryRoot.resolve(s"services/$service/domain/src")
+
+      if Files.isDirectory(domain) then {
+        val named = rows.get(service).map(identifiersIn).getOrElse(Nil).toSet
+
+        traitsDeclaredIn(domain).toList.sorted.foreach(port =>
+          assert(
+            named.contains(port),
+            s"services/$service/domain/src declares `$port[F]` and ARCHITECTURE.md §3's $service row " +
+              s"does not name it. Named there: ${named.toList.sorted.mkString(", ")}"
+          )
+        )
+      }
+    }
+  }
+
+  test("theRosterOfDomainOwningServicesIsTheRosterOnDisk") {
+    // §3's prose used to open with a count — "six of the eight built services" — that had been wrong for two
+    // waves, because `services/connect` and then `services/ksql` arrived and no arithmetic anywhere was
+    // rerun. A count in prose is the cheapest thing in a document to get wrong and the hardest to notice,
+    // so the sentence now carries the roster itself and this reads it. The list is the gate, not the
+    // number: a name added to the tree and not to the sentence fails here, and so does the reverse.
+    val anchor = "**These services own a `domain`**"
+    val start = document.indexOf(anchor)
+
+    assert(start >= 0, s"ARCHITECTURE.md §3 no longer opens its roster sentence with $anchor")
+
+    val fromDash = document.indexOf('—', start + anchor.length)
+    val toDash = document.indexOf('—', fromDash + 1)
+
+    assert(fromDash > 0 && toDash > fromDash, "§3's roster sentence is no longer delimited by em dashes")
+
+    val named = "`([a-z]+)`".r
+      .findAllMatchIn(document.substring(fromDash, toDash))
+      .map(_.group(1))
+      .toSet
+    val onDisk =
+      otherServices.filter(service => Files.isDirectory(repositoryRoot.resolve(s"services/$service/domain")))
+
+    assertEquals(named, onDisk.toSet)
   }
 
   test("everyBuiltServiceHasARowInTheServiceTable") {
@@ -125,7 +178,11 @@ final class ArchitectureDocumentSuite extends FunSuite {
     // module the document used to name.
     List(
       "services/alerts/contract/src-jvm/" -> "kui/alerts/contract/AlertsStreamEndpoint.scala",
-      "services/message/contract/src-jvm/" -> "kui/message/contract/MessageEndpoints.scala"
+      "services/message/contract/src-jvm/" -> "kui/message/contract/MessageEndpoints.scala",
+      // The third relay, and the eleventh service's. It is here for the same reason as the two above it:
+      // a push query never finishes, so it cannot be a derived proxy route, and the endpoint value the
+      // relay is written against has to sit where rule A4 lets the gateway see it.
+      "services/ksql/contract/src-jvm/" -> "kui/ksql/contract/KsqlStreamEndpoint.scala"
     ).foreach { (documented, file) =>
       assert(document.contains(documented), s"ARCHITECTURE.md §3 no longer names $documented")
       assert(
@@ -156,9 +213,44 @@ final class ArchitectureDocumentSuite extends FunSuite {
         assert(
           gatewayModuleDeps.contains(s"$service.contract.jvm"),
           s"services/$service publishes a contract module and services.gateway.api does not depend on " +
-            s"$service.contract.jvm, so the gateway cannot name a single one of its endpoint values"
+            s"$service.contract.jvm, so the gateway cannot name a single one of its endpoint values. " +
+            s"Declared there: ${gatewayModuleDeps.mkString(", ")}"
         )
       )
+  }
+
+  test("theGatewaysModuleDepsBlockWasReadAsABlockOfModuleDependencies") {
+    // What the case above stands on, asserted rather than assumed. Until wave 8 the block was cut out of
+    // `build.mill` by `build.indexOf("\n      )", start)` — a six-space-indented closing paren — and the
+    // membership question was `String.contains`. Two ways for that to be wrong and both are quiet:
+    // reformatting the block changes the indentation, so the cut runs on to some later paren and the text
+    // examined is most of the build file, in which every `<service>.contract.jvm` is trivially present; or
+    // the cut stops early and the check reads a prefix, in which case an edge that is really there is
+    // reported missing. A gate whose input can be silently the wrong region can only ever go quiet.
+    //
+    // So the block is now taken by balancing the parentheses of `Seq(` and split into entries, and this
+    // case asserts the result is what a module-dependency list looks like: dotted identifiers, nothing
+    // else. A reformat that this reader cannot make sense of fails here, loudly, naming the block.
+    assert(gatewayModuleDeps.nonEmpty, "services.gateway.api's moduleDeps block parsed as no entries")
+
+    gatewayModuleDeps.foreach(entry =>
+      assert(
+        entry.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*"),
+        s"`$entry` is not a module path, so the region read out of build.mill is not a moduleDeps block; " +
+          s"the whole block parsed as: ${gatewayModuleDeps.mkString(", ")}"
+      )
+    )
+
+    // The three the gateway cannot work without, named so that a block which parsed cleanly but came from
+    // the wrong module — there are ten modules called `api` in this build — is caught here rather than by
+    // whichever service's edge happens to be missing that wave.
+    List("application", "contract.jvm", "libs.http").foreach(entry =>
+      assert(
+        gatewayModuleDeps.contains(entry),
+        s"the block read as services.gateway.api's moduleDeps does not contain `$entry`, so it is " +
+          s"probably some other module's: ${gatewayModuleDeps.mkString(", ")}"
+      )
+    )
   }
 
   /** The `| service | aggregates | ports | adapters |` rows of §3's per-service table, as (service, ports).
@@ -201,23 +293,63 @@ final class ArchitectureDocumentSuite extends FunSuite {
       .flatMap(line => "^\\| (A\\d+) \\|".r.findFirstMatchIn(line).map(_.group(1)))
       .toSet
 
-  /** `services.gateway.api`'s `moduleDeps` block, taken from `build.mill` by its build-info package name.
+  /** `services.gateway.api`'s declared module dependencies, one entry per element of its `Seq(...)`.
     *
     * Anchoring on `buildInfoPackage = "kui.gateway.api"` rather than on `object api` is what makes this
     * exact: ten modules in the build are called `api` and only one of them is the gateway's.
+    *
+    * The block is closed by **balancing the parentheses** rather than by searching for a closing paren at a
+    * particular indentation, which is what the first version did. Indentation is a formatter's business —
+    * `./mill __.checkFormat` may move it at any time and nothing here would be told — and a cut that lands
+    * in the wrong place produces either a region far too large (in which every service's contract module is
+    * trivially "present") or one far too small (in which a real edge is reported missing). Balanced parens
+    * are a property of the language rather than of the layout, so the region is right or the read fails.
     */
-  private def moduleDepsOfGatewayApi(): String = {
+  private def moduleDepsOfGatewayApi(): List[String] = {
     val build = read("build.mill")
     val anchor = build.indexOf("""buildInfoPackage = "kui.gateway.api"""")
 
     assert(anchor >= 0, "build.mill no longer identifies the gateway's api module by its build-info package")
 
-    val start = build.indexOf("def moduleDeps = Seq(", anchor)
-    val end = build.indexOf("\n      )", start)
+    val opening = "def moduleDeps = Seq("
+    val start = build.indexOf(opening, anchor)
 
-    assert(start >= 0 && end > start, "services.gateway.api's moduleDeps block could not be read")
-    build.substring(start, end)
+    assert(start >= 0, "services.gateway.api declares no `def moduleDeps = Seq(` block")
+
+    entriesOf(balancedBody(build, start + opening.length))
   }
+
+  /** The text between an already-opened `(` and the `)` that closes it. */
+  private def balancedBody(text: String, from: Int): String = {
+    var depth = 1
+    var index = from
+
+    while index < text.length && depth > 0 do {
+      text.charAt(index) match {
+        case '(' => depth += 1
+        case ')' => depth -= 1
+        case _ => ()
+      }
+      index += 1
+    }
+
+    assert(depth == 0, "services.gateway.api's moduleDeps block has no closing parenthesis")
+    text.substring(from, index - 1)
+  }
+
+  /** The elements of a `Seq(...)` body: line comments dropped, then split on commas.
+    *
+    * Splitting on commas rather than on lines so that the reader survives a formatter deciding the list fits
+    * on one. A comma inside an element would break this, and a module path cannot contain one.
+    */
+  private def entriesOf(body: String): List[String] =
+    body.linesIterator
+      .map(line => line.indexOf("//") match { case -1 => line; case at => line.take(at) })
+      .mkString("\n")
+      .split(',')
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .toList
 
   private def read(relative: String): String = {
     val file = repositoryRoot.resolve(relative)

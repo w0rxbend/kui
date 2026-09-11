@@ -168,6 +168,45 @@ describe("the Connect address", () => {
 });
 
 /**
+ * ksqlDB, `ECOSYSTEM`'s third row and the eleventh service's address.
+ *
+ * The same three cases Connect has, and for the same reason: `@kui/feature-ksql` ships the screen
+ * and the shell ships the address, so the two are written in different packages and nothing in the
+ * type system joins them. The third case is the one that has caught a real defect twice — a pattern
+ * aimed at the wrong feature still matches, `landingFor` still builds the link, and the drawer
+ * still marks ksqlDB as current, while the content area draws somebody else's screen.
+ */
+describe("the ksqlDB address", () => {
+  const router = createShellRouter("", views);
+
+  it("resolves the address the drawer's ksqlDB row links to", () => {
+    const link = landingFor(router, "ksql", "prod-kyiv-01");
+    expect(link).toBe("/ui/clusters/prod-kyiv-01/ksql");
+    const leaf = router.match(link!).at(-1);
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId/ksql");
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("has nowhere to point until a cluster is chosen", () => {
+    /* `/ui/clusters//ksql` collapses to `/ui/clusters/ksql`, which lands in the cluster list's own
+       neighbourhood rather than on a workspace. The row stays out of the drawer instead. */
+    expect(landingFor(router, "ksql", undefined)).toBeUndefined();
+  });
+
+  it("draws the ksql feature there, and not the one whose route it was copied from", () => {
+    expect(featureBindings(taggedRouter()).get("/ui/clusters/:clusterId/ksql")).toBe("ksql");
+  });
+
+  it("puts no object name in the address: a selection is not a page", () => {
+    /* §3.16's two panes are one workspace. A `/ksql/:stream` sibling would make the left pane a
+       navigation, and the first thing to break would be the editor's contents on every click. */
+    expect(router.match("/ui/clusters/prod/ksql/PAGEVIEWS_ENRICHED").at(-1)?.pattern).toBe(
+      NotFoundPattern,
+    );
+  });
+});
+
+/**
  * Alerts is a route, not a dashboard tab, and the address the drawer links to is the one the
  * router resolves.
  *
@@ -232,6 +271,7 @@ describe("the alerts address", () => {
       "/ui/clusters/:clusterId/consumer-groups/:groupId": "consumers",
       "/ui/clusters/:clusterId/alerts": "alerts",
       "/ui/clusters/:clusterId/connect": "connect",
+      "/ui/clusters/:clusterId/ksql": "ksql",
       "/ui/clusters/:clusterId/schemas": "schemas",
       "/ui/clusters/:clusterId/schemas/:subject": "schemas",
     });

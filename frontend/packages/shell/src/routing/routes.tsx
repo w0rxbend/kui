@@ -161,6 +161,14 @@ export function shellRoutes(views: RouteViews) {
                is selected inside the screen, and a selection is not a page, which is also what
                keeps the connector's own name out of an address an operator would paste. */
             { path: "/connect", component: gate("connect") },
+            /* ksqlDB (M9's second service, and `ECOSYSTEM`'s third row), on the same shape as
+               Connect and Alerts: one address, no parameters below it. A stream or a table is
+               *selected* inside the workspace and a selection is not a page — which also keeps an
+               object name out of an address an operator would paste, and keeps the push-query
+               editor's state where it belongs, in the screen rather than in the URL. §3.16 draws
+               the two panes as one workspace; two addresses would make the left pane a navigation
+               and the right one a page, which is not what the capture shows. */
+            { path: "/ksql", component: gate("ksql") },
             {
               path: "/schemas",
               children: [
@@ -227,6 +235,8 @@ export function landingFor(
       return cluster === undefined ? undefined : paths.clusters(cluster).alerts();
     case "connect":
       return cluster === undefined ? undefined : paths.clusters(cluster).connect();
+    case "ksql":
+      return cluster === undefined ? undefined : paths.clusters(cluster).ksql();
     case "messages":
       // Its URL names a topic as well as a cluster, and the navigation has no topic to name.
       return undefined;

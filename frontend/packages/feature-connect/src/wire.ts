@@ -49,7 +49,7 @@
  * `0 msg/s`, and §3.14's own *Absent* paragraph is the rule being kept: a literal zero on a paused
  * connector is a measured zero, and an unmeasured one must never look like it.
  */
-import { decodeSection, type Section } from "@kui/api";
+import { ReasonCodes, decodeSection, type Section } from "@kui/api";
 
 /** The connector states this build draws. Anything else the worker says becomes `UNKNOWN`. */
 export type ConnectorRunState =
@@ -157,8 +157,16 @@ export interface ConnectorListing {
  */
 export const CONNECTORS_SECTION_KEY = "connectors";
 
-/** The reason code a rebalancing worker's section carries. See {@link WorkerAnswer}. */
-export const REBALANCING_REASON_CODE = "STARTING";
+/**
+ * The reason code a rebalancing worker's section carries. See {@link WorkerAnswer}.
+ *
+ * `ReasonCodes` is generated from `kui.contracts.capability.ReasonCode` by
+ * `./mill frontend.apiConstants`, so this is a *reference* and not a hand-copied literal — the
+ * mistake the constant above names out loud. The alias exists so that the fold below reads as what
+ * it is: `STARTING` is the reason code the connect service chose for a rebalance, out of eight, and
+ * a reader needs the word "rebalancing" to find it.
+ */
+export const REBALANCING_REASON_CODE = ReasonCodes.Starting;
 
 /** What {@link decodeConnectorListing} answers when the document is not one this build can read. */
 export const Unreadable = Symbol("connector listing this build cannot read");

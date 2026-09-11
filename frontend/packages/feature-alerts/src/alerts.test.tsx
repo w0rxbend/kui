@@ -836,7 +836,7 @@ describe("the filter, which is over the page", () => {
 describe("what KUI checked", () => {
   it("a rule that could not be evaluated says so rather than reporting nothing found", async () => {
     const page = await pageOf(darkRuleDocument);
-    const dark = page.rules.find((report) => report.rule === "log-directory-usage");
+    const dark = page.rules.find((report) => report.rule === "disk-usage");
     expect(dark?.status).toBe("unavailable");
     // Not zero. `ok` with `openEvents: 0` is a measurement; `unavailable` is the absence of one.
     expect(dark?.openEvents).toBeNull();
@@ -845,7 +845,7 @@ describe("what KUI checked", () => {
     const { container, dispose } = mount(() => <RuleReports reports={page.rules} />);
     await flush();
 
-    const row = ruleRow(container, "log-directory-usage");
+    const row = ruleRow(container, "disk-usage");
     expect(row?.textContent).toContain("Not evaluated");
     expect(row?.textContent).toContain("describeLogDirs was refused");
     expect(row?.textContent).not.toContain("Nothing open");
@@ -856,7 +856,7 @@ describe("what KUI checked", () => {
    * The third thing a rule row can be, and the one `ruleRefusal` had no case for.
    *
    * A `stale` evaluation carries a figure that **was** measured, some time ago. Answering it with
-   * *"KUI could not evaluate the log-directory-usage rule, so this row is not a zero"* discards a
+   * *"KUI could not evaluate the disk-usage rule, so this row is not a zero"* discards a
    * real reading and replaces it with the sentence for a rule that never looked — the opposite
    * direction from this product's usual failure and just as wrong. The figure is kept, captioned.
    *
@@ -868,7 +868,7 @@ describe("what KUI checked", () => {
    */
   it("a stale rule keeps the figure it measured and says it is not current", async () => {
     const page = await pageOf(staleRuleDocument);
-    const stale = page.rules.find((report) => report.rule === "log-directory-usage");
+    const stale = page.rules.find((report) => report.rule === "disk-usage");
     expect(stale?.status).toBe("stale");
     expect(stale?.openEvents).toBe(0);
     expect(ruleRefusal(stale!)).toBeUndefined();
@@ -876,7 +876,7 @@ describe("what KUI checked", () => {
     const { container, dispose } = mount(() => <RuleReports reports={page.rules} />);
     await flush();
 
-    const row = ruleRow(container, "log-directory-usage");
+    const row = ruleRow(container, "disk-usage");
     expect(row?.textContent).toContain("Nothing open.");
     expect(row?.textContent).toContain("last reading KUI took");
     expect(row?.textContent).not.toContain("could not evaluate");
@@ -889,7 +889,7 @@ describe("what KUI checked", () => {
     const { container, dispose } = mount(() => <RuleReports reports={page.rules} />);
     await flush();
 
-    const storage = ruleRow(container, "log-directory-usage");
+    const storage = ruleRow(container, "disk-usage");
     // "1 open event" and "2 subjects skipped" are two facts, and the second is what makes the first
     // readable: nothing above 80% *of the directories whose capacity this cluster reports*.
     expect(storage?.textContent).toContain("1 open event.");
@@ -923,7 +923,7 @@ describe("what KUI checked", () => {
     }
     // The one that did skip some still says so, or the four assertions above would pass on a panel
     // that had simply stopped drawing the sentence.
-    expect(ruleRow(container, "log-directory-usage")?.textContent).toContain(
+    expect(ruleRow(container, "disk-usage")?.textContent).toContain(
       "2 subjects were skipped",
     );
     dispose();
@@ -931,18 +931,18 @@ describe("what KUI checked", () => {
 
   it("says a rule this deployment does not run is not running, and not that it found nothing", async () => {
     const page = await pageOf(darkRuleDocument);
-    const absent = page.rules.find((report) => report.rule === "connector-task-failure");
+    const absent = page.rules.find((report) => report.rule === "stuck-rebalance");
     expect(absent?.status).toBe("not_configured");
     expect(absent?.openEvents).toBeNull();
 
     const { container, dispose } = mount(() => <RuleReports reports={page.rules} />);
     await flush();
 
-    const row = ruleRow(container, "connector-task-failure");
+    const row = ruleRow(container, "stuck-rebalance");
     // A rule that is not configured and a rule that could not look are different sentences, for the
     // reason `Fetched` keeps `not-configured` apart from `failed`: one of them is nothing being
     // wrong, and telling an operator to investigate it wastes an afternoon.
-    expect(row?.textContent).toContain("does not run the connector-task-failure rule");
+    expect(row?.textContent).toContain("does not run the stuck-rebalance rule");
     expect(row?.textContent).not.toContain("could not evaluate");
     expect(row?.textContent).not.toContain("Nothing open");
     dispose();

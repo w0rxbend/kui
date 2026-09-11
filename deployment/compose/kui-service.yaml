@@ -125,9 +125,9 @@ kui:
   # Both name the registry `docker-compose.yml` runs, and that container is there for the same
   # reason this comment is: a configured cluster with no registry makes the schema service report
   # `not_configured` for the whole deployment, which is correct and would have meant teaching
-  # `smoke.sh` to expect a different answer for one of the eight services. The check was right; the
+  # `smoke.sh` to expect a different answer for one of the nine services. The check was right; the
   # deployment was incomplete -- and `kafka-connect` beside it is the same sentence applied to the
-  # tenth service one wave later.
+  # tenth service one wave later, and `ksqldb-server` to the eleventh one wave after that.
   clusters:
     - name: "Measured"
       id: "measured"
@@ -157,6 +157,25 @@ kui:
           url:
             - "http://kafka-connect:8083"
           callTimeout: "10s"
+      # The ksqlDB server `docker-compose.yml` runs, named by both clusters for the reason the
+      # registry and the Connect worker are: this stack's subject is process isolation, so a
+      # capability that differs between the two clusters would be a defect rather than a setting.
+      #
+      # SINGULAR where `connect` is a list, and that is `KsqlSettings`' own decision rather than a
+      # simplification here: two ksqlDB clusters over one set of brokers share a command topic and
+      # are one logical service, so a list would model a deployment that does not exist. `url` is
+      # still a list inside it -- every server in a ksqlDB cluster accepts statements and forwards
+      # what it must -- so a second address there would be failover.
+      #
+      # Two timeouts and not one. `callTimeout` is the budget for a call that finishes: listing
+      # objects, describing a stream, a pull query. `streamTimeout` is the budget for a push query,
+      # which by definition does not finish, and a single key for both would mean either calling a
+      # thirty-second listing healthy or cutting off a working push query.
+      ksql:
+        url:
+          - "http://ksqldb-server:8088"
+        callTimeout: "10s"
+        streamTimeout: "5m"
     - name: "Unmeasured"
       id: "unmeasured"
       bootstrapServers:
@@ -173,5 +192,11 @@ kui:
           url:
             - "http://kafka-connect:8083"
           callTimeout: "10s"
+      # And the same ksqlDB server, for the same reason again.
+      ksql:
+        url:
+          - "http://ksqldb-server:8088"
+        callTimeout: "10s"
+        streamTimeout: "5m"
 
   rbac: {}

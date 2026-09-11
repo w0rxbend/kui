@@ -54,8 +54,18 @@ KUI_FRONTEND_PORT="${KUI_FRONTEND_PORT:-8090}"
 export KUI_FRONTEND_PORT
 KAFKA_PORT="${KUI_QUICKSTART_KAFKA_PORT:-9092}"
 
+# The Connect worker's REST port. It is published because the quickstart now runs a connector on
+# that worker, and reading the worker's own answer beside KUI's screen is how anybody checks the
+# screen is honest; the default matches Kafka Connect's own.
+CONNECT_PORT="${KUI_QUICKSTART_CONNECT_PORT:-8083}"
+
+# The ksqlDB server's REST port, published for the same reason and with ksqlDB's own default.
+KSQL_PORT="${KUI_QUICKSTART_KSQL_PORT:-8088}"
+
 export KUI_VERSION KUI_PORT
 export KUI_QUICKSTART_KAFKA_PORT="${KAFKA_PORT}"
+export KUI_QUICKSTART_CONNECT_PORT="${CONNECT_PORT}"
+export KUI_QUICKSTART_KSQL_PORT="${KSQL_PORT}"
 
 compose() {
   if [ "${WITH_AUTH}" = true ]; then
@@ -90,10 +100,36 @@ port_in_use() {
   fi
 }
 
+# A port the quickstart's OWN containers already publish is not a conflict, and until this function
+# existed the check could not tell the difference. Running this script twice -- which is how a
+# running quickstart picks up a changed Compose file, because `up` reconciles rather than
+# replaces -- refused with "something is already listening on 8080", and the something was
+# the quickstart. Three waves of this plan recorded the port check firing and none of them recorded
+# that it fires on the quickstart itself.
+#
+# The project's own ports are asked of Compose rather than derived from the variables above, so that
+# a run started under `KUI_PORT=18080` is recognised as this project's by the port it actually
+# published and not by the port this shell happens to be holding in a variable.
+published_by_this_project() {
+  local port="$1"
+  compose ps --format json 2>/dev/null |
+    grep -o '"PublishedPort":[0-9]*' |
+    grep -qx "\"PublishedPort\":${port}"
+}
+
 check_ports() {
   local blocked=()
-  port_in_use "${KUI_PORT}"   && blocked+=("${KUI_PORT} (KUI, override with KUI_PORT)")
-  port_in_use "${KAFKA_PORT}" && blocked+=("${KAFKA_PORT} (Kafka, override with KUI_QUICKSTART_KAFKA_PORT)")
+  port_in_use "${KUI_PORT}" && ! published_by_this_project "${KUI_PORT}" \
+    && blocked+=("${KUI_PORT} (KUI, override with KUI_PORT)")
+  port_in_use "${KAFKA_PORT}" && ! published_by_this_project "${KAFKA_PORT}" \
+    && blocked+=("${KAFKA_PORT} (Kafka, override with KUI_QUICKSTART_KAFKA_PORT)")
+  # The Connect worker's REST port, published since the quickstart started running a connector on
+  # it. Checked here for the reason the two above are: a bound port is a Compose error naming a
+  # container, and this message can say which variable moves it instead.
+  port_in_use "${CONNECT_PORT}" && ! published_by_this_project "${CONNECT_PORT}" \
+    && blocked+=("${CONNECT_PORT} (Kafka Connect, override with KUI_QUICKSTART_CONNECT_PORT)")
+  port_in_use "${KSQL_PORT}" && ! published_by_this_project "${KSQL_PORT}" \
+    && blocked+=("${KSQL_PORT} (ksqlDB, override with KUI_QUICKSTART_KSQL_PORT)")
   if [ "${#blocked[@]}" -gt 0 ]; then
     say "Something is already listening on:"
     printf '  %s\n' "${blocked[@]}"

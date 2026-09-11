@@ -72,15 +72,44 @@
  * - **A completed read supersedes the frame's hint, on every outcome.** The hint and the read are
  *   the same number from the same source, one of them is older, and leaving both alive is how two
  *   screens come to draw two figures. `applyRead()` drops it first thing; `store.test.ts`'s *"a
- *   completed read supersedes the count the frame carried"* is the case that fails when it does
- *   not.
+ *   completed read supersedes the count the frame carried"* and *"a read that fails at the transport
+ *   keeps the rows and drops the count the frame carried"* are the two cases that fail when it does
+ *   not — one per side of the failure branch, because either one alone leaves the line movable.
+ * - **A read that never reached the gateway is not a refusal.** It is the stream dropping, one
+ *   transport down: the rows stay, badged `stale`, with the reason beside them. A server that
+ *   *answered* — an error envelope — and an answer this build could not decode are refusals, and
+ *   they blank the feed.
  *
  * ## Which of these accessors the product reads, measured rather than assumed
  *
- * Counted over the shell's and every feature package's `src`, at wave 7, excluding test and story
- * files: `feed`, `events`, `openCount`, `unread`, `markAllRead`, `refresh`, `start` and `stop`
- * have production callers. {@link Alerts.unreadCount}, {@link Alerts.lastReadAt} and
- * {@link Alerts.connection} have none.
+ * Re-measured at wave 8 over the shell's and every feature package's `src`, excluding test, story
+ * and fixture files, by running this from `frontend/packages`:
+ *
+ * ```
+ * # the eight this file says have callers
+ * grep -rnE "\.(feed|events|openCount|unread|markAllRead|refresh|start|stop)\(\)" \
+ *   shell/src feature-*\/src | grep -v "\.test\.\|\.stories\."
+ * # and the three it says have none
+ * grep -rnE "\.(unreadCount|lastReadAt|connection)\(\)" \
+ *   shell/src feature-*\/src | grep -v "\.test\.\|\.stories\."
+ * ```
+ *
+ * `feed`, `events`, `openCount`, `unread`, `markAllRead`, `refresh`, `start` and `stop` have
+ * production callers. {@link Alerts.unreadCount}, {@link Alerts.lastReadAt} and
+ * {@link Alerts.connection} still have none. **Read the second grep's hits rather than counting
+ * them**: `connection()` is a member of `SseHandle` as well, and `App.tsx`'s gateway stream and
+ * `feature-messages/src/transport.ts` both call *that* one — which is why this census is done by
+ * eye and why a mechanical version of it would report the opposite of the truth.
+ *
+ * The commands are written out because the sentence is prose: **nothing in this repository compares
+ * it to the tree**, so it is true on the day it is written and nobody is told the day it stops
+ * being. Re-run them rather than trusting this paragraph.
+ *
+ * Wave 8's plan records this paragraph as a false hand-off — that `unreadCount()` gained a caller in
+ * `App.tsx`'s drawer badge during wave 7. The grep above says otherwise, in the direction nobody
+ * expected: the badge and the bell read `openCount()` and `unread()` (`App.tsx`'s `alertsOpen` and
+ * `alertsUnread` props), and `unread()` is a different member answering a boolean over the same
+ * count. It is one letter's difference in a report and it is exactly why the command is here.
  *
  * `openCount()` is **the** open count, and that was settled in wave 7 rather than assumed: the
  * shell held a second derivation (`shell/src/data/alerts.ts`'s `openCountOf`) which read the same
@@ -89,12 +118,23 @@
  * dashboard's alerts card all read this accessor, which is what §3.8 means by one number in three
  * places that cannot disagree.
  *
- * The other three are kept rather than deleted, and this is a disclosure and not a defence: they
- * are a public interface three packages implement — `shell/src/overview/harness.tsx`'s
- * `staticAlerts` among them — so removing a member from {@link Alerts} is an edit in two packages
- * this one does not own. `connection()` is additionally the only observable this store has of the
- * stream's lifecycle, and is what the case pinning *a released stream moves nothing* reads;
- * deleting it would take that assertion with it.
+ * The other three are kept rather than deleted, and at wave 8 that is a decision taken one member at
+ * a time rather than a habit:
+ *
+ * - **`unreadCount()` stays and is not to be deleted.** Wave 8's plan gives the drawer's Alerts
+ *   badge to the per-principal count, which is this accessor — a contract between two packets
+ *   rather than something measured here, and deleting a member in the wave that is wiring it would
+ *   be the two halves of one seam disagreeing inside one wave.
+ * - **`connection()` stays.** It is the only observable this store has of the stream's lifecycle and
+ *   is what the case pinning *a released stream moves nothing* reads — deleting it would take that
+ *   assertion with it, which is a gate lost to tidiness.
+ * - **`lastReadAt()` stays, and it is the weakest of the three.** Its only justification is the
+ *   interface: {@link Alerts} is implemented by three doubles outside this package —
+ *   `shell/src/overview/harness.tsx`'s `staticAlerts` among them — so removing a member is an edit
+ *   in two packages the kernel does not own, and the shell already reads `lastReadAt` off the
+ *   decoded feed (`shell/src/data/alerts.ts`, which compares it to each event's `openedAt`) rather
+ *   than through the store. If a wave ever owns the kernel and the shell together, this is the one
+ *   to delete.
  *
  * ## Why there is no poller behind the stream
  *
@@ -104,7 +144,7 @@
  * same wire, which is the pair of half-contracts this file exists to avoid.
  */
 import type { ApiResult } from "@kui/api";
-import { decodeSection, userMessage } from "@kui/api";
+import { decodeSection, isTransportFailure, userMessage } from "@kui/api";
 import { createEffect, createRoot, createSignal, type Accessor } from "solid-js";
 
 import { apiFailure, type Fetched } from "../fetched.js";
@@ -211,12 +251,20 @@ export function createAlerts(options: AlertsOptions): Alerts {
    * number from the same source and one of them has to win.
    *
    * Three places clear it and one deliberately does not. `applyRead()` clears it on every outcome
-   * and `stop()` clears it as part of ending this life of the store. `markStale()` — a terminal
-   * stream failure with no read behind it — leaves it, and that is correct: the count it holds is
-   * still the last thing the server said about this cluster, it is exactly as old as the rows being
-   * shown beside it, and the feed is badged `stale` while both are on screen. There is no state in
-   * which this hint outlives a refusal, because {@link knownOpenCount} answers `null` for every
-   * feed state that holds no document.
+   * and `stop()` clears it as part of ending this life of the store. `markStale()` leaves it —
+   * reached from the subscriber, that is a terminal stream failure with no read behind it, and
+   * reached from `applyRead()` the clearing has already happened one line above the branch. That is
+   * correct in both directions: the count it holds is still the last thing the server said about
+   * this cluster, it is exactly as old as the rows being shown beside it, and the feed is badged
+   * `stale` while both are on screen. There is no state in which this hint outlives a refusal,
+   * because {@link knownOpenCount} answers `null` for every feed state that holds no document.
+   *
+   * *"On every outcome"* is a claim about one line, and until wave 8 only one of the outcomes could
+   * see it: every failing read blanked the feed to `failed`, `knownOpenCount()` answers `null` for
+   * that state whatever this signal holds, and a suite therefore stayed green with the clearing
+   * moved below the failure branch. It is observable now because a read that fails at the transport
+   * over a feed that is still held keeps the rows and badges them `stale` — so the hint and a
+   * document are on screen together, and a hint from a frame whose read never landed would win.
    */
   const [streamed, setStreamed] = createSignal<number | null>(null, { ownedWrite: true });
 
@@ -231,9 +279,20 @@ export function createAlerts(options: AlertsOptions): Alerts {
    * A read cannot be recalled once it is out, and its answer arrives whenever it arrives — after a
    * `stop()`, after a second `start()`, or after a newer read has already landed. Applying it then
    * paints a feed nobody is waiting for over the one that is current, and on a stopped store it
-   * repopulates a card the shell has torn down. Raised by `start()`, by `stop()` and by every read,
-   * and the answer is dropped when it no longer matches. The capability store's episode, one file
-   * over, is the same rule for the same reason.
+   * repopulates a card the shell has torn down. Raised by every read, which is also how `start()`
+   * raises it, and the answer is dropped when it no longer matches. The capability store's episode,
+   * one file over, is the same rule for the same reason.
+   *
+   * `stop()` used to raise it as well, and that line is deleted rather than left. It could not fire:
+   * `stopped` refuses every read across a teardown on its own, and the only thing that lowers
+   * `stopped` is `start()`, which raises the episode on the very next line by reading — so no
+   * ordering exists in which this raise is the refuser. Measured rather than argued: deleting it
+   * left `pnpm -C frontend test packages/kernel` at 23 files / 455 cases green, which is what a line
+   * nothing can reach looks like from the outside. It is gone for the reason `connect()`'s
+   * unreachable guard went in wave 7 — a guard that cannot fire reads as a considered defence of a
+   * state that does not exist — and its going makes *"a read answered after the store was stopped is
+   * not applied"* into the case that actually holds `stopped`, which it did not while both were
+   * there.
    */
   let episode = 0;
 
@@ -391,11 +450,28 @@ export function createAlerts(options: AlertsOptions): Alerts {
     // A completed read supersedes the stream hint on every outcome — including the ordinary one,
     // where the read simply carries a newer count than the frame that triggered it. The two are the
     // same number from the same source and one of them is older; leaving both alive is how two
-    // screens come to draw two figures, and on a refusal it is how a bell shows a live count beside
-    // a feed that says it cannot be read. Deleting this line reddens *"a completed read supersedes
-    // the count the frame carried"* in `store.test.ts`.
+    // screens come to draw two figures, and on a failed read it is how a bell shows a live count
+    // beside a feed badged as the last answer KUI received. Deleting this line reddens *"a completed
+    // read supersedes the count the frame carried"*; moving it under the failure branch reddens
+    // *"a read that fails at the transport keeps the rows and drops the count the frame carried"*.
+    // Both are in `store.test.ts`, and the second exists because until wave 8 the first outcome was
+    // the only one any case could see — see the note on the branch below.
     setStreamed(null);
     if (!result.ok) {
+      // Nothing answered, so nothing was disproved. A read that never reached the gateway is the
+      // same event as the stream dropping — what is held is real and simply not current, which is
+      // what `stale` says and what {@link markStale} already does for the stream. Blanking a feed
+      // the operator is reading because one poll timed out takes the last known figures away at
+      // exactly the moment they are wanted, which is the defect `Fetched.stale` exists to prevent.
+      //
+      // `envelope` and `decoding` are deliberately not in here and it is not a detail. An envelope
+      // is the server having an opinion — it may be the refusal that revokes this principal's sight
+      // of the cluster — and a `decoding` failure means this build and the gateway disagree about
+      // the contract, which must be loud. Neither may leave rows on screen under a staleness badge.
+      if (isTransportFailure(result.error) && current() !== undefined) {
+        markStale(userMessage(result.error));
+        return;
+      }
       setFeed(apiFailure(result.error));
       return;
     }
@@ -475,7 +551,6 @@ export function createAlerts(options: AlertsOptions): Alerts {
 
     stop(): void {
       stopped = true;
-      episode += 1;
       setStreamed(null);
       releaseHandle();
       setConnection({ phase: "closed", reason: "closed by the client" });

@@ -219,6 +219,80 @@ const voiceOf = (container: HTMLElement): string =>
 const currentTab = (container: HTMLElement): string | null =>
   container.querySelector('[data-testid="tab-strip"] [aria-current="page"]')?.textContent?.trim() ?? null;
 
+/**
+ * The alerts card's own `<section>`, which is where `Card` writes the state word.
+ *
+ * `Card` renders `class={["kui-panel", `kui-panel--${state()}`]}`, so the state the card was given
+ * is in the markup rather than only in the sentence underneath it. Every case in this file selected
+ * on the sentence, which left all three of `AlertsCard`'s `cardState()` arms free: `"forbidden"` →
+ * `"empty"`, `"loading"` → `"ready"`, and the third arm beside them each left the whole package
+ * green, because the sentence is chosen by a different expression from the state word and only the
+ * state word decides the illustration, the `aria-busy` and whether the body is drawn at all.
+ */
+const alertsCard = (container: HTMLElement): HTMLElement | null =>
+  container.querySelector('[data-testid="panel-alerts"]');
+
+/** The `Card` state as the markup carries it, so a case reads a word rather than a class list. */
+const panelState = (card: Element | null): string | undefined =>
+  [...(card?.classList ?? [])]
+    .find((name) => name.startsWith("kui-panel--"))
+    ?.slice("kui-panel--".length);
+
+/**
+ * The pill's tone, the way `StatusPill` writes it: `kui-pill--danger`, `kui-pill--success`.
+ *
+ * Read as a word for the same reason {@link panelState} is. The pill's *text* is gated six ways
+ * over in this file; its colour was gated by nothing at all, and colour is the half of the badge an
+ * operator reads first from across a room.
+ */
+const pillTone = (card: Element | null): string | undefined => {
+  const pill = card?.querySelector(".kui-pill");
+  return [...(pill?.classList ?? [])]
+    .find((name) => name.startsWith("kui-pill--"))
+    ?.slice("kui-pill--".length);
+};
+
+/** A feed of `count` open events that the rules have actually evaluated. */
+const openFeed = (count: number) =>
+  staticAlerts({
+    kind: "ready",
+    value: {
+      items: Array.from({ length: Math.min(count, 2) }, (_, index) => ({
+        id: `evt-${index}`,
+        severity: "critical" as const,
+        tone: "danger",
+        category: "partition",
+        glyph: "partition",
+        openedAt: "2026-09-03T09:11:12Z",
+        lastSeenAt: "2026-09-03T10:11:12Z",
+        title: `event ${index}`,
+        detail: undefined,
+        resolution: undefined,
+      })),
+      total: count,
+      openCount: count,
+      unreadCount: count,
+      lastReadAt: undefined,
+      evaluatedAt: "2026-09-03T10:11:12Z",
+      rules: [],
+    },
+  });
+
+/** Mounts the dashboard over one alerts store and lets the cards settle. */
+const dashboardOver = async (alerts: ReturnType<typeof staticAlerts>): Promise<Mounted> => {
+  const screen = keep(
+    mount(
+      dashboardHost(
+        DASHBOARD,
+        () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+        { alerts },
+      ),
+    ),
+  );
+  await settle();
+  return screen;
+};
+
 describe("the shared alerts card", () => {
   it("draws the store's cluster-wide count rather than counting the page rows", async () => {
     const alerts = staticAlerts({
@@ -511,6 +585,83 @@ describe("the shared alerts card", () => {
     // ticket.
     expect(brokenCard?.textContent).toContain("KUI-UPSTREAM-UNAVAILABLE");
     expect(brokenCard?.querySelector("button")?.textContent).toContain("Retry");
+  });
+
+  /**
+   * The pill's colour, which until now was the one thing on this card nothing looked at.
+   *
+   * Six cases above select on the pill's *text* and every one of them passes with the tone frozen:
+   * `tone="success"` draws a cluster with twelve open alerts as a green dot beside `12 open`, and
+   * `tone="danger"` draws a cluster the rules swept clean as a red one beside `None open`. Both
+   * were run and both left this package at 523 green.
+   *
+   * §3.8 argues the case for the sentence — *"A green `None open` there would be the most
+   * reassuring thing this screen can say and it would be about nothing at all"* — and the sentence
+   * has been gated since wave 7. The colour carrying it was not, and on a dashboard read in one
+   * glance the dot is what is read first: `--kui-color-status-*` is the only channel that works at
+   * the distance a wall display is read from, and a green dot over an open incident is the most
+   * expensive thing this card can say.
+   *
+   * Both directions in one case, deliberately. A single-direction case leaves the constant it
+   * asserts free to become the constant it asserts, which is how `tone` came to be mutable in the
+   * first place.
+   */
+  it("colours the pill by what is open, and not by the fact that a pill exists", async () => {
+    const open = await dashboardOver(openFeed(12));
+    expect(pillTone(alertsCard(open.container))).toBe("danger");
+    /* Beside the tone rather than instead of it, so the case cannot pass on a card that has stopped
+       drawing a pill at all. */
+    const openPill = alertsCard(open.container)?.querySelector(".kui-pill");
+    expect(openPill?.textContent).toContain("12 open");
+
+    const swept = await dashboardOver(openFeed(0));
+    expect(pillTone(alertsCard(swept.container))).toBe("success");
+    const sweptPill = alertsCard(swept.container)?.querySelector(".kui-pill");
+    expect(sweptPill?.textContent).toContain("None open");
+  });
+
+  /**
+   * A refusal is drawn as a refusal, and the state word is what decides that.
+   *
+   * `cardState()`'s `case "forbidden": return "forbidden"` could return `"empty"` with every case
+   * in this package green, because the sentence under it is chosen by `message()` — a different
+   * expression, over the same state. What moves is everything `Card` decides from the word:
+   * `EmptyState`'s `kind`, and with it the lock illustration that says *you may not see this*
+   * rather than the warm one that says *there is nothing here yet*. A principal without
+   * `ALERT:VIEW` would be told the cluster is quiet.
+   *
+   * So this reads the word off the panel and the kind off the illustration, and asserts the wrong
+   * one is absent — an `empty` card and a `forbidden` card differ in the markup by exactly these
+   * two tokens.
+   */
+  it("draws a refusal as a refusal and never as an empty cluster", async () => {
+    const refused = await dashboardOver(staticAlerts({ kind: "forbidden" }));
+    const card = alertsCard(refused.container);
+
+    expect(panelState(card)).toBe("forbidden");
+    expect(card?.querySelector(".kui-empty-state--forbidden")).not.toBeNull();
+    expect(card?.querySelector(".kui-empty-state--empty")).toBeNull();
+  });
+
+  /**
+   * Waiting is drawn as waiting, and a screen reader is told so.
+   *
+   * `case "loading": return "loading"` → `return "ready"` leaves 523 green (disclosed in wave 7 and
+   * still open). The visible symptom is a card with an empty `<ul>` where the skeletons should be —
+   * which reads as *this cluster has no alerts*, on the one card whose whole job is to say when it
+   * has. The invisible one is worse: `Card` sets `aria-busy` from the same word, so a screen reader
+   * is told the region is settled while it is still in flight, and the operator hears silence
+   * rather than "busy".
+   */
+  it("draws a feed still in flight as loading, and says so to a screen reader", async () => {
+    const waiting = await dashboardOver(staticAlerts({ kind: "loading" }));
+    const card = alertsCard(waiting.container);
+
+    expect(panelState(card)).toBe("loading");
+    expect(card?.getAttribute("aria-busy")).toBe("true");
+    /* The body is skeletons, not rows: `Card` draws `props.children` only for `ready`, so a card
+       that had silently become `ready` would draw an empty list and no skeleton at all. */
+    expect(card?.querySelectorAll(".kui-skeleton").length).toBeGreaterThan(0);
   });
 });
 

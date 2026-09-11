@@ -1,0 +1,74 @@
+{
+  "objects" : {
+    "status" : "ok",
+    "data" : {
+      "items" : [
+        {
+          "kind" : "stream",
+          "name" : "ORDERS",
+          "topic" : "orders",
+          "format" : "JSON",
+          "windowed" : null,
+          "sinks" : [
+          ],
+          "statement" : null,
+          "partitions" : null,
+          "replication" : null
+        },
+        {
+          "kind" : "stream",
+          "name" : "PAYMENTS",
+          "topic" : "payments",
+          "format" : null,
+          "windowed" : null,
+          "sinks" : [
+          ],
+          "statement" : null,
+          "partitions" : null,
+          "replication" : null
+        },
+        {
+          "kind" : "table",
+          "name" : "USERS",
+          "topic" : "users",
+          "format" : "AVRO",
+          "windowed" : false,
+          "sinks" : [
+          ],
+          "statement" : null,
+          "partitions" : null,
+          "replication" : null
+        },
+        {
+          "kind" : "query",
+          "name" : "CSAS_ENRICHED_ORDERS_5",
+          "topic" : null,
+          "format" : null,
+          "windowed" : null,
+          "sinks" : [
+            "ENRICHED_ORDERS"
+          ],
+          "statement" : "CREATE STREAM ENRICHED_ORDERS AS SELECT * FROM ORDERS EMIT CHANGES;",
+          "partitions" : null,
+          "replication" : null
+        },
+        {
+          "kind" : "topic",
+          "name" : "orders",
+          "topic" : null,
+          "format" : null,
+          "windowed" : null,
+          "sinks" : [
+          ],
+          "statement" : null,
+          "partitions" : 3,
+          "replication" : 3
+        }
+      ],
+      "unreadable" : [
+      ],
+      "truncated" : 0
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

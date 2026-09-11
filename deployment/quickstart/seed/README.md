@@ -10,18 +10,26 @@ seconds of seeding is the difference between "I see" and "is it working?".
 
 ## Where this sits in the quickstart
 
-Two pieces, and they are different kinds of thing:
+Five pieces, and they are two different kinds of thing. This section said "two" over a list of two
+for two milestones while the directory held three scripts, and it now holds five:
 
 | | What it is | Lifetime |
 | --- | --- | --- |
 | `seed.sh` | creates the topics and writes the messages | a job: it runs, it finishes, it exits |
+| `avro-seed.sh` | registers the Avro schema and writes Avro records through KUI's produce API | a job |
+| `connect-seed.sh` | registers one `FileStreamSource` connector on the Connect worker and waits for it to be `RUNNING` | a job |
+| `ksql-seed.sh` | creates one ksqlDB stream over `orders.v1` and reads it back with `SHOW STREAMS` | a job |
 | `consume.sh` | the one consumer group that is alive | a service: it runs until the stack stops |
 
 The Compose stack that starts Kafka and KUI lives one directory up, in
-`deployment/quickstart/`, and runs both of these. The full contract each one expects — image,
+`deployment/quickstart/`, and runs all five of these. The full contract each one expects — image,
 entrypoint, environment, ordering, exit code — is written at the top of the script itself,
-including a Compose service definition that satisfies it. Read those two headers before wiring
+including a Compose service definition that satisfies it. Read those headers before wiring
 anything up; this file is the tour, they are the specification.
+
+Three of the five do **not** run in the Kafka image, and their headers say why: `avro-seed.sh`,
+`connect-seed.sh` and `ksql-seed.sh` speak HTTP and need `curl`, which `apache/kafka` does not
+carry at all.
 
 The short version:
 
@@ -141,6 +149,9 @@ in that one place would mean appending a second copy of every message on every r
 | File | What it is |
 | --- | --- |
 | `seed.sh` | the job: waits for the broker, creates topics, writes messages, creates the stopped groups |
+| `avro-seed.sh` | the job: one schema in the registry, and Avro records written through KUI's own produce API |
+| `connect-seed.sh` | the job: one connector on the Kafka Connect worker, waited on until it and its task are `RUNNING` |
+| `ksql-seed.sh` | the job: one ksqlDB stream over `orders.v1`, read back through `SHOW STREAMS` |
 | `consume.sh` | the service: the one live consumer group |
 | `topics.tsv` | the topic table — name, partitions, replication, configuration — with a comment per row |
 | `data/<topic>` | the messages for that topic, one per line |

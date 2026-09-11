@@ -180,6 +180,56 @@ final class PrometheusExpositionSuite extends FunSuite {
     assertEquals(sample.networkProcessorIdleRatio, Some(0.7104))
   }
 
+  test("an idle ratio carrying a dimension is a slice too, and neither gauge reads one") {
+    // **The rule this packet owns**, and the third copy of the no-double-count guard in this file. The
+    // other two have cases — `aggregateOf`'s reddens seven and `purgatoryOf`'s reddens one — while
+    // `ratioOf`'s, which feeds both saturation gauges on the brokers screen, reddened nothing: relaxing
+    // `dimensionsOf(sample).isEmpty` to `dimensionsOf(sample).sizeIs < 2` left every metrics task SUCCESS.
+    //
+    // These two families carry no dimension on any exporter shipping today, which is exactly why the
+    // fixture is written out rather than captured: the rule is a bound on what a *future* broker or rule
+    // file may publish. Kafka's own pools are already sliced elsewhere — a per-handler or per-processor
+    // line is the obvious next dimension — and under the relaxed guard one processor's 1% idle would be
+    // drawn as the whole pool's, which is a saturated broker reported as a healthy one on the gauge an
+    // operator looks at first.
+    //
+    // The slices are written **before** the aggregates on purpose. `ratioOf` takes the first line that
+    // matches, so a fixture whose aggregate came first would answer correctly under any guard at all and
+    // gate nothing — the mistake the `aggregateOf` case beside it names out loud.
+    val sliced =
+      """kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate{handler="7"} 0.1204
+        |kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate 0.8912
+        |kafka_network_socketserver_networkprocessoravgidlepercent{networkProcessor="3"} 0.0102
+        |kafka_network_socketserver_networkprocessoravgidlepercent 0.7104
+        |""".stripMargin
+
+    val sample = sampleOf(sliced)
+
+    assertEquals(sample.requestHandlerIdleRatio, Some(0.8912))
+    assertEquals(sample.networkProcessorIdleRatio, Some(0.7104))
+  }
+
+  test("a broker that published only a per-slice idle ratio has no broker-wide one to draw") {
+    // The other direction, and the one that makes the rule a refusal rather than a preference. With no
+    // undimensioned line there is no pool figure, and §3.14's *Absent* paragraph says an unmeasured ring
+    // gauge draws a dash. Answering the slice would be a measured number about the wrong thing.
+    //
+    // A throughput line rides along so that the body is a readable exposition: a sample with nothing but
+    // `None`s in it is `brokerSampleAt`'s `Left`, and this case is about the two ratios rather than about
+    // that refusal.
+    val sliceOnly =
+      """kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate 124800.5
+        |kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate{handler="7"} 0.1204
+        |kafka_network_socketserver_networkprocessoravgidlepercent{networkProcessor="3"} 0.0102
+        |""".stripMargin
+
+    val sample = sampleOf(sliceOnly)
+
+    assertEquals(sample.bytesInPerSecond, Some(124800.5))
+    assertEquals(sample.requestHandlerIdleRatio, None)
+    assertEquals(sample.networkProcessorIdleRatio, None)
+  }
+
   test("purgatory arrives as a count per delayed operation, and no percentage exists to read") {
     // ADR-052's first refusal, asserted against the capture it was decided from. The design draws
     // "38% PURGATORY"; what a broker publishes is 481 parked Fetch requests and no ceiling to divide by.

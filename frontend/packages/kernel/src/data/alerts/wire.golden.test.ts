@@ -119,8 +119,15 @@ function shapeOf(document: unknown): Shape | undefined {
   return undefined;
 }
 
-/** Reads one document all the way through `./events.ts`, or explains what stopped it. */
-function decodeDocument(name: string, document: unknown): void {
+/**
+ * Reads one document all the way through `./events.ts`, or explains what stopped it.
+ *
+ * Answers **whether a decoder in `./events.ts` actually ran**, which is the whole of the counter's
+ * meaning below. Returning `true` from a branch that decoded nothing is how a count of documents
+ * becomes a count of files, and this function had exactly one such branch until wave 8 — see the
+ * `feed-response` case.
+ */
+function decodeDocument(name: string, document: unknown): boolean {
   switch (shapeOf(document)) {
     case "feed-response": {
       const body = document as Record<string, unknown>;
@@ -128,10 +135,18 @@ function decodeDocument(name: string, document: unknown): void {
       // `unreadable` is the one status a committed document may never carry: it means this build
       // could not read the envelope the service wrote, which is the drift itself.
       expect(section.status, `${name}: the 'events' section`).not.toBe("unreadable");
-      if (section.status !== "ok" && section.status !== "stale") return;
+      // A committed document whose section is `forbidden`, `not_configured` or `unavailable` has no
+      // payload, so no decoder runs on it — and this used to fall through to the counter as though
+      // one had. The vacuous pass was inside the guard written to end vacuous passes: the sweep
+      // below would have reported every document read while `decodeAlertFeed` was never called on
+      // any of them. No such golden exists today; the counter refuses one rather than trusting that
+      // it never will, and the refusal names the branch this suite would have to grow first —
+      // `services/alerts` rendering a refusal envelope is a document about a *state*, and the case
+      // that reads it has to assert the state rather than decode a payload that is not there.
+      if (section.status !== "ok" && section.status !== "stale") return false;
       const decoded = decodeAlertFeed(section.data);
       expect(decoded.ok ? true : decoded.cause, `${name}: the feed`).toBe(true);
-      return;
+      return true;
     }
     case "stream-frame": {
       const body = document as Record<string, unknown>;
@@ -143,21 +158,21 @@ function decodeDocument(name: string, document: unknown): void {
       expect(body["event"], `${name}: the SSE event name`).toBe(ALERTS_EVENT_NAME);
       const change = decodeAlertChange(JSON.stringify(body["data"]));
       expect(change.ok ? true : change.cause, `${name}: the frame payload`).toBe(true);
-      return;
+      return true;
     }
     case "acknowledgement": {
       const body = document as Record<string, unknown>;
       const event = decodeAlertEvent(body["event"]);
       expect(event.ok ? true : event.cause, `${name}: the acknowledged event`).toBe(true);
       expect(typeof body["openCount"], `${name}: openCount`).toBe("number");
-      return;
+      return true;
     }
     case "change-frame": {
       // Through `JSON.stringify` because that is how a frame reaches the decoder in production: the
       // text of one `data:` line, parsed by `decodeAlertChange` itself.
       const change = decodeAlertChange(JSON.stringify(document));
       expect(change.ok ? true : change.cause, `${name}: the change frame`).toBe(true);
-      return;
+      return true;
     }
     default: {
       const keys =
@@ -184,11 +199,30 @@ describe("documents rendered by the alerts service", () => {
     // to delete the loop, which leaves every other case here passing.
     expect(files.length, `no .json documents under ${GOLDEN}`).toBeGreaterThan(0);
     let decoded = 0;
+    const undecoded: string[] = [];
     for (const name of files) {
-      decodeDocument(name, golden(name));
-      decoded += 1;
+      if (decodeDocument(name, golden(name))) decoded += 1;
+      else undecoded.push(name);
     }
+    // The count is of documents a decoder ran on, not of files opened — `decodeDocument` answers
+    // which, and the list is named rather than only counted so that the failure says *which*
+    // document this suite walked past. Incrementing on the way through was the third form of the
+    // vacuous pass this case exists to refuse: the loop is there, the roster is non-empty, the
+    // totals agree, and `decodeAlertFeed` was never called.
+    expect(undecoded, "no decoder in ./events.ts read these documents").toEqual([]);
     expect(decoded, "every committed document was read").toBe(files.length);
+  });
+
+  it("counts a document a decoder never ran on as unread", () => {
+    // The counter's own rule, on the input no golden carries today. A refusal envelope is a
+    // legitimate `AlertFeedResponse` — the service can render one — and it has no payload, so the
+    // sweep above must report it rather than count it. Asserted here against a synthetic document
+    // because the fixtures this suite reads are `services/alerts`' to write, and a rule that waits
+    // for somebody else's file is a rule nothing holds.
+    expect(decodeDocument("synthetic-forbidden", { events: { status: "forbidden" } })).toBe(false);
+    expect(decodeDocument("alerts-feed-response.json", golden("alerts-feed-response.json"))).toBe(
+      true,
+    );
   });
 
   it("still carries every document the M8 screens are drawn from", () => {

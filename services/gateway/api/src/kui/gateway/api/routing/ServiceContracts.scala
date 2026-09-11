@@ -7,6 +7,7 @@ import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.connect.contract.ConnectEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
+import kui.ksql.contract.KsqlEndpoints
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
 import kui.metrics.contract.MetricsEndpoints
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
@@ -83,7 +84,17 @@ object ServiceContracts {
       // is no marker to group by. They are still writes, they still carry the CSRF header and an audit
       // record, and `MergedDocumentShapeSuite` asserts their count so that a fourth operation added to
       // `ConnectEndpoints.writes` and forgotten here is a failure rather than a silent omission.
-      ServiceId.unsafe("connect") -> ConnectEndpoints.all
+      ServiceId.unsafe("connect") -> ConnectEndpoints.all,
+      // One list, and the eleventh service. `KsqlEndpoints.all` is the object listing, the statement plan
+      // and the statement apply; the push query is deliberately not here, for the alerts stream's reason —
+      // `ContractRouting.derive` decodes and re-encodes an upstream's JSON and a push query is an event
+      // stream. `KsqlStreamEndpoint` is held in the contract's JVM half for `KsqlStreamRoutes` to relay.
+      //
+      // The plan and the apply are published from the same object rather than a second one, although both
+      // carry ADR-045 markers: unlike the topic service, ksqlDB has no *known* destructive operation to
+      // group — the statement is whatever somebody typed, so the plan is a classification rather than a
+      // second list. `MergedDocumentShapeSuite` counts the two writes for the connect entry's reason.
+      ServiceId.unsafe("ksql") -> KsqlEndpoints.all
     )
 
   /** The identity service is **deliberately absent** from the map above, and must stay absent.

@@ -104,16 +104,16 @@ export type NavigationInput = {
 export const CLUSTER_GROUP = "CLUSTER";
 
 /**
- * The second heading `SCREENS-V4.md` §2.2 draws — and it has no entries in this wave.
+ * The second heading `SCREENS-V4.md` §2.2 draws, and it now has all three of the rows it is drawn
+ * with: Schema Registry, Kafka Connect and ksqlDB.
  *
- * Kafka Connect and ksqlDB are M9, and until their services exist there is nothing honest to put
- * under it: ADR-032's rule for a feature whose upstream is not configured is that it is *hidden*,
- * not drawn as a failure, so a fabricated row would be the exact misreading the rule prevents.
- *
- * It is declared anyway, and emitted empty, so that M9 registers two features and changes nothing
- * else — and so that the state it has today is a state something renders rather than a state
- * nothing has ever produced. `NavDrawer` draws nothing at all for a group with no destinations,
- * which is what makes emitting it safe; see the comment there.
+ * It was declared and emitted **empty** for four waves, before any of the three had a service — and
+ * that is still a state a real deployment has, which is why nothing here treats an empty
+ * `ECOSYSTEM` as a defect. ADR-032's rule for a feature whose upstream is not configured is that it
+ * is *hidden*, not drawn as a failure, so a deployment running none of the three registers none of
+ * the rows and the heading has nothing under it; a fabricated row would be the exact misreading the
+ * rule prevents. `NavDrawer` draws nothing at all for a group with no destinations, which is what
+ * makes emitting it unconditionally safe; see the comment there.
  */
 export const ECOSYSTEM_GROUP = "ECOSYSTEM";
 

@@ -100,6 +100,24 @@ kui:
         url: "http://kui-connect:8080"
         timeout: "10s"
         maxConcurrent: 32
+      # The ninth address, and the eleventh service KUI has. Listing objects and running one
+      # statement are ordinary calls against ksqlDB's REST API, so the budget is the same ten
+      # seconds the topic, consumer and connect services get.
+      #
+      # A PUSH QUERY IS NOT COVERED BY THIS TIMEOUT AND MUST NOT BE. It is a stream: it does not
+      # finish, and a request budget applied to it would cut every one of them off at ten seconds.
+      # The gateway carries it through a hand-written relay rather than through the derived proxy,
+      # exactly as the alerts feed and the message browse are carried, and the budget it runs under
+      # is `kui.clusters[].ksql.streamTimeout` in `kui-service.yaml` -- one key per promise, which
+      # is the distinction `KsqlSettings` exists to keep.
+      #
+      # The three facts a service needs to be reachable are this address, a container in
+      # `docker-compose.yml`, and the contract in `ServiceContracts.byService`; `smoke.sh` reads all
+      # three before it starts anything.
+      ksql:
+        url: "http://kui-ksql:8080"
+        timeout: "10s"
+        maxConcurrent: 32
 
     # How often the gateway asks each service whether it is ready, to keep the capability registry
     # (and therefore the greyed-out parts of the UI) current.

@@ -161,15 +161,38 @@ kui:
       # serves the same REST API and forwards what it cannot answer itself, so a second address
       # there is failover rather than a second system. This quickstart has one of each.
       #
-      # THE WORKER RUNS NO CONNECTORS. That is the honest state of a demonstration nobody has
-      # configured a pipeline into, and the Connect screen says so as a measured empty list rather
-      # than as an outage. Registering one here to make the screen look busy would erase the
-      # difference between "this worker is running nothing" and "this worker cannot be reached",
-      # which is the distinction the whole product is built on.
+      # THE WORKER RUNS ONE CONNECTOR, and this comment used to say it ran none and should. The
+      # argument was that a measured empty list is a different fact from "this worker cannot be
+      # reached" and that seeding one would erase the distinction. The distinction is real; the
+      # conclusion was wrong, because the empty answer was then the ONLY one anything covered:
+      # `frontend/e2e/connect.spec.ts`'s two positive cases had nothing to list and skipped. The
+      # empty-worker state now lives in `deployment/compose`, whose worker runs nothing, and this
+      # stack holds the other one. `seed/connect-seed.sh` registers it.
       connect:
         - name: "quickstart"
           url:
             - "http://kafka-connect:8083"
+
+      # The ksqlDB server this quickstart starts beside the broker.
+      #
+      # Setting this is the on/off switch for the ksqlDB screens on this cluster, exactly as the two
+      # keys above are for their features: with it, KUI lists the streams, tables and queries the
+      # server knows about and can run one statement at a time against it; without it the ksql
+      # service answers `not_configured` and ADR-032's rule hides the row.
+      #
+      # SINGULAR where `connect` is a list, and that is `KsqlSettings`' decision rather than a
+      # shortcut here: two ksqlDB clusters over one set of brokers share a command topic and are one
+      # logical service. `url` inside it is still a list, because every server in a ksqlDB cluster
+      # accepts statements, so a second address is failover.
+      #
+      # `streamTimeout` is separate from `callTimeout` because a push query does not finish. Ten
+      # seconds is right for a listing and wrong for a `SELECT ... EMIT CHANGES`, and one key for
+      # both would mean choosing which of those two to get wrong.
+      ksql:
+        url:
+          - "http://ksqldb-server:8088"
+        callTimeout: "10s"
+        streamTimeout: "5m"
 
       # Which serde reads which topic.
       #

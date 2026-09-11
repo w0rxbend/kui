@@ -9,6 +9,7 @@ import kui.connect.contract.ConnectEndpoints
 import kui.gateway.api.routing.ServiceContracts
 import kui.gateway.contract.{ClusterOverviewEndpoints, TopicOverviewEndpoints}
 import kui.kernel.ServiceId
+import kui.ksql.contract.KsqlEndpoints
 
 /** That the published description of KUI's API describes the API a browser can actually call.
   *
@@ -22,6 +23,7 @@ final class MergedDocumentShapeSuite extends FunSuite {
   private val cluster = ServiceId.unsafe("cluster")
   private val topic = ServiceId.unsafe("topic")
   private val connect = ServiceId.unsafe("connect")
+  private val ksql = ServiceId.unsafe("ksql")
 
   private val merged = DocsRoutes
     .document[IO](List(cluster, topic), List("/"))
@@ -128,6 +130,35 @@ final class MergedDocumentShapeSuite extends FunSuite {
     )
   }
 
+  test("everyPublishedKsqlWriteCarriesItsPermissionDeclaration") {
+    // The eleventh service's two writes, counted at the gateway for the connect entry's reason: a write that
+    // never reaches `ServiceContracts` looks identical to a write that was never written, and ksqlDB — like
+    // connect — publishes its writes from the same object as its read, so there is no second list whose
+    // absence would be obvious. The names are hard-coded, so a third statement endpoint moves this number
+    // and has to be argued for in the change that adds it.
+    //
+    // `ksql.statement.execute` is the one endpoint in KUI that can destroy a Kafka topic without naming it,
+    // and `ksql.statement.plan` is the phase that hands out the token for it (ADR-045). A plan reachable
+    // without a declaration would be a confirmation dialogue the permission seam cannot decide about, which
+    // is worse than an unrouted endpoint: it draws a button.
+    val names = Set("ksql.statement.plan", "ksql.statement.execute")
+    val writes = ServiceContracts.proxied(ksql).filter(_.info.name.exists(names))
+
+    assertEquals(writes.size, 2, ServiceContracts.proxied(ksql).flatMap(_.info.name).toString)
+    assertEquals(
+      writes.flatMap(_.info.name).sorted,
+      KsqlEndpoints.writes.flatMap(_.info.name).sorted,
+      "the writes the gateway proxies are not the writes the ksql contract publishes"
+    )
+
+    writes.foreach(endpoint =>
+      assert(
+        endpoint.attribute(kui.contracts.rbac.EndpointAuthorization.Key).isDefined,
+        s"${endpoint.info.name} carries no authorization declaration"
+      )
+    )
+  }
+
   test("thePublicClusterPathsEqualTheDerivedSet") {
     // Derived from the proxied lists plus the gateway's own two aggregations, so a new endpoint needs no
     // edit here: add one and forget to regenerate the document, and this fails.
@@ -143,6 +174,11 @@ final class MergedDocumentShapeSuite extends FunSuite {
         .endpoints[IO]
         .map(_.showPathTemplate().takeWhile(_ != '?')) ++
       kui.gateway.api.AlertsStreamRoutes
+        .endpoints[IO]
+        .map(_.showPathTemplate().takeWhile(_ != '?')) ++
+      // The ksqlDB push query, on the same terms as the two streams above it: a cluster-scoped path the
+      // gateway serves itself, relayed rather than derived, so `ServiceContracts` never produces it.
+      kui.gateway.api.KsqlStreamRoutes
         .endpoints[IO]
         .map(_.showPathTemplate().takeWhile(_ != '?'))
     val documented = paths.filter(_.startsWith("/api/v1/clusters"))

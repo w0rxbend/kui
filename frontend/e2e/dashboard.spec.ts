@@ -168,4 +168,64 @@ test.describe("the cluster dashboard", () => {
     await expect(meter).toBeVisible();
     await expect(meter).toContainText(/\d+%|could not be read|not known/i);
   });
+
+  /**
+   * The Storage tab (`M04`), which is the third of the three tabs and the only one no browser case
+   * had ever opened.
+   *
+   * W8-07's screen census found it: `traffic.spec.ts` drives Overview and Traffic, this file drives
+   * the frame around them, and `/dashboard/storage` — a route, a strip segment, a body and a voice
+   * line — was reachable by address and asserted by nothing outside jsdom. §4.3's rule is the part
+   * that a unit case cannot see on its own: the tab **replaces the whole body**, so rows 2 and 3
+   * are absent rather than repeated, and a strip whose settings mostly agree with each other is a
+   * strip nobody uses.
+   */
+  test("the Storage tab replaces the body rather than repeating the Overview's rows", async ({
+    page,
+  }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    await page.getByRole("link", { name: "Storage" }).click();
+    await expect(page).toHaveURL(new RegExp(`/ui/clusters/${CLUSTER}/dashboard/storage$`));
+    const strip = page.getByRole("link", { name: "Storage" });
+    await expect(strip).toHaveAttribute("aria-current", "page");
+    /* A tab, not a destination: the drawer stays on Dashboard while the last segment moves. */
+    await expect(page.getByTestId("nav-overview")).toHaveAttribute("aria-current", "page");
+
+    // §4.3: exactly two cards, and then the page ends.
+    await expect(page.getByRole("heading", { name: "Storage by broker" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Message size/ })).toBeVisible();
+    for (const gone of ["Broker health", "Partition health", "Latency · p99", "Alerts & events"]) {
+      await expect(page.getByRole("heading", { name: gone })).toHaveCount(0);
+    }
+  });
+
+  /**
+   * And what the Storage card says about a disk, which is the product's central promise on the one
+   * screen the promise was written for.
+   *
+   * Either two real byte figures with a share between them, or the sentence naming what was not
+   * reported. Never `0 B of 0 B`, and never a bare dash: `StorageByBroker.detailOf` answers
+   * `"no disk size reported"` where the wire carried no capacity, and an empty bar over a row of
+   * zeros is the exact misreading — *your disks are empty* — that the sentence exists to prevent.
+   */
+  test("a broker's storage row carries real byte figures or says what was not reported", async ({
+    page,
+  }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/storage`);
+
+    const card = page.getByTestId("panel-storage");
+    await expect(card).toBeVisible();
+    const rows = card.getByTestId("storage-rows").locator("li");
+    await expect(rows.first()).toBeVisible();
+
+    const detail = (await rows.first().textContent()) ?? "";
+    /* `842 GB of 1.25 TB · 67%` (§2.3's shape, per broker) or the sentence. One of the two, and the
+       case reports which it saw rather than accepting anything non-empty. */
+    expect(
+      /\d[\d.]*\s*(B|kB|MB|GB|TB)\s+of\s+\d[\d.]*\s*(B|kB|MB|GB|TB)/.test(detail) ||
+        /no disk size reported|not measured|could not/i.test(detail),
+      `the first storage row read ${JSON.stringify(detail)}`,
+    ).toBe(true);
+    await expect(card).not.toContainText("0 B of 0 B");
+  });
 });

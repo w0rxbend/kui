@@ -14,6 +14,7 @@
  */
 import type { ConnectorState, TaskState } from "@kui/kernel";
 
+import type { ConnectorCommand } from "./data.js";
 import type { Connector, ConnectorListing, ConnectorRunState, WorkerRow } from "./wire.js";
 
 /**
@@ -49,6 +50,42 @@ export function connectorLabel(connector: {
 /** Which of pause and resume this connector's control offers. Restart is always the other one. */
 export function toggleOf(state: ConnectorRunState): "pause" | "resume" {
   return state === "PAUSED" ? "resume" : "pause";
+}
+
+/**
+ * What a connector's card is handed for its two controls: **handlers, or a refusal, never both.**
+ *
+ * `ConnectorCard` branches on `actionsDisabledReason` and draws a disabled pair when it is there,
+ * so a panel that passed `onPause` *alongside* a refusal would look right on every screen and in
+ * every case — and would arm itself the day that branch is reworked. The defence against an
+ * unpermitted principal pausing a connector would then be living entirely in `Button`, which
+ * swallows the click on `aria-disabled` because it chose `aria-disabled` over the attribute, in a
+ * package this one does not own.
+ *
+ * It is a function rather than a ternary inside the panel because **the difference is invisible in
+ * the DOM**: nothing a case can select on separates a card that was given a handler from a card
+ * that was not, so the only place the rule can be asserted is on the value itself. W7's
+ * verification filed exactly that — the case named *"hands an unpermitted principal no working
+ * control anywhere on the page"* stayed green with the handlers wired unconditionally, because it
+ * reads `aria-disabled` and nothing else.
+ */
+export type CardActions =
+  | { readonly onPause: () => void; readonly onRestart: () => void }
+  | { readonly actionsDisabledReason: string };
+
+export function cardActions(options: {
+  /** Absent means permitted. Present is the sentence the disabled controls carry. */
+  readonly refusal: string | undefined;
+  /** Which of pause and resume this connector's state offers. See {@link toggleOf}. */
+  readonly toggle: "pause" | "resume";
+  readonly onCommand: ((which: ConnectorCommand) => void) | undefined;
+}): CardActions {
+  const refusal = options.refusal;
+  if (refusal !== undefined) return { actionsDisabledReason: refusal };
+  return {
+    onPause: () => options.onCommand?.(options.toggle),
+    onRestart: () => options.onCommand?.("restart"),
+  };
 }
 
 /**
@@ -115,17 +152,14 @@ export function segmentsOf(connector: Connector): readonly TaskState[] {
   return connector.tasks.map((task) => taskSegment(task.state));
 }
 
-/**
- * The caption under the bar: `3/3 tasks`, from the service's own two figures.
- *
- * Never counted here. `runningTasks` is the domain's count and the domain is the one that says
- * `RESTARTING` is not running — which is exactly the state an operator is watching this figure
- * during, and exactly where two derivations would disagree.
+/*
+ * There was a `taskCaption()` here — `3/3 tasks`, from the service's own two figures — and it had
+ * no product caller. `ConnectorPanel`'s own `taskSentence` says the same two numbers in words and
+ * says the gap between `tasks.length` and `taskCount` as well, which a caption cannot; the kernel's
+ * `ConnectorCard` draws its own summary from the segments. A third phrasing of one pair of figures,
+ * reachable only from a case, is a fourth chance to disagree with the domain about what `running`
+ * means. Deleted in wave 8 rather than given a caller.
  */
-export function taskCaption(connector: Connector): string {
-  if (connector.taskCount === 0) return "no tasks";
-  return `${connector.runningTasks}/${connector.taskCount} tasks`;
-}
 
 /* --- The failure reason, which is the whole of `SCREENS-V4.md` §7.7 --------------------------- */
 
@@ -204,6 +238,14 @@ export const NOT_CONFIGURED =
  * fallback for a missing figure — it is the only thing there is to say. §3.14 draws `1,204 msg/s`
  * and its own *Absent* paragraph is the rule being kept: a literal `0 msg/s` on a paused connector
  * is a measured zero, and an unmeasured one must never look like it.
+ *
+ * **It is the second copy of a sentence the kernel owns.** `ConnectorCard.tsx` renders the literal
+ * itself, because this package hands the card no `throughput` prop and the card decides what to say
+ * about that; nothing here can pass the sentence in. So this constant has no product caller and
+ * cannot have one — what it has instead is `connect.test.tsx`, which asserts the **card's rendered
+ * text against this value** rather than against a literal of its own. Two copies compared beat two
+ * copies drifting, and this is the only join available across a package boundary a feature may not
+ * cross.
  */
 export const THROUGHPUT_NOT_MEASURED = "throughput not measured";
 

@@ -29,7 +29,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createSignal, flush } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { clearToasts, toasts } from "@kui/kernel";
+import { clearToasts, toasts, type KuiContextValue } from "@kui/kernel";
 import { mount } from "./testing.js";
 import {
   DEFAULT_TOPIC_QUERY,
@@ -2071,6 +2071,153 @@ describe("the topics screen, wired", () => {
       "Told why not": true,
     });
   });
+
+  /**
+   * The subject, which every permission case above this one is blind to.
+   *
+   * All of them hand the harness a `permits` of the shape `(action) => action.action === held`, so
+   * the `name` is thrown away and so a gate asking `permits(action)` and a gate asking
+   * `permits(action, "orders.v1")` answer identically to every one of them. All four of the topic
+   * page's gates asked the subjectless question until wave 8, and `kernel/src/state/session.ts`
+   * says in as many words which question that is: *"the right answer for a list heading and the
+   * wrong one for a row's delete button"*.
+   *
+   * The principal is the one a **pattern** grant makes, which is the only kind the server issues:
+   * every action, on `analytics.pageviews` and on nothing else. Asked "do they hold `TOPIC:DELETE`
+   * on anything" the answer is yes — that is what `name === undefined` means here, and it is what
+   * the server answers too — and asked about `orders.v1` it is no. So a page that names its topic
+   * closes all four controls and a page that does not opens all four.
+   *
+   * Both directions, because a page that refused everybody would satisfy the first half alone. The
+   * list screen's three gates are deliberately **not** included: a heading's `Create topic` is
+   * about the cluster and naming a topic there would be the opposite mistake.
+   */
+  test("the topic page's write gates ask about this topic, not about the cluster", async () => {
+    const pageAnswers = {
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+        topic: {
+          status: "ok",
+          fetchedAt: "2026-09-06T00:00:00Z",
+          data: {
+            row: {
+              name: "orders.v1",
+              internal: false,
+              partitionCount: 1,
+              replicationFactor: 1,
+              outOfSyncReplicas: 0,
+              offlinePartitions: 0,
+            },
+            partitions: [],
+          },
+        },
+      },
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions": {
+        partitions: {
+          status: "ok",
+          data: [
+            {
+              partition: 0,
+              leader: 1,
+              replicas: [{ broker: 1, leader: true, inSync: true }],
+              earliestOffset: 0,
+              latestOffset: 4,
+            },
+          ],
+        },
+      },
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/config": {
+        config: {
+          status: "ok",
+          data: {
+            status: "entries",
+            values: [
+              {
+                name: "retention.ms",
+                value: "604800000",
+                defaultValue: "604800000",
+                source: "dynamic-topic",
+                sensitive: false,
+                readOnly: false,
+                documentation: null,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    /** Every action, on the one topic this grant's pattern covers, and on nothing else. */
+    const grantedOn =
+      (topic: string): KuiContextValue["permits"] =>
+      (_action, name) =>
+        name === undefined || name === topic;
+
+    const onTab = async (
+      cluster: string,
+      granted: string,
+      tab: string,
+    ): Promise<ReturnType<typeof mount>> => {
+      const host = topicsHost({
+        at: `/clusters/${cluster}/topics/orders.v1?tab=${tab}`,
+        permits: grantedOn(granted),
+        answers: pageAnswers,
+      });
+      const mounted = mount(host.view);
+      await settle();
+      return mounted;
+    };
+
+    const live = (within: ParentNode, label: string): boolean => {
+      const button = [...within.querySelectorAll<HTMLButtonElement>("button")].find(
+        (one) => one.textContent?.trim() === label,
+      );
+      expect(button, `${label} must be on screen whoever is looking at it`).toBeDefined();
+      return button?.getAttribute("aria-disabled") !== "true";
+    };
+
+    const offered = async (
+      cluster: string,
+      granted: string,
+    ): Promise<Record<string, boolean | undefined>> => {
+      const overview = await onTab(cluster, granted, "overview");
+      const header = {
+        "Empty topic": live(overview.container, "Empty topic"),
+        "Delete topic": live(overview.container, "Delete topic"),
+      };
+      overview.dispose();
+      forgetQueries();
+
+      const partitions = await onTab(cluster, granted, "partitions");
+      const mayAdd = live(partitions.container, "Add partitions");
+      partitions.dispose();
+      forgetQueries();
+
+      const settings = await onTab(cluster, granted, "settings");
+      const mayEdit = [
+        ...settings.container.querySelectorAll<HTMLButtonElement>("button"),
+      ].some((one) => one.textContent?.trim() === "Edit");
+      settings.dispose();
+      forgetQueries();
+
+      return { ...header, "Add partitions": mayAdd, "Edit a setting": mayEdit };
+    };
+
+    // Granted on a topic that is not this one: nothing on this page is theirs to press.
+    expect(await offered("elsewhere-cluster", "analytics.pageviews")).toEqual({
+      "Empty topic": false,
+      "Delete topic": false,
+      "Add partitions": false,
+      "Edit a setting": false,
+    });
+    // And the same grant, on this topic: all four live, so the assertions above are about the
+    // subject rather than about a page that refuses everybody.
+    expect(await offered("here-cluster", "orders.v1")).toEqual({
+      "Empty topic": true,
+      "Delete topic": true,
+      "Add partitions": true,
+      "Edit a setting": true,
+    });
+  });
   test("a cluster that has not answered yet is not treated as read-only", async () => {
     /*
      * The other half of `useClusterReadOnly`, and the half a case that settles first cannot see.
@@ -2625,6 +2772,64 @@ describe("the topics screen, wired", () => {
 
     expect(outcome).toBe("finished");
     expect(reloads).toBe(6);
+  });
+
+  /**
+   * The short-circuit the function is named for, which the case above is structurally blind to.
+   *
+   * It passes `() => false`, so the loop can only ever run to its bound — deleting
+   * `if (listed()) return;` leaves it at six reloads and green. What that ships is a screen that
+   * sees the new topic on its first re-read and goes on asking the gateway five more times over the
+   * next two and a half seconds, for a row already on screen. `settleAfterCreate` runs after every
+   * successful create, so it is every create on the cluster.
+   *
+   * `listed` answers true on the second pass rather than the first, because a loop that returned
+   * after one reload unconditionally would satisfy a first-pass fixture and is a different defect.
+   */
+  test("the create poll stops at the first read that can see the topic", async () => {
+    let reloads = 0;
+    await pollUntilListed(
+      () => {
+        reloads += 1;
+      },
+      () => reloads >= 2,
+    );
+
+    expect(reloads).toBe(2);
+  });
+
+  /**
+   * The interval, on a clock this case owns.
+   *
+   * Half a second is "long enough for the fetch the reload just started to have landed", and the
+   * figure had nothing holding it: 500 and 50 draw the same page, and the difference is a gateway
+   * asked ten times a second by every browser that has just created a topic. It was left ungated on
+   * the reasoning that gating it means asserting wall-clock duration, which is sound about a real
+   * clock and is why this one is fake — the assertion is that the loop waits for *that many
+   * milliseconds*, made in two turns either side of the boundary, and it costs no wall time at all.
+   */
+  test("the create poll waits half a second between reads", async () => {
+    vi.useFakeTimers();
+    try {
+      let reloads = 0;
+      // Never listed, so nothing but the clock can end a pass.
+      const polled = pollUntilListed(() => {
+        reloads += 1;
+      }, () => false);
+
+      expect(reloads).toBe(1);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(reloads).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reloads).toBe(2);
+
+      // And it still finishes, rather than this case leaving a timer running into the next one.
+      await vi.advanceTimersByTimeAsync(6 * 500);
+      await polled;
+      expect(reloads).toBe(6);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("the bulk bar's dismiss clears the ticks and not just the bar", async () => {

@@ -74,7 +74,8 @@ export const TopicTreeExpanded: Story = {
 };
 
 /**
- * `ECOSYSTEM` with nothing in it, which is its only state until M9 ships Connect and ksqlDB.
+ * `ECOSYSTEM` with nothing in it — a deployment that configured no registry, no Connect worker and
+ * no ksqlDB server, which ADR-032 renders by hiding all three rows rather than by drawing failures.
  *
  * The drawer draws **nothing at all** for it: no heading, no count, no rule above it. A lettered
  * heading over an empty list reads as a list that failed to load, and sends an operator hunting for

@@ -207,4 +207,28 @@ final class ConnectCapabilitiesSuite extends CatsEffectSuite {
     assert(ConnectCapabilities.rebalancing(rebalancing))
     assert(!ConnectCapabilities.rebalancing(unreachable))
   }
+
+  test("the composition root's route list is the published contract plus the three health probes") {
+    // `ConnectTestServer.resource` used to assemble `HealthEndpoints.make ++ ConnectRoutes` itself, so an
+    // endpoint dropped from `ConnectApi.routes` — the list the process actually serves — left every route
+    // case green against a list the product does not have. The rig now drives `ConnectApi.routes` and
+    // hands it back; this is the case that reads it. `services/alerts` landed the same case a wave earlier,
+    // for the stream it had to hand-write; this service has no stream, and the list it must not lose a
+    // member of is the four contract endpoints and the three health probes.
+    //
+    // Compared against `ConnectEndpoints.all` rather than against a written-out list of paths, so that a
+    // fifth contract endpoint joins without editing this file — and against `documented`, which is what
+    // the OpenAPI document is rendered from, so a route that is served and not published cannot appear.
+    ConnectTestServer.resource().use { rig =>
+      IO {
+        val served = rig.routes.map(_.showPathTemplate())
+
+        assertEquals(served.distinct.size, served.size, clue = served)
+        assertEquals(served.size, ConnectApi.documented.size)
+        ConnectEndpoints.all.flatMap(_.showPathTemplate().split("\\?").headOption).foreach { path =>
+          assert(served.exists(_.startsWith(path)), clue = s"$path is not served: $served")
+        }
+      }
+    }
+  }
 }

@@ -24,6 +24,10 @@
     // whatever the shell happens to depend on.
     { "path": "./packages/feature-schemas" },
     { "path": "./packages/feature-alerts" },
-    { "path": "./packages/feature-connect" }
+    { "path": "./packages/feature-connect" },
+    // The eighth feature package. Named here for the same reason `feature-schemas` is: a package
+    // reachable only through `packages/shell/tsconfig.json` is type-checked by whatever the shell
+    // happens to depend on, which is a property nobody chose.
+    { "path": "./packages/feature-ksql" }
   ]
 }

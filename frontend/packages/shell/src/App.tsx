@@ -1082,6 +1082,10 @@ export function topCrumbs(
     schemas: "Schema Registry",
     alerts: "Alerts",
     connect: "Connect",
+    /* The product's word, not the service's. `SCREENS-V4.md` §4.15 draws the row, the heading and
+       the breadcrumb as `ksqlDB` — one capital in the middle — and the feature id is `ksql` because
+       an id is a path segment. Spelling the crumb from the id would put `Ksql` in the top band. */
+    ksql: "ksqlDB",
     settings: "Settings",
   };
   // "overview" adds nothing: the cluster crumb already links there, and a trail that repeats itself
@@ -1281,6 +1285,7 @@ export function currentFeatureId(pathname: string, uiPrefix: string): string | u
   if (segments.includes("schemas")) return "schemas";
   if (segments.includes("alerts")) return "alerts";
   if (segments.includes("connect")) return "connect";
+  if (segments.includes("ksql")) return "ksql";
   // `/clusters/<id>`, with or without `/dashboard/<tab>` after it. Both are the same page.
   if (segments[1] !== undefined && segments[1] !== "manage" && !segments.includes("brokers")) {
     return "overview";

@@ -18,7 +18,7 @@
 #   ./deployment/compose/smoke.sh
 #
 # Requires the images. `./mill deployment.docker.__.build` builds every backend image: the gateway,
-# the eight services this file runs, and the all-in-one binary it does not. The number is not
+# the nine services this file runs, and the all-in-one binary it does not. The number is not
 # written down and does not need to be -- the preflight below derives the list from this stack's own
 # compose file and names anything that is missing. The interface's image is
 # not a Mill target at all -- Mill never builds a browser bundle -- and `docker compose up` builds
@@ -29,10 +29,10 @@
 # message about a registry, for a build step somebody skipped. The first thing this script does is
 # therefore to check that each of them exists on this machine, and to name the Mill target that
 # makes the missing one. The third-party images -- the Kafka broker, the JMX exporter beside it that
-# makes this stack measurable at all, the Schema Registry, and the Kafka Connect worker, which runs
-# the broker's own image and so is a fourth container rather than a fourth image -- are pulled by
-# Compose like any other published image and are deliberately not in that check: there is no Mill
-# target it could name.
+# makes this stack measurable at all, the Schema Registry, the Kafka Connect worker, which runs the
+# broker's own image and so is a fifth container rather than a fifth image, and the ksqlDB server --
+# are pulled by Compose like any other published image and are deliberately not in that check: there
+# is no Mill target it could name.
 
 set -euo pipefail
 
@@ -765,9 +765,29 @@ await "at least one alert rule read the facts it needs" "yes" \
 # This stack is the third. `kafka-connect` is a real Kafka Connect worker started by
 # `docker-compose.yml` and nothing registers a connector into it, so the honest answer here is an
 # empty list, and asserting on its emptiness would assert nothing: a service that never called the
-# worker at all answers the same shape. What separates them is the STATUS, which is `ok` only when
-# a worker was reached, so that is what is asserted -- the same argument the alerts feed above is
-# asserted under, one service over.
+# worker at all answers the same shape. What separates them is the STATUS -- but it has to be the
+# PER-WORKER status, and until this was measured it was the outer one.
+#
+# THE OUTER STATUS IS `ok` WITH NO WORKER REACHABLE AT ALL. Measured on this stack, with both
+# `connect.url` entries in `kui-service.yaml` pointed at a host that does not resolve:
+#
+#   GET .../connect/connectors                    HTTP 200
+#   to_entries[0].value.status                    "ok"
+#   ...data.workers[0].connectors.status          "unavailable"
+#   ...data.workers[0].connectors.reason          "UPSTREAM_UNAVAILABLE"
+#   /api/v1/capabilities, connect, cluster null   "available"
+#
+# So the old assertion here -- `to_entries[0].value.status` == "ok" -- passed against a deployment
+# with no worker it could reach, and so did the capability row above it. Wave 7's verification
+# measured the same pass by stopping the container instead. The outer status separates
+# `not_configured` from the other two states and nothing separated those two from each other, which
+# is two of the three states enumerated above asserted by nothing, in the one script whose job is to
+# notice that a service is unreachable.
+#
+# The per-worker assertion below fails on that arrangement: `every Connect worker the cluster names
+# answered was 'unavailable' after 90s, expected 'ok'`.
+#
+# The per-worker section is where a refusal is reported, so that is what is asserted.
 log "the tenth service answers, on a path the gateway derives rather than one written here"
 
 # The read path, taken from the gateway's own merged OpenAPI document.
@@ -801,13 +821,22 @@ connect_path="$(connect_read_path)"
   the routes are derived from it, or it is not and this service is reachable by nothing."
 printf '  the gateway publishes the connect read at: %s\n' "$connect_path"
 
-# `to_entries[0].value.status` and not a field name. Every KUI read answers one `Section` under one
-# key (ADR-034), and which key this one is belongs to `services/connect`'s contract; naming it here
+# `to_entries[0].value` and not a field name. Every KUI read answers one `Section` under one key
+# (ADR-034), and which key this one is belongs to `services/connect`'s contract; naming it here
 # would be a fifth copy of somebody else's decision, and one that goes stale silently -- a `jq`
 # selecting a key that is not there answers `null`, and `await` would spend ninety seconds on it
-# and then report `null` rather than reporting the rename.
-await "the connect read on a cluster that names a worker" "ok" \
-  "curl -sf '$base${connect_path/\{clusterId\}/measured}' | jq -r 'to_entries[0].value.status'"
+# and then report `null` rather than reporting the rename. Below that key the field names ARE
+# written out, because the per-worker status is the only place a refusal is reported and there is
+# no way to reach it without naming the path to it.
+#
+# `unique | join(",")` and not a boolean: a failure then prints what the workers actually said --
+# `unavailable`, or `ok,unavailable` on a stack where one of several is down -- instead of `false`.
+# The empty case is named for the same reason: a document that carried no worker section at all
+# would otherwise render as an empty string, which reads as the curl having failed.
+await "every Connect worker the cluster names answered" "ok" \
+  "curl -sf '$base${connect_path/\{clusterId\}/measured}' |
+     jq -r '[to_entries[0].value.data.workers[]?.connectors.status]
+            | unique | if length == 0 then \"no worker section\" else join(\",\") end'"
 
 log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null

@@ -53,8 +53,13 @@ function quietStream(): SseHandle {
   } as SseHandle;
 }
 
-/** The store, reading one document. The caller owns disposal. */
-export function storeFor(document: unknown): Alerts {
+/**
+ * The store, reading one document. The caller owns disposal.
+ *
+ * Module-private: `feedState` and `FromDocument` below are its only callers and always were, and an
+ * export nothing outside this file names is a promise this module is not being asked for.
+ */
+function storeFor(document: unknown): Alerts {
   return createAlerts({
     load: async () => ({ ok: true, value: document }),
     openStream: quietStream,

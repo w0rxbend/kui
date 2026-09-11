@@ -184,21 +184,32 @@ services:
   # configuration file in this directory would be one more thing `ShippedConfigurationSuite` has to
   # be told is not KUI's own.
   #
-  # NOTHING REGISTERS A CONNECTOR AND NOTHING SHOULD. This worker runs zero connectors, so the
-  # Connect screens show a real worker that is running none -- which is a different answer from
-  # "this deployment configured no Connect cluster" (the `not_configured` a quickstart without this
-  # container would give) and from "the worker will not answer". Seeding a connector to make the
-  # screen look busy would erase exactly the distinction the product is built on.
+  # ONE CONNECTOR RUNS ON IT, AND THIS COMMENT USED TO SAY THE OPPOSITE. It said "nothing registers
+  # a connector and nothing should", on the argument that a worker running zero connectors is one of
+  # three answers the Connect screens must not confuse -- `not_configured`, a refusal, and `ok` with
+  # an empty list -- and that seeding one would erase the distinction. The distinction is real and
+  # the conclusion was wrong: `frontend/e2e/connect.spec.ts` has two positive cases, a connector's
+  # rows and a task's state, and both of them SKIP on this stack because there is nothing to list.
+  # The empty-worker answer is still covered, one directory over, by `deployment/compose`, whose own
+  # worker runs nothing and whose `smoke.sh` asserts that shape. The two stacks now hold the two
+  # states between them, and the state nothing covered was the one every real deployment is in.
+  # `./seed/connect-seed.sh` is what registers it, and it is the `connect-seed` service below.
   #
-  # NO PUBLISHED PORT, for the reason the exporter above gives: the REST API is for KUI. To read it
-  # by hand:
+  # THE REST PORT IS PUBLISHED, and it was not before. The exporter above keeps its port to itself
+  # because its exposition is for KUI and there is nothing to compare it against; this worker is now
+  # the one container in the quickstart whose facts KUI *re-renders*, so being able to read the
+  # worker's own answer beside the screen's is the whole way anybody checks the screen is honest:
   #
-  #   docker compose -f deployment/quickstart/docker-compose.quickstart.yml exec kui curl -s \
-  #     http://kafka-connect:8083/connectors
+  #   curl -s localhost:${KUI_QUICKSTART_CONNECT_PORT:-8083}/connectors/quickstart-file-source
+  #
+  # It is a variable with a default, like every other published port here, so a machine already
+  # running something on 8083 moves it rather than losing the quickstart.
   # ---------------------------------------------------------------------------------------------
   kafka-connect:
     image: apache/kafka:4.3.1
     container_name: kui-quickstart-kafka-connect
+    ports:
+      - "${KUI_QUICKSTART_CONNECT_PORT:-8083}:8083"
     depends_on:
       kafka:
         condition: service_healthy
@@ -208,7 +219,23 @@ services:
         sed -e 's|^bootstrap.servers=.*|bootstrap.servers=kafka:9092|' \
             -e 's|^group.id=.*|group.id=kui-quickstart-connect|' \
             /opt/kafka/config/connect-distributed.properties > /tmp/connect-distributed.properties
-        printf 'listeners=http://:8083\nplugin.discovery=hybrid_warn\n' >> /tmp/connect-distributed.properties
+        # THE FileStream CONNECTORS ARE IN THIS IMAGE AND NOT ON ITS CLASSPATH. `connect-file-*.jar`
+        # ships in /opt/kafka/libs, but `connect-distributed.sh` builds a classpath that leaves it
+        # out -- the jar is absent from the `jvm.classpath` the worker logs at startup -- so one
+        # started with no `plugin.path` answers `Failed to find any class that implements Connector
+        # and which name matches org.apache.kafka.connect.file.FileStreamSourceConnector` and lists
+        # only the three MirrorMaker connectors. Measured here, against this image, on the 400 the
+        # connector seed got back.
+        #
+        # So the jar is copied into a directory of its own and that directory is the plugin path.
+        # Copied rather than named in `plugin.path` directly, because the jar's name carries the
+        # Kafka version and this file should not have to be edited when the image tag moves; the
+        # glob is what makes it version-agnostic.
+        mkdir -p /tmp/connect-plugins/file
+        cp /opt/kafka/libs/connect-file-*.jar /tmp/connect-plugins/file/
+        printf 'listeners=http://:8083\nplugin.discovery=hybrid_warn\n' \
+          >> /tmp/connect-distributed.properties
+        printf 'plugin.path=/tmp/connect-plugins\n' >> /tmp/connect-distributed.properties
         exec /opt/kafka/bin/connect-distributed.sh /tmp/connect-distributed.properties
     healthcheck:
       # A real GET of the resource KUI reads, not a port check: Jetty accepts connections before
@@ -227,6 +254,111 @@ services:
     networks:
       - kui-quickstart
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------------------------
+  # A ksqlDB server, so that the ksqlDB screens have a real server to be honest about.
+  #
+  # IT IS THE ONE IMAGE IN THIS FILE THAT IS NOT APACHE-2.0, and that is worth saying out loud
+  # rather than leaving for somebody to discover. ADR-014 Amendment 1 chose Apicurio over
+  # Confluent's Schema Registry to keep this quickstart on Apache-licensed images, and it could,
+  # because two implementations of that REST API exist. There is no second implementation of
+  # ksqlDB: `confluentinc/ksqldb-server` under the Confluent Community License is the only thing
+  # that speaks it. KUI's own code depends on the API and not on this server.
+  #
+  # It is also the one container here that is a real extra download -- every other image in this
+  # file is the Kafka image, the registry image or KUI's own, each pulled once. That cost buys the
+  # ksqlDB screens something to show; without it every one of them would be a refusal, which is the
+  # state the Connect screens were in for two waves.
+  #
+  # `KSQL_KSQL_SERVICE_ID` prefixes the internal command topic: two servers on one broker sharing an
+  # id share a command topic and are one cluster. The replication and min-ISR settings are here
+  # because this broker is a single node.
+  # ---------------------------------------------------------------------------------------------
+  ksqldb-server:
+    image: confluentinc/ksqldb-server:0.29.0
+    container_name: kui-quickstart-ksqldb
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      # Published for the reason the registry's port is: so the server KUI is reading can be asked
+      # the same question by hand, which is how anybody checks a screen is honest.
+      - "${KUI_QUICKSTART_KSQL_PORT:-8088}:8088"
+    environment:
+      KSQL_BOOTSTRAP_SERVERS: kafka:9092
+      KSQL_LISTENERS: http://0.0.0.0:8088
+      KSQL_KSQL_SERVICE_ID: kui-quickstart-
+      KSQL_KSQL_STREAMS_REPLICATION_FACTOR: 1
+      KSQL_KSQL_INTERNAL_TOPIC_REPLICAS: 1
+      KSQL_KSQL_INTERNAL_TOPIC_MIN_INSYNC_REPLICAS: 1
+    healthcheck:
+      # A real GET of `/info`, which is the resource KUI's adapter reads first, and not a port
+      # check: Jetty accepts connections well before the engine has started. This image is
+      # Debian-based and carries curl.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8088/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 20s
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------------------------
+  # A one-shot container that creates one ksqlDB stream over a seeded topic, then exits.
+  #
+  # Same argument as `connect-seed` below it: a ksqlDB server that knows about nothing renders as an
+  # empty list, which is honest and is the only state anything would cover. One stream gives the
+  # object listing a row, the statement screen something to describe, and a push query something to
+  # select from.
+  # ---------------------------------------------------------------------------------------------
+  ksql-seed:
+    image: apicurio/apicurio-registry:3.0.6
+    container_name: kui-quickstart-ksql-seed
+    depends_on:
+      ksqldb-server:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/ksql-seed.sh"]
+    environment:
+      KUI_KSQL_URL: http://ksqldb-server:8088
+    volumes:
+      - ./seed:/seed:ro
+    restart: "no"
+    networks:
+      - kui-quickstart
+
+  # ---------------------------------------------------------------------------------------------
+  # A one-shot container that puts one connector onto the worker above, then exits.
+  #
+  # It runs the registry's image and not `apache/kafka` for the reason `avro-seed.sh` records in
+  # full: this script talks HTTP and nothing else, so it needs `curl`, and the Kafka image is
+  # Alpine with busybox `wget` and no `curl` at all. The registry image is already being pulled by
+  # this same file.
+  #
+  # `service_completed_successfully` is what `kui` waits on below, so the first look at the Connect
+  # screen shows the connector rather than the ten seconds during which it is UNASSIGNED. The script
+  # itself does not exit until the connector and its task both report RUNNING, which is what makes
+  # that wait worth anything.
+  # ---------------------------------------------------------------------------------------------
+  connect-seed:
+    image: apicurio/apicurio-registry:3.0.6
+    container_name: kui-quickstart-connect-seed
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/seed/connect-seed.sh"]
+    environment:
+      KUI_CONNECT_URL: http://kafka-connect:8083
+    volumes:
+      - ./seed:/seed:ro
+    networks:
+      - kui-quickstart
+    # Same reasoning as `seed` below: the script is safe to re-run -- it PUTs the configuration
+    # rather than POSTing it -- but a restart loop hiding a real failure is worse than a container
+    # that stopped and said why.
+    restart: "no"
 
   # ---------------------------------------------------------------------------------------------
   # A one-shot container that puts something worth looking at into the broker, then exits.
@@ -367,6 +499,18 @@ services:
         # screen is opened rather than at start-up, so waiting here buys only that the first look at
         # the screen shows the worker answering instead of the twenty seconds it spends starting.
         condition: service_healthy
+        required: false
+      ksql-seed:
+        # And that the ksqlDB server knows about its one stream by then, for the same reason.
+        condition: service_completed_successfully
+        required: false
+      connect-seed:
+        # And that the worker has its connector on it by then, for the same reason the data seed
+        # below is waited on: the first Connect screen a newcomer opens should be the one this
+        # quickstart is demonstrating, not the empty one it passes through on the way. Not gated --
+        # a failed seed leaves a worker running nothing, which the screens render honestly and which
+        # is a better outcome than KUI refusing to start.
+        condition: service_completed_successfully
         required: false
       seed:
         # Wait for the data to be there, so the first screen is never a half-seeded cluster.

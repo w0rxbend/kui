@@ -79,11 +79,11 @@ describe("NavItem", () => {
       <NavItem
         destination={{
           id: "ksql",
-          label: "KSQL DB",
+          label: "ksqlDB",
           icon: "ksql",
           href: "/ksql",
           disabled: true,
-          disabledReason: "Not built yet",
+          disabledReason: "You do not have permission to run ksqlDB statements on this cluster",
         }}
       />
     ));
@@ -91,8 +91,12 @@ describe("NavItem", () => {
     expect(container.querySelector("a")).toBeNull();
     const row = container.querySelector('[data-testid="nav-ksql"]')!;
     expect(row.getAttribute("aria-disabled")).toBe("true");
-    expect(row.getAttribute("title")).toBe("Not built yet");
-    expect(row.getAttribute("aria-label")).toBe("KSQL DB, Not built yet");
+    expect(row.getAttribute("title")).toBe(
+      "You do not have permission to run ksqlDB statements on this cluster",
+    );
+    expect(row.getAttribute("aria-label")).toBe(
+      "ksqlDB, You do not have permission to run ksqlDB statements on this cluster",
+    );
     dispose();
   });
 
@@ -328,7 +332,8 @@ describe("NavDrawer", () => {
   });
 
   it("renders nothing at all for a group with no destinations", async () => {
-    // ECOSYSTEM's only state until M9. A lettered heading over an empty list reads as a list that
+    // ECOSYSTEM's state on a deployment that configured none of its three upstreams, and its only
+    // state at all until M9. A lettered heading over an empty list reads as a list that
     // failed to load, and sends an operator hunting for an outage that does not exist — the same
     // misreading ADR-032's `not_configured → hidden` rule prevents one level up.
     const { container, dispose } = mount(() => (

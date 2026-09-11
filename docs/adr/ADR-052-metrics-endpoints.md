@@ -306,19 +306,24 @@ rule A1) may state. `kui.topics.internalPrefix` is the deployment's own, broader
 to `__` in `libs/config/src/kui/config/TopicsConfig.scala:135`, three of the shipped configuration
 files narrow it to `_` — `deployment/quickstart/kui-quickstart.yaml:49`,
 `deployment/quickstart/kui-quickstart-auth.yaml:120` and `deployment/demo/kui-demo.yaml:44`, which
-is every file in `deployment/` that mentions the key at all — and the topics screen lets an operator
-turn it off with `?showInternal=1`. Borrowing the wider one here would drop a customer's `_audit`
-topic out of a producer ranking with nothing on screen saying so, and losing a real producer is a
-worse answer than keeping an internal one.
+is every file in `deployment/` that **sets** it. A fourth mentions the key without setting it —
+`deployment/metrics/kafka-jmx-exporter.yml:179`, in the comment explaining why this ranking must not
+borrow it — so `grep -rln internalPrefix deployment/` answers four files while
+`grep -rln 'internalPrefix:' deployment/` answers three, and three is the number this sentence is
+about. The topics screen lets an operator turn the exclusion off with `?showInternal=1`. Borrowing
+the wider prefix here would drop a customer's `_audit` topic out of a producer ranking with nothing
+on screen saying so, and losing a real producer is a worse answer than keeping an internal one.
 
 **The value this ranking uses reaches it from no configuration file, and that is the part a reader
 has to get right.** `TopProducers.InternalTopicPrefix` is the literal `"__"`; `kui.topics` is not on
 the metrics service's path at all, so on the quickstart — where `internalPrefix` *is* `_` —
 `_schemas` is internal to the topics screen and a ranked producer here. Two rules, deliberately, and
 this section is the one that says so. Any file explaining this exclusion through
-`kui.topics.internalPrefix` is describing behaviour the code does not have;
-`deployment/metrics/kafka-jmx-exporter.yml:148-171` currently does, and correcting it belongs to
-whoever owns that file.
+`kui.topics.internalPrefix` is describing behaviour the code does not have.
+`deployment/metrics/kafka-jmx-exporter.yml` did, and was corrected in wave 7. Its
+`AND THE PREFIX THE READER USES IS KAFKA'S, NOT KUI'S` block — the comment from line 174 on, whose
+own first sentence says it *"had this backwards for a wave"* — now states the same two rules this
+section does.
 
 **The omission is not silent.** `TopProducersDto` gained `internalTopicsExcluded`, the count of the
 topic lines the ranking left out, and the card prints a sentence when it is non-zero and nothing

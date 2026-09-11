@@ -48,21 +48,24 @@ final class ConnectHttpSuite extends KuiIOSuite {
     "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01:9200" +
       "\\n\\tat org.apache.kafka.connect.runtime.WorkerSinkTask.poll(WorkerSinkTask.java:329)"
 
-  /** The expanded document Kafka 2.3 and later answer: one key per connector, each with its status. */
+  /** The expanded document Kafka 2.3 and later answer: one key per connector, each with its status.
+    *
+    * ==Every order in it is deliberately wrong==
+    *
+    * Circe hands back the worker's own key order and a Connect herder is under no obligation to keep one,
+    * so the three orderings this client imposes have to be visible in what it answers. The keys here are
+    * `elastic-sink, orders-source, archive-sink`, whose reverse (`archive, orders, elastic`) is *not* the
+    * sorted order (`archive, elastic, orders`) — while the previous fixture's keys reversed to exactly the
+    * sorted list, so `.sortBy(_.name.value)` could be replaced with `.reverse` and all 129 cases stayed
+    * green. `orders-source`'s tasks are listed `1, 0, 2` for the same reason: sorted reads `0, 1, 2`,
+    * reversed reads `2, 0, 1`, and the worker's own order reads `1, 0, 2`, so no two of the three agree.
+    *
+    * `archive-sink` carries **no `tasks` key at all**, which is what a paused or freshly created connector
+    * genuinely sends, and is the other rule this fixture is the input to: it must be a connector with zero
+    * tasks and not an `unreadable` one.
+    */
   private val expanded: String =
     s"""{
-      |  "orders-source": {
-      |    "info": { "name": "orders-source", "type": "source" },
-      |    "status": {
-      |      "name": "orders-source",
-      |      "connector": { "state": "RUNNING", "worker_id": "10.0.0.1:8083" },
-      |      "tasks": [
-      |        { "id": 1, "state": "RUNNING", "worker_id": "10.0.0.2:8083", "trace": "" },
-      |        { "id": 0, "state": "RUNNING", "worker_id": "10.0.0.1:8083" }
-      |      ],
-      |      "type": "source"
-      |    }
-      |  },
       |  "elastic-sink": {
       |    "info": { "name": "elastic-sink", "type": "sink" },
       |    "status": {
@@ -74,11 +77,23 @@ final class ConnectHttpSuite extends KuiIOSuite {
       |      "type": "sink"
       |    }
       |  },
+      |  "orders-source": {
+      |    "info": { "name": "orders-source", "type": "source" },
+      |    "status": {
+      |      "name": "orders-source",
+      |      "connector": { "state": "RUNNING", "worker_id": "10.0.0.1:8083" },
+      |      "tasks": [
+      |        { "id": 1, "state": "RUNNING", "worker_id": "10.0.0.2:8083", "trace": "" },
+      |        { "id": 0, "state": "RUNNING", "worker_id": "10.0.0.1:8083" },
+      |        { "id": 2, "state": "RUNNING", "worker_id": "10.0.0.3:8083", "trace": "" }
+      |      ],
+      |      "type": "source"
+      |    }
+      |  },
       |  "archive-sink": {
       |    "status": {
       |      "name": "archive-sink",
-      |      "connector": { "state": "PAUSED", "worker_id": "10.0.0.1:8083" },
-      |      "tasks": []
+      |      "connector": { "state": "PAUSED", "worker_id": "10.0.0.1:8083" }
       |    }
       |  }
       |}""".stripMargin
@@ -98,9 +113,9 @@ final class ConnectHttpSuite extends KuiIOSuite {
         )
         assertEquals(
           facts.connectors.map(_.tasks.map(task => s"${task.id.value}:${task.state.wire}")),
-          List(Nil, List("0:FAILED"), List("0:RUNNING", "1:RUNNING"))
+          List(Nil, List("0:FAILED"), List("0:RUNNING", "1:RUNNING", "2:RUNNING"))
         )
-        assertEquals(facts.connectors.map(_.runningTasks), List(0, 0, 2))
+        assertEquals(facts.connectors.map(_.runningTasks), List(0, 0, 3))
         assertEquals(facts.unreadable, Nil)
       case Left(error) => fail(s"expected connectors, got $error")
     }
@@ -163,9 +178,15 @@ final class ConnectHttpSuite extends KuiIOSuite {
     }
   }
 
-  test("a pre-2.3 worker that answers a bare list is read one status at a time") {
+  test("a pre-2.3 worker that answers a bare list is read one status at a time, in name order") {
+    // **The rule this packet owns**, on the second of the two readers. `perConnector` sorts the names it
+    // was given and the connectors come back in that order; the worker's own array order is `elastic,
+    // orders, archive`, whose reverse is `archive, orders, elastic` and whose sort is `archive, elastic,
+    // orders` — so no two of the three agree and `names.sorted` cannot be replaced by `names.reverse` or
+    // dropped. The previous fixture named two connectors whose reverse *was* their sorted order, which is
+    // why that replacement left all 129 cases green.
     worker {
-      case "/connectors" => (StatusCode.Ok, """["orders-source","elastic-sink"]""")
+      case "/connectors" => (StatusCode.Ok, """["elastic-sink","orders-source","archive-sink"]""")
       case "/connectors/orders-source/status" =>
         (
           StatusCode.Ok,
@@ -173,9 +194,71 @@ final class ConnectHttpSuite extends KuiIOSuite {
         )
       case "/connectors/elastic-sink/status" =>
         (StatusCode.Ok, """{"name":"elastic-sink","connector":{"state":"PAUSED"},"tasks":[]}""")
+      case "/connectors/archive-sink/status" =>
+        (StatusCode.Ok, """{"name":"archive-sink","connector":{"state":"PAUSED"}}""")
     }.connectors.map {
       case Right(facts) =>
-        assertEquals(facts.connectors.map(_.name.value), List("elastic-sink", "orders-source"))
+        assertEquals(
+          facts.connectors.map(_.name.value),
+          List("archive-sink", "elastic-sink", "orders-source")
+        )
+        assertEquals(facts.unreadable, Nil)
+      case Left(error) => fail(s"expected connectors, got $error")
+    }
+  }
+
+  test("the expanded document's connectors arrive in name order and not in the worker's key order") {
+    // **The rule this packet owns**, on the first of the two readers, and it compares two connectors'
+    // positions rather than asserting a whole list — which is what makes it a statement about *order*
+    // rather than about content. A Connect herder rebuilds its status map on every rebalance, so the key
+    // order changes between polls; a panel that drew rows in that order would reshuffle under an operator
+    // reading it, and `Connector.reason`'s own promise about task-id order rests on the same argument one
+    // level down.
+    worker { case "/connectors" => (StatusCode.Ok, expanded) }.connectors.map {
+      case Right(facts) =>
+        val names = facts.connectors.map(_.name.value)
+
+        assert(names.indexOf("archive-sink") < names.indexOf("elastic-sink"), clue = names)
+        assert(names.indexOf("elastic-sink") < names.indexOf("orders-source"), clue = names)
+        assertEquals(names, names.sorted, clue = "the worker's key order reached the domain")
+      case Left(error) => fail(s"expected connectors, got $error")
+    }
+  }
+
+  test("one connector's tasks arrive in id order whatever order the worker listed them in") {
+    // **The rule this packet owns.** `tasksFrom` sorts by task id, and two positions are compared rather
+    // than a list asserted. `Connector.reason` picks *the first failed task in id order* so that the card
+    // and the drawer cannot name different tasks; if this sort went away, the input to that rule would be
+    // whatever order Circe handed back and the two screens would disagree between polls.
+    worker { case "/connectors" => (StatusCode.Ok, expanded) }.connectors.map {
+      case Right(facts) =>
+        val tasks = facts.connectors.find(_.name.value == "orders-source").toList.flatMap(_.tasks)
+        val ids = tasks.map(_.id.value)
+
+        assertEquals(ids, List(0, 1, 2))
+        assert(ids.indexOf(0) < ids.indexOf(1), clue = ids)
+      case Left(error) => fail(s"expected connectors, got $error")
+    }
+  }
+
+  test("a connector with no tasks key is a connector with no tasks, not an unreadable one") {
+    // **The rule this packet owns.** `tasksFrom`'s `case None => Some(Nil)`, which the fixture's paused
+    // `archive-sink` is the input to. Answering `None` there makes a paused or freshly created connector
+    // — the case the code's own comment names out loud — vanish from the list and reappear in the screen's
+    // *"KUI could not describe it"* row, which is a KUI defect reported as a broken connector.
+    //
+    // A connector whose `tasks` key is present and unreadable is still unreadable — `a task list KUI
+    // cannot read makes the connector unreadable` further down holds that half — and the two together are
+    // what make the distinction a rule rather than a leniency.
+    worker { case "/connectors" => (StatusCode.Ok, expanded) }.connectors.map {
+      case Right(facts) =>
+        val paused = facts.connectors
+          .find(_.name.value == "archive-sink")
+          .getOrElse(fail("the paused connector with no tasks key was dropped from the list"))
+
+        assertEquals(paused.tasks, Nil)
+        assertEquals(paused.taskCount, 0)
+        assertEquals(paused.state.wire, "PAUSED")
         assertEquals(facts.unreadable, Nil)
       case Left(error) => fail(s"expected connectors, got $error")
     }
@@ -192,7 +275,6 @@ final class ConnectHttpSuite extends KuiIOSuite {
       case Right(facts) =>
         assertEquals(facts.connectors.map(_.name.value), List("orders-source"))
         assertEquals(facts.unreadable, List("elastic-sink"))
-        assert(facts.partial)
       case Left(error) => fail(s"expected connectors, got $error")
     }
   }

@@ -18,7 +18,7 @@ never builds the browser bundle — but both compose files carry a `build:` stan
 | File                            | What runs                                       | What it demonstrates                     |
 | ------------------------------- | ----------------------------------------------- | ---------------------------------------- |
 | `docker-compose.allinone.yml`   | The backend in one container, and the interface  | The fastest possible start               |
-| `docker-compose.yml`            | The gateway and all eight services, apart, and the interface | Fault isolation between real processes |
+| `docker-compose.yml`            | The gateway and all nine services, apart, and the interface | Fault isolation between real processes |
 
 They run the same code. That is ADR-005's whole argument, and it is why the distributed environment
 is worth having even though the all-in-one one starts faster: the all-in-one process is a single
@@ -58,17 +58,17 @@ docker compose -f deployment/compose/docker-compose.yml up -d --wait
 open http://localhost:8090/ui/
 ```
 
-Fourteen containers, which is what `docker compose -f deployment/compose/docker-compose.yml config
---services | wc -l` prints. Two publish a port — `kui-frontend` and `kui-gateway`. **Eight** are KUI
+Sixteen containers, which is what `docker compose -f deployment/compose/docker-compose.yml config
+--services | wc -l` prints. Two publish a port — `kui-frontend` and `kui-gateway`. **Nine** are KUI
 services and publish none: `kui-cluster`, `kui-topic`, `kui-message`, `kui-consumer`, `kui-schema`,
-`kui-metrics`, `kui-alerts` and `kui-connect` — count them, because the sentence that used to be
-here said "eight" over a list of seven, having been changed from "six" when a seventh was added. The
-remaining four are the upstreams those services have something to say about, and publish nothing
-either: a single-node Kafka broker (`kafka`), a Prometheus JMX exporter beside it
-(`kafka-metrics`), a Schema Registry (`schema-registry`) and a Kafka Connect worker
-(`kafka-connect`). The eight services are reachable only from inside the compose network, which is
-the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must not be exposed
-outside the cluster network.
+`kui-metrics`, `kui-alerts`, `kui-connect` and `kui-ksql` — count them, because the sentence that
+used to be here said "eight" over a list of seven, having been changed from "six" when a seventh was
+added. The remaining five are the upstreams those services have something to say about, and publish
+nothing either: a single-node Kafka broker (`kafka`), a Prometheus JMX exporter beside it
+(`kafka-metrics`), a Schema Registry (`schema-registry`), a Kafka Connect worker (`kafka-connect`)
+and a ksqlDB server (`ksqldb-server`). The nine services are reachable only from inside the compose
+network, which is the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must
+not be exposed outside the cluster network.
 
 **The broker is new, and it is here for one reason.** This stack ran with `clusters: []` for three
 milestones because its subject is process isolation rather than Kafka. M7 ended that: the throughput
@@ -80,7 +80,7 @@ point: whether KUI can measure a cluster is a fact about the deployment's config
 about the broker, and until now only the refusal could be produced — which is why a metrics
 service containing no adapter satisfied every clause of M7's old exit criterion.
 
-**Those eight `kui-*` service containers are exactly the contracts the gateway holds, and the
+**Those nine `kui-*` service containers are exactly the contracts the gateway holds, and the
 equality is the property rather than the number** — `smoke.sh` derives both sides and compares them
 before it starts anything, so neither figure has to be remembered. `services/schema` was once in
 `ServiceContracts.byService`, had a `deployment.docker.schema` image target nothing built, and
@@ -104,21 +104,29 @@ produces no events, and a feed of zeros nobody can distinguish from a service th
 is precisely what this product refuses.
 
 `kui-connect` is M9's first half and is here on the same terms. `kafka-connect` beside it is a
-real Kafka Connect worker with **no connector registered in it**, and that is deliberate: an empty
-list from a worker that answered is a measured empty list, and a connector planted to make the
-screen look busy would erase the difference between it and a worker that cannot be reached.
-`smoke.sh` therefore asserts the `Section` status rather than the length of the list — and it reads
+real Kafka Connect worker with **no connector registered in it**, and that is deliberate *in this
+stack*: an empty list from a worker that answered is a measured empty list, and it is the one state
+nothing else covers. The quickstart runs the other one — it registers a `FileStreamSource` on its
+own worker, because `frontend/e2e/connect.spec.ts`'s two positive cases had nothing to list and
+skipped — so the empty worker and the busy worker are one state each rather than one state twice.
+
+`smoke.sh` asserts the per-worker `Section` status rather than the length of the list, and it reads
 the path to ask on out of the gateway's own merged OpenAPI document rather than writing one here,
 because a hard-coded path that 404s cannot be told apart from a path that was typed wrongly, and an
-unroutable service is the thing this file's checks exist to catch.
+unroutable service is the thing this file's checks exist to catch. **It used to assert the outer
+status, and that could not fail:** measured here, stopping `kui-compose-kafka-connect` leaves the
+read answering 200 with the outer status `ok` and the refusal reported one level down, so the
+assertion passed with no worker running at all.
 
-M9's other half adds `kui-ksql`, and `docker-compose.yml` still carries a commented slot naming the
-container and the address it will take, so that adding it is a copy of `kui-consumer` and three more
-edits rather than a reshaping of the file. `kui-metrics`, `kui-alerts` and `kui-connect` are that
-recipe already applied, and are the worked examples to read beside it — `kui-connect` in particular,
-because it is the one that added the fourth edit: a service whose whole subject is an upstream this
-stack does not already run needs that upstream here too, or the capability document reports the
-whole service `not_configured` and `smoke.sh` is right to refuse it.
+M9's other half is `kui-ksql`, and it is in this file now: the service container, a
+`confluentinc/ksqldb-server` beside it for the reason the Connect worker is beside `kui-connect`, an
+address in `kui.yaml`, and a `ksql:` block on both clusters in `kui-service.yaml`. That is the same
+four edits `kui-connect` needed, and `kui-connect` is the worked example to read beside it, because
+it is the one that added the fourth: a service whose whole subject is an upstream this stack does
+not already run needs that upstream here too, or the capability document reports the whole service
+`not_configured` and `smoke.sh` is right to refuse it. The ksqlDB image is the one container here
+that is not Apache-2.0 licensed, and `docker-compose.yml` says so beside it: unlike the Schema
+Registry, ksqlDB has no second implementation to choose.
 
 Check that the gateway can reach every service, and that a request really does travel through one:
 
@@ -279,10 +287,21 @@ CI runs it in the end-to-end job, right after the backend images are built, so t
 file is caught by the same run that builds the artefacts it describes. **The count is not written
 down anywhere and that is the point**: the list is derived from the `image: kui-*` lines in this
 compose file rather than typed into the workflow, because it was once typed into the workflow, said
-five, and was wrong for a milestone. It is nine today — the gateway and the eight services — and
-`docker compose -f deployment/compose/docker-compose.yml config --format json` is what says so. The
-interface's image is not one of them: it carries a `build:` stanza and Compose makes it here, which
-adds a few minutes to a cold run and nothing to a warm one.
+five, and was wrong for a milestone. It is ten today — the gateway and the nine services — and the
+workflow's own derivation is what says so:
+
+```
+grep -oE 'image: kui-[a-z-]+:' deployment/compose/docker-compose.yml |
+  sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u | wc -l
+```
+
+The sentence here used to name `docker compose -f deployment/compose/docker-compose.yml config
+--format json` instead, which prints the whole resolved topology — every service, every volume,
+every environment variable — and not a count of anything. The interface's image is the reason the
+derivation ends with a filter rather than a plain `sort -u`: `kui-frontend` is one more `image:
+kui-*` line in this file, and it is not one of the ten, because it carries a `build:` stanza and
+Compose makes it here, which adds a few minutes to a cold run and nothing to a warm one. Without
+that filter the same command prints eleven.
 
 The interface is unaffected throughout. It is a static file server that proxies `/api/`, so it has
 nothing to lose when a KUI service dies: the page still loads, and what an operator sees is the

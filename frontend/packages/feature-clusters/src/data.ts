@@ -167,7 +167,15 @@ function toClusterSummary(entry: ClusterEntryPayload): ClusterSummary {
     partitions: figure(topics?.partitionCount),
     underReplicatedPartitions: figure(summary?.underReplicatedPartitionCount),
     readOnly: row.readOnly,
-    observedAt: summary?.scrapedAt === undefined ? null : new Date(summary.scrapedAt),
+    /*
+     * `== null` and not `=== undefined`, which is a two-character fix for a fabricated date.
+     * `new Date(null)` is the Unix epoch, so a wire `scrapedAt: null` — which every other absent
+     * figure on this row arrives as — rendered "Read 20702d ago" in the one line whose own comment
+     * forbids inventing a date. It is latent rather than live today only because
+     * `ClusterSummaryDto.scrapedAt` is non-optional; the row beside it reads `?? null` for exactly
+     * the same wire, so the asymmetry was the defect.
+     */
+    observedAt: summary?.scrapedAt == null ? null : new Date(summary.scrapedAt),
   };
 }
 

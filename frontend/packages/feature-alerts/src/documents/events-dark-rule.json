@@ -50,29 +50,17 @@
           "rule" : "stuck-rebalance",
           "category" : "rebalance",
           "evaluation" : {
-            "status" : "ok",
-            "data" : {
-              "openEvents" : 0,
-              "unmeasuredSubjects" : 0
-            },
-            "fetchedAt" : "2026-03-04T09:40:00.000Z"
+            "status" : "not_configured"
           }
         },
         {
-          "rule" : "log-directory-usage",
+          "rule" : "disk-usage",
           "category" : "storage",
           "evaluation" : {
             "status" : "unavailable",
             "reason" : "UPSTREAM_AUTH",
             "message" : "describeLogDirs was refused for this principal.",
             "since" : "2026-03-04T05:12:00Z"
-          }
-        },
-        {
-          "rule" : "connector-task-failure",
-          "category" : "connector",
-          "evaluation" : {
-            "status" : "not_configured"
           }
         }
       ]

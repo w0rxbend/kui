@@ -2289,6 +2289,250 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/ksql/stream" : {
+      "get" : {
+        "tags" : [
+          "ksql",
+          "gateway"
+        ],
+        "summary" : "Rows of a push query, as they arrive",
+        "description" : "Named events: 'phase' carries {columns} once, as soon as the server accepts the query; 'row' carries {values} in that column order; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope; 'done' says why it ended. A statement that is not a push query is refused before the server is called, and the refusal names the endpoint that does answer it.",
+        "operationId" : "ksql.stream",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "statement",
+            "in" : "query",
+            "description" : "The push query to run. It must be a SELECT ... EMIT CHANGES and nothing else",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/objects" : {
+      "get" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "The streams, tables, queries and topics this cluster's ksqlDB knows about",
+        "description" : "One list, ordered by kind and then by name, because §3.16's pane is one pane and a row that moves between polls is one an operator cannot click accurately. A row the server returned and KUI could not describe is named in `unreadable` rather than dropped.",
+        "operationId" : "ksql.objects",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/KsqlObjectsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/statements/plan" : {
+      "post" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "What running this statement would do",
+        "description" : "Part of the ksql.statement flow. This call changes nothing. Answers what the statement is — a pull query, a push query or a statement — whether it is destructive, whether it deletes a Kafka topic, the warnings to show before it is confirmed, and a token valid for five minutes and for this statement's exact text. A statement that is not destructive plans to no token and needs none.",
+        "operationId" : "ksql.statement.plan",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StatementRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/statements" : {
+      "post" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "Run one ksqlDB statement",
+        "description" : "Mutation (ksql.statement). This call changes the cluster and cannot be undone. One statement per request. A `DROP ... DELETE TOPIC` is refused without the token its plan answered with, and the token is checked against the statement's exact text so that a confirmed statement cannot be swapped for another one. A `SELECT ... EMIT CHANGES` is refused here and named at .../ksql/stream, because it never finishes. A pull query answers rows; everything else answers the server's own status sentence.",
+        "operationId" : "ksql.statement.execute",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StatementRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/topics/{topicName}/messages" : {
       "post" : {
         "tags" : [
@@ -6058,6 +6302,19 @@
           }
         }
       },
+      "KsqlObjectsResponse" : {
+        "title" : "KsqlObjectsResponse",
+        "description" : "What this cluster's ksqlDB named. `not_configured` with a 200 when this cluster has no ksqlDB",
+        "type" : "object",
+        "required" : [
+          "objects"
+        ],
+        "properties" : {
+          "objects" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "LagDeltaDto" : {
         "title" : "LagDeltaDto",
         "description" : "Groups whose lag changed since the given token, the groups that are gone, and a new token",
@@ -7540,6 +7797,112 @@
           "reason" : {
             "description" : "Why a capability is not available",
             "type" : "string"
+          }
+        }
+      },
+      "StatementPlanDto" : {
+        "title" : "StatementPlanDto",
+        "description" : "What running this statement would do. A destructive statement carries a token valid for five minutes and for this statement's exact text; a harmless one carries none and needs none",
+        "type" : "object",
+        "required" : [
+          "statement",
+          "shape",
+          "destructive",
+          "deletesTopic",
+          "computedAt"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "shape" : {
+            "type" : "string"
+          },
+          "destructive" : {
+            "type" : "boolean"
+          },
+          "deletesTopic" : {
+            "type" : "boolean"
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "computedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StatementRequestDto" : {
+        "title" : "StatementRequestDto",
+        "description" : "One ksqlDB statement, and the plan token confirming it when it is destructive. One statement per request: this service classifies what it is given in order to decide whether it needs a confirmation, and a batch has no single classification",
+        "type" : "object",
+        "required" : [
+          "statement"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "StatementResultDto" : {
+        "title" : "StatementResultDto",
+        "description" : "What a finished statement produced. `outcome` is 'rows' for a pull query — an empty rows list then means the query matched nothing — or 'status' for a DDL or DML statement, whose `message` is the server's own sentence",
+        "type" : "object",
+        "required" : [
+          "statement",
+          "shape",
+          "outcome",
+          "executedAt"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "shape" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "columns" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "entity" : {
+            "type" : "string"
+          },
+          "executedAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

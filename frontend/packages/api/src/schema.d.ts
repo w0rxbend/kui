@@ -519,6 +519,86 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/ksql/objects": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The streams, tables, queries and topics this cluster's ksqlDB knows about
+         * @description One list, ordered by kind and then by name, because §3.16's pane is one pane and a row that moves between polls is one an operator cannot click accurately. A row the server returned and KUI could not describe is named in `unreadable` rather than dropped.
+         */
+        readonly get: operations["ksql.objects"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/ksql/statements": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Run one ksqlDB statement
+         * @description Mutation (ksql.statement). This call changes the cluster and cannot be undone. One statement per request. A `DROP ... DELETE TOPIC` is refused without the token its plan answered with, and the token is checked against the statement's exact text so that a confirmed statement cannot be swapped for another one. A `SELECT ... EMIT CHANGES` is refused here and named at .../ksql/stream, because it never finishes. A pull query answers rows; everything else answers the server's own status sentence.
+         */
+        readonly post: operations["ksql.statement.execute"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/ksql/statements/plan": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * What running this statement would do
+         * @description Part of the ksql.statement flow. This call changes nothing. Answers what the statement is — a pull query, a push query or a statement — whether it is destructive, whether it deletes a Kafka topic, the warnings to show before it is confirmed, and a token valid for five minutes and for this statement's exact text. A statement that is not destructive plans to no token and needs none.
+         */
+        readonly post: operations["ksql.statement.plan"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/ksql/stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Rows of a push query, as they arrive
+         * @description Named events: 'phase' carries {columns} once, as soon as the server accepts the query; 'row' carries {values} in that column order; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope; 'done' says why it ended. A statement that is not a push query is refused before the server is called, and the refusal names the endpoint that does answer it.
+         */
+        readonly get: operations["ksql.stream"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/log-dirs": {
         readonly parameters: {
             readonly query?: never;
@@ -1863,6 +1943,14 @@ export interface components {
             readonly storeType: string;
         };
         /**
+         * KsqlObjectsResponse
+         * @description What this cluster's ksqlDB named. `not_configured` with a 200 when this cluster has no ksqlDB
+         */
+        readonly KsqlObjectsResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly objects: unknown;
+        };
+        /**
          * LagDeltaDto
          * @description Groups whose lag changed since the given token, the groups that are gone, and a new token
          */
@@ -2537,6 +2625,45 @@ export interface components {
             readonly fetchedAt: string;
             /** @description Why a capability is not available */
             readonly reason: string;
+        };
+        /**
+         * StatementPlanDto
+         * @description What running this statement would do. A destructive statement carries a token valid for five minutes and for this statement's exact text; a harmless one carries none and needs none
+         */
+        readonly StatementPlanDto: {
+            /** Format: date-time */
+            readonly computedAt: string;
+            readonly deletesTopic: boolean;
+            readonly destructive: boolean;
+            /** Format: date-time */
+            readonly expiresAt?: string;
+            readonly shape: string;
+            readonly statement: string;
+            readonly token?: string;
+            readonly warnings?: readonly string[];
+        };
+        /**
+         * StatementRequestDto
+         * @description One ksqlDB statement, and the plan token confirming it when it is destructive. One statement per request: this service classifies what it is given in order to decide whether it needs a confirmation, and a batch has no single classification
+         */
+        readonly StatementRequestDto: {
+            readonly statement: string;
+            readonly token?: string;
+        };
+        /**
+         * StatementResultDto
+         * @description What a finished statement produced. `outcome` is 'rows' for a pull query — an empty rows list then means the query matched nothing — or 'status' for a DDL or DML statement, whose `message` is the server's own sentence
+         */
+        readonly StatementResultDto: {
+            readonly columns?: readonly string[];
+            readonly entity?: string;
+            /** Format: date-time */
+            readonly executedAt: string;
+            readonly message?: string;
+            readonly outcome: string;
+            readonly rows?: readonly (readonly string[])[];
+            readonly shape: string;
+            readonly statement: string;
         };
         /**
          * StoreMaterialWrite
@@ -3750,6 +3877,143 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["LagDeltaDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.objects": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["KsqlObjectsResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.statement.execute": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["StatementRequestDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StatementResultDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.statement.plan": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["StatementRequestDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StatementPlanDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.stream": {
+        readonly parameters: {
+            readonly query: {
+                /** @description The push query to run. It must be a SELECT ... EMIT CHANGES and nothing else */
+                readonly statement: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/event-stream": string;
                 };
             };
             readonly default: {

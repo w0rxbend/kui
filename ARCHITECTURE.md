@@ -157,8 +157,8 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 | consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdminPort[F]` | kui-kafka |
 | security | `AclBinding`, `AclFilter`, `ClientQuotaEntity`, `AclPreset` | **not built**: there is no `services/security`, and this row is the intent | not built |
 | schema | `Subject`, `SchemaVersion`, `CompatibilityLevel` | `SchemaRegistryPort[F]` | own sttp client (ADR-014) |
-| connect | `ConnectCluster`, `Connector`, task, plugin | **not built** when this row was last checked: `services/connect` is M9's first service | sttp client with 409 retry (ADR-037) |
-| ksql | `Statement`, query-result stream | **not built**: `services/ksql` is M9's second service | sttp HTTP/2 `/query-stream` with `/query` fallback |
+| connect | `Connector` (state + tasks + `reason`), `ConnectorTask`, `ConnectorState`, `ConnectorKind`, `ConnectorFacts` (readable connectors + the ones KUI could not describe), `ConnectorOperation` | `ConnectWorkerPort[F]` | sttp client with 409 retry (ADR-037), the 2.3 `?expand=` reader and its pre-2.3 fallback |
+| ksql | `KsqlObject` (stream, table, running query, topic), `KsqlObjects`, `KsqlObjectKind`, `KsqlStatement` with `StatementShape` (push query, pull query, statement) and `StatementProblem`, `StatementOutcome` | `KsqlServerPort[F]` | sttp client over the ksqlDB REST API. The push query's port is `KsqlQueryStream` in `application`, not here: an unbounded answer is an `fs2.Stream` and rule A1 keeps fs2 out of a `domain` |
 | metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `MetricsSourcePort[F]` | Prometheus scrape and exposition, per-cluster source resolution, the bounded sample buffer |
 | alerts | `AlertEvent` (opened-at, severity, category, resolution), `ClusterFacts`, `AlertLimits` | `ClusterFactsPort[F]` | kui-kafka admin facts, in-memory event store, logging acknowledgement sink, configured profile source |
 | identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `UserDirectory[F]`, `PasswordHasher[F]` | UnboundID LDAP, nimbus OIDC, PBKDF2 users, in-memory/Kafka session and audit sinks |
@@ -171,23 +171,43 @@ are.** A port whose subject is a *store* or another *process* rather than the do
 module may depend on `libs/kernel` and cats-core and nothing else — so a port that needs to speak of
 anything wider cannot live there.
 
-The column was re-read against the tree in wave 7 and **six of the eight built services** named at
-least one identifier that is not a `trait` declared in that service's own `domain`: `topic`,
-`message`, `consumer`, `metrics`, `alerts` and `identity`. `cluster` and `schema` were correct.
+**These services own a `domain`** — `cluster`, `topic`, `message`, `consumer`, `schema`, `connect`,
+`ksql`, `metrics`, `alerts` and `identity` — and `security` is the one row above describing a service
+that does not exist. That roster is read off disk and compared to this sentence by
+`ArchitectureDocumentSuite`, because the previous version of this paragraph published a count that
+had been wrong for two waves and nothing could tell.
+
+The column was re-read against the tree in wave 7. Eight of the nine rows that had a `domain` then
+named a port (`connect`'s still
+said *not built*, and it is corrected above), and **six of those eight** named at least one
+identifier that is not a `trait` declared in that service's own `domain`: `topic`, `message`,
+`consumer`, `metrics`, `alerts` and `identity`. `cluster` and `schema` were correct.
 Three of the six named a port that is real and lives in `application` (`alerts`, `consumer`,
 `identity`); the rest named identifiers the tree declares nowhere — `TopicAnalysisPort[F]`,
-`MessageBrowsePort[F]`, `MessageFilterPort[F]`, `BrokerMetricsScraper[F]`, `MetricsStore[F]`,
+`MessageBrowsePort[F]`, `BrokerMetricsScraper[F]`, `MetricsStore[F]`,
 `TopicSnapshotSource[F]`, `GroupSnapshotSource[F]`, `IdentityProviderPort[F]` and
-`RolePolicySource[F]` — or named one that
+`RolePolicySource[F]`, which is **eight** and was published as nine — or named one that
 belongs to a library or to another service (`SerdeRegistry[F]` in `libs/serde`, `AuditSink[F]` in
-`libs/security-core`, `GroupAdmin[F]` in `libs/kafka`, `SessionStore[F]` in the gateway's own
-`application`). Nothing read this column, so it drifted for six milestones.
+`libs/security-core`, `GroupAdmin[F]` in `libs/kafka`, `MessageFilterPort[F]` in `libs/filter` at
+`CelFilterEngine.scala`, `SessionStore[F]` in the gateway's own
+`application`). `MessageFilterPort[F]` was in the first bucket for a wave and is real: the message
+service's use case holds it, and it is declared by the filter library rather than by that service,
+which is the same shape `SerdeRegistry[F]` has. Nothing read this column, so it drifted for six
+milestones.
 
 `ArchitectureDocumentSuite` (in `services/gateway/api/test/`) reads this table off disk and fails
 when an identifier in the ports column is not a `trait` declared under that service's own
-`domain/src`, and when a built service has no row at all. A row for a service that does not exist
+`domain/src`, when a `trait` declared under `domain/src` is named by no row, and when a built
+service has no row at all. A row for a service that does not exist
 yet says so in words and is checked no further; that exemption is the one hole in this gate and is
 deliberate, because the row is a plan rather than a description until the service lands.
+
+The second of those three arrived in wave 8 and it is the interesting one. The first version read
+the row and asked the tree, so it could only see an identifier that is *wrong*; deleting
+`ClusterFactsPort[F]` from the alerts row left it green, and an emptied cell read as a service with
+no outbound ports rather than as a claim nobody had checked. Omission is the failure mode this
+table is most exposed to, because a row that says too little looks exactly like a row about a
+service that does little.
 
 The gateway has `contract` (its own `/api/v1` endpoint definitions, so
 the frontend derives typed clients from them), `application` (aggregations, capability
@@ -212,6 +232,19 @@ rule A4 lets the gateway see it: `MessageEndpoints.browseStream` is in
 cross-compiled contract. `AlertsStreamEndpoint` likewise lives in
 `services/alerts/contract/src-jvm/`, and `AlertsStreamRoutes` rewrites its prefix, applies the
 gateway's RBAC check before opening the upstream, and relays its event stream.
+
+The ksqlDB **push query** is the third of these and the same shape exactly. `KsqlEndpoints.all` —
+the object listing, the statement plan and the statement apply — is derived like any other service's
+contract; the push query never finishes, so it is declared in
+`services/ksql/contract/src-jvm/` as `KsqlStreamEndpoint` and relayed by `KsqlStreamRoutes`. Its
+permission is re-decided at the relay rather than inherited: ADR-020 leaves the query string outside
+the signed request digest and the statement travels in the query string, so nothing the gateway
+signed can have covered it.
+
+Every one of the three relays appends ADR-035's terminal `error` event when the upstream body ends
+without one (`StreamProxy.withTerminalEvent`). That is the promise a browser depends on to tell a
+finished stream from a broken one, and it is the rule each relay's own suite drives end to end —
+asserting that the *relay* uses the helper, not only that the helper works.
 
 The layering rules above are checked by `./mill checkArchitecture` on every build, not by
 review (ADR-041). The task reads each module's declared `moduleDeps` and `mvnDeps` and fails on

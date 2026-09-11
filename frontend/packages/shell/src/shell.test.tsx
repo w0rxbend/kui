@@ -614,6 +614,13 @@ describe("which navigation entry is current", () => {
     expect(currentFeatureId("/ui/clusters/prod/dashboard/connect", "/ui")).toBe("overview");
   });
 
+  /** The eleventh service's screen, with the same silent fall-through the ninth and tenth had. */
+  it("marks the ksqlDB screen as itself and not as the dashboard it falls through to", () => {
+    expect(currentFeatureId("/ui/clusters/prod/ksql", "/ui")).toBe("ksql");
+    expect(currentFeatureId("/kui/ui/clusters/prod/ksql", "/kui/ui")).toBe("ksql");
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/ksql", "/ui")).toBe("overview");
+  });
+
   /**
    * The address the product opens on, which was marking the wrong entry.
    *
@@ -674,6 +681,13 @@ describe("the top band's trail", () => {
        draws the *dashboard's* trail over somebody else's page. */
     const connect = topCrumbs(clusters, "prod", "/ui/clusters/prod/connect", "/ui", router);
     expect(connect.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Connect"]);
+
+    /* And the eleventh's, where the *spelling* is the assertion as well as the presence. The id is
+       `ksql` because an id is a path segment; the product's word is `ksqlDB` (§4.15), with one
+       capital in the middle. A crumb built from the id rather than from the table would read
+       `Ksql`, which is a word this product does not use anywhere a person can see. */
+    const ksql = topCrumbs(clusters, "prod", "/ui/clusters/prod/ksql", "/ui", router);
+    expect(ksql.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "ksqlDB"]);
   });
 });
 

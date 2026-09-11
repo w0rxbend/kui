@@ -50,7 +50,12 @@ object DocsRoutes {
       kui.gateway.api.MessageStreamRoutes.endpoints[F] ++
       // The alerts change stream has the same shape: its request/response endpoints are derived, while its
       // long-lived body is relayed by `AlertsStreamRoutes` and therefore has to be documented here.
-      kui.gateway.api.AlertsStreamRoutes.endpoints[F]
+      kui.gateway.api.AlertsStreamRoutes.endpoints[F] ++
+      // The ksqlDB push query, for the third time the same shape: `KsqlEndpoints.all` holds the object
+      // listing, the plan and the apply and is derived; the push query never finishes, so it is relayed by
+      // `KsqlStreamRoutes` and documented from here. An integrator who cannot find this address in the
+      // document has no way to learn it exists.
+      kui.gateway.api.KsqlStreamRoutes.endpoints[F]
 
   /** Everything the gateway documents: its own endpoints plus every configured service it can route. */
   def documentation[F[_]](services: List[ServiceId]): List[ServiceDoc] =

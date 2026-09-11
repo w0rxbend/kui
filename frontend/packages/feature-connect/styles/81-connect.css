@@ -2,10 +2,10 @@
  * Kafka Connect: the connectors screen
  *
  * `SCREENS-V4.md` §3.14 draws four `ConnectorCard`s in a row, and the card itself is the kernel's —
- * `29-connect-ksql.css` styles `.kui-connector*` and `.kui-taskbar*` and has done since before there
- * was a service. This sheet styles only what is **around** the card, which is the part §3.14 does
- * not draw and §7.7 says is missing: the failure reason, the refusal sentence, and the panel for a
- * connector whose tasks the worker would not describe.
+ * `29-connect-ksql.css` styles `.kui-connector*` and `.kui-taskbar*` and has done since before
+ * there was a service. This sheet styles only what is **around** the card, which is the part
+ * §3.14 does not draw and §7.7 says is missing: the failure reason, the refusal sentence, and the
+ * panel for a connector whose tasks the worker would not describe.
  *
  * Every class here is prefixed `.kui-connect__` or `.kui-connect-`, so nothing in it can restyle a
  * kernel primitive or another screen. The one exception is `.kui-connect__undescribed`, which sits
@@ -116,8 +116,9 @@
   font-size: var(--kui-font-size-sm);
 }
 
-/* Where the task bar would be. Deliberately not styled as an error: the worker answered, it simply
-   did not say — and a red block here would send somebody to look for an outage that is not there. */
+/* Where the task bar would be. Deliberately not styled as an error: the worker answered, it
+   simply did not say — and a red block here would send somebody to look for an outage that is
+   not there. */
 .kui-connect__undescribed-note {
   margin: 0;
   color: var(--kui-color-text-muted);

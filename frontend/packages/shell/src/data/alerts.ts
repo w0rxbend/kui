@@ -46,6 +46,12 @@ import type { NavCount } from "../chrome/types.js";
  * care about. What pins the address is what {@link loadAlertFeed} actually hands the client —
  * asserted in `alerts.test.ts` through the function, and end to end off the real `Request` in
  * `app.render.test.tsx`.
+ *
+ * Two comments in `@kui/feature-alerts` still cite this name across the package boundary, which is
+ * a citation to a symbol that package could not import even if it wanted to. They are that
+ * package's sentences to correct; recorded here so the next reader who greps the name finds out
+ * from this side that the cross-package half is known and owned elsewhere, rather than concluding
+ * the export was removed by accident.
  */
 const ALERTS_FEED_PATH = "/api/v1/clusters/{clusterId}/alerts/events";
 

@@ -47,7 +47,7 @@
           }
         },
         {
-          "rule" : "log-directory-usage",
+          "rule" : "disk-usage",
           "category" : "storage",
           "evaluation" : {
             "status" : "ok",

@@ -18,9 +18,13 @@ import kui.kernel.{ConnectName, ConnectorName, TaskId}
   * unchanged, and the screen renders an unrecognised state in the neutral tone rather than refusing to draw
   * the row.
   *
-  * The three constants below exist because three rules in this service *are* about specific states — a
-  * running task is running, a failed one carries a trace, a paused connector's zero throughput is a measured
-  * zero — and comparing against a constant is what keeps those spellings in one place.
+  * The two constants below exist because two rules in this service *are* about specific states — a running
+  * task is running and a failed one carries a trace — and comparing against a constant is what keeps those
+  * spellings in one place. There was a third, `PAUSED`, justified by *"a paused connector's zero throughput
+  * is a measured zero"*; there is no throughput anywhere on this wire (ADR-054 §7), so nothing in the product
+  * ever asked the question and the constant and its `isPaused` were deleted rather than left as declarations
+  * with no caller. A paused connector still reaches the browser: its state word travels unchanged, which is
+  * this type's whole argument.
   */
 final case class ConnectorState(wire: String) {
 
@@ -33,14 +37,11 @@ final case class ConnectorState(wire: String) {
   def isRunning: Boolean = is(ConnectorState.Running)
 
   def isFailed: Boolean = is(ConnectorState.Failed)
-
-  def isPaused: Boolean = is(ConnectorState.Paused)
 }
 
 object ConnectorState {
 
   val Running: ConnectorState = ConnectorState("RUNNING")
-  val Paused: ConnectorState = ConnectorState("PAUSED")
   val Failed: ConnectorState = ConnectorState("FAILED")
 
   given CanEqual[ConnectorState, ConnectorState] = CanEqual.derived
@@ -118,7 +119,7 @@ object ConnectorTask {
   * The Connect REST API can answer the connector list and the per-connector status separately, and this type
   * is the joined result — `GET /connectors?expand=status` in one call where the worker supports it. The join
   * is a fact about what was read, not about what exists: a connector that answered a list and refused a
-  * status is [[ConnectorFacts.partial]] rather than a row with zeros in it.
+  * status is named in [[ConnectorFacts.unreadable]] rather than drawn as a row with zeros in it.
   *
   * @param trace
   *   the connector-level trace, which the worker sets when the connector itself failed rather than one of its
@@ -189,10 +190,7 @@ object Connector {
   *   the ways a connector becomes unreadable is a name KUI's own validation refuses, and a list that could
   *   only hold valid names would have to drop exactly those.
   */
-final case class ConnectorFacts(connectors: List[Connector], unreadable: List[String]) {
-
-  def partial: Boolean = unreadable.nonEmpty
-}
+final case class ConnectorFacts(connectors: List[Connector], unreadable: List[String])
 
 object ConnectorFacts {
 
@@ -220,8 +218,5 @@ enum ConnectorOperation(val wire: String, val operation: String) {
 }
 
 object ConnectorOperation {
-
-  def fromWire(raw: String): Option[ConnectorOperation] = values.find(_.wire == raw)
-
   given CanEqual[ConnectorOperation, ConnectorOperation] = CanEqual.derived
 }

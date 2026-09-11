@@ -20,6 +20,21 @@ object SseEventName {
   val Heartbeat: String = "heartbeat"
   val Capabilities: String = "capabilities"
 
+  /** A row of a result set that arrives over time: ksqlDB's push query is the first and only user.
+    *
+    * It is here rather than as a literal in `services/ksql` because of what the four names above it cost.
+    * `services/message` spells its own two — `message`, `consumed` — in `BrowseAddress.Events`, and
+    * `services/alerts` spells `alerts` in `AlertChangeDto` and again in `AlertsStreamEndpoint`, where nothing
+    * in the tree compares the two to each other and the browser's third copy is compared to a golden file by
+    * eye. That is five copies of a name over two streams. A sixth would have been worse than the first five,
+    * so the sixth name is declared where the browser's generated constants are derived from and where
+    * `SseEventsSuite` pins its literal (ADR-055 §5, wave 8's W8-01).
+    *
+    * It is deliberately **not** in [[shared]]: a client that registered a `row` listener on the capability
+    * stream would wait for ever. `shared` is the set every stream sends, and this is a data event.
+    */
+  val Row: String = "row"
+
   /** The names shared by every stream, for a test that asserts a stream emits nothing else. */
   val shared: List[String] = List(Phase, Done, Error, Heartbeat)
 }

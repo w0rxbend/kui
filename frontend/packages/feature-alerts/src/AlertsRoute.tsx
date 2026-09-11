@@ -39,6 +39,7 @@ import {
   createMutation,
   useAlerts,
   useKui,
+  useQuery,
   writeBlockedReason,
   type AlertFeed,
   type Fetched,
@@ -46,7 +47,7 @@ import {
 
 import { AlertsFeed } from "./AlertsFeed.jsx";
 import { RuleReports } from "./RuleReports.jsx";
-import { acknowledge } from "./data.js";
+import { acknowledge, fetchClusterWriteState, type ClusterWriteState } from "./data.js";
 import {
   feedVoice,
   severityChip,
@@ -79,6 +80,35 @@ function NoCluster(): JSX.Element {
   );
 }
 
+/**
+ * Whether this cluster is registered read-only, for the one write control on this screen.
+ *
+ * ADR-047's flag is a property of the **deployment**, not of the principal, and
+ * `writeBlockedReason` prints a different sentence for each because the two need different actions
+ * from the reader: telling somebody to ask an administrator for a permission they already hold
+ * wastes their afternoon.
+ *
+ * One query, keyed by the cluster and by nothing else, on the shared registry — which is the same
+ * key `feature-topics` uses, so a reader who walks from the topic list to the alerts feed asks the
+ * gateway once between the two screens rather than once per screen.
+ *
+ * Answers `false` while the question is still out, and `false` when it could not be asked at all,
+ * for the reason `useKui().permits` gives for the same choice: a screenful of refusals drawn over a
+ * fact KUI does not have is worse than a refusal that arrives from the server, and the server is
+ * the authority either way. This decides only whether a control explains itself in advance.
+ */
+function useClusterReadOnly(clusterId: () => string): () => boolean {
+  const kui = useKui();
+  const query = useQuery<ClusterWriteState>({
+    key: () => `cluster-write-state|${clusterId()}`,
+    load: () => fetchClusterWriteState(kui.api, clusterId()),
+  });
+  return () => {
+    const current = query.state();
+    return (current.kind === "ready" || current.kind === "stale") && current.value.readOnly;
+  };
+}
+
 export interface AlertsScreenProps {
   readonly clusterId: string;
   /** The clock, held still by stories and tests so a relative age is a fact and not a race. */
@@ -92,16 +122,25 @@ export function AlertsScreen(props: AlertsScreenProps): JSX.Element {
   const [lifecycle, setLifecycle] = createSignal<StateFilter>("all");
   const filter = createMemo<FeedFilter>(() => ({ severity: severity(), state: lifecycle() }));
 
+  /* The deployment's own answer to "may anything here write at all", which the gate below asks
+     before it asks about the principal. See `useClusterReadOnly`. */
+  const readOnly = useClusterReadOnly(() => props.clusterId);
+
   /*
-   * The permission gate for the whole control, decided once and threaded into the card. `undefined`
-   * for `onAcknowledge` is what makes the button draw disabled with its reason: the component
-   * cannot invent a handler it was not given, so there is no path from an unpermitted principal to
-   * an enabled control.
+   * The gate for the whole control, decided once and threaded into the card. `undefined` for
+   * `onAcknowledge` is what makes the button draw disabled with its reason: the component cannot
+   * invent a handler it was not given, so there is no path from an unpermitted principal to an
+   * enabled control.
+   *
+   * Two facts, and the button says which one applies. Until wave 8 the second was the literal
+   * `false`, so a cluster somebody had deliberately registered read-only handed a permitted
+   * principal a fully enabled `Acknowledge`, issued the write, and let the gateway refuse it — the
+   * defect `feature-topics` had on seven controls and closed in wave 7, shipped here on one.
    */
   const refusal = createMemo(() =>
     writeBlockedReason({
       permitted: kui.permits(Actions.AlertsAcknowledge),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "acknowledge alerts on this cluster",
     }),
   );

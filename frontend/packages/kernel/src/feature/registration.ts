@@ -52,7 +52,11 @@ export type FeatureId =
   // The seventh package, `@kui/feature-connect` (M9). Widened here rather than in W7-04's own tree
   // because this union is the kernel's and a feature may not edit it — the same two-line seam the
   // sixth package used.
-  | "connect";
+  | "connect"
+  // The eighth, `@kui/feature-ksql` (M9). Same seam, same reason, and widened in the kernel's own
+  // wave rather than on request: a feature package whose id is not in this union cannot appear in
+  // the shell's registry at all, so the entry has to exist before the package that needs it.
+  | "ksql";
 
 /**
  * The service that backs a feature.

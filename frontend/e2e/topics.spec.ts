@@ -190,37 +190,99 @@ test.describe("the topic list", () => {
     await expect(page.locator("body")).not.toContainText("analytics.pageviews");
   });
 
-  test("asks the gateway whether the cluster is registered read-only", async ({ page }) => {
+  test("reads the cluster's read-only flag, and the write controls obey it", async ({ page }) => {
     /*
-     * The edge, driven through the browser's own path.
+     * The edge, driven through the browser's own path — and the assertion moved to where only this
+     * feature's own read can satisfy it.
      *
-     * `TopicsRoute` gates all seven of its write controls on ADR-047's read-only flag, and the
-     * flag lives on `GET /api/v1/clusters/{clusterId}` — a different service from the one that
-     * answers for topics. Every unit case in `feature-topics` stubs that path, so all of them would stay
-     * green if the request 404'd, 502'd or never reached the gateway at all: the accessor answers
-     * "not read-only" when it cannot ask, which is deliberate and which makes a broken edge
-     * completely silent. Wave 6 lost a whole service to exactly that shape.
+     * `TopicsRoute` gates all seven of its write controls on ADR-047's read-only flag, which lives
+     * on `GET /api/v1/clusters/{clusterId}`: a different service from the one that answers for
+     * topics. Every unit case in `feature-topics` stubs that path, so all of them stay green if the
+     * request 404s, 502s or never reaches the gateway at all — the accessor answers "not read-only"
+     * when it cannot ask, deliberately, which makes a broken edge completely silent.
      *
-     * So this asserts the **response**, through nginx's `/api` proxy, which is the only path the
-     * browser uses. And the flag the quickstart really carries is `false`, so the Create control is
-     * live beside it: a 200 carrying `readOnly: true` would be a different failure and this
-     * separates the two.
+     * This case used to wait for that *response* and stop there, and that gated nothing:
+     * `shell/src/App.tsx` fetches the same endpoint on **every** route, so the wait was
+     * satisfied by the shell's own request. Measured at wave 7's verification, two such requests
+     * fire on `/clusters/<id>/consumer-groups`, where `feature-topics` is not mounted at all — and
+     * deleting `useClusterReadOnly` outright left the case passing.
+     *
+     * So the flag is flipped in flight on the real answer, and what is asserted is the **screen**:
+     * only a read this feature made itself can close the control and print the deployment's
+     * sentence. Both directions, in one case, because a screen that refused every cluster would
+     * satisfy the second half alone.
      */
+    const clusterDocument = (url: URL): boolean => url.pathname === `/api/v1/clusters/${CLUSTER}`;
+
+    /*
+     * First, the request itself, counted rather than waited for.
+     *
+     * The shell asks for this document on every route, so "a response arrived" is not evidence that
+     * this feature asked. What is evidence is the *difference* between a route where the feature is
+     * mounted and one where it is not — and it is a difference rather than a number so that the
+     * shell changing its own behaviour moves both sides together instead of reddening this case for
+     * somebody else's reason. Measured here, on this stack: two on the group list, three on the
+     * topic list.
+     */
+    let asked = 0;
+    page.on("response", (response) => {
+      if (clusterDocument(new URL(response.url()))) asked += 1;
+    });
+
+    await page.goto(`/ui/clusters/${CLUSTER}/consumer-groups`);
+    await expect(page.getByRole("heading", { name: /consumer groups/i }).first()).toBeVisible();
+    const withoutThisFeature = asked;
+
     const answered = page.waitForResponse(
       (response) =>
-        new URL(response.url()).pathname === `/api/v1/clusters/${CLUSTER}` &&
-        response.request().method() === "GET",
+        clusterDocument(new URL(response.url())) && response.request().method() === "GET",
     );
     await page.goto(`/ui/clusters/${CLUSTER}/topics`);
     const response = await answered;
     expect(response.status()).toBe(200);
     const body = (await response.json()) as { cluster?: { readOnly?: boolean } };
+    // The quickstart really is writable, so the control is live — and that is what makes the
+    // second half below a measurement rather than a screen that says no to everything.
     expect(body.cluster?.readOnly).toBe(false);
 
-    // And the screen agrees with it: the quickstart is writable, so the header action is offered.
     const create = page.getByRole("button", { name: /create topic/i }).first();
     await expect(create).toBeVisible();
     await expect(create).not.toHaveAttribute("aria-disabled", "true");
+
+    // The read this feature makes for itself, on top of whatever the shell asked for.
+    expect(asked).toBeGreaterThan(withoutThisFeature);
+
+    /*
+     * Now the same document with one field changed, fetched from the real gateway and patched on
+     * the way through rather than invented here: everything else on it is the deployment's own.
+     */
+    await page.route(
+      (url) => clusterDocument(url),
+      async (route) => {
+        const original = await route.fetch();
+        const document = (await original.json()) as { cluster?: Record<string, unknown> };
+        await route.fulfill({
+          response: original,
+          json: { ...document, cluster: { ...(document.cluster ?? {}), readOnly: true } },
+        });
+      },
+    );
+
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+    const frozen = page.getByRole("button", { name: /create topic/i }).first();
+    await expect(frozen).toBeVisible();
+    await expect(frozen).toHaveAttribute("aria-disabled", "true");
+
+    /*
+     * And the deployment's sentence, not the permission one. `Button` renders its reason into a
+     * tooltip reached by focus, which is also how a keyboard user reaches it; the two sentences
+     * send an operator to different places, and the wrong one costs them an afternoon asking an
+     * administrator for a permission they already hold.
+     */
+    await frozen.focus();
+    const reason = page.locator(`#${(await frozen.getAttribute("aria-describedby")) ?? "none"}`);
+    await expect(reason).toContainText("This cluster is configured read-only in KUI");
+    await expect(reason).not.toContainText("You do not have permission");
   });
 
   test("remembers whether the reader prefers cards", async ({ page }) => {

@@ -183,4 +183,118 @@ test.describe("the shell", () => {
       "the page reloaded, so this proves the feed is readable and says nothing about the stream",
     ).toBe("before");
   });
+
+  /**
+   * The notifications panel, opened (`M06`, `M21`) — the frame's half of two captures, and a panel
+   * no browser case had ever opened before W8-07's screen census counted them.
+   *
+   * The bell's *count* is asserted twice above. The panel underneath it was not asserted anywhere
+   * outside jsdom, and it is the half that can be empty for four different reasons: fetching,
+   * refused, not configured, and a genuinely quiet cluster. §4.16 puts it in the frame rather than
+   * on a page — it is drawn over the dashboard in `M06` and over ksqlDB in `M21` — which is why it
+   * is driven here rather than from either screen's spec.
+   *
+   * Every branch asserts the words for the state the API is actually in, and one rule spans all of
+   * them: **no branch may draw a blank panel**. A panel with nothing in it and nothing to say is
+   * indistinguishable from a panel that failed to render, which is the misreading the whole
+   * component exists to prevent.
+   */
+  test("the bell opens a panel that says something in every state it can be in", async ({
+    page,
+    api,
+  }) => {
+    const body = (await api.get(`/api/v1/clusters/${CLUSTER}/alerts/events`)) as {
+      events?: { status?: string; data?: { items?: readonly unknown[] } };
+    };
+    const section = body.events;
+
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    await page.getByTestId("notifications").click();
+
+    const panel = page.getByTestId("notification-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("heading", { name: "Notifications" })).toBeVisible();
+
+    if (section?.status === "ok" || section?.status === "stale") {
+      const rows = section.data?.items ?? [];
+      if (rows.length === 0) {
+        /* Words, not a blank panel: the case this component exists to get right. */
+        await expect(panel).toContainText("Nothing to report");
+      } else {
+        await expect(panel.locator(".kui-notices__item")).toHaveCount(rows.length);
+        /* The control that makes the bell's mark meaningful. Present only where there is something
+           to mark, which is why it is asserted inside this branch and not above it. */
+        await expect(panel.getByRole("button", { name: "Mark all read" })).toBeVisible();
+      }
+    } else {
+      /* Refused, unavailable or not configured. Each has its own sentence and none of them is the
+         empty-cluster sentence, which would be a statement about the cluster. */
+      await expect(panel).not.toContainText("Nothing to report");
+      await expect(panel.locator(".kui-notices__state p")).toBeVisible();
+    }
+
+    /* Whatever branch ran: something legible is in it. A panel whose only content is its own
+       heading is the rendering fault this asserts against. */
+    const text = ((await panel.textContent()) ?? "").replace("Notifications", "").trim();
+    const why = "the notifications panel drew its heading and nothing else";
+    expect(text.length, why).toBeGreaterThan(0);
+  });
+
+  /**
+   * The Appearance popover (`M22`) and the light theme it writes (`M02`) — two of the twenty-three
+   * screens, and until W8-07's census counted them, two that no browser case had ever opened.
+   *
+   * They are one case because they are one mechanism seen from two ends. `chrome.test.tsx` asserts
+   * in jsdom that choosing `light` writes `data-theme="light"` on the root element; what it cannot
+   * assert is that the popover a person clicks is wired to that preference at all, through a real
+   * `TopBar`, a real anchor and the kernel's own singleton. §3.10's rule is the second half and is
+   * equally invisible to a unit case: **no chip carries its meaning in colour alone** — every
+   * segment is a named radio, which is why the accent row is four words rather than four swatches.
+   *
+   * `M22` is drawn over the ksqlDB screen and `M02` over the dashboard. The popover belongs to the
+   * frame rather than to either page (§4.16 makes the same point about the notifications panel), so
+   * it is driven here, from the address the product opens on.
+   */
+  test("the appearance popover names every choice in words, and Light repaints the frame", async ({
+    page,
+  }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+
+    const control = page.getByTestId("appearance-control");
+    await expect(control).toHaveAttribute("aria-expanded", "false");
+    await control.click();
+
+    const popover = page.getByRole("dialog", { name: "Appearance" });
+    await expect(popover).toBeVisible();
+    await expect(control).toHaveAttribute("aria-expanded", "true");
+
+    /* Three preferences, each a named group, and every option a word. A swatch-only accent row
+       would satisfy "the popover opened" and fail every colour-blind operator. */
+    for (const group of ["Accent colour", "Theme", "Density"]) {
+      await expect(popover.getByRole("radiogroup", { name: group })).toBeVisible();
+    }
+    const options = ["Blue", "Teal", "Green", "Amber", "Auto", "Light", "Dark"];
+    for (const option of [...options, "Comfortable", "Compact"]) {
+      await expect(popover.getByRole("radio", { name: option })).toHaveCount(1);
+    }
+
+    /* And "Auto" is explained. Nobody guesses that it keeps following the system rather than
+       resolving once at load, and it is the value most operators are on. */
+    await expect(popover).toContainText(/Auto follows the system/i);
+
+    await popover.getByRole("radio", { name: "Light", exact: true }).check();
+    /* The attribute, not a colour: `10-tokens.css` redefines the palette under
+       `:root[data-theme="light"]`, so this is the one thing the whole light theme hangs from, and
+       it is what `M02` is a picture of. */
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+    await popover.getByRole("radio", { name: "Dark", exact: true }).check();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    /* Escape closes it and returns focus to the glyph, which is the rule that keeps a keyboard user
+       from being dropped at the top of the document. */
+    await page.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+    await expect(control).toBeFocused();
+  });
 });

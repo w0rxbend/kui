@@ -41,7 +41,6 @@ final class ConnectorsSuite extends FunSuite {
     assertEquals(state.wire, "DESTROYED")
     assert(!state.isRunning)
     assert(!state.isFailed)
-    assert(!state.isPaused)
   }
 
   test("a state is compared case-insensitively, because not every implementation shouts") {
@@ -102,14 +101,26 @@ final class ConnectorsSuite extends FunSuite {
   }
 
   test("the connector's own trace wins over its tasks', and the failed tasks are read in id order") {
-    val bad = connector(
-      "FAILED",
-      List(task(2, "FAILED", Some("second")), task(1, "FAILED", Some("first"))),
-      trace = Some("the connector configuration is invalid")
+    // **The rule this packet owns**, and the fixture is the half of it that was missing. The tasks were
+    // `[2, 1]`, where `sortBy(_.id.value)` and `reverse` produce the same list, so replacing the sort with
+    // `tasks.reverse` left all 129 cases green and `reason`'s own promise — *"in task-id order, so that two
+    // screens reading one document cannot pick different tasks"* — was held by nothing.
+    //
+    // Three tasks in document order `[2, 1, 3]` separate all three candidate readings, which is what a
+    // fixture has to do to be a gate: sorted picks task 1, the worker's own order picks task 2, and
+    // reversed picks task 3. A worker is under no obligation to list tasks in id order — `ConnectHttp`
+    // sorts them for this reason — and the card's sentence must not depend on which of the three the
+    // document happened to be in.
+    val unordered = List(
+      task(2, "FAILED", Some("task 2 said")),
+      task(1, "FAILED", Some("task 1 said")),
+      task(3, "FAILED", Some("task 3 said"))
     )
 
+    val bad = connector("FAILED", unordered, trace = Some("the connector configuration is invalid"))
+
     assertEquals(bad.reason, Some("the connector configuration is invalid"))
-    assertEquals(bad.copy(trace = None).reason, Some("first"))
+    assertEquals(bad.copy(trace = None).reason, Some("task 1 said"))
   }
 
   test("a healthy connector has no reason at all") {
@@ -118,10 +129,13 @@ final class ConnectorsSuite extends FunSuite {
   }
 
   test("facts with an unreadable connector say so rather than reporting a shorter list") {
+    // `unreadable` is read directly, here and on the wire. `ConnectorFacts.partial` used to wrap this
+    // expression and had no production caller — `ConnectMapping.worker` puts the list itself in
+    // `ConnectorsDto` — so it was deleted rather than kept as a declaration only a test uses.
     val facts = ConnectorFacts(List(connector("RUNNING", Nil)), List("elastic-sink"))
 
-    assert(facts.partial)
-    assert(!ConnectorFacts.complete(facts.connectors).partial)
+    assertEquals(facts.unreadable, List("elastic-sink"))
+    assertEquals(ConnectorFacts.complete(facts.connectors).unreadable, Nil)
   }
 
   test("the three operations spell their audit names the way a MutationKind spells one") {
@@ -132,7 +146,9 @@ final class ConnectorsSuite extends FunSuite {
       List("connect.connector.pause", "connect.connector.resume", "connect.connector.restart")
     )
     assert(ConnectorOperation.values.forall(op => op.operation == op.operation.toLowerCase))
-    assertEquals(ConnectorOperation.fromWire("restart"), Some(ConnectorOperation.Restart))
-    assertEquals(ConnectorOperation.fromWire("delete"), None)
+    // `wire` is the worker's own verb and is what `ConnectHttp.operate` builds each path from. There is no
+    // `fromWire` any more: the routes bind one operation per endpoint statically, so nothing in the product
+    // ever parsed one out of a string and the parser had only this line reading it.
+    assertEquals(ConnectorOperation.values.map(_.wire).toList, List("pause", "resume", "restart"))
   }
 }

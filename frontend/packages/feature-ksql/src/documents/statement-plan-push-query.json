@@ -1,0 +1,11 @@
+{
+  "statement" : "SELECT * FROM ORDERS EMIT CHANGES;",
+  "shape" : "push_query",
+  "destructive" : false,
+  "deletesTopic" : false,
+  "warnings" : [
+  ],
+  "token" : null,
+  "expiresAt" : null,
+  "computedAt" : "2026-09-03T10:11:12Z"
+}

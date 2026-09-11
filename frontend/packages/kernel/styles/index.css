@@ -170,3 +170,17 @@
  * named here exactly once, and this index is the only place that can name it. Two packets, one
  * line each. */
 @import "../../feature-connect/styles/81-connect.css";
+
+/* The ksqlDB screens (M9): the object list, the statement editor and the result region. After
+ * `29-connect-ksql.css` for the same reason the Connect line above is — that sheet styles the
+ * `KsqlWorkspace` primitive this screen composes, and a screen must be able to adjust a primitive
+ * inside itself — and last in the file because the pre-migration order at the top of this file is
+ * preserved on purpose and a new screen joins the end of it.
+ *
+ * The file is `@kui/feature-ksql`'s and this line is the kernel's, for the third time and the same
+ * reason: `build-tests`' `CssReferences` requires every stylesheet on disk to be named here exactly
+ * once, and this index is the only file that can name it. **The path is the contract between the two
+ * packets** — `CssReferences.violations` reports an import of a file that is not on disk, so this
+ * line is red until `frontend/packages/feature-ksql/styles/82-ksql.css` exists at exactly this
+ * name, and the feature's stylesheet is red the moment it is committed under any other one. */
+@import "../../feature-ksql/styles/82-ksql.css";

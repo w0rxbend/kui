@@ -137,6 +137,38 @@ describe("fetchClusters", () => {
     const answer = await fetchClusters(client({ clusters: { status: "something-new" } }));
     expect(answer.kind).toBe("failed");
   });
+
+  it("never turns a null scrape instant into the Unix epoch", async () => {
+    /*
+     * `new Date(null)` is 1970-01-01, and the row that draws this figure prints it as "Read 20702d
+     * ago" — a fabricated date in the one line whose own comment forbids inventing one, and a
+     * figure that says the cluster was last read half a century ago. `=== undefined` let it
+     * through; `== null` is the whole fix, and this is the case that holds it.
+     *
+     * Latent rather than live today, because `ClusterSummaryDto.scrapedAt` is non-optional. Every
+     * other absent figure on this row arrives as a wire `null`, so the field becoming optional is a
+     * server-side edit away and nothing else in this package would have noticed.
+     */
+    const answer = await fetchClusters(
+      client({
+        clusters: {
+          status: "ok",
+          fetchedAt: "2026-09-05T12:00:00Z",
+          data: [
+            row("silent-01", {
+              status: "ok",
+              fetchedAt: "2026-09-05T12:00:00Z",
+              data: { ...scrape, scrapedAt: null },
+            }),
+          ],
+        },
+      }),
+    );
+    expect(answer.kind).toBe("ready");
+    if (answer.kind === "ready") {
+      expect(answer.value[0]?.observedAt).toBeNull();
+    }
+  });
 });
 
 describe("fetchBrokers", () => {

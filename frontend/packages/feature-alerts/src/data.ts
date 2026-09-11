@@ -1,14 +1,15 @@
 /**
- * The alerts feature's one HTTP call, and the reason the other one is not here.
+ * The alerts feature's two HTTP calls, and the reason the feed is not one of them.
  *
- * ## Reads are the shell's, writes are this package's
+ * ## The feed is the shell's, the write and the write's gate are this package's
  *
  * The feed is fetched once for the whole application by `@kui/kernel`'s `createAlerts`, wired up in
- * `packages/shell/src/App.tsx` against `packages/shell/src/data/alerts.ts`'s `ALERTS_FEED_PATH`,
+ * `packages/shell/src/App.tsx` through `packages/shell/src/data/alerts.ts`'s `loadAlertFeed`,
  * because the bell in the chrome and the card on this screen must never be able to disagree about
  * how many alerts are open. This screen reads that store through `useAlerts()` and issues no read
- * of its own. What is left for this file is the acknowledgement, which is a write on one event and
- * belongs to the screen that offers the control.
+ * of the feed. What is left for this file is the acknowledgement, which is a write on one event and
+ * belongs to the screen that offers the control — and the one fact that decides whether the control
+ * is offered at all, ADR-047's read-only flag.
  *
  * ## Why the read that fills this screen does not ask the server to mark the feed read
  *
@@ -26,6 +27,7 @@
  * beside the bell it silences.
  */
 import type { ApiResult, KuiApiClient } from "@kui/api";
+import { apiFailure, type Fetched } from "@kui/kernel";
 
 /** `AlertsEndpoints.acknowledge`: the event's own sub-resource, and no request body. */
 export const ACKNOWLEDGEMENT_PATH =
@@ -40,4 +42,40 @@ export async function acknowledge(
     params: { path: { clusterId, eventId } },
   });
   return answer.ok ? { ok: true, value: undefined } : answer;
+}
+
+/** `ClusterEndpoints.get`: the cluster's own document, which carries ADR-047's flag. */
+export const CLUSTER_PATH = "/api/v1/clusters/{clusterId}";
+
+/** The one fact about the cluster itself that the acknowledge control needs. */
+export interface ClusterWriteState {
+  readonly readOnly: boolean;
+}
+
+/** What `GET /api/v1/clusters/{clusterId}` carries. Only the one field this screen gates on. */
+interface ClusterDetailPayload {
+  readonly cluster?: { readonly readOnly?: boolean } | null;
+}
+
+/**
+ * Whether this deployment has the cluster marked read-only.
+ *
+ * Not a section: `cluster.get` answers a plain document, so there is no ADR-039 envelope to unwrap
+ * and a failure is a failure. The caller decides what an unanswered question means — see
+ * `AlertsRoute`, which treats it as "not read-only" rather than disabling a control on a fact KUI
+ * does not have.
+ *
+ * A second reader of one endpoint, and deliberately so: `feature-topics` carries the same three
+ * lines. A feature may not import another feature — that edge is what the microfrontend split
+ * exists to prevent — and the alternative, hoisting it into the kernel, would put a cluster-service
+ * address in the package that is meant to know about no service at all.
+ */
+export async function fetchClusterWriteState(
+  api: KuiApiClient,
+  clusterId: string,
+): Promise<Fetched<ClusterWriteState>> {
+  const answer = await api.get(CLUSTER_PATH, { params: { path: { clusterId } } });
+  if (!answer.ok) return apiFailure(answer.error);
+  const payload = answer.value as ClusterDetailPayload;
+  return { kind: "ready", value: { readOnly: payload.cluster?.readOnly === true } };
 }

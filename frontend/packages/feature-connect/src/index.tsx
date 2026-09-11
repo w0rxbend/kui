@@ -27,6 +27,7 @@ export {
 export {
   allConnectors,
   allNotDescribed,
+  cardActions,
   connectVoice,
   connectorLabel,
   failureReason,
@@ -34,7 +35,6 @@ export {
   operateSubject,
   pillState,
   segmentsOf,
-  taskCaption,
   taskSegment,
   toggleOf,
   workersThatDidNotAnswer,
@@ -43,6 +43,7 @@ export {
   NO_CONNECTORS,
   NO_REASON_REPORTED,
   THROUGHPUT_NOT_MEASURED,
+  type CardActions,
   type FailureReason,
 } from "./model.js";
 export {

@@ -33,6 +33,8 @@ import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.identity.api.IdentityApi
 import kui.identity.app.IdentityWiring
 import kui.kernel.ServiceId
+import kui.ksql.api.KsqlApi
+import kui.ksql.app.KsqlWiring
 import kui.message.api.MessageApi
 import kui.message.app.MessageWiring
 import kui.metrics.api.MetricsApi
@@ -171,6 +173,7 @@ object AllInOneWiring {
       ConnectApi.Id,
       ConsumerApi.Id,
       IdentityApi.Id,
+      KsqlApi.Id,
       MessageApi.Id,
       MetricsApi.Id,
       SchemaApi.Id,
@@ -320,6 +323,32 @@ object AllInOneWiring {
         principals,
         logger
       )
+      // The ksql service, and the eleventh. It reads the same `kui.clusters[]` as the five services
+      // above -- a ksqlDB address is the per-cluster key `kui.clusters.<n>.ksql` -- and, like the
+      // connect service, it holds no Kafka client at all: every fact it reports comes from a ksqlDB
+      // server's REST API.
+      //
+      // Its URL policy comes from the process environment, for the reason the schema and connect
+      // services' does: a server at `http://ksqldb-server:8088` is the ordinary arrangement inside a
+      // Compose network, and a stricter policy here than the one that accepted the address would mean
+      // a server KUI logged at startup and could never call.
+      //
+      // IT IS THE ONLY OPTIONAL SERVICE IN THIS PROCESS THAT TAKES THE CURSOR KEY. A statement that
+      // drops a stream, a table or a topic loses data that no opposite button restores, so it is an
+      // ADR-045 plan->token->confirm mutation and `streaming.cursorKey` is what signs the token --
+      // the same key ADR-026 already made an operator configure for the browse cursor, so a
+      // deployment configures one secret rather than two. `KsqlWiring` decides what to do when the
+      // key is absent and says so in its own start-up line; this file's job is only to hand it the
+      // one the operator configured rather than a default of its own.
+      ksqlService <- KsqlWiring.make[F](
+        clusters,
+        UrlPolicy.fromEnv(schemaEnvironment),
+        rbac,
+        streaming.cursorKey,
+        telemetry,
+        principals,
+        logger
+      )
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](
@@ -374,6 +403,12 @@ object AllInOneWiring {
           ConnectApi.Id,
           connectService.routes,
           connectService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          KsqlApi.Id,
+          ksqlService.routes,
+          ksqlService.interceptors,
           principals
         )
       )

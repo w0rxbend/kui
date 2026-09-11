@@ -7,7 +7,9 @@ import kui.alerts.contract.AlertsEndpoints
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.connect.contract.ConnectEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
+import kui.gateway.api.KsqlStreamRoutes
 import kui.kernel.ServiceId
+import kui.ksql.contract.KsqlEndpoints
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
 import kui.metrics.contract.MetricsEndpoints
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
@@ -29,6 +31,7 @@ final class ServiceContractsSuite extends FunSuite {
   private val metrics = ServiceId.unsafe("metrics")
   private val alerts = ServiceId.unsafe("alerts")
   private val connect = ServiceId.unsafe("connect")
+  private val ksql = ServiceId.unsafe("ksql")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -44,7 +47,7 @@ final class ServiceContractsSuite extends FunSuite {
   test("everyConfiguredServiceHasItsContract") {
     assertEquals(
       ServiceContracts.byService.keySet,
-      Set(cluster, topic, consumer, message, schema, metrics, alerts, connect)
+      Set(cluster, topic, consumer, message, schema, metrics, alerts, connect, ksql)
     )
     // Both of the cluster service's lists. `ClusterWriteEndpoints` used to be deliberately absent, so
     // that the one write M1 shipped had no public route while it had no screen; the administration screen
@@ -98,6 +101,30 @@ final class ServiceContractsSuite extends FunSuite {
     // them by and they are published alongside the read. Which endpoint list is in the map is asserted
     // here, and the count of the writes inside it is asserted in `MergedDocumentShapeSuite`.
     assertEquals(ServiceContracts.of(connect), ConnectEndpoints.all)
+    // The ksql service's one list: the eleventh service and the ninth entry in this map. Its plan and
+    // its apply both carry ADR-045 markers
+    // and are still published from the same object as the read, because ksqlDB has no *known* destructive
+    // operation to group into a second one: the statement is whatever somebody typed, so the plan is a
+    // classification of that text rather than a separate family of endpoints. Its fourth endpoint is the
+    // push query, which this derivation cannot proxy for the alerts and message streams' reason — a stream
+    // is relayed rather than called and re-encoded — so `KsqlStreamEndpoint` is deliberately not in the map
+    // and this assertion is what says so.
+    assertEquals(ServiceContracts.of(ksql), KsqlEndpoints.all)
+  }
+
+  test("theKsqlStreamIsRelayedAndThereforeNotInTheMap") {
+    // The failure this stops is the one `ContractRouting`'s own comments describe: a stream added to the map
+    // derives a proxy route that waits for the whole response value, decodes it and re-encodes it, so a push
+    // query would answer nothing until it ended and it never ends. `assertEquals` above pins the list; this
+    // pins the *reason*, by name, so that a push query arriving in `KsqlEndpoints.all` one day fails here
+    // with the sentence rather than in a browser that hangs.
+    val relayed = KsqlStreamRoutes.publicEndpoint[cats.effect.IO].info.name
+
+    assert(relayed.isDefined, "the relayed push query has no endpoint name to check the map against")
+    assert(
+      !ServiceContracts.of(ksql).flatMap(_.info.name).exists(relayed.contains),
+      s"$relayed is in ServiceContracts, where ContractRouting would decode and re-encode an event stream"
+    )
   }
 
   test("theSchemaServicesTwoListsAreTheSizeTheMapSaysTheyAre") {
@@ -118,15 +145,15 @@ final class ServiceContractsSuite extends FunSuite {
     // capability snapshot; it simply has no proxied routes yet. No service is in that position today, so
     // the case is made with an id nothing serves rather than left untested until one is.
     //
-    // It used to be made with `connect`, which stopped being an id nothing serves the moment the tenth
-    // service landed -- the case would have kept passing only because `getOrElse` answers `Nil` for a key
-    // that is absent, and it is absent from nothing now. `ksql` is M9's second service and is the next id to
-    // move; whoever routes it moves this line, and a stale one fails here rather than silently asserting
-    // something true of every string.
-    assertEquals(ServiceContracts.of(ServiceId.unsafe("ksql")), Nil)
+    // It used to be made with `connect`, then with `ksql`, and each stopped being an id nothing serves the
+    // moment that service was routed -- the case would have kept passing only because `getOrElse` answers
+    // `Nil` for a key that is absent, and it is absent from nothing now. `security` is the next service this
+    // plan names and has no `services/security` at all; whoever routes it moves this line, and a stale one
+    // fails on the second assertion rather than silently asserting something true of every string.
+    assertEquals(ServiceContracts.of(ServiceId.unsafe("security")), Nil)
     assert(
-      !ServiceContracts.byService.keySet.contains(ServiceId.unsafe("ksql")),
-      "ksql is routed now; this case needs an id the gateway really has no contract for"
+      !ServiceContracts.byService.keySet.contains(ServiceId.unsafe("security")),
+      "security is routed now; this case needs an id the gateway really has no contract for"
     )
   }
 

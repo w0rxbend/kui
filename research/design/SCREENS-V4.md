@@ -280,6 +280,20 @@ the useful part of the record:
    cluster in every deployment. Written down here because for two waves this decision existed only
    in a source comment, which is where a design document's readers do not look.
 
+**`ECOSYSTEM`'s third row, and the figure it does not carry.** The ksqlDB row ships with the
+eleventh service: it is a route and a nav destination at `/clusters/<id>/ksql`, registered by
+`@kui/feature-ksql` with `group: "Ecosystem"`, and it is the third row under that heading beside
+Schema Registry and Kafka Connect — the drawing above, finally, as drawn. Two things about it are
+decisions rather than omissions. **It is not a dashboard tab**, for the reason Alerts and Connect
+are not: a tab lives in the shell's `overview/`, and a feature package reaching into the shell's
+dashboard inverts the dependency the whole feature split exists to keep. And **it carries no figure
+yet**, where the capture draws `4 objects`. Nothing in this product counts ksqlDB streams and tables
+for the drawer: the count in `NavCounts` is the cluster store's, the cluster store reads the cluster
+service, and a row that printed `0 objects` over a ksqlDB server holding four would be the exact
+misreading `countBadge` refuses — an absent count is *not known*, which is no badge, and it is never
+a zero. When something counts them the row gets a neutral total and this paragraph loses its second
+half; until then the row is a link with a label, which is true.
+
 ### 2.3 The drawer foot is the storage meter
 
 Unchanged from `SCREENS.md` §2.7 and drawn identically in all twenty-three:

@@ -15,7 +15,7 @@
  * place to be wrong in and it is a place that fails.
  */
 import { describe, expect, it } from "vitest";
-import type { ApiResult } from "@kui/api";
+import { ErrorCodes, type ApiResult } from "@kui/api";
 import { createRoot, createSignal, flush } from "solid-js";
 
 import type { SseConnection, SseHandle, SseSubscriber } from "../sse/stream.js";
@@ -575,6 +575,112 @@ describe("the alert feed store", () => {
     });
   });
 
+  it("a read that fails at the transport keeps the rows and drops the count the frame carried", async () => {
+    await createRoot(async (dispose) => {
+      let reachable = true;
+      const world = harness({
+        load: () =>
+          reachable
+            ? answering(body(wireFeed()))
+            : Promise.resolve<ApiResult<unknown>>({
+                ok: false,
+                error: { kind: "unreachable", cause: "the gateway is not answering" },
+              }),
+      });
+      world.alerts.start();
+      await world.settle();
+      expect(world.alerts.openCount()).toBe(2);
+
+      // The frame moves the bell to 9 at once, and the read it triggers never reaches the gateway.
+      // Nothing was disproved, so the rows stay and are badged — this is the same event as the
+      // stream dropping, one transport down, and blanking the card here would take the last known
+      // figures away at the moment they are most wanted.
+      reachable = false;
+      world.stream.send(wireChange({ openCount: 9 }));
+      expect(world.alerts.openCount()).toBe(9);
+      await world.settle();
+
+      const state = world.alerts.feed();
+      expect(state.kind).toBe("stale");
+      expect(state.kind === "stale" && state.reason).toBe("KUI cannot reach the server.");
+      expect(world.alerts.events()).toHaveLength(1);
+
+      // And the hint goes with the read that failed. This is the outcome the header's *"on every
+      // outcome"* is about and the only one that can see it: a completed read supersedes the frame,
+      // and a read that completed by failing is still a completed read. Left alive, the bell would
+      // draw a 9 that came from a frame whose read never landed, over rows that say plainly they are
+      // the last answer KUI received — the bell is then the most confident thing on the screen and
+      // the least supported. `applyRead()` drops it before it branches; moving that line below the
+      // failure branch reddens exactly here.
+      expect(world.alerts.openCount()).toBe(2);
+      dispose();
+    });
+  });
+
+  it("reports a first read that never reached the gateway under the transport's own code", async () => {
+    await createRoot(async (dispose) => {
+      const world = harness({
+        load: () =>
+          Promise.resolve<ApiResult<unknown>>({
+            ok: false,
+            error: { kind: "unreachable", cause: "the gateway is not answering" },
+          }),
+      });
+      world.alerts.start();
+      await world.settle();
+
+      // Nothing is held, so there are no rows to badge and the honest state is a failure. The code
+      // is the half that matters and the half a store can get wrong without anybody noticing: it is
+      // what an operator quotes in a ticket, and routing this through the stream's staleness path
+      // would file the browser's own unreachable gateway under `STREAM_CLOSED` — a code about a
+      // subscription that was never opened. Deleting `current() !== undefined` from the transport
+      // branch in `applyRead()` reddens exactly this line and nothing else.
+      const state = world.alerts.feed();
+      expect(state.kind).toBe("failed");
+      expect(state.kind === "failed" && state.code).toBe("UNREACHABLE");
+      expect(state.kind === "failed" && state.message).toBe("KUI cannot reach the server.");
+      dispose();
+    });
+  });
+
+  it("blanks the feed when the server answers with a refusal rather than not answering at all", async () => {
+    await createRoot(async (dispose) => {
+      let refuse = false;
+      const world = harness({
+        load: () =>
+          refuse
+            ? Promise.resolve<ApiResult<unknown>>({
+                ok: false,
+                error: {
+                  kind: "envelope",
+                  code: ErrorCodes.Forbidden,
+                  message: "You may not read this cluster's alerts.",
+                  details: [],
+                  correlationId: "c-1",
+                  retryable: false,
+                },
+              })
+            : answering(body(wireFeed())),
+      });
+      world.alerts.start();
+      await world.settle();
+      expect(world.alerts.feed().kind).toBe("ready");
+
+      // The other side of the branch above, and the reason it is a branch. An envelope is the server
+      // having an opinion — here, that this principal may no longer see the cluster — and rows kept
+      // on screen under a staleness badge would be data the server has just refused. Only "nothing
+      // answered" earns the rows.
+      refuse = true;
+      world.alerts.refresh();
+      await world.settle();
+
+      expect(world.alerts.feed().kind).toBe("failed");
+      expect(world.alerts.events()).toEqual([]);
+      expect(world.alerts.openCount()).toBeNull();
+      dispose();
+    });
+  });
+
   it("a live count does not outlive the refusal that answered it", async () => {
     await createRoot(async (dispose) => {
       let refused = false;
@@ -794,10 +900,18 @@ describe("the alert feed store", () => {
       world.alerts.markAllRead();
       await world.settle();
 
-      // The failure is stated rather than swallowed, and nothing pretends the bell was cleared.
-      expect(world.alerts.feed().kind).toBe("failed");
-      expect(world.alerts.unread()).toBe(false);
-      expect(world.alerts.unreadCount()).toBeNull();
+      // The failure is stated rather than swallowed, and nothing pretends the bell was cleared. The
+      // gateway did not answer, so what is held is still the truth as of the last answer: the rows
+      // stay, badged, and the unread mark stays lit on the server's own count. That is what this
+      // case has always been named for — until wave 8 it asserted the opposite, because a failed
+      // read blanked the feed and `unreadCount()` then answered `null`, which is "nobody has said"
+      // rather than "nothing is unread". A bell that goes quiet because a request timed out is the
+      // browser zeroing it by another route.
+      const state = world.alerts.feed();
+      expect(state.kind).toBe("stale");
+      expect(state.kind === "stale" && state.reason).toBe("KUI cannot reach the server.");
+      expect(world.alerts.unread()).toBe(true);
+      expect(world.alerts.unreadCount()).toBe(2);
       dispose();
     });
   });

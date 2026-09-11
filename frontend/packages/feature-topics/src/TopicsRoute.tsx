@@ -302,8 +302,13 @@ export const CREATE_POLL_ATTEMPTS = 6;
 /**
  * Long enough for the fetch a reload just started to have landed, short enough that the list is on
  * screen well before anybody wonders.
+ *
+ * Module-private, and it was exported. Nothing in the product or in a case ever named it from
+ * outside this file, and an export with no caller is a promise this module is not being asked for.
+ * What holds the figure is `pollUntilListed`'s own case, driven on a fake clock so the rule can be
+ * asserted without a case that sleeps for it.
  */
-export const CREATE_POLL_INTERVAL_MS = 500;
+const CREATE_POLL_INTERVAL_MS = 500;
 
 /**
  * Re-reads the list until the new topic is in it, or until it is time to stop asking.
@@ -317,11 +322,14 @@ export const CREATE_POLL_INTERVAL_MS = 500;
  * what the broker decided about the defaults it was not given — and a guessed partition count on a
  * topic somebody is about to produce to is worse than a short wait.
  *
- * Lifted out of `TopicsScreen` so that both halves of the rule can be gated. The lower half — that
- * it polls at all, rather than re-reading once — is observable through the screen and has a case.
- * The **upper** half is not: a bound of 6 and a bound of 100 draw the same page, and differ only in
- * how long the browser keeps asking a cluster that is never going to answer. Nothing could see that
- * through the DOM, so the loop is a function with a caller and the caller is one line below.
+ * Lifted out of `TopicsScreen` so that all three halves of the rule can be gated, none of which the
+ * screen can show. That it polls at all, rather than re-reading once, is observable through the
+ * screen and has a case. The **bound** is not: 6 and 100 draw the same page and differ only in how
+ * long the browser keeps asking a cluster that is never going to answer. Neither is the
+ * **short-circuit** — deleting `if (listed()) return;` draws the same page too, and every
+ * successful create then fires all six reloads over three seconds instead of stopping at the first
+ * that can see the topic. Nor is the **interval**, whose only effect is wall-clock. So the loop is
+ * a function with one caller, one line below, and its three rules are asserted on the function.
  */
 export async function pollUntilListed(reload: () => void, listed: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < CREATE_POLL_ATTEMPTS; attempt += 1) {
@@ -731,16 +739,26 @@ function TopicScreen(props: {
     updateTopicConfig(kui.api, props.clusterId, props.topicName, change),
   );
 
+  /**
+   * Every gate on this page names the topic, and the list screen's three deliberately do not.
+   *
+   * A grant carries a *pattern*, so somebody granted `TOPIC:DELETE` on `analytics\..*` holds the
+   * action on something and holds it on nothing here. `kernel/src/state/session.ts` says which
+   * question is which: the subjectless form is *"the right answer for a list heading and the wrong
+   * one for a row's delete button"* — and this whole page is one row's delete button. Until wave 8
+   * all four of these asked the weaker question, so an account trusted with `analytics.*` was
+   * offered a live `Delete this topic` on `orders.payments` and found out from the gateway.
+   */
   const purgeBlocked = (): string | undefined =>
     writeBlockedReason({
-      permitted: kui.permits(Actions.TopicMessagesDelete),
+      permitted: kui.permits(Actions.TopicMessagesDelete, props.topicName),
       readOnly: readOnly(),
       action: "empty this topic",
     });
 
   const deleteBlocked = (): string | undefined =>
     writeBlockedReason({
-      permitted: kui.permits(Actions.TopicDelete),
+      permitted: kui.permits(Actions.TopicDelete, props.topicName),
       readOnly: readOnly(),
       action: "delete this topic",
     });
@@ -755,14 +773,14 @@ function TopicScreen(props: {
    */
   const growBlocked = (): string | undefined =>
     writeBlockedReason({
-      permitted: kui.permits(Actions.TopicEdit),
+      permitted: kui.permits(Actions.TopicEdit, props.topicName),
       readOnly: readOnly(),
       action: "add partitions to this topic",
     });
 
   const editBlocked = (): string | undefined =>
     writeBlockedReason({
-      permitted: kui.permits(Actions.TopicEdit),
+      permitted: kui.permits(Actions.TopicEdit, props.topicName),
       readOnly: readOnly(),
       action: "change this topic's settings",
     });

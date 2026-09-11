@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../.tsbuild/feature-ksql",
+    "tsBuildInfoFile": "../../.tsbuild/feature-ksql.tsbuildinfo",
+    "rootDir": "src",
+    // `src/documents/*.json`: whole ksqlDB documents in the wire's own shape, decoded by the cases
+    // and rendered by the stories, so that the field names this package reads are checked against a
+    // document rather than against a literal written beside the assertion.
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
+  "references": [{ "path": "../api" }, { "path": "../kernel" }]
+}

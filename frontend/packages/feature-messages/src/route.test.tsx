@@ -899,12 +899,48 @@ describe("saving what is on the filter bar", () => {
  * single flag can produce.
  */
 describe("the write controls the route offers", () => {
-  /** Yes to everything except these, compared field by field rather than by object identity. */
+  /**
+   * Yes to everything except these, compared field by field rather than by object identity.
+   *
+   * ## `exceptOn`, and why this helper had to grow it
+   *
+   * For two waves this compared `{resource, action}` and **threw the `name` away**, so it answered
+   * the same thing to `permits(action)` and to `permits(action, "orders.payments")`. That made the
+   * subject in `MessagesRoute`'s `mayProduce` and `mayResend` unobservable: pointing either call at
+   * a topic nobody is looking at left all 165 cases in this package green. It is the unfixed twin
+   * of the helper `feature-consumers/src/groupRoute.test.tsx` repaired in wave 7, one directory
+   * over, and it is repaired here the same way.
+   *
+   * A grant carries a *pattern*, so `exceptOn` is the principal one produces: denied the action
+   * everywhere except on the topic it names, and **yes** when nobody names a topic at all, because
+   * they do hold it on something. `kernel/src/state/session.ts` is explicit that the subjectless
+   * form is *"the right answer for a list heading and the wrong one for a row's delete button"*.
+   */
   function permitsAllBut(
-    ...denied: readonly { readonly resource: string; readonly action: string }[]
+    ...denied: readonly {
+      readonly resource: string;
+      readonly action: string;
+      readonly exceptOn?: string;
+    }[]
   ): KuiContextValue["permits"] {
-    return (asked) =>
-      !denied.some((one) => one.resource === asked.resource && one.action === asked.action);
+    return (asked, name) => {
+      const rule = denied.find(
+        (one) => one.resource === asked.resource && one.action === asked.action,
+      );
+      if (rule === undefined) return true;
+      if (rule.exceptOn === undefined) return false;
+      // The weaker question, answered the way the server answers it: they hold this action on
+      // something, and only a named subject can turn that into a refusal.
+      return name === undefined || name === rule.exceptOn;
+    };
+  }
+
+  /** Every message action, granted on one topic's pattern and on nothing else. */
+  function grantedOnlyOn(topic: string): KuiContextValue["permits"] {
+    return permitsAllBut(
+      { ...Actions.TopicMessagesProduce, exceptOn: topic },
+      { ...Actions.TopicMessagesRead, exceptOn: topic },
+    );
   }
 
   function control(container: HTMLElement, label: string): HTMLButtonElement {
@@ -1062,6 +1098,75 @@ describe("the write controls the route offers", () => {
     expect(resend.getAttribute("aria-disabled")).toBe("true");
     expect(await reasonUnder(resend)).toContain(
       "You do not have permission to read this topic and publish into another one.",
+    );
+
+    dispose();
+  });
+
+  /**
+   * The subject, which is what every case above is blind to.
+   *
+   * Every case above hands `permitsAllBut` an entry with no `exceptOn`, which refuses the action
+   * whatever subject is named — so a route asking the subjectless question and a route asking the
+   * named one are indistinguishable to all of them, and both `mayProduce` and `mayResend` asked the
+   * subjectless one until wave 8. The principal here is the one a pattern grant makes:
+   * `TOPIC:MESSAGES_*` on some other topic, which answers **yes** to "do they hold this action on
+   * anything" and **no** about this page's topic.
+   *
+   * Both halves, because one alone cannot separate a route that names the topic from a route that
+   * answers `false` to everybody. The track form's positive half is the case four above it, which
+   * already mounts a principal permitted everywhere.
+   */
+  test("the topic's write controls ask about this topic and not about the cluster", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.subject") });
+    const { container, dispose } = routeAt(
+      "",
+      api,
+      "orders.subject",
+      grantedOnlyOn("analytics.pageviews"),
+    );
+    await settle();
+
+    const produce = control(container, "Produce message");
+    expect(produce.getAttribute("aria-disabled")).toBe("true");
+    expect(await reasonUnder(produce)).toContain(
+      "You do not have permission to publish into this topic.",
+    );
+    expect(control(container, "Copy records out").getAttribute("aria-disabled")).toBe("true");
+
+    dispose();
+  });
+
+  test("and offers them when the grant is on this topic", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.granted") });
+    const granted = grantedOnlyOn("orders.granted");
+    const { container, dispose } = routeAt("", api, "orders.granted", granted);
+    await settle();
+
+    expect(control(container, "Produce message").getAttribute("aria-disabled")).toBeNull();
+    expect(control(container, "Copy records out").getAttribute("aria-disabled")).toBeNull();
+
+    dispose();
+  });
+
+  /**
+   * The track form, where the subject is whatever the reader typed.
+   *
+   * A track is a full read of every topic it names, so a grant covering one of two is not enough —
+   * and the subjectless question cannot see the shortfall at all. The form below names
+   * `orders.v1` and `orders.payments.v2`; the grant covers the first, and Search must still close,
+   * naming the topic it closed on so the reader is not sent to ask for a permission they hold.
+   */
+  test("the track search refuses a topic on the form the principal may not read", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.halftracked") });
+    const { container, dispose } = trackAt(api, grantedOnlyOn("orders.v1"));
+    await settle();
+    await fillTrack(container);
+
+    const search = control(container, "Search");
+    expect(search.getAttribute("aria-disabled")).toBe("true");
+    expect(await reasonUnder(search)).toContain(
+      "You do not have permission to read messages on orders.payments.v2.",
     );
 
     dispose();

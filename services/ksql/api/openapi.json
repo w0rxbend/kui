@@ -1,0 +1,673 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI ksqlDB service",
+    "version" : "1.0.0"
+  },
+  "paths" : {
+    "/internal/v1/clusters/{clusterId}/ksql/objects" : {
+      "get" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "The streams, tables, queries and topics this cluster's ksqlDB knows about",
+        "description" : "One list, ordered by kind and then by name, because §3.16's pane is one pane and a row that moves between polls is one an operator cannot click accurately. A row the server returned and KUI could not describe is named in `unreadable` rather than dropped.",
+        "operationId" : "ksql.objects",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/KsqlObjectsResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/ksql/statements/plan" : {
+      "post" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "What running this statement would do",
+        "description" : "Part of the ksql.statement flow. This call changes nothing. Answers what the statement is — a pull query, a push query or a statement — whether it is destructive, whether it deletes a Kafka topic, the warnings to show before it is confirmed, and a token valid for five minutes and for this statement's exact text. A statement that is not destructive plans to no token and needs none.",
+        "operationId" : "ksql.statement.plan",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StatementRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementPlanDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/ksql/statements" : {
+      "post" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "Run one ksqlDB statement",
+        "description" : "Mutation (ksql.statement). This call changes the cluster and cannot be undone. One statement per request. A `DROP ... DELETE TOPIC` is refused without the token its plan answered with, and the token is checked against the statement's exact text so that a confirmed statement cannot be swapped for another one. A `SELECT ... EMIT CHANGES` is refused here and named at .../ksql/stream, because it never finishes. A pull query answers rows; everything else answers the server's own status sentence.",
+        "operationId" : "ksql.statement.execute",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StatementRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementResultDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/ksql/stream" : {
+      "get" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "Rows of a push query, as they arrive",
+        "description" : "Named events: 'phase' carries {columns} once, as soon as the server accepts the query; 'row' carries {values} in that column order; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope; 'done' says why it ended. A statement that is not a push query is refused before the server is called, and the refusal names the endpoint that does answer it.",
+        "operationId" : "ksql.stream",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "statement",
+            "in" : "query",
+            "description" : "The push query to run. It must be a SELECT ... EMIT CHANGES and nothing else",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: query parameter statement",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live" : {
+      "get" : {
+        "description" : "Whether the process should be restarted. Never depends on an upstream.",
+        "operationId" : "health.live",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LivenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready" : {
+      "get" : {
+        "description" : "Whether the service can serve requests now, and which checks say otherwise.",
+        "operationId" : "health.ready",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities" : {
+      "get" : {
+        "description" : "What this service can currently do, per cluster.",
+        "operationId" : "capabilities",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceCapabilities"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CheckResult" : {
+        "title" : "CheckResult",
+        "description" : "One readiness check and its result",
+        "type" : "object",
+        "required" : [
+          "name",
+          "healthy"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "healthy" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterCapability" : {
+        "title" : "ClusterCapability",
+        "type" : "object",
+        "required" : [
+          "configured",
+          "status"
+        ],
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "features" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "KsqlObjectsResponse" : {
+        "title" : "KsqlObjectsResponse",
+        "description" : "What this cluster's ksqlDB named. `not_configured` with a 200 when this cluster has no ksqlDB",
+        "type" : "object",
+        "required" : [
+          "objects"
+        ],
+        "properties" : {
+          "objects" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "LivenessReport" : {
+        "title" : "LivenessReport",
+        "description" : "Whether the process should be restarted",
+        "type" : "object",
+        "required" : [
+          "alive",
+          "at"
+        ],
+        "properties" : {
+          "alive" : {
+            "type" : "boolean"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "Map_ClusterId_ClusterCapability" : {
+        "title" : "Map_ClusterId_ClusterCapability",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/ClusterCapability"
+        }
+      },
+      "ReadinessReport" : {
+        "title" : "ReadinessReport",
+        "description" : "Whether the service can serve requests now",
+        "type" : "object",
+        "required" : [
+          "ready",
+          "at"
+        ],
+        "properties" : {
+          "ready" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            }
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ServiceCapabilities" : {
+        "title" : "ServiceCapabilities",
+        "type" : "object",
+        "required" : [
+          "service",
+          "clusters"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "clusters" : {
+            "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      },
+      "StatementPlanDto" : {
+        "title" : "StatementPlanDto",
+        "description" : "What running this statement would do. A destructive statement carries a token valid for five minutes and for this statement's exact text; a harmless one carries none and needs none",
+        "type" : "object",
+        "required" : [
+          "statement",
+          "shape",
+          "destructive",
+          "deletesTopic",
+          "computedAt"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "shape" : {
+            "type" : "string"
+          },
+          "destructive" : {
+            "type" : "boolean"
+          },
+          "deletesTopic" : {
+            "type" : "boolean"
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "computedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StatementRequestDto" : {
+        "title" : "StatementRequestDto",
+        "description" : "One ksqlDB statement, and the plan token confirming it when it is destructive. One statement per request: this service classifies what it is given in order to decide whether it needs a confirmation, and a batch has no single classification",
+        "type" : "object",
+        "required" : [
+          "statement"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "StatementResultDto" : {
+        "title" : "StatementResultDto",
+        "description" : "What a finished statement produced. `outcome` is 'rows' for a pull query — an empty rows list then means the query matched nothing — or 'status' for a DDL or DML statement, whose `message` is the server's own sentence",
+        "type" : "object",
+        "required" : [
+          "statement",
+          "shape",
+          "outcome",
+          "executedAt"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "shape" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "columns" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "entity" : {
+            "type" : "string"
+          },
+          "executedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      }
+    }
+  }
+}

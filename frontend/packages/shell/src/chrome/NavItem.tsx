@@ -19,8 +19,10 @@ import type { NavDestination, NavRank } from "./types.js";
  *
  * ## A disabled destination stays visible, and says why
  *
- * KSQL DB is in the design marked "soon". The row is present, dimmed, not a link and not focusable,
- * and it carries its reason as a tooltip *and* in its accessible name. Removing the row instead
+ * The fold produces a disabled row for exactly one state — `forbidden` — and the row is present,
+ * dimmed, not a link and not focusable, and it carries its reason as a tooltip *and* in its
+ * accessible name. (The design marks ksqlDB "soon" in the capture; ksqlDB ships in this wave, so
+ * the fixtures that used to draw that row now draw a refused one.) Removing the row instead
  * would tell the operator the product cannot do the thing at all, which is a different and wrong
  * statement; leaving it dead with no explanation is worse still, because there is nothing to read
  * and nothing to try.

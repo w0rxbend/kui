@@ -112,19 +112,22 @@ export const BadgeUnavailable: Story = {
 };
 
 /**
- * Not built yet. Present, dimmed, not focusable, and it says why on hover and to a screen reader.
+ * Refused. Present, dimmed, not focusable, and it says why on hover and to a screen reader — the
+ * one state ADR-032 renders as a disabled row, and the only one `destinationFor` produces one for.
  * A dead row with no explanation is worse than no row at all.
+ *
+ * It was a "soon" badge over `KSQL DB` until this wave, which was true while ksqlDB was unbuilt.
+ * It is built now, so the story draws a state a principal can actually be in.
  */
-export const DisabledSoon: Story = {
+export const DisabledForbidden: Story = {
   args: {
     destination: {
       id: "ksql",
-      label: "KSQL DB",
+      label: "ksqlDB",
       icon: "ksql",
       href: "/ksql",
       disabled: true,
-      disabledReason: "Not built yet",
-      badge: { text: "soon", tone: "neutral", description: "not built yet" },
+      disabledReason: "You do not have permission to run ksqlDB statements on this cluster",
     },
   },
 };

@@ -162,7 +162,8 @@ final class ReadinessPollerSuite extends CatsEffectSuite {
           case CapabilityState.Unavailable(_, _, _) => true
           case _ => false
         },
-        s"a service answering after 8s, past the ${ReadinessPoller.MaxPollTimeout} poll budget, was $slowerState"
+        s"a service answering after 8s, past the ${ReadinessPoller.MaxPollTimeout} poll budget, " +
+          s"was $slowerState"
       )
       // Not `Available`: three seconds is inside the budget but outside the registry's latency threshold,
       // so this one is reported `Degraded`. That is the contrast the case needs — it answered, and the

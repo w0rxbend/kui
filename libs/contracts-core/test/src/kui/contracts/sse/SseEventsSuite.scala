@@ -28,6 +28,18 @@ final class SseEventsSuite extends FunSuite {
     assertEquals(SseEventName.Capabilities, "capabilities")
   }
 
+  test("a row is 'row', and it is a data event rather than one every stream sends") {
+    // The literal, because it is an `addEventListener` argument in the browser and an `event:` line on the
+    // server and nothing converts it. `services/ksql`'s golden stream frame carries the same string in its
+    // `event` field, which is what stops the two ends drifting the way the alerts wire's name can.
+    assertEquals(SseEventName.Row, "row")
+
+    // Not shared: a client that registered a `row` listener on the capability stream would wait for ever,
+    // and `shared` is the set a suite asserts a stream emits *nothing else* from.
+    assert(!SseEventName.shared.contains(SseEventName.Row), clue = SseEventName.shared)
+    assertEquals(SseEventName.shared, List("phase", "done", "error", "heartbeat"))
+  }
+
   test("a done event encodes to the golden document and round-trips") {
     val done = DoneEvent(DoneReason.Limit, Some("eyJ2IjoxfQ.c2ln"))
     assertEquals(prettyJson.print(done.asJson), GoldenDocuments.sseDone)

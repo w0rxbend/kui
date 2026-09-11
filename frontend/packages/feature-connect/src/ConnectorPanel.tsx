@@ -33,12 +33,19 @@
  * this Connect cluster, so there is no path from an unpermitted principal to an enabled control and
  * no second copy of the permission question to drift from the first. `ConnectRoute` asks it, once
  * per connector, with the Connect cluster's name as the subject.
+ *
+ * The *shape* of what the card is handed — handlers, or a refusal, never both — is
+ * {@link cardActions}, in `model.ts`, and it is a function there for a measured reason: a card
+ * given a handler and a refusal together is indistinguishable in the DOM from a card given only the
+ * refusal, because `ConnectorCard` ignores the handlers whenever `actionsDisabledReason` is set. So
+ * no assertion on this rendered page can hold that rule, and the value is what a case reads.
  */
 import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { ConnectorCard, IconTile, StatusPill, connectorChip } from "@kui/kernel";
 
 import {
+  cardActions,
   connectorLabel,
   failureReason,
   pillState,
@@ -75,14 +82,15 @@ export function ConnectorPanel(props: ConnectorPanelProps): JSX.Element {
         state={pillState(props.connector.state)}
         tasks={segmentsOf(props.connector)}
         /* No `throughput` prop at all. See the header: there is no rate on this wire to pass. */
+        /* The only thing stopping a second POST while the first is in flight: `Button`'s `inert()`
+           swallows the click on `aria-busy`, and nothing else on this page does. */
         busy={props.pending !== undefined}
         testId="connector-card"
-        {...(props.refusal === undefined
-          ? {
-              onPause: () => props.onCommand?.(toggle()),
-              onRestart: () => props.onCommand?.("restart"),
-            }
-          : { actionsDisabledReason: props.refusal })}
+        {...cardActions({
+          refusal: props.refusal,
+          toggle: toggle(),
+          onCommand: props.onCommand,
+        })}
       />
 
       {/* The service's two figures, said in words beside the bar the card draws them as. The card's
@@ -151,11 +159,16 @@ export function ConnectorPanel(props: ConnectorPanelProps): JSX.Element {
 /**
  * A connector the Connect cluster named and would not describe.
  *
- * One of the two states §3.14 does not draw. There is no task bar and no state pill, because there
- * is no state and no task list to draw: `ConnectorsDto.unreadable` carries a name and nothing else.
- * Drawing an empty bar would be a picture of "no tasks" and a neutral pill would be a claim about a
- * state nobody reported — and the row exists at all only because a connector missing from a list is
- * indistinguishable from one that was deleted.
+ * One of the two states §3.14 does not draw. There is **no task bar**, because drawing an empty one
+ * would be a picture of "no tasks" over a connector that may be running twenty:
+ * `ConnectorsDto.unreadable` carries a name and nothing else.
+ *
+ * There **is** a pill, and it is the one `connectorChip("UNKNOWN")` gives — *state not reported*.
+ * That is the opposite of a claim about a state nobody reported: the pill slot is where a reader
+ * looks for a state, and leaving it empty on a row that sits beside four cards carrying pills reads
+ * as a card still loading. The row exists at all only because a connector missing from a list is
+ * indistinguishable from one that was deleted, so it says the two things it knows — the name, and
+ * that nobody described it — and claims nothing further.
  */
 export function NotDescribedPanel(props: {
   readonly connect: string;

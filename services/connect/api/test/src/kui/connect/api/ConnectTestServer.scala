@@ -15,12 +15,12 @@ import sttp.client4.*
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.BackendStub
 import sttp.model.Uri
+import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.stub4.TapirStubInterpreter
 
 import kui.connect.application.*
 import kui.connect.domain.*
 import kui.contracts.KuiEndpoint
-import kui.http.health.HealthEndpoints
 import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{ClusterId, ConnectName, ConnectorName, RoleName, Secret, TaskId, UserName}
@@ -107,7 +107,12 @@ object ConnectTestServer {
       .make[IO](NonEmptyList.of(key), "kui-gateway")
       .getOrElse(throw new IllegalStateException("the test signing key is too short for HS256"))
 
-  final case class Rig(backend: Backend[IO], worker: CountingWorker)
+  /** @param routes
+    *   exactly the list `ConnectApi.routes` built, so that a case can assert what the composition root
+    *   serves rather than only what a request happened to reach. Handed out beside the backend because the
+    *   stub interpreter keeps no readable record of what it was given.
+    */
+  final case class Rig(backend: Backend[IO], worker: CountingWorker, routes: List[ServerEndpoint[Any, IO]])
 
   /** The service, with the deployment's policy and whatever the worker is going to say. */
   def resource(
@@ -131,15 +136,26 @@ object ConnectTestServer {
         guard = MutationGuard.make[IO](sources, ConnectorOperationSink.noop[IO], logger)
         useCases = ConnectUseCases.make[IO](sources, guard)
         permissions = RbacGuard.fromPolicy[IO](rbac, id => ClusterFlags(id == readOnly), logger)
-        routes = HealthEndpoints.make[IO](
+        // `ConnectApi.routes`, not a second assembly of the same list. Building
+        // `HealthEndpoints.make ++ ConnectRoutes` here meant this rig could not see an endpoint being
+        // dropped from the composition root: every route case would have gone on passing against a list the
+        // product does not serve. `services/alerts` has `AlertsTestServer.compositionRoutes` for exactly
+        // this reason, and it is the same defect one level further back.
+        routes = ConnectApi.routes[IO](
+          useCases,
           Nil,
-          ConnectApi.capabilityDocument[IO](ConnectCapabilities.make[IO](sources, logger), logger)
-        ) ++ ConnectRoutes[IO](useCases, ConnectApi.Securing[IO](codec, rejections, logger, permissions))
+          ConnectCapabilities.make[IO](sources, logger),
+          codec,
+          rejections,
+          logger,
+          permissions
+        )
       } yield Rig(
         TapirStubInterpreter(interceptors, BackendStub[IO](summon))
           .whenServerEndpointsRunLogic(routes)
           .backend(),
-        worker
+        worker,
+        routes
       )
     )
 

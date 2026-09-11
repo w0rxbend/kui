@@ -53,14 +53,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     destinations: [
       { id: "schema", label: "Schema Registry", icon: "schema", href: "/schema" },
       { id: "connect", label: "Kafka Connect", icon: "connect", href: "/connect" },
+      /* The one state that draws a *disabled* row, and the only one the fold produces: ADR-032
+         renders `forbidden` as present, dimmed, not a link, with the reason in its accessible name.
+         It used to read "Not built yet" with a `soon` badge, which was true while ksqlDB was M9's
+         and is a sentence this wave made false — and a fixture claiming a shipped feature does not
+         exist is the kind of stale citation four retrospectives have asked to stop finding. */
       {
         id: "ksql",
-        label: "KSQL DB",
+        label: "ksqlDB",
         icon: "ksql",
         href: "/ksql",
         disabled: true,
-        disabledReason: "Not built yet",
-        badge: { text: "soon", tone: "neutral", description: "not built yet" },
+        disabledReason: "You do not have permission to run ksqlDB statements on this cluster",
       },
     ],
   },
@@ -107,12 +111,11 @@ export const NAV_GROUPS_DEGRADED: readonly NavGroup[] = [
       },
       {
         id: "ksql",
-        label: "KSQL DB",
+        label: "ksqlDB",
         icon: "ksql",
         href: "/ksql",
         disabled: true,
-        disabledReason: "Not built yet",
-        badge: { text: "soon", tone: "neutral", description: "not built yet" },
+        disabledReason: "You do not have permission to run ksqlDB statements on this cluster",
       },
     ],
   },
@@ -238,10 +241,13 @@ export const NAV_GROUPS_WITH_TREE: readonly NavGroup[] = NAV_GROUPS.map((group) 
 }));
 
 /**
- * `ECOSYSTEM` as it is in this wave: declared, and holding nothing until M9.
+ * `ECOSYSTEM` with nothing registered into it — a deployment configured with no registry, no
+ * Connect worker and no ksqlDB server.
  *
- * Its only state today, and the one to test — a heading over an empty list reads as a list that
- * failed to load, so the drawer must draw nothing at all for it.
+ * It was the group's *only* state until M9; it is now one state of two, and still the one to test,
+ * because a heading over an empty list reads as a list that failed to load and the drawer must draw
+ * nothing at all for it. ADR-032 hides an unconfigured feature rather than drawing it as a failure,
+ * so this shape is reachable in production and not merely a fixture.
  */
 export const NAV_GROUPS_EMPTY_ECOSYSTEM: readonly NavGroup[] = [
   NAV_GROUPS[0]!,

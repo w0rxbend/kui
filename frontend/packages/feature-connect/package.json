@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The Kafka Connect microfrontend: connectors, their tasks, the worker's own failure reason, and pause/resume/restart",
+  "description": "Kafka Connect: connectors, tasks, the worker's failure reason, three commands",
   "main": "src/index.tsx",
   "types": "src/index.tsx",
   "exports": {

@@ -156,20 +156,49 @@ final class ShippedConfigurationSuite extends KuiSuite {
   private def excludedBy(name: String): Option[(String, String)] =
     notKuiConfiguration.find((pattern, _) => name.contains(pattern))
 
-  /** The file names a widened exclusion pattern would swallow, none of which exist on disk.
-    *
-    * `shipped` is the roster of files KUI's loader must accept, so its `.yml` twins are exactly the names
-    * the *next* KUI configuration file plausibly takes -- the eleventh row, written `.yml` because half the
-    * YAML in this repository already is. They are the class [[notKuiConfiguration]] must never claim, and
-    * they are derived from `shipped` rather than invented so that a file added there is probed with no
-    * second list to remember.
+  /** The names a widened exclusion pattern would swallow: every file KUI's next configuration plausibly is.
     *
     * On-disk names cannot carry this assertion and that is the whole point: every file the reconciliation
-    * can see today is a `*.yaml`, so a `.yml` pattern moves nothing and both directions of the set
-    * difference stay empty. The rule is about the files that are not here.
+    * can see today is a `*.yaml` in a directory that already holds one, so a pattern widened past them
+    * moves nothing and both directions of the set difference stay empty. The rule is about the files that
+    * are not here, and it is derived from what IS here so that nothing has to be remembered twice.
+    *
+    * ==Two families, and the second one is why this is a `def` over the filesystem==
+    *
+    * **The extension twins.** `shipped` is the roster of files the loader must accept, so its `.yml` twins
+    * are the eleventh row written `.yml`, which half the YAML in this repository already is.
+    *
+    * **A KUI configuration in each directory `deployment/` already has.** The twins above are all named
+    * after files that exist, in directories that already hold a `shipped` row, so a pattern widened along
+    * the *directory* rather than the extension is invisible to them -- and `deployment/metrics/`,
+    * `deployment/frontend/` and `deployment/storybook/` hold no `shipped` row at all, which makes them the
+    * cheapest place for a widening to hide. Measured on this tree: replacing `"kafka-jmx-exporter.yml"`
+    * with `"metrics/"` leaves the reconciliation above completely green -- the pattern still matches the
+    * exporter, no `shipped` row is under that path, and the left-over set does not move -- while silently
+    * excluding the `deployment/metrics/kui.yaml` somebody writes next. With this family present that
+    * widening reddens the case below and nothing else, which is the only form of evidence this suite
+    * accepts about itself.
+    *
+    * ==What is deliberately NOT probed, and why it is not a hole==
+    *
+    * An extension `deployment/` does not use at all -- `.conf`, `.properties` -- needs no probe: the first
+    * case above asserts that every pattern still matches something on disk, and a pattern matching no
+    * `.yaml` or `.yml` fails there before this case is reached. Probing it would add an assertion that
+    * cannot fail, which is the thing this suite exists to refuse.
     */
-  private def widenedExclusionProbes: List[String] =
-    shipped.map((relative, _, _) => relative.stripSuffix(".yaml") + ".yml")
+  private def widenedExclusionProbes(root: Path): List[String] = {
+    val extensionTwins = shipped.map((relative, _, _) => relative.stripSuffix(".yaml") + ".yml")
+
+    // `kui.yaml` and not a generated name: it is what `deployment/compose/` actually calls KUI's own
+    // configuration, so it is the name the next directory's will most plausibly take, and it keeps the
+    // probe a fact about this repository rather than an invention.
+    val inEveryDirectory = deploymentYaml(root)
+      .map(name => name.substring(0, name.lastIndexOf('/')))
+      .distinct
+      .flatMap(directory => List(s"$directory/kui.yaml", s"$directory/kui.yml"))
+
+    (extensionTwins ++ inEveryDirectory).distinct.sorted
+  }
 
   /** Every `.yaml` and `.yml` file under `deployment/`, relative to the repository root. */
   private def deploymentYaml(root: Path): List[String] = {
@@ -248,7 +277,11 @@ final class ShippedConfigurationSuite extends KuiSuite {
     //
     // Measured before this case existed: the widening left `./mill libs.config.test` at 395/395 with this
     // suite 14/14 green. The reconciliation could not fail for the class of file it was written to notice.
-    widenedExclusionProbes.foreach { probe =>
+    //
+    // The probe list is wider than the `.yml` twins it started as, and the second family in its comment is
+    // the reason: a pattern can be widened along the directory as easily as along the extension, and three
+    // directories under `deployment/` hold no `shipped` row for a twin to be derived from.
+    widenedExclusionProbes(repositoryRoot).foreach { probe =>
       excludedBy(probe) match {
         case None => ()
         case Some((pattern, reason)) =>

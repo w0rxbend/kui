@@ -49,8 +49,12 @@ case greys out a connector the worker described perfectly well, and mapping to t
 state invents a fact about somebody's data pipeline. So an unrecognised state travels to the browser
 unchanged, and the screen draws it in the neutral tone.
 
-Three constants — `RUNNING`, `PAUSED`, `FAILED` — exist because three rules *are* about specific
-states, and comparison is case-insensitive because at least one implementation answers `Running`.
+Two constants — `RUNNING` and `FAILED` — exist because two rules *are* about specific states, and
+comparison is case-insensitive because at least one implementation answers `Running`. There was a
+third, `PAUSED`, justified in this document's first draft by a paused connector's zero throughput
+being a measured zero; §7 says there is no throughput anywhere on this wire, so nothing ever asked
+the question and the constant and its `isPaused` were deleted rather than left with no caller. A
+paused connector is unaffected: its state word travels unchanged, which is this section's argument.
 
 The same reasoning applies to `type`: every Connect release before 2.0 sends none, so
 `ConnectorKind.Other("")` is "the worker did not say" and the icon's direction is left undrawn. A
@@ -273,6 +277,17 @@ accepted it. The topic and message services wrote `Failed` here and W6-A1 repair
   count and a state, and never a rate.
 - Every operation is audited under a record type that is scheduled for deletion by a failing test
   rather than by a comment (§10).
+- `services/connect/api/openapi.json` is **7 paths, 7 operations and 10 component schemas** — the
+  four contract endpoints, each on its own path (`…/connect/connectors`, and one path per verb under
+  `…/connect/{connectName}/connectors/{connectorName}/`), plus the three health probes every KUI
+  service serves, one operation per path — generated from the endpoint values and committed. Count
+  them with `jq '[(.paths|length), ([.paths[]|keys[]]|length), (.components.schemas|length)]'
+  services/connect/api/openapi.json`, which is what `./mill services.connect.api.openApiCheck`
+  regenerates and compares. **Four** is a different figure about the same service: the number of
+  connect operations in the *merged* document, which
+  `jq '[.paths|keys[]|select(test("/connect/"))]|length' docs/api/openapi.json` counts. The two are
+  quoted apart here because they have been quoted together, and the merged document's own totals
+  belong to ADR-048.
 
 ## Alternatives rejected
 

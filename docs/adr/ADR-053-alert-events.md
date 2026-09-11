@@ -251,9 +251,12 @@ topic and a replay, which is `libs/config`'s metadata store and a milestone of i
   carrying three operations, plus the three health probes every KUI service serves — generated from
   the endpoint values and committed. Count them with
   `jq '.paths | length, (.paths | keys)' services/alerts/api/openapi.json`. The committed merged
-  service and browser documents contain all three public alerts operations; they now measure 57
-  paths, 68 operations and 154 component schemas. `./mill services.gateway.api.openApiCheck` keeps
-  both generated views aligned with the endpoint values.
+  service and browser documents contain all three public alerts operations; measured at wave 7's
+  integration they are **61 paths, 72 operations and 156 component schemas**, and the number moves
+  every time a service is added, so it is quoted with the command that recounts it:
+  `jq '[(.paths|length), ([.paths[]|keys[]]|length), (.components.schemas|length)]'
+  docs/api/openapi.json`. `./mill services.gateway.api.openApiCheck` keeps both generated views
+  aligned with the endpoint values.
 - `ServiceContracts.byService` gains a ninth service, `AllInOneWiring` gains an entry and the compose
   stack gains a container — and there is a **fourth** edge, which belonged to none of the three and is
   the reason the service was unroutable for a wave: `alerts.contract.jvm` in `services.gateway.api`'s
@@ -290,14 +293,19 @@ topic and a replay, which is `libs/config`'s metadata store and a milestone of i
   DTO: the server writes frames under `AlertChangeDto.EventName`, the browser listens under a constant
   of its own, and `tools/error-codes` writes the five SSE names by hand with no `SseEventName.Alerts`
   for either side to read — so the two spellings are a hand-copied pair that nothing compares. The
-  server half of the comparison is landed here. The browser half is one assertion, and until it is
-  written the mirror is still a copy: `frontend/packages/kernel`'s `ALERTS_EVENT_NAME` must be asserted
-  against `alerts-stream-frame.json`'s `event` field, the way `overview/wire.golden.test.ts` reads the
-  metrics documents.
+  server half of the comparison is landed here, and so is the browser half:
+  `frontend/packages/kernel/src/data/alerts/wire.golden.test.ts` reads `alerts-stream-frame.json`
+  off disk and asserts its `event` field against `ALERTS_EVENT_NAME`, the way
+  `overview/wire.golden.test.ts` reads the metrics documents. The two spellings are compared rather
+  than copied.
 - **`acknowledge` publishes on the change topic, and that is what the relay carries.** The store's
   one write wakes every subscriber for that cluster; without it the stream would deliver only rule
   passes, so a bell cleared on one tab would stay lit on every other until its next poll.
-  `InMemoryAlertStoreSuite` asserts the publication for both writers.
+  `InMemoryAlertStoreSuite` asserts the publication for **both writers, and for both halves of the
+  condition `record` publishes under**: a pass that opens an event, a pass that only *resolves* one,
+  and an acknowledgement — three cases, because the resolution half was covered by nothing and a
+  condition clearing itself is the change an operator never sees without a reload. A fourth case
+  holds the other direction, that a pass which changed nothing wakes no bell.
 - **The stream is not in the capability document's `features` list**, because that list is derived
   from `AlertsEndpoints.all` and the stream cannot be in it. A browser therefore learns the feed and
   the acknowledgement from the capability row and the stream's address from this document. It is a

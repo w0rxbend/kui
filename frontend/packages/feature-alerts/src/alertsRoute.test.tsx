@@ -32,6 +32,7 @@ import { Actions, ErrorCodes, type KuiApiClient } from "@kui/api";
 
 import { mount, findViolations, describeViolations, testContext } from "./testing.js";
 import Alerts, { ACKNOWLEDGEMENT_PATH, SEVERITIES } from "./index.jsx";
+import { CLUSTER_PATH } from "./data.js";
 import openDocument from "./documents/events-open.json" with { type: "json" };
 import notConfiguredDocument from "./documents/events-not-configured.json" with { type: "json" };
 import neverEvaluatedDocument from "./documents/events-never-evaluated.json" with { type: "json" };
@@ -43,10 +44,10 @@ const BASE = "/ui";
  *
  * The read that fills this screen is the **shell's**: `packages/shell/src/App.tsx` builds one
  * `createAlerts` store for the whole application against `packages/shell/src/data/alerts.ts`'s
- * `ALERTS_FEED_PATH`, so that the bell in the chrome and the card here cannot disagree about how
- * many alerts are open. `open()` below stands in for that wiring, so it spells the address the way
- * the shell does rather than importing a constant this package would then be exporting for no
- * product caller — which is what it did until wave 7.
+ * `loadAlertFeed`, so that the bell in the chrome and the card here cannot disagree about how many
+ * alerts are open. The address that function sends is module-private there, deliberately — a
+ * constant asserted against a copy of itself is a rule that cannot fail — so `open()` below spells
+ * it out the way the shell does rather than importing anything.
  */
 const EVENTS_PATH = "/api/v1/clusters/{clusterId}/alerts/events";
 
@@ -66,6 +67,8 @@ interface Call {
 interface Stub {
   readonly api: KuiApiClient;
   readonly calls: Call[];
+  /** Just the feed reads. The screen also asks the cluster service whether writing is allowed. */
+  readonly feedReads: () => Call[];
   /** Replaces what the next `GET …/events` answers with. */
   answerWith: (document: unknown) => void;
 }
@@ -83,6 +86,8 @@ function stub(
     readonly acknowledgement?: unknown;
     readonly hold?: boolean;
     readonly holdRead?: boolean;
+    /** ADR-047's flag, as the cluster service answers it. `false` is the quickstart's answer. */
+    readonly readOnly?: boolean;
   } = {},
 ): Stub {
   const calls: Call[] = [];
@@ -96,6 +101,13 @@ function stub(
     ) => {
       calls.push({ method, path, params: init.params.path, query: init.params.query });
       if (method === "get") {
+        /* The cluster document, which is a different service and a different question: whether this
+           deployment lets anything write here at all. Answered eagerly even when the feed is held,
+           because the two reads are independent and a screen waiting for one is not waiting for the
+           other. */
+        if (path === CLUSTER_PATH) {
+          return { ok: true, value: { cluster: { readOnly: options.readOnly === true } } };
+        }
         // A read that never answers, for the one case about what the screen says before anything
         // has been established.
         if (options.holdRead === true) return new Promise<never>(() => {});
@@ -112,6 +124,7 @@ function stub(
   return {
     api: { get: answer("get"), post: answer("post") } as unknown as KuiApiClient,
     calls,
+    feedReads: () => calls.filter((call) => call.method === "get" && call.path === EVENTS_PATH),
     answerWith: (next) => {
       document = next;
     },
@@ -206,7 +219,11 @@ describe("the alerts route", () => {
     const { container, dispose } = open("quickstart", client.api);
     await settle();
 
-    expect(client.calls).toHaveLength(1);
+    /* One feed read. The screen also asks the cluster service whether this deployment lets anything
+       write here, which is a different question of a different service — `feedReads` keeps the two
+       apart so that neither can hide the other going missing. */
+    expect(client.feedReads()).toHaveLength(1);
+    expect(client.calls.map((call) => call.path)).toContain(CLUSTER_PATH);
     /*
      * The address as a literal, not as `EVENTS_PATH`.
      *
@@ -216,7 +233,7 @@ describe("the alerts route", () => {
      * `clusters / clusterId / alerts / events` under the gateway's public `/api/v1` prefix, and that
      * is what is written out here.
      */
-    expect(client.calls[0]).toEqual({
+    expect(client.feedReads()[0]).toEqual({
       method: "get",
       path: "/api/v1/clusters/{clusterId}/alerts/events",
       params: { clusterId: "quickstart" },
@@ -384,6 +401,55 @@ describe("the alerts route", () => {
     dispose();
   });
 
+  /**
+   * ADR-047's flag, which is the *deployment's* answer and not the principal's.
+   *
+   * `writeBlockedReason` has taken both facts since wave 5 and this screen passed the literal
+   * `false` for the second one until wave 8 — so a cluster somebody had deliberately registered
+   * read-only handed a fully permitted operator a live `Acknowledge`, issued the `POST`, and let
+   * the gateway refuse it. The two sentences are different on purpose: sending an operator to ask
+   * for a permission they already hold wastes their afternoon, and this asserts the read-only one
+   * rather than merely that *something* closed the button.
+   */
+  it("a read-only cluster offers no acknowledgement, however permitted the reader", async () => {
+    const client = stub({ readOnly: true });
+    const { container, dispose } = open("frozen-cluster", client.api);
+    await settle();
+
+    const button = acknowledgeButton(container, "evt-1");
+    expect(button).toBeDefined();
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+
+    button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await settle();
+    expect(document.body.textContent).toContain(
+      "This cluster is configured read-only in KUI, so nothing here can acknowledge alerts on " +
+        "this cluster.",
+    );
+    // Not the permission sentence: this principal holds `ALERTS:ACKNOWLEDGE` and would be sent to
+    // an administrator who has nothing to give them.
+    expect(document.body.textContent).not.toContain(
+      "You do not have permission to acknowledge alerts",
+    );
+
+    button?.click();
+    await settle();
+    expect(client.calls.filter((call) => call.method === "post")).toHaveLength(0);
+    dispose();
+  });
+
+  it("a writable cluster reads as writable, which makes the case above a gate", async () => {
+    const client = stub({ readOnly: false });
+    const { container, dispose } = open("thawed-cluster", client.api);
+    await settle();
+
+    // The same read, answering `false`, and the control is live. Without this half a screen that
+    // refused every cluster would satisfy the case above.
+    expect(client.calls.map((call) => call.path)).toContain(CLUSTER_PATH);
+    expect(acknowledgeButton(container, "evt-1")?.getAttribute("aria-disabled")).not.toBe("true");
+    dispose();
+  });
+
   it("acknowledging an event the API refuses leaves the row unacknowledged and says why", async () => {
     const client = stub({
       acknowledgement: {
@@ -416,7 +482,7 @@ describe("the alerts route", () => {
     expect(acknowledgeButton(container, "evt-1")).toBeDefined();
     // And the feed was not re-read: refetching would replace the reason with the same row and read
     // as though nothing had been pressed.
-    expect(client.calls.filter((call) => call.method === "get")).toHaveLength(1);
+    expect(client.feedReads()).toHaveLength(1);
     dispose();
   });
 
@@ -525,7 +591,7 @@ describe("the alerts route", () => {
       "offline-partitions",
       "under-replicated-partitions",
       "stuck-rebalance",
-      "log-directory-usage",
+      "disk-usage",
     ]);
     expect(container.querySelector('[data-testid="alerts-rules"]')).not.toBeNull();
     dispose();
@@ -576,6 +642,65 @@ describe("the alerts route", () => {
       container.querySelector('[data-testid="alerts-open-count"]')?.textContent,
     ).toContain("3 open");
     expect(container.textContent).toContain("2 of the 5 events on this page match.");
+    dispose();
+  });
+
+  /**
+   * The *Alert state* bar, which no case in this package had ever clicked.
+   *
+   * `filterEvents` is gated at the model level and `AlertsFeed`'s application of the prop is gated,
+   * so both ends of this wire had cases and the wire between them had none: swapping the `open` and
+   * `resolved` chip values, replacing `onChange` with a no-op, and pinning the memo's `state` to
+   * `"all"` each left all 61 cases in the package green. The first of those three is the worst — a
+   * reader clicks *Open* during an incident and is shown the events that are already closed.
+   *
+   * So this reads the rows **by event id** rather than by counting them: the open and resolved
+   * halves of `events-open.json` are three and two, and a count alone cannot tell a swapped pair
+   * from a working one when the two halves happen to be the same size. It also asserts the pressed
+   * chip, because a bar that filtered correctly and never moved its own highlight is a control that
+   * looks broken to the person using it.
+   */
+  it("the Alert state chips choose which half of the feed is on screen", async () => {
+    const client = stub();
+    const { container, dispose } = open("lifecycle-cluster", client.api);
+    await settle();
+
+    const bar = container.querySelector<HTMLElement>('[data-testid="alerts-state-filter"]');
+    expect(bar, "the state bar is the control this case is about").not.toBeNull();
+    const chip = (label: string): HTMLButtonElement => {
+      const found = [...(bar?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+        (one) => (one.textContent ?? "").trim() === label,
+      );
+      if (found === undefined) throw new Error(`no ${label} chip on the Alert state bar`);
+      return found;
+    };
+    const shown = (): string[] => rows(container).map((row) => row.dataset["event"] ?? "");
+
+    // Everything, before anybody touches the bar.
+    expect(shown()).toEqual(["evt-1", "evt-2", "evt-3", "evt-4", "evt-5"]);
+
+    chip("Open").click();
+    await settle();
+    // The three with no `resolution` on the file, by name. `evt-4` and `evt-5` carry one.
+    expect(shown()).toEqual(["evt-1", "evt-2", "evt-3"]);
+    expect(chip("Open").getAttribute("aria-pressed")).toBe("true");
+    expect(container.textContent).toContain("3 of the 5 events on this page match.");
+
+    chip("Resolved").click();
+    await settle();
+    expect(shown()).toEqual(["evt-4", "evt-5"]);
+    expect(chip("Resolved").getAttribute("aria-pressed")).toBe("true");
+    expect(chip("Open").getAttribute("aria-pressed")).toBe("false");
+
+    // And back, so the bar is a filter and not a one-way door.
+    chip("All").click();
+    await settle();
+    expect(shown()).toHaveLength(5);
+
+    // The service's own figure, untouched by any of it: the pill is what the API counted.
+    expect(container.querySelector('[data-testid="alerts-open-count"]')?.textContent).toContain(
+      "3 open",
+    );
     dispose();
   });
 

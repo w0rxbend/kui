@@ -121,6 +121,21 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           paths.contains("/api/v1/clusters/connect/connectors"),
           s"the in-process connect service's connector list was not proxied; served $paths"
         )
+        // The eleventh service, asserted the same way and for the same reason, and it needs BOTH of
+        // its paths named. ksqlDB is the second service in this process to publish an ADR-035 stream,
+        // and a stream is not a proxied route: `ContractRouting.derive` decodes and re-encodes JSON,
+        // so it cannot carry one, and the relay has to be mounted by hand the way the alerts stream's
+        // is. Asserting only the object listing would leave a binary whose ksqlDB screens list streams
+        // and whose push query opens a socket to a 404 -- which is precisely the state wave 6 shipped
+        // the alerts stream in, with every suite green.
+        assert(
+          paths.contains("/api/v1/clusters/ksql/objects"),
+          s"the in-process ksql service's object listing was not proxied; served $paths"
+        )
+        assert(
+          paths.contains("/api/v1/clusters/ksql/stream"),
+          s"the public ksql push-query relay was not mounted; served $paths"
+        )
         assert(paths.contains("/api/v1/health/live"), s"the process's own probes are missing from $paths")
       }
     }
@@ -235,7 +250,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           // Ten services now, and this string has broken every time one was added -- which is what it
           // is for. It is the first line of a KUI log and the one a reader checks against the roadmap
           // to find out which milestone's services are actually in the binary they are running.
-          val expected = "alerts,cluster,connect,consumer,identity,message,metrics,schema,topic"
+          val expected = "alerts,cluster,connect,consumer,identity,ksql,message,metrics,schema,topic"
           assertEquals(context.get("services"), Some(expected))
         }
     }
@@ -380,6 +395,52 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           List(AlertsConfig.DefaultEvaluationInterval.toString),
           clue = entries
         )
+        assertEquals(
+          logged("alerts.diskUsedWarningPercent"),
+          List(AlertThresholds.DefaultDiskUsedWarningPercent.toString),
+          clue = entries
+        )
+      }
+    }
+  }
+
+  test("aDeploymentThatTunedOnlyRetentionIsStillReadingItsOwnFile") {
+    // THE PROVENANCE FLAG, WHICH IS THE ONE FIELD OF THIS LINE NOTHING LOOKED AT. The two cases above
+    // exercise `alerts.source` at the only two points where `alerts != AlertsConfig.Default` and
+    // `alerts.thresholds != AlertThresholds.Default` agree: everything tuned, and nothing tuned. Between
+    // them sits the deployment that wrote a `kui.alerts` section containing no threshold at all --
+    // retention, or the evaluation interval, or both -- and it is not a hypothetical shape:
+    // `AlertsConfig` has five thresholds and two fields beside them, and "keep the events for three days"
+    // is the first thing anybody changes.
+    //
+    // Measured before this case existed: `alerts != AlertsConfig.Default` ->
+    // `alerts.thresholds != AlertThresholds.Default` left `./mill apps.allinone.test` at 3821/3821
+    // SUCCESS. Under that mutation this operator reads "no kui.alerts section; the alert rules use the
+    // shipped default thresholds" printed in the same line as their own 36-hour retention -- a line that
+    // contradicts itself, and the one line in the process whose whole job is to say whose numbers these
+    // are. Wave 7 closed the context map to all eight fields and left the flag that interprets them open.
+    val retentionOnly = AllInOneConfig.Default.copy(
+      clusters = List(unmeasuredCluster),
+      alerts = AlertsConfig.Default.copy(retention = 36.hours)
+    )
+
+    wire(retentionOnly).use { (_, logger) =>
+      logger.entries.map { entries =>
+        def logged(field: String): List[String] = entries.flatMap(_.context.get(field))
+
+        assertEquals(logged("alerts.source"), List("kui.alerts"), clue = entries)
+        // The sentence as well as the field, because the flag drives both and an operator reads the
+        // sentence first. Asserted as the whole message so that a line rewritten to hedge -- "possibly
+        // tuned" -- is a change somebody has to make here on purpose.
+        assertEquals(
+          entries.filter(_.context.contains("alerts.source")).map(_.message),
+          List("alert thresholds taken from kui.alerts"),
+          clue = entries
+        )
+        // And the thresholds beside it really are the shipped ones, which is what makes this the middle
+        // case rather than a third copy of the tuned one: the provenance is `kui.alerts` while every
+        // number on the line is a default, and nothing about that is a contradiction.
+        assertEquals(logged("alerts.retention"), List("36 hours"), clue = entries)
         assertEquals(
           logged("alerts.diskUsedWarningPercent"),
           List(AlertThresholds.DefaultDiskUsedWarningPercent.toString),

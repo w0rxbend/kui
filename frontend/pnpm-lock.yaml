@@ -161,6 +161,24 @@ importers:
         specifier: 2.0.0-rc.6
         version: 2.0.0-rc.6
 
+  packages/feature-ksql:
+    dependencies:
+      '@kui/api':
+        specifier: workspace:*
+        version: link:../api
+      '@kui/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@solidjs/router':
+        specifier: 2.0.0-next.21
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+      '@solidjs/web':
+        specifier: 2.0.0-rc.6
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+      solid-js:
+        specifier: 2.0.0-rc.6
+        version: 2.0.0-rc.6
+
   packages/feature-messages:
     dependencies:
       '@kui/api':
@@ -269,6 +287,9 @@ importers:
       '@kui/feature-consumers':
         specifier: workspace:*
         version: link:../feature-consumers
+      '@kui/feature-ksql':
+        specifier: workspace:*
+        version: link:../feature-ksql
       '@kui/feature-messages':
         specifier: workspace:*
         version: link:../feature-messages

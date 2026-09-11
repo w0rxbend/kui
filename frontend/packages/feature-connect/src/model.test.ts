@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cardActions,
   connectVoice,
   connectorLabel,
   failureReason,
@@ -15,7 +16,6 @@ import {
   operateSubject,
   pillState,
   segmentsOf,
-  taskCaption,
   taskSegment,
   toggleOf,
   workersThatDidNotAnswer,
@@ -121,23 +121,62 @@ describe("what the card is handed", () => {
     expect(segmentsOf(held)).toEqual(["running"]);
   });
 
-  it("takes the task caption from the service's figures and never counts the tasks", () => {
-    const held = connector({
-      runningTasks: 1,
-      taskCount: 3,
-      tasks: [
-        { id: 0, state: "RUNNING", workerId: undefined, reason: undefined, trace: undefined },
-        { id: 1, state: "RESTARTING", workerId: undefined, reason: undefined, trace: undefined },
-        { id: 2, state: "RESTARTING", workerId: undefined, reason: undefined, trace: undefined },
-      ],
+});
+
+describe("what a connector's card is handed for its two controls", () => {
+  /*
+   * The rule is *never both*, and it is asserted on the value because it cannot be asserted on the
+   * page. `ConnectorCard` branches on `actionsDisabledReason` and ignores the handlers whenever it
+   * is present, so a card handed a live `onPause` **and** a refusal renders byte-identically to one
+   * handed only the refusal. W7's verification filed exactly that: the wiring was made
+   * unconditional and all 58 cases stayed green, including the one named for it, because every one
+   * of them reads `aria-disabled`.
+   */
+  it("hands a refused connector the sentence and no handler of any kind", () => {
+    const actions = cardActions({
+      refusal: "You do not have permission to pause connectors on 'analytics'.",
+      toggle: "pause",
+      onCommand: () => {
+        throw new Error("a refused card must not be able to reach a command at all");
+      },
     });
-    // A browser counting "not failed" tasks would say 3/3 here. The domain says RESTARTING is not
-    // running, and this is exactly the state an operator is watching that figure during.
-    expect(taskCaption(held)).toBe("1/3 tasks");
+
+    expect(actions).toEqual({
+      actionsDisabledReason: "You do not have permission to pause connectors on 'analytics'.",
+    });
+    // Spelled out as well, because `toEqual` on an object with extra function properties is the
+    // assertion that would quietly stop being about this rule if the shape grew a field.
+    expect("onPause" in actions).toBe(false);
+    expect("onRestart" in actions).toBe(false);
   });
 
-  it("says a connector has no tasks rather than drawing 0/0", () => {
-    expect(taskCaption(connector({ runningTasks: 0, taskCount: 0, tasks: [] }))).toBe("no tasks");
+  it("hands a permitted connector both handlers and no disabled reason", () => {
+    const asked: string[] = [];
+    const actions = cardActions({
+      refusal: undefined,
+      toggle: "pause",
+      onCommand: (which) => asked.push(which),
+    });
+
+    expect("actionsDisabledReason" in actions).toBe(false);
+    if (!("onPause" in actions)) throw new Error("a permitted card must carry its handlers");
+    actions.onPause();
+    actions.onRestart();
+    expect(asked).toEqual(["pause", "restart"]);
+  });
+
+  it("sends the toggle the connector's own state offers, so a paused one resumes", () => {
+    const asked: string[] = [];
+    const actions = cardActions({
+      refusal: undefined,
+      toggle: toggleOf("PAUSED"),
+      onCommand: (which) => asked.push(which),
+    });
+    if (!("onPause" in actions)) throw new Error("a permitted card must carry its handlers");
+
+    actions.onPause();
+    // Never a literal "pause": the control on a paused connector reads Resume and must send resume.
+    expect(asked).toEqual(["resume"]);
   });
 });
 

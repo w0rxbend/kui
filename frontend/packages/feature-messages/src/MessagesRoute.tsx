@@ -335,12 +335,23 @@ function BrowserScreen(props: {
     );
   }
 
-  const mayProduce = () => kui.permits(Actions.TopicMessagesProduce);
+  /*
+   * Both questions name the topic this page is about.
+   *
+   * A grant carries a *pattern*, and `kernel/src/state/session.ts` is explicit that the subjectless
+   * form asks the weaker question — *"the right answer for a list heading and the wrong one for a
+   * row's delete button"*. This screen is one topic, so the weaker question is never the right one
+   * here: until wave 8 an account granted `TOPIC:MESSAGES_PRODUCE` on `analytics\..*` was handed a
+   * live `Produce message` over `orders.payments`, and the refusal arrived from the gateway after
+   * the record had been typed.
+   */
+  const mayProduce = () => kui.permits(Actions.TopicMessagesProduce, props.topicName);
   /* A resend reads this topic and writes another. The gateway checks both, and the second is a
    * permission on a topic that has not been named yet — so this only gates on the half that can be
    * checked here, and the server refuses the other half with the destination in the message. */
   const mayResend = () =>
-    kui.permits(Actions.TopicMessagesRead) && kui.permits(Actions.TopicMessagesProduce);
+    kui.permits(Actions.TopicMessagesRead, props.topicName) &&
+    kui.permits(Actions.TopicMessagesProduce, props.topicName);
 
   /**
    * Name a preset for what is on the bar right now.
@@ -543,13 +554,44 @@ function BrowserScreen(props: {
   );
 }
 
+/**
+ * Why Search is closed, in the words that tell the reader what to ask for.
+ *
+ * Two sentences rather than one, because they send the reader to different places. "on this
+ * cluster" is a role nobody granted; a named topic is a grant that exists and does not stretch
+ * this far, and an operator who is told only the first will ask an administrator for a permission
+ * they already hold. The topic is named because a track form carries several, and the reader
+ * cannot otherwise tell which of them closed the button.
+ */
+function disabledReasonFor(anywhere: boolean, refused: string | undefined): string | undefined {
+  if (!anywhere) return "You do not have permission to read messages on this cluster.";
+  if (refused === undefined) return undefined;
+  return `You do not have permission to read messages on ${refused}.`;
+}
+
 /** Tracking one value across several topics. */
 function TrackScreen(props: { readonly clusterId: string }): JSX.Element {
   const kui = useKui();
   const [query, setQuery] = createSignal<TrackQuery>(emptyQuery());
   const run = createMutation((q: TrackQuery) => track(kui.api, props.clusterId, q));
 
-  const mayRead = () => kui.permits(Actions.TopicMessagesRead);
+  /**
+   * The first topic on the form this principal may not read, or `undefined`.
+   *
+   * A track is a full read of **every** topic it names, so one refused topic refuses the whole
+   * search — and it is refused before the request rather than after a multi-topic scan has already
+   * started. The subjectless question cannot see that: a grant on `analytics\..*` answers yes to it
+   * while answering no to `orders.payments`, which is the arrangement this page is most likely to
+   * meet, because the form is where somebody types a topic they do not normally read.
+   */
+  const refusedTopic = (): string | undefined =>
+    query().topics.find((topic) => !kui.permits(Actions.TopicMessagesRead, topic));
+
+  /* The weaker question, asked for its own sake: it separates "this account may not read anything
+     here" from "this grant does not stretch to that topic", and those send the reader to different
+     places. With no topic named it is also the only question there is — `TrackPage` refuses an
+     empty form on its own, with "at least one topic". */
+  const holdsRead = () => kui.permits(Actions.TopicMessagesRead);
 
   return (
     <TrackPage
@@ -562,9 +604,7 @@ function TrackScreen(props: { readonly clusterId: string }): JSX.Element {
       }}
       onSearch={() => void run.run(query())}
       state={run.state()}
-      disabledReason={
-        mayRead() ? undefined : "You do not have permission to read messages on this cluster."
-      }
+      disabledReason={disabledReasonFor(holdsRead(), refusedTopic())}
     />
   );
 }
