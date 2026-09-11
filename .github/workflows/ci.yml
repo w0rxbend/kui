@@ -146,6 +146,66 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+      # BEFORE ANYTHING IS INSTALLED, because this one needs neither Node nor pnpm and it is the
+      # cheapest failure in the workflow.
+      #
+      # `deployment/frontend/Dockerfile` copies each workspace package's `package.json` in by hand,
+      # one `COPY` per package, so that `pnpm install --frozen-lockfile` can resolve the workspace
+      # before the sources arrive and the install layer survives a source change. That roster is
+      # hand-written and it cannot be a glob -- `COPY frontend/packages/*/package.json` flattens
+      # every match into one directory and Docker has no form that preserves the per-package path.
+      #
+      # IT HAD DRIFTED BY THREE AND NOTHING NOTICED FOR TWO WAVES. `feature-alerts`,
+      # `feature-connect` and `feature-ksql` were added by packets that did not own that file, and
+      # the image still built and still carried all eight feature chunks. Measured again in wave 10:
+      # deleting one `COPY` line builds an image that is byte-indistinguishable from the correct
+      # one, because `--frozen-lockfile` resolves a ten-package workspace without complaining --
+      # the only trace is `Scope: all 11 workspace projects` in the build log where the correct
+      # roster prints `all 12`. A line in a build log that nobody reads is not a gate.
+      #
+      # So the two numbers are compared. The self-test first, for the reason the compose job's image
+      # derivation has one: both counts are equal on every passing run, so a `grep` pattern that had
+      # stopped matching -- an anchor removed, the path changed -- would answer zero against zero
+      # somewhere, or two equal wrong numbers, and read as agreement. The fixture gives the
+      # derivation a Dockerfile with a KNOWN count that is not the real one.
+      - name: The interface image copies every workspace manifest
+        working-directory: .
+        run: |
+          rostered() { grep -c '^COPY frontend/packages/' "$1"; }
+
+          fixture="$(mktemp)"
+          cat > "$fixture" <<'FIXTURE'
+          COPY frontend/package.json frontend/pnpm-lock.yaml ./
+          COPY frontend/packages/api/package.json ./packages/api/
+          COPY frontend/packages/kernel/package.json ./packages/kernel/
+           COPY frontend/packages/indented/package.json ./packages/indented/
+          RUN echo 'COPY frontend/packages/quoted/package.json'
+          FIXTURE
+          probe="$(rostered "$fixture")"
+          rm -f "$fixture"
+          [ "$probe" = "2" ] || {
+            echo "the manifest-roster count is broken: a Dockerfile with two anchored COPY lines," \
+                 "one indented and one inside a RUN, counted [$probe] and not [2]."
+            exit 1
+          }
+
+          packages="$(ls frontend/packages | wc -l)"
+          copies="$(rostered deployment/frontend/Dockerfile)"
+          [ "$packages" = "$copies" ] || {
+            echo "frontend/packages holds $packages packages and" \
+                 "deployment/frontend/Dockerfile copies $copies manifests."
+            echo "Add the missing 'COPY frontend/packages/<name>/package.json ./packages/<name>/'" \
+                 "line, or remove the stale one. Missing lines do not fail the image build:" \
+                 "pnpm resolves the smaller workspace and only says so in 'Scope: all N workspace" \
+                 "projects'."
+            # Both sides sorted, because the roster is written in dependency order and `ls` is
+            # alphabetical: without this the diff names ten packages instead of the one missing.
+            diff <(ls frontend/packages | sort) \
+                 <(grep '^COPY frontend/packages/' deployment/frontend/Dockerfile |
+                     sed -E 's#^COPY frontend/packages/([^/]+)/.*#\1#' | sort) || true
+            exit 1
+          }
+          echo "frontend/packages: $packages packages, $copies manifests copied"
       - uses: actions/setup-node@v4
         with:
           # The versions in `.tool-versions`, and pnpm is exact: `frontend/package.json` names the

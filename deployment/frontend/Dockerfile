@@ -50,16 +50,23 @@ WORKDIR /build
 #
 # It cannot be a glob: `COPY frontend/packages/*/package.json` flattens the matches into one
 # directory and there is no Docker form that preserves the per-package path. It is therefore a
-# roster, and a roster has to be checked by a reader. THE CHECK IS ONE COMMAND, and the two numbers
-# it prints must be equal:
+# roster, and the sentence that stood here said a roster "has to be checked by a reader", with the
+# two commands a reader was meant to run. IT IS NOW CHECKED BY A JOB — `.github/workflows/ci.yml`,
+# in the `frontend` job, step "The interface image copies every workspace manifest", which compares
+# exactly those two numbers and names the package that is missing:
 #
 #   ls frontend/packages | wc -l
 #   grep -c '^COPY frontend/packages/' deployment/frontend/Dockerfile
 #
-# 11 and 11 as this is written (2026-09-11). What drifting costs when it is not benign: the install
-# layer resolves a *different* workspace from the one the lockfile describes, so `--frozen-lockfile`
-# is being asked a question about a tree that is not the tree, and the layer-cache win this ordering
-# exists for is lost for the packages it omits.
+# 11 and 11 as this is written (2026-09-11). Deleting one line below now fails that step with
+# `frontend/packages holds 11 packages and deployment/frontend/Dockerfile copies 10 manifests` and
+# a one-line diff naming it — measured, on `feature-ksql`, before this comment was written.
+#
+# The gate exists because the drift is otherwise invisible. What it costs when it is not benign: the
+# install layer resolves a *different* workspace from the one the lockfile describes, so
+# `--frozen-lockfile` is being asked a question about a tree that is not the tree, and the
+# layer-cache win this ordering exists for is lost for the packages it omits. What it costs when it
+# IS benign is nothing at all, which is why two waves of green builds never mentioned it.
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 COPY frontend/packages/api/package.json ./packages/api/
 COPY frontend/packages/kernel/package.json ./packages/kernel/

@@ -73,8 +73,13 @@ then be silently missing in production.
 ## The metrics
 
 Every metric KUI emits is in this table. The names are constants in
-`libs/observability`'s `MetricNames`, and `MetricNamesSuite` asserts the list against this
-document and `ARCHITECTURE.md` §13, so the code and the docs cannot drift apart.
+`libs/observability`'s `MetricNames`, and `MetricNamesSuite` pins that list — in full, in order,
+written out a second time inside the suite — against `ARCHITECTURE.md` §13, so a renamed metric is
+a failing build.
+
+**What that suite does not do is read this page**, and this table was eleven rows short of
+`MetricNames.all` until wave 10 while the sentence above claimed otherwise. Nothing compares the
+two: if you add a metric, add its row here by hand.
 
 "Live from" is when the metric starts being *emitted*. Every name is declared from M0, so a
 later milestone cannot accidentally reuse one for something else.
@@ -95,6 +100,19 @@ later milestone cannot accidentally reuse one for something else.
 | `kui.cursor.rejected` | `reason` | M3 | Paging cursors refused, by why. |
 | `kui.principal.rejected` | `reason` | M0 | Signed principal headers refused, by why. |
 | `kui.config.version` | `section` | M1 | The version of each configuration section in use. |
+| `kui.gateway.aggregation.section` | `aggregation`, `section`, `status` | M2 | How often each section of an aggregated response is served in each state. It is the number that answers "how often do operators see a degraded topic page, and which part of it is degrading" — which no per-endpoint metric can, because an aggregation that answers 200 with four missing sections looks healthy to a status-code histogram. **It is emitted and it is not in `MetricNames.all`**, so `MetricNamesSuite` does not pin its name. |
+| `kui.cluster.profile.fetch` | `outcome` | M2 | Cluster-profile fetches by a Kafka-facing service, by how they ended (ADR-046). |
+| `kui.cluster.profile.subscribed` | *(none)* | M2 | Whether that service's change subscription is open. With the counter above it answers the question asked when a cluster edit does not take effect: is this service being *told* about changes, or polling because the stream is broken? Those look identical in a latency graph. |
+| `kui.serde.deserialize.failures` | `serde`, `target`, `topic` | M3 | Records whose intended serde could not read them, so the fallback rendered them instead. The metric that says a default serde is wrong for a topic; without it that misconfiguration is visible only as a screen full of mojibake nobody reports. |
+| `kui.serde.autodetected` | `serde` | M3 | Payloads decoded by an auto-detected serde: what the topics nobody configured actually contain. |
+| `kui.serde.serialize.failures` | `serde`, `topic`, `reason` | M3 | Produce payloads that could not become bytes, split by whose problem it is. |
+| `kui.serde.registry.built` | `cluster`, `reason` | M3 | Serde registries built for a cluster. A number that climbs on a stable configuration means profile churn is rebuilding them, and each rebuild throws away every cached schema. |
+| `kui.serde.registry.requests` | `cluster`, `outcome` | M3 | Calls to a Schema Registry, by how they ended. |
+| `kui.serde.registry.up` | `cluster` | M3 | Whether a cluster's Schema Registry is answering: the number the capability fold reads (ADR-039). |
+| `kui.filter.compile` | `outcome` | M3 | Smart-filter compilations, by outcome (ADR-017). |
+| `kui.filter.evaluate.duration` | *(none)* | M3 | How long one record's filter evaluation took. Its p99 is what says a user's filter, and not Kafka, is why browsing is slow. |
+| `kui.filter.errors` | `kind` | M3 | Records a filter could not decide on, split into runtime errors and timeouts. The same number the `consumed` stream event reports as `filterErrors`. |
+| `kui.masking.applied` | `cluster`, `topic`, `target` | M3 | Reads on which a masking rule was in force, one per read per half of the record (DM-001, ADR-023). Deliberately **not** a count of fields or records masked: that number is a function of the payload, so a per-field series would publish the shape of protected data onto a dashboard that is routinely less protected than the data itself. A topic whose card-number field is present on 3% of records would say so. |
 
 ### Reading `outcome`
 

@@ -117,4 +117,45 @@ describe("formatBytes", () => {
   it("does not render a negative size", () => {
     expect(formatBytes(-1)).toBe("0 B");
   });
+
+  it("rounds a fractional byte count, because rates come through here too", () => {
+    // Measured on the shipped product before this was fixed: the cluster dashboard's CONSUME stat
+    // card printed `81.2359955010432 B/s` beside a PRODUCTION card reading `1.2 kB/s`, and three
+    // rows of the throughput card's data table carried seventeen significant figures each. The
+    // whole-byte case below is why the rounding is conditional rather than an unconditional
+    // `toFixed(1)`: a 147-byte record is 147 bytes, and `147.0 B` claims a precision nobody has.
+    expect(formatBytes(81.2359955010432)).toBe("81.2 B");
+    expect(formatBytes(214.77853092686576)).toBe("214.8 B");
+    expect(formatBytes(20.149754341786714)).toBe("20.1 B");
+    expect(formatBytes(147)).toBe("147 B");
+  });
+
+  it("says a small rate is small rather than rounding it to a zero it does not mean", () => {
+    // `0.0 B/s` over a cluster that is moving something is the one figure this product is not
+    // allowed to draw. A *measured* zero is different and keeps its own spelling.
+    expect(formatBytes(0.30493676815166676)).toBe("0.3 B");
+    expect(formatBytes(0.04)).toBe("<0.1 B");
+    expect(formatBytes(0)).toBe("0 B");
+  });
+
+  it("stops at the top unit rather than dividing off the end of the scale", () => {
+    // The promotion loop's `unit < units.length - 1` is the only thing keeping `units[unit]` inside
+    // the table; without it a petabyte-scale figure divides one step too far, `units[5]` is
+    // `undefined`, and the `?? "B"` fallback prints `1.5 B` for a million gigabytes — a figure that
+    // is wrong by twelve orders of magnitude and reads as perfectly ordinary.
+    //
+    // The second line is the price of that cap, asserted rather than left to be discovered: TB is
+    // the ceiling, so the header's "the printed figure is always in [0, 1000)" holds at every unit
+    // below the top and the top unit keeps counting. If a `PB` is ever added to the table, this is
+    // the line that has to be rewritten deliberately.
+    expect(formatBytes(1_500_000_000_000)).toBe("1.5 TB");
+    expect(formatBytes(1_500_000_000_000_000)).toBe("1500.0 TB");
+  });
+
+  it("never prints a four-digit figure under a three-digit unit", () => {
+    // 999.96 is below the promotion threshold and rounds to 1000.0 at one decimal, which is how a
+    // `1000.0 B` reached a card that has a `kB` to put it in.
+    expect(formatBytes(999.96)).toBe("1.0 kB");
+    expect(formatBytes(999)).toBe("999 B");
+  });
 });

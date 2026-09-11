@@ -92,11 +92,25 @@ object MaskingConfig {
     */
   val DefaultReplacementChars: String = "*"
 
-  /** The most characters either end of a `keep` may preserve.
+  /** The most characters a `keep` may preserve: per end, and — since wave 10 — across the two ends together.
     *
     * A bound exists because `keep` is the one knob that makes a mask reveal *more*, and a typo of
     * `suffix: 44` on a sixteen-digit card number would reveal the whole of it while still looking like a
     * masking rule in the file. Twenty is past every real "show the last four" and nowhere near a payload.
+    *
+    * ==Why the sum is bounded and not only each end==
+    *
+    * Because the per-end bound was defeated by writing the bound twice. `keep: {prefix: 20, suffix: 20}`
+    * passed `readKeep` on both ends, loaded, and returned `4111111111111111` in full — measured in wave 9
+    * against the shipped engine — which is precisely the outcome the paragraph above says the bound exists to
+    * prevent. Two legal ends are not a legal rule when together they reveal the field.
+    *
+    * The engine fails safe on the same input as of wave 10 (`MaskingEngine.maskKeepingEnds` masks the whole
+    * value when the kept ends leave nothing to mask), so this refusal is not the only thing standing between
+    * that file and an exposed card number. It is here anyway, because the two answer different questions: the
+    * engine decides what a running mask does, and this decides whether the operator hears about the mistake
+    * while they are still looking at their file. A rule whose `keep` exceeds the field's own length is a rule
+    * that no longer does what its author wrote, and it should not start.
     */
   val MaxKeep: Int = 20
 
@@ -174,6 +188,7 @@ object MaskingConfig {
     for {
       _ <- refuseBothFieldSelectors(draft)
       _ <- refuseKeysThatDoNotApply(draft)
+      _ <- refuseAKeepThatRevealsTheField(draft)
       kind <- kindOf(draft)
     } yield MaskingRule(
       kind = kind,
@@ -198,6 +213,34 @@ object MaskingConfig {
           "Split it into two rules"
       )
     else Right(())
+
+  /** Two legal ends that together reveal the whole field, refused as the pair they are.
+    *
+    * `readKeep` bounds each end at [[MaxKeep]] on its own and cannot see the other one: `prefix: 20` is a
+    * legal keep, `suffix: 20` is a legal keep, and a rule carrying both keeps forty characters of a
+    * sixteen-character card number — that is, all of it. Wave 9 measured the shipped behaviour and got
+    * `4111111111111111` back from a rule that loaded, looked correct in the file and was written to hide it.
+    *
+    * The sum is what the bound was always about. It is compared against [[MaxKeep]] rather than against a
+    * second, larger number so that there is one figure to know: a rule may reveal at most twenty characters
+    * of a field, wherever in the field they sit.
+    *
+    * **This refuses a file that used to load.** A deployment that wrote two ends summing above twenty was
+    * masking less than its author believed — often nothing at all — so the refusal is the first time anyone
+    * would hear about it, which is the argument for making it a refusal rather than a clamp. The message says
+    * what to write instead, and `docs/operations/masking.md` carries the migration note.
+    */
+  private def refuseAKeepThatRevealsTheField(draft: Draft): Either[String, Unit] = {
+    val kept = draft.keepPrefix.getOrElse(0) + draft.keepSuffix.getOrElse(0)
+    if kept > MaxKeep then
+      Left(
+        s"keeps $kept characters across `keep.prefix` and `keep.suffix` together, and a rule may keep at " +
+          s"most $MaxKeep. Each end is under the maximum on its own, which is how this reads as a valid " +
+          "rule and reveals the whole of a shorter field: a mask keeping twenty characters at each end of " +
+          "a sixteen-digit card number hides none of it. Lower one of the two ends"
+      )
+    else Right(())
+  }
 
   /** A key that this `kind` does not read is a mistake, not a preference.
     *

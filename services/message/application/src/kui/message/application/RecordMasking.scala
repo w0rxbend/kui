@@ -70,6 +70,26 @@ object RecordMask {
   * way in writes the mask into the topic and destroys the original. Not applied on a resend either, for the
   * same reason — a resend reads a record in order to write it back.
   *
+  * ==What a decode error carries, which is a decision and not an omission==
+  *
+  * A `DecodedRecord` has one more payload-derived field than the three a mask obviously reaches:
+  * `DecodeError.cause`, the sentence a serde writes when it cannot read the bytes. At least one serde quotes
+  * them — `libs/serde`'s `JsonSerde` names the payload's first printable character — so a record whose value
+  * is hidden by a whole-value rule could arrive carrying the first character of that value in the field
+  * beside it.
+  *
+  * **The decision is that a masked half's decode error keeps its `target` and its `serde` and loses its
+  * `cause`**, which becomes a fixed sentence saying the detail is withheld because a rule is in force.
+  * `ConfiguredRecordMasking.withheldWhereMasked` implements it and argues the three alternatives down; the
+  * short version is that masking the cause would throw away "this record could not be decoded" along with the
+  * character, and leaving it would let the size of the leak be decided by whichever serde is added next. A
+  * half no rule reaches keeps its cause exactly as the serde wrote it.
+  *
+  * `Decoded.properties` is the field in the same position that is **not** treated this way, and the reason is
+  * a contract rather than a judgement: `DeserializeResult` says it carries `{type, id, subjects}` — the
+  * schema's identity — and nothing from the payload. A serde that put payload text in there would be breaking
+  * that contract, and the repair belongs at the serde.
+  *
   * ==`originalValue`==
   *
   * ADR-023 says masking reaches `originalValue` too. This service has no such field: a record crosses the

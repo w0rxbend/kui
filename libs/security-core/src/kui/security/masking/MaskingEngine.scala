@@ -10,9 +10,9 @@ import kui.kernel.serde.{PayloadKind, Target}
   * Every function here is total and the identity is a legal result, which is why none of them returns an
   * `Either`. The one dangerous case — a rule that matches nothing because of a typo — cannot be caught here
   * at all; it is caught at startup, where an unusable regex is a configuration error
-  * (`kui.clusters[].masking[]`, `MaskingConfig`). There is no operator guide for it yet: the sentence that
-  * used to stand here named `docs/operations/masking.md`, and that file has never existed in this repository
-  * — a comment naming a document nobody can open is worth less than one that says so.
+  * (`kui.clusters[].masking[]`, `MaskingConfig`). `docs/operations/masking.md` is the operator's guide to
+  * writing one; it exists as of wave 10, and the sentence that stood here for nine waves — saying the file
+  * had never existed — is what it replaces.
   *
   * ## The application order
   *
@@ -230,6 +230,23 @@ object MaskingEngine {
       case MaskingKind.Mask(chars, keep) => maskKeepingEnds(text, chars, keep)
     }
 
+  /** A mask whose kept ends leave nothing to mask masks the **whole** value.
+    *
+    * This is the fail-safe direction, and it is the direction this file argues for everywhere else:
+    * [[maskPayload]]'s own rule is that *masking too much is recoverable and masking nothing is not*. The
+    * branch used to return `text` — the input, in full, from a rule whose author wrote it to hide the input.
+    *
+    * It was reachable from a configuration file, which is why it is repaired here and not only at the loader.
+    * `MaskingConfig.MaxKeep` bounds each end at 20 and the bound was enforced per end, so
+    * `keep: {prefix: 20, suffix: 20}` loaded and returned a sixteen-digit card number untouched; the loader
+    * now refuses that pair as well. But `KeepEnds` is a plain pair of `Int`s that any caller can build —
+    * `MaskingRule.onFields(MaskingKind.Mask("*", KeepEnds(8, 8)), "pin")` in code reaches this function
+    * without passing a loader at all — and a four-character `last4` under an honest `keep: {suffix: 4}`
+    * reaches it on every record. The engine is where the guarantee has to hold.
+    *
+    * The result is still never longer than the input: every kept end is dropped and one replacement code
+    * point is written per input code point.
+    */
   private def maskKeepingEnds(text: String, chars: String, keep: KeepEnds): String = {
     val points: Vector[Int] = codePoints(text)
     val total = points.length
@@ -240,24 +257,26 @@ object MaskingEngine {
     val suffix = keep.suffix.max(0).min(total - prefix)
     val maskedCount = total - prefix - suffix
 
-    if maskedCount <= 0 then text
-    else {
-      val replacement =
-        if chars.isEmpty then "*" * maskedCount
-        else {
-          val cycle = codePoints(chars)
-          // Cycling through the replacement characters is Kafbat's behaviour, and it is one replacement
-          // code point per input code point — never more — which is what keeps the result no longer than
-          // the input.
-          (0 until maskedCount)
-            .map(index => new String(Character.toChars(cycle(index % cycle.length))))
-            .mkString
-        }
+    if maskedCount <= 0 then replacementFor(chars, total)
+    else
       new String(points.take(prefix).flatMap(Character.toChars).toArray) +
-        replacement +
+        replacementFor(chars, maskedCount) +
         new String(points.takeRight(suffix).flatMap(Character.toChars).toArray)
-    }
   }
+
+  /** `count` replacement code points, cycling through `chars`.
+    *
+    * Cycling is Kafbat's behaviour, and it is one replacement code point per masked input code point — never
+    * more — which is what keeps the result no longer than the input.
+    */
+  private def replacementFor(chars: String, count: Int): String =
+    if chars.isEmpty then "*" * count
+    else {
+      val cycle = codePoints(chars)
+      (0 until count)
+        .map(index => new String(Character.toChars(cycle(index % cycle.length))))
+        .mkString
+    }
 
   /** Code points, not `Char`s. A `Char` is half of an emoji, and half of an emoji is invalid text.
     *

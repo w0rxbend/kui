@@ -138,4 +138,30 @@ final class CsrfCheckSuite extends FunSuite {
       )
     assertEquals(verdict, CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token"))
   }
+
+  test("aTokenThatIsOnlyLongerThanTheSecretIsNotAMatch") {
+    // W10-A1: `constantTimeEquals` folds `left.length ^ right.length` into its accumulator before it
+    // compares a single byte, and that seed had no case: every row above compares equal-length strings or
+    // wholly different ones. Seeding the accumulator with `0` instead left the whole gateway module green
+    // — and the loop runs to `max(left, right)` zero-padding the shorter side, so `secret + "\u0000"` then
+    // compares *equal* to `secret` and a forged token is accepted. The length is part of the comparison.
+    val padded = secret + "\u0000"
+
+    assertEquals(
+      CsrfCheck.verdict("POST", PrincipalKind.Session, Some(padded), Some(secret), Some("same-origin")),
+      CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token")
+    )
+    // The other direction too, for completeness: a token that is a prefix of the secret is refused with
+    // or without the seed, because the byte the shorter side is padded with differs from the real one.
+    assertEquals(
+      CsrfCheck.verdict(
+        "POST",
+        PrincipalKind.Session,
+        Some(secret.dropRight(1)),
+        Some(secret),
+        Some("same-origin")
+      ),
+      CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token")
+    )
+  }
 }

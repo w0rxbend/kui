@@ -311,4 +311,51 @@ final class ContractRoutingSuite extends CatsEffectSuite {
       }
     }
   }
+
+  test("eachTransportFailureDimsTheCapabilityWithItsOwnReason") {
+    // W10-A1: `reasonOf`'s four-way mapping had no case. Both directions of *whether* a failure dims are
+    // asserted above; *why* it dimmed was not, and permuting the three named arms left the whole gateway
+    // module green. The reason code is not decoration: ADR-032 draws a different sentence for each, and
+    // `CircuitOpen` ("calls are suspended while it recovers", which ends on its own) against
+    // `UpstreamAuth` ("KUI's credentials were rejected", which never ends on its own) is the difference
+    // between waiting and editing a configuration file.
+    def reasonFor(error: KuiError): IO[kui.contracts.capability.ReasonCode] =
+      signals.use { (signal, registry) =>
+        ContractRouting.reportIfInfrastructure[IO](cluster, signal, error) *>
+          IO.sleep(100.milliseconds) *>
+          registry.state(clusterKey).map {
+            case CapabilityState.Unavailable(reason, _, _) => reason
+            case other => fail(s"expected the capability to be dimmed, got $other")
+          }
+      }
+
+    for {
+      open <- reasonFor(InfrastructureError.CircuitOpen("cluster", at))
+      slow <- reasonFor(InfrastructureError.Timeout("cluster", 2000))
+      refused <- reasonFor(InfrastructureError.AuthFailed("cluster"))
+      down <- reasonFor(InfrastructureError.Unreachable("cluster", "connection refused"))
+    } yield {
+      assertEquals(open, kui.contracts.capability.ReasonCode.CircuitOpen)
+      assertEquals(slow, kui.contracts.capability.ReasonCode.UpstreamTimeout)
+      assertEquals(refused, kui.contracts.capability.ReasonCode.UpstreamAuth)
+      assertEquals(down, kui.contracts.capability.ReasonCode.UpstreamUnavailable)
+    }
+  }
+
+  test("rejectsAContractUnderInternalAtTheWrongVersion") {
+    // W10-A1: `segments.take(2) == InternalPrefix` had a case for the *first* segment being wrong and none
+    // for the second, so weakening the check to `take(1)` left the whole gateway module green. A contract
+    // published at `/internal/v2` would then be rewritten by dropping two segments and prefixing
+    // `/api/v1` — so `/internal/v2/ping` is served as `/api/v1/ping`, at a version nobody agreed to, and
+    // the browser's generated client calls it believing it is v1.
+    val futureVersion: AnyEndpoint =
+      KuiEndpoint.internal.get.in("internal" / "v2" / "ping").name("cluster.future")
+
+    ContractRouting.publicPathOf(futureVersion) match {
+      case Left(problem) =>
+        assert(problem.contains("cluster.future"), problem)
+        assert(problem.contains("/internal/v2/ping"), problem)
+      case Right(path) => fail(s"a contract at /internal/v2 must not produce a route, but it produced $path")
+    }
+  }
 }

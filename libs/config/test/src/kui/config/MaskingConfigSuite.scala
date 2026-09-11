@@ -57,11 +57,15 @@ final class MaskingConfigSuite extends KuiSuite {
     assert(!MaskingEngine.applies(configured.masking.rules, payments, Target.Key))
   }
 
-  test("every shipped configuration file still loads with no masking section, and none of them has one") {
+  test("a file written before this section existed loads as a cluster that masks nothing") {
     // The standing rule for every section this project has added: an existing YAML boots unchanged. Stated
-    // here over the files the repository actually ships rather than over an invented one, because that is
-    // the set an operator's file resembles.
-    val quickstart = KuiConfigSource
+    // over `valid.yaml`, the fixture that predates masking, rather than over an invented document.
+    //
+    // THE SHIPPED FILES ARE ASSERTED IN `ShippedConfigurationSuite` AND NOT HERE, and the distinction
+    // stopped being cosmetic in wave 10: `deployment/quickstart/kui-quickstart.yaml` now configures two
+    // rules on purpose, so a sentence claiming that no shipped file has a masking section is false and
+    // this case's old name said exactly that while loading one fixture.
+    val unmasked = KuiConfigSource
       .loadFrom[IO](
         Nil,
         List(ConfigFixtures.fixture("valid.yaml")),
@@ -71,7 +75,7 @@ final class MaskingConfigSuite extends KuiSuite {
       .unsafeRunSync()
       .fold(errors => fail(errors.render), identity)
 
-    assert(quickstart.clusters.forall(_.masking.isEmpty))
+    assert(unmasked.clusters.forall(_.masking.isEmpty))
   }
 
   // ------------------------------------------------------------------ the three kinds
@@ -287,6 +291,73 @@ final class MaskingConfigSuite extends KuiSuite {
 
     assertEquals(reported.map(_.key), List("kui.clusters.0.masking.0.keep.suffix"))
     assert(reported.head.problem.contains(s"above the maximum of ${MaskingConfig.MaxKeep}"))
+  }
+
+  test("a keep whose two ends together reveal the field is refused") {
+    // THE RULE THIS PACKET OWNS, AND IT IS A RULE ABOUT A PAIR OF LEGAL VALUES. `readKeep` bounds each end
+    // at `MaxKeep` and cannot see the other one, so `prefix: 20` passes, `suffix: 20` passes, and the rule
+    // they form keeps forty characters of a sixteen-character card number -- all of it. Wave 9 measured the
+    // shipped behaviour with a throw-away suite and got `4111111111111111` back from a rule that loaded and
+    // looked correct in the file (W9-06/F4). The bound's own stated reason -- "a `suffix: 44` reveals the
+    // whole of a card number while still looking like a masking rule" -- was defeated by writing 20 twice.
+    //
+    // The refusal is reported against the ENTRY and not against either key, because neither key is wrong:
+    // the combination is. That is the same shape as `fields` beside `fieldsNamePattern` two cases up.
+    val reported = problems(
+      base("""      masking:
+             |        - kind: mask
+             |          fields: [cardNumber]
+             |          keep:
+             |            prefix: 20
+             |            suffix: 20""".stripMargin)
+    )
+
+    assertEquals(reported.map(_.key), List("kui.clusters.0.masking.0"))
+    assert(reported.head.problem.contains("keeps 40 characters"), clue = reported.head.problem)
+    assert(reported.head.problem.contains(s"at most ${MaskingConfig.MaxKeep}"), clue = reported.head.problem)
+  }
+
+  test("a keep that sums to exactly the maximum still loads, because the bound is on what it reveals") {
+    // The other side of the refusal above, and the reason it is a `>` rather than a `>=`: `MaxKeep` is the
+    // most a rule may reveal, and a rule revealing exactly that much is a rule an operator wrote on
+    // purpose. A bound that refused its own stated maximum would be a different bound with the same name.
+    val configured = cluster(
+      base("""      masking:
+             |        - kind: mask
+             |          fields: [iban]
+             |          keep:
+             |            prefix: 8
+             |            suffix: 12""".stripMargin)
+    )
+
+    assertEquals(configured.masking.rules.head.kind, MaskingKind.Mask("*", KeepEnds(8, 12)): MaskingKind)
+  }
+
+  test("a keep bounded at both ends still hides a field shorter than the two ends together") {
+    // THE HALF THE LOADER CANNOT SEE, asserted here because the two halves of this repair belong together.
+    // A rule may be legal and still meet a value too short for it -- `keep: {suffix: 4}` is an honest rule
+    // and a four-character `last4` is an honest value -- and the engine used to hand such a value back
+    // untouched. It now masks the whole of it: these numbers bound what a mask may REVEAL, so the
+    // arithmetic running out has to fail towards hiding.
+    val configured = cluster(
+      base("""      masking:
+             |        - kind: mask
+             |          fields: [last4]
+             |          keep:
+             |            suffix: 4""".stripMargin)
+    )
+
+    assertEquals(
+      MaskingEngine
+        .maskJson(
+          configured.masking.rules,
+          payments,
+          Target.Value,
+          io.circe.parser.parse("""{"last4":"4242"}""").toOption.get
+        )
+        .noSpaces,
+      """{"last4":"****"}"""
+    )
   }
 
   test("an empty fields list is refused rather than read as a rule that matches nothing by name") {

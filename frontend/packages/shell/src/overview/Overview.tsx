@@ -67,6 +67,7 @@ import {
   Button,
   Card,
   Donut,
+  EmptyState,
   IconTile,
   MagnitudeBarList,
   PageHeader,
@@ -213,6 +214,62 @@ function figureOf(reading: Reading<number>, unit?: string): StatFigure {
   }
 }
 
+/* --- The six stat tiles, and the address that asks nothing ----------------------------------- */
+
+/** What a stat tile is called and what glyph it carries. Exactly `StatCard`'s head, spreadable. */
+interface StatHead {
+  readonly label: string;
+  readonly icon: IconName;
+  readonly testId: string;
+}
+
+/**
+ * The six tiles, in the order the design puts them in (§3.2).
+ *
+ * One table rather than six literals, because the row is drawn **twice**: once with the figures a
+ * cluster answered, and once on the address that names no cluster, where each tile says in words
+ * what nobody asked. Two hand-written rows would drift the first time a label or a testid changed,
+ * and the drift would be invisible — the unasked row is the one nobody screenshots.
+ *
+ * `question` completes *"No cluster is selected, so KUI has not asked …"*. Per tile rather than one
+ * sentence repeated six times: six identical paragraphs in a row read as a rendering fault, and the
+ * tile's own subject is the only thing that makes its blankness informative.
+ */
+const STAT_ORDER = ["brokers", "topics", "inSync", "production", "consume", "lag"] as const;
+
+type StatId = (typeof STAT_ORDER)[number];
+
+const STATS: Readonly<Record<StatId, { readonly head: StatHead; readonly question: string }>> = {
+  brokers: {
+    head: { label: "BROKERS ONLINE", icon: "brokers", testId: "stat-brokers" },
+    question: "how many brokers are online",
+  },
+  topics: {
+    head: { label: "TOPICS", icon: "topics", testId: "stat-topics" },
+    question: "how many topics there are",
+  },
+  inSync: {
+    head: { label: "PARTITIONS IN SYNC", icon: "partitions", testId: "stat-in-sync" },
+    question: "what share of its partitions are in sync",
+  },
+  production: {
+    head: { label: "PRODUCTION", icon: "chart-bars", testId: "stat-production" },
+    question: "how fast anything is being produced",
+  },
+  consume: {
+    head: { label: "CONSUME", icon: "stream", testId: "stat-consume" },
+    question: "how fast anything is being consumed",
+  },
+  lag: {
+    head: { label: "CONSUMER LAG", icon: "lag", testId: "stat-lag" },
+    question: "how far the consumers are behind",
+  },
+};
+
+/** The voice line for the address that names no cluster. See {@link NoClusterChosen}. */
+const NO_CLUSTER_LEDE =
+  "Nothing has been asked yet, because no cluster is selected. Pick one and this page fills in.";
+
 export function Overview(props: OverviewProps): JSX.Element {
   const params = useParams<{ readonly clusterId?: string; readonly tab?: string }>();
   const kui = useKui();
@@ -349,7 +406,11 @@ export function Overview(props: OverviewProps): JSX.Element {
         /* The voice line, chosen by the tab. Conditional on the cluster actually being healthy —
            see `overviewLede` and `storageLede`. A cheerful sentence over a broken cluster is worse
            than a plain one. */
-        voice={ledeFor(tab(), props.model, throughput.state())}
+        voice={
+          cluster() === undefined
+            ? NO_CLUSTER_LEDE
+            : ledeFor(tab(), props.model, throughput.state())
+        }
         actions={
           <Button variant="primary" icon="plus" onClick={() => props.onCreateTopic?.()}>
             Create topic
@@ -365,37 +426,117 @@ export function Overview(props: OverviewProps): JSX.Element {
         <TabStrip tabs={tabs()} currentId={tab()} label="Cluster sections" />
       </Show>
 
-      {/* Tab-invariant, and drawn once above the switch rather than inside each arm. §4.2 proves
-          the rule the design only implies: the stat cards are identical on every tab, so a reader
-          who switches tabs is not made to re-read them. */}
-      <StatRow model={props.model} throughput={throughput.state()} range={range()} />
+      {/*
+       * Everything below this line describes a cluster, and on one address there is not one.
+       *
+       * `/ui` resolves to this component with no `clusterId` in it, and if nothing is selected
+       * either — which is every visit to a deployment registering more than one cluster, because
+       * `soleClusterChoice` refuses to choose for the operator — then the shell fetches
+       * nothing, every reading stays `pending` for ever, and the six tiles draw a skeleton apiece
+       * under a voice line saying the cluster is being asked. That was the shipped behaviour and it
+       * is the exact failure the definition of done forbids: not a fabricated figure, a fabricated
+       * *claim about* a figure. Measured in a browser it survived `networkidle` plus fifteen
+       * seconds with three requests in flight, none of them about a cluster.
+       *
+       * So the address draws what is true instead: the same six tiles, each saying in words what
+       * nobody asked, and where the body would be, the choice that has to be made before any of it
+       * can be filled in. **Not a redirect to the first registered cluster** — the product already
+       * took that decision in `soleClusterChoice`, and taking it again here would land an operator
+       * on a cluster they did not name, which is how somebody acts on the wrong one.
+       */}
+      <Show
+        when={cluster() !== undefined}
+        fallback={<NoClusterChosen manageHref={kui.paths.manageClusters()} />}
+      >
+        {/* Tab-invariant, and drawn once above the switch rather than inside each arm. §4.2 proves
+            the rule the design only implies: the stat cards are identical on every tab, so a reader
+            who switches tabs is not made to re-read them. */}
+        <StatRow model={props.model} throughput={throughput.state()} range={range()} />
 
-      {/* `Dynamic` rather than a call, and this is not a style choice. The JSX compiler treats an
-          expression container holding a call as dynamic and wraps it in a tracked computation, so
-          `{bodyFor(tab(), props.model)}` read the model *at the dispatch* — and every model change
-          re-ran the switch and replaced the whole body. Measured: moving LOADING → HEALTHY kept the
-          tab-invariant stat row's DOM node and replaced the broker-health card's. Handing the model
-          across as a prop instead leaves it a getter the children read, so the only thing this
-          container tracks is `tab()`, and the panels below update in place. That is what makes
-          `BrokerHealth`'s keying argument below true rather than merely written. */}
-      <Dynamic
-        component={bodyFor(tab())}
-        model={props.model}
-        throughput={throughput.state()}
-        latency={latency.state()}
-        handlers={handlers.state()}
-        producers={producers.state()}
-        recordSize={recordSize.state()}
-        range={range()}
-        onRange={(chosen: ThroughputRange) => {
-          /* `setSearchParams` and not a `navigate`: this replaces one parameter and leaves the
-             path, the tab and anything else in the query alone. */
-          setSearch({ [RANGE_PARAM]: chosen });
-        }}
-        onRetry={throughput.reload}
-        alerts={alerts}
-      />
+        {/* `Dynamic` rather than a call, and this is not a style choice. The JSX compiler treats an
+            expression container holding a call as dynamic and wraps it in a tracked computation, so
+            `{bodyFor(tab(), props.model)}` read the model *at the dispatch* — and every model
+            change re-ran the switch and replaced the whole body. Measured: moving LOADING →
+            HEALTHY kept the tab-invariant stat row's DOM node and replaced the broker-health
+            card's. Handing the model across as a prop instead leaves it a getter the children
+            read, so the only thing this container tracks is `tab()`, and the panels below update
+            in place. That is what makes `BrokerHealth`'s keying argument below true rather than
+            merely written. */}
+        <Dynamic
+          component={bodyFor(tab())}
+          model={props.model}
+          throughput={throughput.state()}
+          latency={latency.state()}
+          handlers={handlers.state()}
+          producers={producers.state()}
+          recordSize={recordSize.state()}
+          range={range()}
+          onRange={(chosen: ThroughputRange) => {
+            /* `setSearchParams` and not a `navigate`: this replaces one parameter and leaves the
+               path, the tab and anything else in the query alone. */
+            setSearch({ [RANGE_PARAM]: chosen });
+          }}
+          onRetry={throughput.reload}
+          alerts={alerts}
+        />
+      </Show>
     </div>
+  );
+}
+
+/**
+ * What `/ui` draws when no cluster has been chosen.
+ *
+ * ## Why this is a rendering of the dashboard rather than a different screen
+ *
+ * The six tiles stay, and each one says what it would have been about. Removing them would leave
+ * the address with nothing to assert about — and the assertion that matters here is exactly *"every
+ * tile carries a figure or a sentence"*, which is the first thing in this project to check that a
+ * screen says **something** rather than that it says a particular thing. A page that draws no tiles
+ * satisfies that vacuously, which is how the hole this repairs stayed open for a wave.
+ *
+ * ## Why an `EmptyState` and not a chooser of its own
+ *
+ * The frame already has one: the environment rail lists every registered cluster, names each in its
+ * tooltip and accessible name, and selects on click. A second list here would be a second control
+ * to keep in step with the roster, and `ClusterSelector` — the shell's other cluster chooser — is
+ * already a component with zero production callers. So this names the choice, says where it is, and
+ * offers the one action the rail does not: the page that registers a cluster in the first place,
+ * which is the honest destination when the rail is empty because nothing is registered at all.
+ */
+function NoClusterChosen(props: { readonly manageHref: string }): JSX.Element {
+  return (
+    <>
+      <div class="kui-overview__stats">
+        <For each={STAT_ORDER}>
+          {(id) => (
+            <StatNote
+              {...STATS[id].head}
+              why={`No cluster is selected, so KUI has not asked ${STATS[id].question}.`}
+            />
+          )}
+        </For>
+      </div>
+
+      <EmptyState
+        kind="empty"
+        title="No cluster is selected."
+        description={
+          "Choose one from the environment rail on the left — each tile names its cluster — and " +
+          "every figure above fills in. Nothing has been asked until then."
+        }
+        action={
+          <a
+            class="kui-button kui-button--secondary kui-button--md"
+            href={props.manageHref}
+            data-testid="no-cluster-manage"
+          >
+            Manage clusters
+          </a>
+        }
+        testId="overview-no-cluster"
+      />
+    </>
   );
 }
 
@@ -512,24 +653,19 @@ function StatRow(props: {
   return (
     <div class="kui-overview__stats">
       <StatCard
-        label="BROKERS ONLINE"
-        icon="brokers"
+        {...STATS.brokers.head}
         tone="success"
         figure={figureOf(props.model.brokerCount)}
         pill={props.model.brokerPill}
-        testId="stat-brokers"
       />
       <StatCard
-        label="TOPICS"
-        icon="topics"
+        {...STATS.topics.head}
         tone="accent"
         figure={figureOf(props.model.topicCount)}
         pill={pillForPartitions(props.model.partitionTotal)}
-        testId="stat-topics"
       />
       <StatCard
-        label="PARTITIONS IN SYNC"
-        icon="partitions"
+        {...STATS.inSync.head}
         tone="primary"
         figure={inSyncFigure(props.model.inSync)}
         /* The design's third micro-visual (§3.2), and the one card on this screen whose good end of
@@ -549,7 +685,6 @@ function StatRow(props: {
             />
           ) : undefined
         }
-        testId="stat-in-sync"
       />
       {/* The design's "PRODUCTION 86.4 MB/s" and "CONSUME 71.2 MB/s" (§3.2), each with the jagged
           sparkline the same table gives it. Two of §3.2's four sparkline cards; the other two —
@@ -557,29 +692,23 @@ function StatRow(props: {
           and §3.2's own absent rule is that a card with no series has no sparkline rather than a
           flat line at zero. */}
       <RateCard
-        label="PRODUCTION"
-        testId="stat-production"
-        icon="chart-bars"
+        {...STATS.production.head}
         noun="this cluster's produce rate"
         instead="Per-topic message counts are on each topic's page."
         state={props.throughput}
         pick={(rates) => ({ current: rates.latest?.produce ?? null, points: rates.produce })}
       />
       <RateCard
-        label="CONSUME"
-        testId="stat-consume"
-        icon="stream"
+        {...STATS.consume.head}
         noun="this cluster's consume rate"
         state={props.throughput}
         pick={(rates) => ({ current: rates.latest?.consume ?? null, points: rates.consume })}
       />
       <StatCard
-        label="CONSUMER LAG"
-        icon="lag"
+        {...STATS.lag.head}
         tone="warning"
         figure={figureOf(mapLagTotal(props.model.lag))}
         pill={props.model.lagPill}
-        testId="stat-lag"
       />
     </div>
   );
@@ -832,11 +961,7 @@ function RateNote(props: {
   readonly state: Fetched<ThroughputSeries>;
 }): JSX.Element {
   return (
-    <div class="kui-stat kui-stat--note" data-testid={props.testId}>
-      <span class="kui-stat__head">
-        <IconTile icon={props.icon} tone="neutral" />
-        <span class="kui-stat__label">{props.label}</span>
-      </span>
+    <StatShell label={props.label} icon={props.icon} testId={props.testId}>
       <Show
         when={rateAbsence(props.state, props.noun)}
         fallback={<MetricAbsence state={props.state} noun={props.noun} />}
@@ -849,7 +974,47 @@ function RateNote(props: {
           />
         )}
       </Show>
+    </StatShell>
+  );
+}
+
+/**
+ * A tile that is shaped like a `StatCard` and carries something other than a figure.
+ *
+ * The head is `.kui-stat`'s own — the icon tile and the label — rather than a bare note, so that
+ * the row reads as a row of equals. Dropping the label as well as the figure made the card visibly
+ * a different kind of object from its neighbours, which draws the eye to the one card with nothing
+ * to say. Two callers: a rate that could not be measured, and a tile on an address that asked
+ * nothing.
+ */
+function StatShell(props: {
+  readonly label: string;
+  readonly icon: IconName;
+  readonly testId: string;
+  readonly children: JSX.Element;
+}): JSX.Element {
+  return (
+    <div class="kui-stat kui-stat--note" data-testid={props.testId}>
+      <span class="kui-stat__head">
+        <IconTile icon={props.icon} tone="neutral" />
+        <span class="kui-stat__label">{props.label}</span>
+      </span>
+      {props.children}
     </div>
+  );
+}
+
+/** One of the six tiles on the address that names no cluster: the head, and a sentence under it. */
+function StatNote(props: {
+  readonly label: string;
+  readonly icon: IconName;
+  readonly testId: string;
+  readonly why: string;
+}): JSX.Element {
+  return (
+    <StatShell label={props.label} icon={props.icon} testId={props.testId}>
+      <NotMeasured why={props.why} testId={`${props.testId}-note`} />
+    </StatShell>
   );
 }
 

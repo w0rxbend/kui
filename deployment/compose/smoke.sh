@@ -793,32 +793,99 @@ await "at least one alert rule read the facts it needs" "yes" \
 # answered was 'unavailable' after 90s, expected 'ok'`.
 #
 # The per-worker section is where a refusal is reported, so that is what is asserted.
-log "the tenth service answers, on a path the gateway derives rather than one written here"
-
-# The read path, taken from the gateway's own merged OpenAPI document.
+# ==================================================================================================
+# EVERY CONTRACTED SERVICE ANSWERS A REAL READ, AND NOT ONLY A CAPABILITY PROBE.
 #
-# WRITTEN HERE IT WOULD BE THE FOURTH COPY OF A ROUTE AND THE FIRST ONE NOTHING CHECKS. The whole
-# defect this file exists to catch is a service that is complete, imaged and unroutable, and a
-# hard-coded `/api/v1/clusters/measured/connect/connectors` cannot see it: a gateway publishing none
-# of the connect contract answers 404 for the path this script invented, which is indistinguishable
-# from the path being wrong. Read off the running gateway instead, an empty derivation IS the
-# failure, and the message can say so.
+# THE HOLE THIS CLOSES, MEASURED IN WAVE 9, BOTH DIRECTIONS. Change `KUI_PRINCIPAL_KEY` on
+# `kui-topic` in `docker-compose.yml` so that it no longer matches the gateway's, and this script
+# printed `PASSED` in 107 seconds with `topic capability: available` twice -- while
+# `GET /api/v1/clusters/measured/topics` answered `HTTP 401 KUI-UNAUTHENTICATED` and
+# `/consumer-groups`, whose service still had the right key, answered 200. The product was broken on
+# the one screen most people open first and the smoke test was green.
 #
-# The filter is every GET whose path is `clusters/{clusterId}/connect` plus fixed segments and no
-# further template -- so a per-connector or per-task route, which needs a name this stack has none
-# of, is excluded -- and the shortest of those is the collection read.
-connect_read_path() {
-  curl -sf "$base/api/v1/openapi.json" |
-    jq -r '.paths | to_entries[]
-           | select(.value.get != null)
-           | .key
-           | select(test("^/api/v1/clusters/\\{clusterId\\}/connect(/[A-Za-z0-9._-]+)*$"))' |
+# It is green because a capability row is not a read. `/api/v1/capabilities` reflects readiness --
+# the gateway's own poll of a service's health endpoint, which carries no signed principal -- so it
+# says the process is up and answering, and says nothing at all about whether the gateway is allowed
+# to ask it a question. Six of the nine contracted services were covered by nothing else: `connect`
+# had the read below, `metrics` and `alerts` had theirs, and `cluster`, `topic`, `consumer`,
+# `schema`, `ksql` and `message` had a probe and a container name.
+#
+# So every contract gets a read, and the loop is over `$expected` -- the derived contract list --
+# rather than over a roster written here.
+#
+# WRITING THE PATHS HERE WOULD BE A NINTH COPY OF SOMEBODY ELSE'S DECISION AND THE FIRST ONE NOTHING
+# CHECKS. That reasoning is `connect_read_path`'s, which stood for one service and is now this
+# function for all of them: the whole defect this file exists to catch is a service that is
+# complete, imaged and unroutable, and a hard-coded `/api/v1/clusters/measured/topics` cannot see
+# it, because a gateway publishing none of the topic contract answers 404 for the path this script
+# invented -- indistinguishable from the path simply being wrong. Read off the running gateway
+# instead and an empty derivation IS the failure, with a message that can say so.
+#
+# WHICH read is derived too, from the gateway's own merged document, by the service tag each
+# operation already carries. Three filters, and each one is a fact the document states rather than a
+# guess:
+#
+#   * the operation is tagged with this service;
+#   * its 200 is not `text/event-stream` -- a stream does not end, and `curl -sf` on one would hang
+#     until this script's own timeout rather than report a status. `ksql` is why this filter is not
+#     optional: `/ksql/stream` is one character shorter than `/ksql/objects`, so "the shortest read"
+#     picks the stream without it;
+#   * its path templates nothing but `{clusterId}` -- a per-connector or per-subject route needs a
+#     name this stack has none of.
+#
+# and of what survives, the shortest is the collection read.
+service_read_path() {
+  local service="$1"
+  printf '%s' "$merged" |
+    jq -r --arg service "$service" '
+      .paths | to_entries[]
+      | select(.value.get != null)
+      | select(((.value.get.tags // []) | index($service)) != null)
+      | select(((.value.get.responses["200"].content // {}) | keys
+                | index("text/event-stream")) == null)
+      | .key
+      | select(test("^/api/v1/clusters/\\{clusterId\\}(/[A-Za-z0-9._-]+)*$"))' |
     awk '{ print length, $0 }' | LC_ALL=C sort -n | head -1 | cut -d' ' -f2-
 }
 
+# SELF-TESTED, for the reason every derivation in this file is: on a passing run every service has a
+# path and the failure modes are all invisible. A tag filter that matched everything, a stream
+# filter inverted, or a regexp that rejected the bare `/api/v1/clusters/{clusterId}` would each
+# still answer *a* path for every service, and the loop below would still go green -- against the
+# wrong endpoint. The fixture is a made-up document carrying exactly the three situations the three
+# filters exist for.
+merged="$(cat <<'FIXTURE'
+{"paths":{
+  "/api/v1/clusters/{clusterId}/probe/stream":
+    {"get":{"tags":["probe"],"responses":{"200":{"content":{"text/event-stream":{}}}}}},
+  "/api/v1/clusters/{clusterId}/probe/items/{itemId}":
+    {"get":{"tags":["probe"],"responses":{"200":{"content":{"application/json":{}}}}}},
+  "/api/v1/clusters/{clusterId}/probe/items":
+    {"get":{"tags":["probe"],"responses":{"200":{"content":{"application/json":{}}}}}},
+  "/api/v1/clusters/{clusterId}/other":
+    {"get":{"tags":["other"],"responses":{"200":{"content":{"application/json":{}}}}}}
+}}
+FIXTURE
+)"
+probe="$(service_read_path probe)"
+[[ "$probe" == "/api/v1/clusters/{clusterId}/probe/items" ]] || fail "the read-path derivation is
+  broken: a document whose \`probe\` tag carries an event stream, a templated item route and a
+  collection derived [$probe] and not /api/v1/clusters/{clusterId}/probe/items. Check the tag
+  filter, the text/event-stream filter and the template regexp in service_read_path."
+# And that the tag filter is a filter: asking for a service the document does not tag answers
+# nothing, which is what makes an empty derivation below a real failure rather than a typo here.
+probe="$(service_read_path absent)"
+[[ -z "$probe" ]] || fail "the read-path derivation ignores its service tag: asking for a service
+  the document does not mention answered [$probe] instead of nothing."
+
+merged="$(curl -sf "$base/api/v1/openapi.json")" ||
+  fail "the gateway's merged OpenAPI document could not be read at $base/api/v1/openapi.json"
+
+log "the tenth service answers, on a path the gateway derives rather than one written here"
+
 await "the connect capability" "available" "$(status_of connect)"
 
-connect_path="$(connect_read_path)"
+connect_path="$(service_read_path connect)"
 [[ -n "$connect_path" ]] || fail "the gateway publishes no readable connect path at all.
   Every /api/v1/clusters/{clusterId}/connect... GET was expected in the merged document at
   $base/api/v1/openapi.json and none is there. The container is running and its capability row is
@@ -842,6 +909,47 @@ await "every Connect worker the cluster names answered" "ok" \
   "curl -sf '$base${connect_path/\{clusterId\}/measured}' |
      jq -r '[to_entries[0].value.data.workers[]?.connectors.status]
             | unique | if length == 0 then \"no worker section\" else join(\",\") end'"
+
+log "every contracted service answers a signed read, and not only a capability probe"
+
+# `message` publishes exactly one GET and it is the browse stream, so it has no path the loop's
+# filters can keep -- both the stream filter and the `{topicName}` template exclude it. It is
+# covered here rather than skipped, because "the browse stream answers" is the assertion that
+# separates a message service the gateway may talk to from one it may not, and that is the whole
+# subject of this block. `limit=1` is what makes an endless stream end; the topic is the one the
+# traffic step above created, so this is a read of bytes this run produced.
+#
+# A second reason to write it out: it is the only read here whose path carries a name, and a name is
+# the thing a derivation cannot supply.
+readonly STREAM_READS="message:\
+/api/v1/clusters/{clusterId}/topics/$TRAFFIC_TOPIC/messages/stream?limit=1"
+
+for service in $expected; do
+  path="$(service_read_path "$service")"
+
+  if [[ -z "$path" ]]; then
+    # Every service whose only read is a stream is named above with its substitution. One that is
+    # not named has no read at all in the gateway's document, which is the failure this block is
+    # for: the contract exists, the container is up, and there is nothing a browser could ask it.
+    written="$(printf '%s\n' "$STREAM_READS" | grep "^$service:" | cut -d: -f2- || true)"
+    [[ -n "$written" ]] || fail "the gateway publishes no readable path for \`$service\` at all.
+  Every GET tagged \`$service\` in $base/api/v1/openapi.json was either an event stream or needed a
+  name this stack has none of. Its capability row is available and its container is up, so this is
+  the third fact: the contract is in ServiceContracts.byService and its routes are derived from it,
+  or it is not and this service is reachable by nothing."
+    path="$written"
+  fi
+
+  # `%{http_code}` rather than `curl -sf`, because the number is the assertion. A 401 and a 404 and
+  # a 503 are three different repairs and `curl -sf` reports all three as "it failed"; the wave-9
+  # defect this block exists for was a 401, and a message that says `401` sends a reader to the
+  # principal key rather than to the routing table.
+  #
+  # `await` and not a bare curl: a service can be routable and still be finishing its first scrape,
+  # and every other assertion in this file gives that the same ninety seconds.
+  await "$service answers $path" "200" \
+    "curl -s -o /dev/null -m 20 -w '%{http_code}' '$base${path/\{clusterId\}/measured}'"
+done
 
 log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null

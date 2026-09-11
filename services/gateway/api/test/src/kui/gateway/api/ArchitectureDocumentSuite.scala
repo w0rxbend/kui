@@ -40,31 +40,70 @@ final class ArchitectureDocumentSuite extends FunSuite {
 
   private val otherServices: List[String] = services.filterNot(_ == "gateway")
 
-  test("everyPortNamedInTheServiceTableIsATraitInThatServicesDomain") {
+  test("everyPortNamedInTheServiceTableIsATraitInTheLayerTheRowClaims") {
     // The column header says `domain`, and for six of the eight built services it named something else:
     // a port that really lives in `application`, an identifier the tree declares nowhere, or a trait
     // belonging to a library. None of it was checkable, so all of it drifted. Reading the table here is
     // what makes the header a rule instead of a label.
+    //
+    // A row may also say that a port lives somewhere other than `domain` — ``in **`application`**`` after
+    // the name — and `RecordMasking[F]` in the message row is the first one that does. Before this, such a
+    // cell could not be written at all: the check read every identifier in the column as a claim about
+    // `domain`, so the honest note failed and the alternatives were to leave the port out of the table or to
+    // say something untrue about where it is. The annotation is now read rather than ignored, and it is held
+    // to both halves — the trait has to be in the layer the row names **and** absent from `domain` — because
+    // an annotation nobody checked would be a worse cell than the wrong one it replaced: a reader would
+    // believe it.
     serviceRows.foreach { case (service, ports) =>
-      val domain = repositoryRoot.resolve(s"services/$service/domain/src")
+      val disagreements = portDisagreements(repositoryRoot, service, ports)
 
-      if Files.isDirectory(domain) then {
-        val declared = traitsDeclaredIn(domain)
-        identifiersIn(ports).foreach(name =>
-          assert(
-            declared.contains(name),
-            s"ARCHITECTURE.md §3 lists `$name[F]` as a port of the $service service's `domain`, and " +
-              s"services/$service/domain/src declares no such trait. Ports declared there: " +
-              declared.toList.sorted.mkString(", ")
-          )
-        )
-      } else
-        assert(
-          ports.contains("not built"),
-          s"ARCHITECTURE.md §3 has a $service row and there is no services/$service/domain; a row for a " +
-            "service that does not exist has to say so in words"
-        )
+      assert(disagreements.isEmpty, disagreements.mkString("\n"))
     }
+  }
+
+  test("theRowReaderRefusesTheDisagreementsItIsWrittenToRefuse") {
+    // W10-06, found by W10-A2. The case above is a check of this repository, so it can only ever fail on
+    // the tree as it is — and today the tree has exactly one annotated port, `RecordMasking[F]` in the
+    // message service's `application`, which is not declared in `domain`. That makes the annotation's
+    // second half — the trait must be ABSENT from `domain` — true by accident: replacing it with a
+    // tautology left the suite 9/9 green. The first half already covers the only row that exercises it.
+    //
+    // So the reader is driven over a fixture tree instead, where each disagreement can actually be built:
+    // a port in both layers, a port in neither, an annotation pointing at a layer that does not exist, and
+    // a row for a service with no `domain` at all. Four of these cannot be written into ARCHITECTURE.md
+    // without breaking the build, which is precisely why none of them was gated.
+    val root = Files.createTempDirectory("kui-architecture-fixture")
+
+    try {
+      write(root, "services/fixture/domain/src/Ports.scala", "trait InDomain[F[_]]\ntrait InBoth[F[_]]\n")
+      write(root, "services/fixture/application/src/Ports.scala", "trait InBoth[F[_]]\n")
+      Files.createDirectories(root.resolve("services/absent"))
+
+      assertEquals(
+        portDisagreements(root, "fixture", "`InDomain[F]`"),
+        Nil,
+        "a row naming a port that really is in `domain` was reported as a disagreement"
+      )
+
+      val inBothLayers = portDisagreements(root, "fixture", "`InBoth[F]` in **`application`**")
+      assertEquals(inBothLayers.length, 1, inBothLayers.mkString("\n"))
+      assert(
+        inBothLayers.head.contains("declares it as well"),
+        s"a port annotated into `application` and also declared in `domain` was not refused for that " +
+          s"reason: ${inBothLayers.mkString("\n")}"
+      )
+
+      val undeclared = portDisagreements(root, "fixture", "`Nowhere[F]`")
+      assertEquals(undeclared.length, 1, undeclared.mkString("\n"))
+      assert(undeclared.head.contains("declares no such trait"), undeclared.head)
+
+      val noSuchLayer = portDisagreements(root, "fixture", "`InDomain[F]` in `infrastructure`")
+      assertEquals(noSuchLayer.length, 1, noSuchLayer.mkString("\n"))
+      assert(noSuchLayer.head.contains("there is no services/fixture/infrastructure/src"), noSuchLayer.head)
+
+      assertEquals(portDisagreements(root, "absent", "not built").length, 0)
+      assertEquals(portDisagreements(root, "absent", "`Something[F]`").length, 1)
+    } finally deleteTree(root)
   }
 
   test("everyPortTraitInAServicesDomainIsNamedInItsRow") {
@@ -271,11 +310,85 @@ final class ArchitectureDocumentSuite extends FunSuite {
       .toList
   }
 
-  /** Every `` `Name[F]` `` in a table cell. The backticks matter: they are what distinguishes an identifier
-    * the tree can be asked about from a sentence explaining that there is nothing to ask.
+  /** Every `` `Name[F]` `` in a table cell, with the layer the cell claims for it when it claims one.
+    *
+    * The backticks matter: they are what distinguishes an identifier the tree can be asked about from a
+    * sentence explaining that there is nothing to ask. The optional tail is ``in `layer` `` — with or without
+    * the bold — and `None` means the column header stands, which is `domain`.
     */
-  private def identifiersIn(cell: String): List[String] =
-    "`([A-Za-z][A-Za-z0-9]*)\\[F\\]`".r.findAllMatchIn(cell).map(_.group(1)).toList
+  private def portsIn(cell: String): List[(String, Option[String])] =
+    "`([A-Za-z][A-Za-z0-9]*)\\[F\\]`(?: in \\*{0,2}`([a-z]+)`\\*{0,2})?".r
+      .findAllMatchIn(cell)
+      .map(found => (found.group(1), Option(found.group(2))))
+      .toList
+
+  /** Just the names, for the check that reads the tree and asks the row. */
+  private def identifiersIn(cell: String): List[String] = portsIn(cell).map(_._1)
+
+  /** Every disagreement between one row's port cell and one tree, as sentences; empty when they agree.
+    *
+    * A function over a root rather than a block of `assert`s inside the case, because a check written against
+    * this repository can only fail on the repository as it is: the annotation's second half — an annotated
+    * port must be absent from `domain` — is true of today's tree whether the reader enforces it or not, and a
+    * rule that cannot be made to fail is not a rule. This shape lets both halves be driven over a fixture
+    * tree that holds each disagreement on purpose.
+    */
+  private def portDisagreements(root: Path, service: String, cell: String): List[String] = {
+    val domain = root.resolve(s"services/$service/domain/src")
+
+    if !Files.isDirectory(domain) then
+      // A row for a service that does not exist has to say so in words.
+      if cell.contains("not built") then Nil
+      else
+        List(
+          s"ARCHITECTURE.md §3 has a $service row and there is no services/$service/domain; a row for a " +
+            "service that does not exist has to say so in words"
+        )
+    else {
+      val inDomain = traitsDeclaredIn(domain)
+
+      portsIn(cell).flatMap { case (name, claimed) =>
+        val layer = claimed.getOrElse("domain")
+        val source = root.resolve(s"services/$service/$layer/src")
+
+        if !Files.isDirectory(source) then
+          List(
+            s"ARCHITECTURE.md §3 puts `$name[F]` in the $service service's `$layer`, and there is no " +
+              s"services/$service/$layer/src"
+          )
+        else {
+          val declared = traitsDeclaredIn(source)
+
+          val absent = Option.when(!declared.contains(name))(
+            s"ARCHITECTURE.md §3 lists `$name[F]` as a port of the $service service's `$layer`, and " +
+              s"services/$service/$layer/src declares no such trait. Ports declared there: " +
+              declared.toList.sorted.mkString(", ")
+          )
+
+          // The other half of the annotation. A port marked as living above `domain` that is also declared
+          // in `domain` means the row and the tree disagree in the direction the note was written to deny.
+          val alsoInDomain = Option.when(claimed.isDefined && inDomain.contains(name))(
+            s"ARCHITECTURE.md §3 says `$name[F]` is in the $service service's `$layer`, and " +
+              s"services/$service/domain/src declares it as well"
+          )
+
+          absent.toList ++ alsoInDomain.toList
+        }
+      }
+    }
+  }
+
+  private def write(root: Path, relative: String, content: String): Unit = {
+    val file = root.resolve(relative)
+    Files.createDirectories(file.getParent)
+    Files.writeString(file, content)
+    ()
+  }
+
+  private def deleteTree(root: Path): Unit = {
+    val everything = Files.walk(root).iterator.asScala.toList
+    everything.reverse.foreach(Files.deleteIfExists)
+  }
 
   private def traitsDeclaredIn(directory: Path): Set[String] = {
     val sources = Files.walk(directory).iterator.asScala.filter(_.toString.endsWith(".scala")).toList

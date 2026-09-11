@@ -442,4 +442,105 @@ final class KsqlHttpSuite extends KuiIOSuite {
 
     client.objects.map(_ => assertEquals(seen.toList, List("/ksql")))
   }
+
+  test("a failure that is not a response names the exception's kind and its own words, and nothing else") {
+    // W10-A1: `thrown` builds its sentence from `getClass.getSimpleName` and `getMessage`, and a plain
+    // `toString` was green across the whole module. The two differ in exactly the place that matters: a
+    // `toString` publishes whatever the exception class chose to print — a package path at best, and at
+    // worst a connection failure's own text, which routinely carries the URL it was dialling with the
+    // password still in it. The rule is that this sentence is *composed here* from two known fields.
+    val silent = new RuntimeException()
+
+    val calls: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF(_ => IO.raiseError[sttp.client4.Response[StubBody]](silent))
+
+    val streaming: StreamBackend[IO, Fs2Streams[IO]] =
+      StreamBackendStub[IO, Fs2Streams[IO]](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+        .thenRespondF(_ =>
+          IO.pure(
+            ResponseStub.adjust(Stream.empty.covaryAll[IO, Byte], StatusCode.Ok): sttp.client4.Response[
+              StubBody
+            ]
+          )
+        )
+
+    new KsqlHttp[IO](
+      calls,
+      streaming,
+      base,
+      scala.concurrent.duration.Duration(30, "seconds"),
+      KsqlCredentials.anonymous[IO]
+    ).objects.map {
+      case Left(kui.kernel.error.InfrastructureError.Unreachable(upstream, cause)) =>
+        assertEquals(upstream, KsqlHttp.UpstreamName)
+        // `cause` is the field that reaches the log. An exception with no message of its own says so in
+        // words rather than trailing off, and the class is named without its package, so nothing the
+        // exception class itself chose to print gets through.
+        assertEquals(cause, "RuntimeException: no further detail")
+      case other => fail(s"expected an unreachable upstream, got $other")
+    }
+  }
+
+  test("a statement answered as a document with a top-level message shows that message") {
+    // W10-A1: `statusFrom`'s middle arm — `commandStatus` absent, a top-level `message` present — had no
+    // case, and deleting it left the module green. ksqlDB writes that shape for a `TERMINATE` and for
+    // several warnings, and without the arm the screen reads "the ksqlDB cluster answered a
+    // currentStatus rather than a status" over a server that said exactly what happened.
+    val entity =
+      io.circe.parser
+        .parse("""{"@type":"warning_entity","message":"Query terminated","statementText":"TERMINATE q;"}""")
+        .fold(error => fail(error.getMessage), identity)
+
+    KsqlHttp.statusFrom(List(entity)) match {
+      case StatementOutcome.Status(message, entityId) =>
+        assertEquals(message, "Query terminated")
+        assertEquals(entityId, Some("warning_entity"))
+      case other => fail(s"expected the server's own sentence, got $other")
+    }
+  }
+
+  test("both of the error shapes a query stream can carry are failures rather than skipped frames") {
+    // W10-A1: `frameOf` reads three shapes and only one of them had a case. A frame this function does
+    // not recognise as an error falls through to `frameOfJson`, which answers `None` — so the frame is
+    // *dropped* and the query ends looking like a query that simply stopped. Silence is the worst
+    // possible rendering of "the server refused your statement".
+    def messageOf(line: String): Option[String] =
+      KsqlHttp.frameOf(line).flatMap(_.left.toOption).map(_.message)
+
+    // The older shape: `errorMessage` as a string rather than as an object.
+    assertEquals(
+      messageOf("""{"errorMessage":"the query was terminated"}"""),
+      Some("the query was terminated")
+    )
+    // The typed shape: an `@type` that ends in `error`, with the sentence beside it.
+    assertEquals(
+      messageOf("""{"@type":"generic_error","error_code":40001,"message":"Cannot query a stream"}"""),
+      Some("Cannot query a stream")
+    )
+    // And the nested one, which already had a case, so that the three stay asserted together.
+    assertEquals(
+      messageOf("""{"errorMessage":{"message":"the query was terminated"}}"""),
+      Some("the query was terminated")
+    )
+  }
+
+  test("a comma inside a quoted column name does not become a column boundary") {
+    // W10-A1: `columnsOf` tracks backticks as well as `<>` and `()`, and the quoted half had no case —
+    // the existing fixture's commas are all inside a nested type. ksqlDB quotes any identifier that is not
+    // a bare word, and a column somebody called `A,B` would otherwise split the schema into two headings
+    // and draw every row under the wrong one.
+    assertEquals(KsqlHttp.columnsOf("`A,B` STRING, `C` INT"), List("A,B", "C"))
+  }
+
+  test("a refusal whose message is blank is reported as a refusal with no reason, not as a blank one") {
+    // W10-A1: the `.filter(_.nonEmpty)` on the parsed detail had no case, and removing it left the module
+    // green. A ksqlDB — or a proxy in front of one — that answers 400 with a `message` of whitespace would
+    // then put an empty sentence on the screen, which is the shape the definition of done forbids: a
+    // figure or a sentence that is drawn as nothing at all.
+    server { case "/ksql" => (StatusCode.BadRequest, """{"message":"   "}""") }.objects.map {
+      case Left(error) =>
+        assertEquals(error.message, "the ksqlDB cluster refused this statement and gave no reason")
+      case Right(other) => fail(s"expected a refusal, got $other")
+    }
+  }
 }

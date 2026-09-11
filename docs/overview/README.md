@@ -55,7 +55,7 @@ The Scala side is built with Mill (`build.mill`), on Scala 3, with cats-effect, 
 | `alerts` | Four rules over facts KUI already reads, an event feed, and a per-principal read marker (ADR-053). |
 | `connect` | Kafka Connect workers: the connector list with each connector's tasks, and pause / resume / restart (ADR-054). |
 | `ksql` | ksqlDB: statements, pull queries and push queries as a stream (ADR-055, ADR-056). |
-| `identity` | Principals and the authentication mechanisms. It holds no routed contract yet. |
+| `identity` | Principals and the authentication mechanisms. It holds no routed contract **by design**, and must not: a proxied `/login` would answer with a principal in a body and set no cookie. |
 
 **Nine of them are routed.** The gateway's `ServiceContracts.byService` is the single place that
 association is declared, and running its own derivation over the file answers `alerts cluster
@@ -77,9 +77,12 @@ app              the wiring and the main class.
 ```
 
 The direction of those dependencies is not a convention here. `./mill checkArchitecture` reads the
-module graph and fails the build on an edge that points the wrong way; it checked 233 modules at
-this wave's integration. ADR-041 is the decision and its §1a explains the one place the rule bends:
-the gateway owns no domain, so its `application` may hold wire types.
+module graph and fails the build on an edge that points the wrong way; run on 2026-09-11 it prints
+`195 modules, 10 rules, no layering violations`. The figure this sentence used to publish was 233,
+which is what Mill prints as its *task* count for the same command and not a count of modules at
+all — the same confusion the `openApiCheck` line below carried. ADR-041 is the decision and its §1a
+explains the one place the rule bends: the gateway owns no domain, so its `application` may hold
+wire types.
 
 ### One contract, two documents
 
@@ -89,7 +92,11 @@ endpoints themselves — **65 paths, 76 operations, 160 component schemas, OpenA
 because those headers are minted by the gateway and stripped from anything a browser sends: a
 browser client generated from the service-facing document would have types obliging every call site
 to send the exact header the security boundary exists to reject. Both are committed and
-`./mill __.openApiCheck` re-renders and byte-compares them (2629 endpoints at integration).
+`./mill __.openApiCheck` re-renders and byte-compares them — **eleven committed documents over ten
+`openApiCheck` targets**: one per service that publishes a contract, plus the gateway's merged pair.
+This sentence used to say *2629 endpoints*, which is neither: it is what Mill prints as its task
+count for that command, it is not a count of anything in the contract, and it answered 2544 on the
+next run of the same command against the same tree.
 
 ---
 
@@ -111,7 +118,8 @@ A feature package owns its screens and its own wire module and nothing else. It 
 through the shell's registry (`frontend/packages/shell/src/features/registry.ts`, eight
 registrations), which loads it by dynamic import, so a feature cannot be imported by another
 feature and a screen cannot be reached by an address the shell does not publish. The gate on that
-is `pnpm lint:boundaries`, which checked 424 files across 11 packages at integration.
+is `pnpm lint:boundaries`, which printed `425 files in 11 packages: no boundary violations` on
+2026-09-11.
 
 Two conventions are worth knowing before you write any of it. **Storybook first**: a component gets
 a story before it gets a screen, because the story is where its states are visible without a
@@ -145,17 +153,29 @@ A change lands when every one of these is green. They are run one at a time; two
 ones together have exhausted memory on a developer machine, and a killed subprocess reads as a
 failure that is not one.
 
-| Gate | What it checks | Size at the wave-8 integration |
+Every figure in the right-hand column was printed by the command beside it on **2026-09-11**, one
+gate at a time. Two of them — the Scala and browser case counts — move on almost every commit, which
+is why the column is dated rather than maintained; the rest move only when the shape of the build
+does.
+
+| Gate | What it checks | Size, measured 2026-09-11 |
 | --- | --- | --- |
-| `./mill __.compile` | Scala compilation under `-Werror` | 8251 sources |
-| `./scripts/run-tests.sh` | every Scala suite | 4,205 cases over 81 modules |
-| `./mill checkArchitecture` | the ADR-041 module dependency direction | 233 modules |
-| `./mill __.checkFormat` | Scalafmt | 252 sources |
-| `./mill __.fix --check` | Scalafix, including the stricter no-`var` rule set for `libs` and every `domain` | 5353 sources — **and no test source anywhere; see `TECH_DEBT.md` TD-027** |
-| `./mill __.openApiCheck` | the two committed OpenAPI documents against a fresh render | 2629 endpoints |
-| `pnpm test` | the browser suites | 1,884 cases over 82 files |
-| `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | 424 files over 11 packages |
-| `./scripts/feature-matrix-check.sh` | every count this repository publishes about itself | 283 claims |
+| `./mill __.compile` | Scala compilation under `-Werror` | 8251/8251 build tasks over 1,145 Scala sources |
+| `./scripts/run-tests.sh` | every Scala suite | **4,310 cases over 81 modules**, all 81 carrying tests |
+| `./mill checkArchitecture` | the ADR-041 module dependency direction | **195 modules**, 10 rules |
+| `./mill __.checkFormat` | Scalafmt | **495/495 over 1,145 sources across 162 reporting targets** |
+| `./mill __.fix --check` | Scalafix, including the stricter no-`var` rule set for `libs` and every `domain` | **10672/10672 over the same 1,145 sources — every test tree included**, with `.scalafix-tests.conf` relaxing four sub-rules for `test/src` only |
+| `./mill __.openApiCheck` | the committed OpenAPI documents against a fresh render | 11 documents over 10 targets; the merged one is 65 paths, 76 operations, 160 schemas |
+| `pnpm test` | the browser suites | **1,908 cases** |
+| `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | 425 files over 11 packages; 790 stories × 2 themes |
+| `pnpm e2e` | Playwright against a quickstart built from the tree | 105 passed, 3 skipped, 0 failed |
+| `./scripts/feature-matrix-check.sh` | every count and every service claim this repository publishes about itself | **390 claims over nine sections** |
+
+**The `__.fix --check` row carried a clause that was false when it was read again.** It said *5353
+sources — and no test source anywhere*. Wave 9 widened both style gates to every test tree: 81
+`.test.fix` targets resolve where none did, `./mill resolve '__.fix'` answers 163 targets, and 380
+of the repository's 499 test sources had to be reformatted the first time the formatter reached them.
+`TECH_DEBT.md` TD-027 is closed on those figures.
 
 The last one is unusual enough to be worth a paragraph, because it is the gate most likely to
 surprise you. Several documents here publish figures about the code — how many capability rows are
@@ -164,9 +184,17 @@ dependency matrix, whether every ADR on disk has a row in `DECISIONS.md`. Each s
 wrapped in an HTML comment naming the claims it expects checked, and the script compares every one
 of them against the thing it counts. It fails with the figure that would make each sentence true,
 so repairing it is a substitution rather than an investigation. It also checks itself first: its own
-comparator is driven into both of its states before a document is read, and section 6 drives each of
-its refusals over a fixture built for the occasion, because a refusal whose failing case never
-arrives in this repository is a line nothing distinguishes from `true`.
+comparator is driven into both of its states before a document is read, and a whole section drives
+each of its refusals over a fixture built for the occasion, because a refusal whose failing case
+never arrives in this repository is a line nothing distinguishes from `true`.
+
+**And since 2026-09-11 it compares one thing that is not a figure.** Every gate in this list was
+green over a `README.md` whose *What is not built* section said *"No Kafka Connect, no ksqlDB"* —
+against a tree that ships both services and routes both through the gateway — because the false
+sentence sat outside every marker and nothing here read prose. The `capability-claims` section
+compares the service roster that README publishes against `services/` on disk and against
+`ServiceContracts.byService`, in both directions: a service named as not built that is built fails,
+and so does a service on disk the page does not mention at all.
 
 ---
 

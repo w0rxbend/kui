@@ -32,10 +32,12 @@
  *
  * `src/documents/*.json` are **byte-for-byte copies** of
  * `services/ksql/contract/test/resources/golden/`, held that way by `wire.golden.test.ts`, so a
- * fixture here cannot become a third opinion about the wire. Three are hand-made because the
- * service commits no golden for them — `objects-forbidden.json`, `objects-empty.json` and
- * `statement-plan-push-query.json` — and they are the states a working ksqlDB cannot be put into on
- * purpose, which is where this project's defects have always lived.
+ * fixture here cannot become a third opinion about the wire. Two are hand-made because the service
+ * commits no golden for them — `objects-forbidden.json` and `objects-empty.json` — and they are the
+ * states a working ksqlDB cannot be put into on purpose, which is where this project's defects have
+ * always lived. There were three: `statement-plan-push-query.json` was a plan no encoder had
+ * produced, and W10-06 replaced it with `testing.ts`'s `pushQueryPlan`, which is derived from a
+ * golden and says which two fields it changed.
  */
 import { describe, expect, it } from "vitest";
 import { flush } from "solid-js";
@@ -71,6 +73,7 @@ import {
   findViolations,
   grant,
   mount,
+  pushQueryPlan,
   serving,
   testContext,
   TEST_CLUSTER,
@@ -83,7 +86,6 @@ import objectsForbidden from "./documents/objects-forbidden.json" with { type: "
 import objectsUnavailable from "./documents/objects-unavailable.json" with { type: "json" };
 import planHarmless from "./documents/statement-plan-harmless.json" with { type: "json" };
 import planDrop from "./documents/statement-plan.json" with { type: "json" };
-import planPush from "./documents/statement-plan-push-query.json" with { type: "json" };
 import resultRows from "./documents/statement-rows.json" with { type: "json" };
 import resultStatus from "./documents/statement-status.json" with { type: "json" };
 
@@ -111,14 +113,19 @@ function open(
     readonly plan?: unknown;
     readonly result?: unknown;
     readonly openStream?: PushQueryOpener | undefined;
+    /** Runs before a write is answered. See `serving`: `undefined` back means "answer normally". */
+    readonly write?: (path: string) => Promise<unknown>;
   } = {},
 ): Open {
-  const stub = serving({
-    [KSQL_OBJECTS_PATH]: objects,
-    [CLUSTER_PATH]: cluster(options.readOnly === true),
-    ...(options.plan === undefined ? {} : { [KSQL_PLAN_PATH]: options.plan }),
-    ...(options.result === undefined ? {} : { [KSQL_STATEMENTS_PATH]: options.result }),
-  });
+  const stub = serving(
+    {
+      [KSQL_OBJECTS_PATH]: objects,
+      [CLUSTER_PATH]: cluster(options.readOnly === true),
+      ...(options.plan === undefined ? {} : { [KSQL_PLAN_PATH]: options.plan }),
+      ...(options.result === undefined ? {} : { [KSQL_STATEMENTS_PATH]: options.result }),
+    },
+    options.write,
+  );
   const queries = createQueryRegistry();
   const mounted = mount(() => (
     <KuiProvider value={testContext(stub.api, options.grants)}>
@@ -533,6 +540,130 @@ describe("the plan phase", () => {
     dispose();
   });
 
+  it("keeps the dialogue open when the veil is clicked, and applies nothing", async () => {
+    /*
+     * W9-A1, and the seam is one word: `ConfirmStatement` passes `closeOnScrimClick={false}`, and
+     * flipping it to `true` left the whole workspace green — 1,904 cases when W9-A1 measured it,
+     * and this case is what that flip now reddens. The veil is not an answer to the question this
+     * dialogue is asking, and the reader is looking at a statement in order to decide, so a stray
+     * click beside the box must leave both the dialogue and the statement exactly where they were.
+     *
+     * The click is dispatched rather than `userEvent.click`ed: `userEvent` decides where a click
+     * lands from layout and jsdom has none, so it never reaches an element that covers the window.
+     * The property itself is held in `kernel/src/components/dialog.test.tsx`, which drives the veil
+     * at the level the prop is applied; this case is the caller asking for it.
+     */
+    const { container, stub, dispose } = open(objectsResponse, {
+      grants: MAY_EXECUTE,
+      plan: planDrop,
+      result: resultStatus,
+    });
+    await settle();
+
+    type(container, "DROP STREAM ORDERS DELETE TOPIC;");
+    await settle();
+    button(container, "Run query")?.click();
+    await settle();
+
+    const veil = document.querySelector(".kui-modal-scrim");
+    expect(veil, "the confirmation drew no veil").not.toBeNull();
+    veil?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="ksql-confirm"]'),
+      "a stray click on the veil dismissed the dialogue between a typed statement and a " +
+        "deleted Kafka topic",
+    ).not.toBeNull();
+    expect(calls(stub, KSQL_STATEMENTS_PATH)).toBe(0);
+    // And the statement is still the one the service canonicalised, not a re-planned one.
+    expect(document.querySelector('[data-testid="ksql-confirm-statement"]')?.textContent).toBe(
+      "DROP STREAM ORDERS DELETE TOPIC;",
+    );
+    dispose();
+  });
+
+  it("refuses a second press while the confirmed statement is still in flight", async () => {
+    /*
+     * W9-A1's row, and the cost is not the one the row predicted. Measured here rather than
+     * assumed: `busy={apply.busy()}` on `ConfirmStatement` replaced with `busy={false}` does
+     * **not** send the statement twice — `createMutation.run` holds a plain `running` flag for
+     * exactly this, set in the same synchronous turn, so the second request never leaves. The
+     * network is defended whichever way this prop goes.
+     *
+     * What the prop defends is what the reader sees, and losing it is worse than a silent no-op:
+     * with `busy={false}` the button looks idle and pressable while a `DROP … DELETE TOPIC` is in
+     * flight, the press reaches `applyNow`, and `run` answers `{kind:"running"}` — which is not
+     * `done`, so this screen closes the confirmation and paints *"The ksqlDB server did not accept
+     * that, and did not say why"* over a statement that is running perfectly well. An operator is
+     * then looking at a failure panel for a destructive statement that is about to succeed.
+     *
+     * So the assertions run in that order: the busy state first (the mutation kills it), then the
+     * two consequences, then the send count — which is stated as a **regression guard and not a
+     * closed mutation**, because `createMutation` holds it today and this case would stay green if
+     * this prop were the only thing removed.
+     *
+     * The apply is held in flight rather than simulated: the stub's write hook does not answer the
+     * statements address until this case releases it, so the second press lands in the same state a
+     * reader's second press lands in — the first request sent, no answer yet.
+     */
+    let release: (() => void) | undefined;
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const { container, stub, dispose } = open(objectsResponse, {
+      grants: MAY_EXECUTE,
+      plan: planDrop,
+      result: resultStatus,
+      write: async (path) => {
+        // Only the apply is held. The plan is the other write on this screen and it must answer
+        // normally, or the dialogue this case is about never opens.
+        if (path === KSQL_STATEMENTS_PATH) await inFlight;
+        return undefined;
+      },
+    });
+    await settle();
+
+    type(container, "DROP STREAM ORDERS DELETE TOPIC;");
+    await settle();
+    button(container, "Run query")?.click();
+    await settle();
+
+    button(container, "Run it")?.click();
+    await settle();
+    expect(calls(stub, KSQL_STATEMENTS_PATH), "the confirmed statement was not sent").toBe(1);
+
+    const confirm = button(container, "Run it");
+    expect(
+      confirm?.getAttribute("aria-busy"),
+      "the confirm button said nothing while a destructive statement was in flight",
+    ).toBe("true");
+
+    confirm?.click();
+    await settle();
+    expect(
+      document.querySelector('[data-testid="ksql-confirm"]'),
+      "a second press closed the confirmation while the statement it confirmed was still running",
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="ksql-result"]')?.getAttribute("data-kind"),
+      "a second press reported the running statement as one the server would not accept",
+    ).not.toBe("failed");
+    expect(
+      calls(stub, KSQL_STATEMENTS_PATH),
+      "a second press sent the destructive statement again while the first was still running",
+    ).toBe(1);
+
+    release?.();
+    await settle();
+    // Released, the one request finishes and the dialogue goes away: the refusal above is a
+    // refusal to send it *twice*, not a refusal to send it at all.
+    expect(calls(stub, KSQL_STATEMENTS_PATH)).toBe(1);
+    expect(document.querySelector('[data-testid="ksql-confirm"]')).toBeNull();
+    dispose();
+  });
+
   it("never posts a push query to the address that refuses one", async () => {
     /*
      * A `SELECT ... EMIT CHANGES` does not finish, so `KsqlEndpoints.execute` refuses it and names
@@ -542,7 +673,7 @@ describe("the plan phase", () => {
      */
     const { container, stub, dispose } = open(objectsResponse, {
       grants: MAY_EXECUTE,
-      plan: planPush,
+      plan: pushQueryPlan,
       result: resultStatus,
       openStream: fakeStream().opener,
     });
@@ -821,7 +952,7 @@ describe("a push query's result region", () => {
     const stream = fakeStream();
     const opened = open(objectsResponse, {
       grants: MAY_EXECUTE,
-      plan: planPush,
+      plan: pushQueryPlan,
       openStream: stream.opener,
     });
     await settle();

@@ -230,12 +230,29 @@ object AuthRoutes {
       basePath: String,
       secureCookies: Boolean
   ): F[CookieValueWithMeta] =
+    sessionOf[F](req)
+      .flatMap(previous => replaceSession[F](store, previous, principal))
+      .map(cookieOf(_, basePath, secureCookies))
+
+  /** Delete, then create. The id and the CSRF secret both have to change, because both are values an attacker
+    * may already hold — which is what makes a session id they planted on the victim worthless the moment that
+    * victim signs in.
+    *
+    * `private[auth]` rather than `private`, and separated from [[signIn]], so that the rule can be asserted
+    * against a real session store without a `ServerRequest` and without an identity service to sign in to:
+    * the whole sign-in path is unreachable in a deployment that has configured no identity service, which is
+    * every deployment this project's suites build.
+    */
+  private[auth] def replaceSession[F[_]: Sync](
+      store: SessionStore[F],
+      previous: Session,
+      principal: Principal
+  ): F[Session] =
     for {
-      previous <- sessionOf[F](req)
       _ <- store.delete(previous.id)
       now <- Clock[F].realTimeInstant
       session <- store.create(principal, now)
-    } yield cookieOf(session, basePath, secureCookies)
+    } yield session
 
   /** The cookie for the session the request already has, unchanged.
     *

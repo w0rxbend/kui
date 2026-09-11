@@ -7,7 +7,7 @@ import kui.config.ClusterConfig
 import kui.kernel.serde.Target
 import kui.kernel.{ClusterId, TopicName}
 import kui.message.application.{RecordMask, RecordMasking}
-import kui.message.domain.{Decoded, RenderedHeader}
+import kui.message.domain.{DecodeError, Decoded, RenderedHeader}
 import kui.security.masking.{MaskingEngine, MaskingRule}
 
 /** The message domain's `RecordMasking`, answered from this process's own `kui.clusters[].masking[]`.
@@ -78,7 +78,11 @@ object ConfiguredRecordMasking {
       topic: TopicName,
       keys: Boolean,
       values: Boolean
-  ): RecordMask =
+  ): RecordMask = {
+    // Hoisted out of the per-record function for the same reason `keys` and `values` are parameters: it is
+    // a property of the topic and the rule list, and both are fixed for the whole read.
+    val withheld = withheldWhereMasked(keys, values)
+
     record =>
       record.copy(
         key = if keys then maskPayload(rules, topic, Target.Key, record.key) else record.key,
@@ -87,8 +91,59 @@ object ConfiguredRecordMasking {
         // rules under `Target.Value` and argues for it: a header belongs to the record, not to its key or
         // its value, so only value-scoped and unscoped rules reach one. Asking for headers here when only
         // `keys` is true would re-decide that in a second place and get the opposite answer.
-        headers = if values then maskHeaders(rules, topic, record.headers) else record.headers
+        headers = if values then maskHeaders(rules, topic, record.headers) else record.headers,
+        decodeErrors = record.decodeErrors.map(withheld)
       )
+  }
+
+  /** The sentence a decode error's `cause` becomes on a half this topic masks.
+    *
+    * Display text, in the same register as the cause it replaces, because it is drawn where that cause was
+    * drawn: on the record, beside the payload that could not be read.
+    */
+  private[infrastructure] val WithheldCause: String =
+    "this payload could not be decoded, and the detail is withheld because a masking rule is in force " +
+      "for this topic"
+
+  /** A decode error whose `cause` may quote the payload, on a half that is masked, loses the quotation.
+    *
+    * ==The decision, and it is a decision rather than an oversight==
+    *
+    * `DecodeError.cause` is the one payload-derived field of a `DecodedRecord` that is not `key`, `value` or
+    * `headers`, and it crosses the wire in `MessageDto` exactly as they do. It is written by a serde that
+    * failed, and at least one of them quotes the bytes: `libs/serde`'s `JsonSerde.describeFirst` puts the
+    * payload's **first printable character** into the sentence it hands back (``starts with `4` ``). One
+    * character — and a whole-value text rule exists to hide precisely that text, so under such a rule the
+    * service would mask a payload and then publish the first character of it in the field beside.
+    *
+    * So on a masked half the cause is replaced rather than masked. Three alternatives were weighed and each
+    * is worse:
+    *
+    *   - **Leave it.** ADR-023's bar is "before any DTO leaves the service", and this port's own scaladoc
+    *     claims the placement satisfies it for every reader at once. One character is a small leak and a leak
+    *     all the same, and the number of characters is a serde's choice, not this file's — a serde added
+    *     tomorrow that quotes the first *line* would inherit the exposure silently.
+    *   - **Run the rules over the cause.** A field rule cannot apply: the cause is prose, not a document with
+    *     named fields, so only a whole-value rule would reach it and it would render as asterisks — which
+    *     throws away "this record could not be decoded" along with the character.
+    *   - **Drop the error.** The screen would show a record with an empty payload and nothing saying why,
+    *     which is the failure `DecodeError` exists to prevent: a record KUI cannot decode is still a record
+    *     the user came to look at.
+    *
+    * What survives is the half that is not payload-derived and is what an operator acts on: `target` and
+    * `serde` — "the value could not be read as Avro" — with the quotation gone.
+    *
+    * An error on a half this topic does **not** mask is untouched, for the same reason the payload of that
+    * half is untouched: nothing there is hidden, so there is nothing to withhold.
+    */
+  private def withheldWhereMasked(keys: Boolean, values: Boolean)(error: DecodeError): DecodeError = {
+    val masked = error.target match {
+      case Target.Key => keys
+      case Target.Value => values
+    }
+
+    if masked then error.copy(cause = WithheldCause) else error
+  }
 
   /** One decoded half, masked in whichever form the serde produced.
     *

@@ -110,7 +110,59 @@ trait KuiPureModule extends KuiModule {
 }
 
 /** A module that runs on the JVM. Its own trait so that JVM-only defaults have somewhere to live. */
-trait KuiJvmModule extends KuiModule
+trait KuiJvmModule extends KuiModule {
+
+  /** Runs one of this module's document generators in a forked JVM, and when the fork dies, says
+    * what the fork said.
+    *
+    * `runMain(...)()` reports a dead child as `Subprocess failed`, carrying an exit code and
+    * nothing else. Measured across waves 8 and 9: roughly one `./mill __.openApiCheck` run in four
+    * under load fails that way, on a different module each run, with an empty log — which is
+    * byte-for-byte indistinguishable from the one defect this gate exists to catch, a committed
+    * document that no longer matches the endpoints. Two waves spent an hour each telling those two
+    * apart by hand, and both times the answer was that the fork never reached `main`.
+    *
+    * So the child's two streams are captured rather than inherited, and both are replayed into the
+    * failure. A stale document then arrives with the generator's own diff; a JVM that could not
+    * start arrives with the reason the JVM gives, which is the sentence that was being thrown away.
+    * Silence on both streams is itself a finding and is reported as one, because it is the only
+    * remaining shape in which this task can fail without saying why.
+    *
+    * `check = false` is the whole mechanism: it is what makes the non-zero exit a value this task
+    * can read the streams beside, rather than an exception thrown before it gets the chance.
+    */
+  def runDocumentMain(mainClass: String, args: String*): Task[Unit] = Task.Anon {
+    val ran = mill.util.Jvm.callProcess(
+      mainClass = mainClass,
+      mainArgs = args,
+      javaHome = javaHome().map(_.path),
+      jvmArgs = forkArgs(),
+      classPath = runClasspath().map(_.path),
+      env = forkEnv(),
+      cwd = forkWorkingDir(),
+      stdout = os.Pipe,
+      stderr = os.Pipe,
+      check = false
+    )
+
+    val said = Seq(ran.out.text().trim, ran.err.text().trim).filter(_.nonEmpty).mkString("\n")
+
+    if (ran.exitCode == 0) {
+      // The generators are quiet on success, so this is usually nothing. It is forwarded anyway:
+      // a warning printed by a run that still exited 0 is exactly the kind of thing that goes
+      // unread for three waves.
+      if (said.nonEmpty) Task.log.info(said)
+    } else if (said.isEmpty) {
+      Task.fail(
+        s"$mainClass exited ${ran.exitCode} and printed nothing on stdout or stderr.\n" +
+          "The fork died before it reached `main`, so this is not a stale document: re-run this\n" +
+          "one module on an unloaded machine before touching any openapi.json."
+      )
+    } else {
+      Task.fail(s"$mainClass exited ${ran.exitCode}:\n$said")
+    }
+  }
+}
 
 
 
@@ -1025,11 +1077,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.cluster.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.cluster.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.cluster.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.cluster.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -1254,7 +1306,12 @@ object services extends Module {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
-          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // A real meter, in memory. `MaskingMetrics` is the only thing that decides what the
+          // `{cluster, topic, target}` attributes on `kui.masking.applied` actually contain, and a
+          // fake counter cannot tell a swapped attribute from a correct one — it agrees with the
+          // bug. Reading the point back off an in-memory meter is the only assertion that can.
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
         )
       }
     }
@@ -1572,7 +1629,11 @@ object services extends Module {
 
       /** Regenerates both committed documents. */
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget, openApiBrowserTarget)()
+        runDocumentMain(
+          "kui.gateway.api.openapi.OpenApiDocument",
+          openApiTarget,
+          openApiBrowserTarget
+        )()
       }
 
       /** Fails when the committed document no longer matches the endpoints it was generated from. A
@@ -1580,7 +1641,12 @@ object services extends Module {
         * builds against an API that changed three releases ago.
         */
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget, openApiBrowserTarget, "--check")()
+        runDocumentMain(
+          "kui.gateway.api.openapi.OpenApiDocument",
+          openApiTarget,
+          openApiBrowserTarget,
+          "--check"
+        )()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -1771,11 +1837,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.topic.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.topic.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.topic.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.topic.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -2016,11 +2082,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.identity.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.identity.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.identity.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.identity.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -2235,11 +2301,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.consumer.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.consumer.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.consumer.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.consumer.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -2446,11 +2512,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.schema.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.schema.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.schema.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.schema.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -2644,11 +2710,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.metrics.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.metrics.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.metrics.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.metrics.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -2838,11 +2904,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.alerts.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.alerts.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.alerts.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.alerts.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -3052,11 +3118,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.connect.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.connect.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.connect.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.connect.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -3263,11 +3329,11 @@ object services extends Module {
       private def openApiTarget: String = (moduleDir / "openapi.json").toString
 
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.ksql.api.OpenApiDocument", openApiTarget)()
+        runDocumentMain("kui.ksql.api.OpenApiDocument", openApiTarget)()
       }
 
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.ksql.api.OpenApiDocument", openApiTarget, "--check")()
+        runDocumentMain("kui.ksql.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {

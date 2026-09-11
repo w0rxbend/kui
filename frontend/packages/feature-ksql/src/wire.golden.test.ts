@@ -53,7 +53,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { fetchObjects, KSQL_OBJECTS_PATH } from "./data.js";
-import { serving } from "./testing.js";
+import { pushQueryPlan, serving } from "./testing.js";
 import {
   decodePlan,
   decodeQueryHeader,
@@ -290,6 +290,61 @@ describe("the documents the ksql service rendered", () => {
       const mine = readFileSync(join(DOCUMENTS, name), "utf8");
       expect(mine, `${name} has drifted from the golden`).toBe(golden?.text);
     }
+  });
+
+  it("holds no plan document that no encoder produced", () => {
+    /*
+     * W10-06. `statement-plan-push-query.json` lived in `documents/` and was written by hand: it
+     * carried `"warnings": []` where `KsqlUseCases.plan` gives a push query exactly one warning,
+     * and nothing compared the two. A hand-written file in this directory is indistinguishable
+     * from a captured one, which is why house rule 12 exists — so the plan documents are held
+     * to their goldens by name, and a new one with nothing behind it is a red case rather than a
+     * fixture somebody trusts.
+     *
+     * Plans specifically, and not every document here: `objects-forbidden.json` and
+     * `objects-empty.json` are hand-made on purpose and named as such in `ksql.test.tsx`'s header —
+     * they are states a working ksqlDB cannot be put into to be captured. A plan has no such
+     * excuse; `services/ksql` can render one for any statement it is given.
+     */
+    const committed = goldens().map((one) => one.name);
+    const plans = readdirSync(DOCUMENTS).filter(
+      (name) => name.startsWith("statement-plan") && name.endsWith(".json"),
+    );
+    expect(plans.length, "this package holds no plan document at all").toBeGreaterThan(0);
+
+    const invented = plans.filter((name) => !committed.includes(name));
+    expect(
+      invented,
+      `${invented.join(", ")} is a plan document with no golden behind it: either ` +
+        "services/ksql/contract commits the golden, or the case that needs it derives the " +
+        "document from one that exists and says which fields it changed (testing.ts's " +
+        "pushQueryPlan)",
+    ).toEqual([]);
+  });
+
+  it("derives the push query's plan from a golden, changing only two fields", () => {
+    /*
+     * The document the cases route a push query on. There is no golden for it — the service commits
+     * no plan for a `SELECT … EMIT CHANGES` — so it is the *harmless* plan golden with the
+     * statement and the shape replaced, and this case is what stops that derivation growing a third
+     * field. `warnings` in particular: the real document carries `KsqlUseCases.PushQueryElsewhere`,
+     * and copying that sentence here by eye would be a second copy of a Scala constant with nothing
+     * comparing the two.
+     */
+    const golden = goldens().find((one) => one.name === "statement-plan-harmless.json");
+    expect(golden, "the harmless plan golden is gone, so the derivation has no base").toBeDefined();
+
+    const base = record(golden?.document);
+    const derived = record(pushQueryPlan);
+    const keys = [...new Set([...Object.keys(base), ...Object.keys(derived)])];
+    const changed = keys
+      .filter((key) => JSON.stringify(base[key]) !== JSON.stringify(derived[key]))
+      .sort();
+    expect(changed, "the derived push-query plan diverges from its golden by more than its shape")
+      .toEqual(["shape", "statement"]);
+
+    // And it is still a plan this build can read, which is the only reason it exists.
+    expect(decodePlan(pushQueryPlan)).not.toBe(Unreadable);
   });
 });
 

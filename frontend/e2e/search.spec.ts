@@ -147,11 +147,102 @@ test.describe("cross-entity search", () => {
       await expect(overlay).toContainText(/Nothing matches/i);
       await expect(overlay).not.toContainText(/Not searched/i);
     } else {
+      /*
+       * Said out loud, because a green run over this arm is not coverage of the other one.
+       *
+       * `/api/v1/search` is global and this deployment registers a cluster with no schema registry,
+       * so **every** query answers `partial: ["schema"]` and the arm above has never executed here
+       * — measured on `?q=orders` and on this query. W9-03's verifier replaced the empty-state
+       * sentence in the served bundle with a bare `0` and this file stayed 6 passed. The case below
+       * is what pins that sentence; this annotation is what stops the reader of a green run from
+       * believing this case did.
+       */
+      test.info().annotations.push({
+        type: "arm not exercised",
+        description:
+          `this deployment answered partial: [${partial.join(", ")}], so the "everybody answered ` +
+          `and nothing matched" arm did not run; it is driven by the case below`,
+      });
       await expect(overlay).toContainText(/Not searched/i);
       await expect(overlay).toContainText(/missing, not empty/i);
       await expect(overlay).not.toContainText(/Nothing matches/i);
     }
     await expect(overlay).not.toContainText(/not answering/i);
+  });
+
+  /**
+   * The empty state, reached the only way this deployment can reach it.
+   *
+   * The case above branches on the wire and the wire here has one value: `staging-eu-01` has no
+   * schema registry, `/api/v1/search` is global rather than cluster-scoped, so every query — a
+   * matching one and this deliberately unmatchable one alike — comes back `partial: ["schema"]`.
+   * `searchStatus` is then right to refuse the empty rendering, because "Nothing matches" over a
+   * search that never reached the registry is a false negative and a false negative in a search box
+   * is indistinguishable from an absence. The consequence is that the *honest* empty state — the
+   * one an operator sees on a healthy deployment when they mistype a topic name — is drawn by no
+   * browser on this stack, and nothing here pinned it.
+   *
+   * So one field of the answer is replaced on the wire, and only one. The results are the gateway's
+   * own: the query really is answered by the real search endpoint over the real cluster and really
+   * does match nothing. What the intercept changes is `partial`, which is a fact about **which
+   * services this deployment runs** and not a fact about the rendering under test — the same
+   * deployment shape difference the case above has to branch on. Nothing else is faked, and the
+   * case fails if the gateway stops answering or starts matching this query.
+   *
+   * This is a second case rather than a third arm of the first one because the two ask different
+   * questions: the one above asks what this deployment draws, and this one asks what the empty
+   * state is. Both are `searchStatus`'s contract and only one of them can be true at a time.
+   */
+  test("draws the empty state when everybody answered and nothing matched", async ({ page }) => {
+    const query = "zzz-nothing-matches-this-zzz";
+    let served = 0;
+
+    /* A predicate rather than a glob: Playwright's URL globs treat `?` as a wildcard, and a pattern
+       that matched more than this one path would rewrite answers this case is not about. */
+    await page.route(
+      (url) => url.pathname === "/api/v1/search",
+      async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          results?: {
+            topics?: readonly unknown[];
+            groups?: readonly unknown[];
+            subjects?: readonly unknown[];
+          };
+        };
+        const hits =
+          (body.results?.topics?.length ?? 0) +
+          (body.results?.groups?.length ?? 0) +
+          (body.results?.subjects?.length ?? 0);
+        expect(
+          hits,
+          `the gateway matched ${hits} rows for ${query}, so the empty state is not the honest ` +
+            `rendering of this answer and this case would be asserting a sentence over results`,
+        ).toBe(0);
+        served += 1;
+        await route.fulfill({ response, json: { ...body, partial: [] } });
+      },
+    );
+
+    await search(page, query);
+    const overlay = page.getByTestId("search");
+
+    /* The sentence, in the field's own words and with the query quoted back — an empty panel and a
+       bare `0` are the two renderings this replaces, and both of them read as a broken box. */
+    await expect(overlay).toContainText(/Nothing matches/i);
+    await expect(overlay).toContainText(query);
+
+    /* And neither of the other two sentences: an answer that reached everybody has nothing to
+       caveat, and nothing failed. Drawing either over this one tells the operator two different
+       things about one answer. */
+    await expect(overlay).not.toContainText(/Not searched/i);
+    await expect(overlay).not.toContainText(/not answering/i);
+
+    expect(
+      served,
+      "the search endpoint was never called through the browser, so the assertions above ran " +
+        "against a panel this case did not put there",
+    ).toBeGreaterThan(0);
   });
 
   test("bounds the query at the box, at the length the endpoint accepts", async ({ page, api }) => {

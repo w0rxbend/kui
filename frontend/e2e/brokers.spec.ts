@@ -405,6 +405,45 @@ test.describe("the brokers screen", () => {
      * a case about brokers. What the switch above establishes is that the change propagated; what
      * follows establishes that this screen is the second cluster's.
      */
+
+    /*
+     * The wire, which is the only thing on this page that differs between the two clusters.
+     *
+     * Everything below reads the screen, and reading the screen cannot decide this question on this
+     * deployment: both registered profiles point at the same `kafka:9092`, so their summaries and
+     * their broker lists are identical documents and every figure below agrees with whichever
+     * cluster was asked. Measured in wave 9 (`docs/plan/verification/W9-03.md` F1) and reproduced
+     * here before this assertion was written: pinning all three of this route's loaders to
+     * `quickstart` while leaving their reactive keys alone left this file **11 passed**, with the
+     * browser issuing `GET /api/v1/clusters/quickstart/brokers` on
+     * `/ui/clusters/staging-eu-01/brokers`. The identity assertions this case's header claims
+     * redden on that mutation are driven by the route parameter, not by the answer.
+     *
+     * **And waiting for the right request does not close it either**, which is why this is a
+     * ledger and not a `waitForRequest`. Measured on this stack, with every `/api/` request on this
+     * navigation printed: the frame asks for this cluster whatever the route does — the drawer's
+     * tree reads `/clusters/<id>/brokers`, `/topics`, `/consumer-groups` and `/schemas/subjects`,
+     * and the drawer foot's storage meter reads `/clusters/<id>/log-dirs` — so
+     * `/api/v1/clusters/staging-eu-01/brokers` is on the wire under the mutation too, three times,
+     * and a positive observation of it passes while the cards on screen are the first cluster's.
+     * The three requests the mutation actually moves are the route's own, and what distinguishes
+     * them from the frame's is not that they happened but **whose id they carry**.
+     *
+     * So: every cluster-scoped request this navigation makes must name this cluster. The buffer is
+     * emptied on the main frame's own navigation request, so nothing the previous screen left in
+     * flight is counted, and the assertion is read after the screen has finished drawing.
+     */
+    const foreign: string[] = [];
+    page.on("request", (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+        foreign.length = 0;
+        return;
+      }
+      const path = new URL(request.url()).pathname;
+      const named = /^\/api\/v1\/clusters\/([^/]+)(?:\/|$)/.exec(path);
+      if (named !== null && named[1] !== other.id) foreign.push(path);
+    });
+
     await page.goto(`/ui/clusters/${other.id}/brokers`);
 
     const document = (await api.get(`/api/v1/clusters/${other.id}`)) as ClusterDocument;
@@ -434,6 +473,18 @@ test.describe("the brokers screen", () => {
        names the cluster whose brokers are on screen, and the rail's current tile agrees with it. */
     await expect(page.getByTestId("nav-drawer")).toContainText(other.name);
     await expect(page.getByTestId(`env-tile-${other.id}`)).toHaveAttribute("aria-current", "true");
+
+    /*
+     * And the ledger, read last, because by now the screen has drawn everything it is going to ask
+     * for. On a clean stack this list is empty; under the mutation described above it holds
+     * `/api/v1/clusters/quickstart/brokers`, `/api/v1/clusters/quickstart` and
+     * `/api/v1/clusters/quickstart/log-dirs` — the route's three loaders, and nothing else moves.
+     */
+    expect(
+      foreign,
+      "this screen asked another cluster's endpoints, so the figures above are that cluster's " +
+        "and agree only because both profiles point at one broker",
+    ).toEqual([]);
   });
 });
 

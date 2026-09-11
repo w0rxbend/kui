@@ -8,6 +8,9 @@ import scala.jdk.CollectionConverters.*
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 
+import kui.kernel.TopicName
+import kui.kernel.serde.{PayloadKind, Target}
+import kui.security.masking.{KeepEnds, MaskingEngine, MaskingKind}
 import kui.testkit.KuiSuite
 
 /** That every configuration file this repository ships actually loads.
@@ -308,55 +311,76 @@ final class ShippedConfigurationSuite extends KuiSuite {
     }
   }
 
-  test("a shipped file that adds a masking section still loads, and none of them has one today") {
-    // DM-001/ADR-023's half of this suite, and the only half W9-06 could write: `deployment/**` belongs to
-    // another packet this wave, so no shipped file can be given a `masking:` block here. What CAN be
-    // asserted is the two facts that matter to an operator copying one of these examples.
+  test("the quickstart ships the masking rules its comment describes, and the second profile has none") {
+    // DM-001/ADR-023 AS A DEPLOYMENT AND NOT ONLY AS A TYPE. Wave 9 wired the masking engine into the
+    // message service and left it unreachable: no file in this repository configured a rule, so the
+    // feature could be read about and not looked at. This case is the other end of that repair -- the
+    // quickstart now masks two fields of `customers.profiles`, and this asserts the rules a person is
+    // told they will see.
     //
-    // FIRST, that every shipped file is unchanged by the new section existing -- the standing rule for
-    // every configuration section this project has added, stated over the files somebody actually copies
-    // rather than over an invented one. `shipped` already proves each of them loads; this proves none of
-    // them silently acquired a masking rule.
-    //
-    // SECOND, and this is the one an absence could hide: that the section is REACHABLE from a real shipped
-    // file. `kui.clusters.*.masking.*` had to be added to the loader's known-key list, and a key missing
-    // from that list is refused as "is not a KUI configuration key" -- so a masking rule written into any
-    // of these files would stop the process, and no suite over the files as they stand could tell. The
-    // overlay below is a second document in the same load, which is exactly how `docker-compose` layers a
-    // deployment's file over an image's default.
+    // IT IS ALSO THE REACHABILITY ASSERTION THE OVERLAY USED TO MAKE. `kui.clusters.*.masking.*` has to
+    // be in `KuiConfigSource.UnknownKeys.Known` or every one of these keys is refused at start-up as "is
+    // not a KUI configuration key". The overlay this replaces wrote three of those keys into a second
+    // document over the quickstart; the shipped file now writes five of them itself, which is a stronger
+    // statement of the same fact: deleting a `Known` entry stops the quickstart booting.
     val quickstart = "deployment/quickstart/kui-quickstart.yaml"
 
-    val asShipped = KuiConfigSource
+    val loaded = KuiConfigSource
       .loadFrom[IO](Nil, List(resolve(quickstart)), Map.empty, UrlPolicy.Dev)
       .unsafeRunSync()
       .fold(errors => fail(s"$quickstart does not load:\n${errors.render}"), identity)
 
-    assert(
-      asShipped.clusters.forall(_.masking.isEmpty),
-      clue = s"a shipped file now configures masking: ${asShipped.clusters.map(_.id.value)}"
-    )
-
-    val overlay = ConfigFixtures.yaml(
-      """kui:
-        |  clusters:
-        |    - masking:
-        |        - kind: mask
-        |          fields: [cardNumber]
-        |          keep:
-        |            suffix: 4
-        |""".stripMargin
-    )
-
-    val withMasking = KuiConfigSource
-      .loadFrom[IO](Nil, List(resolve(quickstart), overlay), Map.empty, UrlPolicy.Dev)
-      .unsafeRunSync()
-      .fold(
-        errors => fail(s"$quickstart does not load with a masking rule over it:\n${errors.render}"),
-        identity
+    val rules = loaded.clusters.head.masking.rules
+    assertEquals(rules.size, 2, clue = s"the quickstart's masking rules: ${rules.map(_.kind)}")
+    assertEquals(
+      rules.map(_.kind),
+      List(
+        MaskingKind.Mask(MaskingConfig.DefaultReplacementChars, KeepEnds(0, 4)),
+        MaskingKind.Replace("<redacted>")
       )
+    )
+    assertEquals(rules.map(_.fields.map(_.toList)), List(Some(List("email")), Some(List("name"))))
+    assertEquals(
+      rules.map(_.topicValuesPattern.map(_.regex)),
+      List(Some("customers\\.profiles"), Some("customers\\.profiles"))
+    )
 
-    assertEquals(withMasking.clusters.head.masking.rules.size, 1)
-    assertEquals(withMasking.clusters.head.masking.rules.head.fields.map(_.toList), Some(List("cardNumber")))
+    // AS THE ENGINE READS IT, over a record shaped like the ones `seed/data/customers.profiles` writes.
+    // A case that stopped at the parse would prove the loader agrees with itself, and the promise made
+    // in the file's own comment is about what the message browser draws.
+    assertEquals(
+      MaskingEngine
+        .maskPayload(
+          rules,
+          TopicName.unsafe("customers.profiles"),
+          Target.Value,
+          PayloadKind.Json,
+          """{"customerId":"CUST-8812","name":"Marta Zielinska","email":"marta.zielinska@example.com"}"""
+        ),
+      """{"customerId":"CUST-8812","name":"<redacted>","email":"***********************.com"}"""
+    )
+
+    // AND THE SECOND PROFILE, WHICH CONFIGURES NONE ON PURPOSE. `staging-eu-01` points at the same
+    // `kafka:9092` as the cluster above, so the same records read through it come back in full: a
+    // masking rule protects the registered profile it is written on and not the broker underneath it.
+    // That is the property `docs/operations/masking.md` warns about, and this is where it is true.
+    // Copying the block onto the second cluster would take the demonstration away.
+    assertEquals(loaded.clusters(1).masking, MaskingConfig.empty)
+
+    // Every other shipped file is unchanged by the section existing, which is the standing rule for
+    // every configuration section this project has added: an existing YAML still boots unchanged.
+    val others = shipped.filterNot((relative, _, _) => relative == quickstart)
+    others.foreach { (relative, policy, environment) =>
+      val configured = KuiConfigSource
+        .loadFrom[IO](Nil, List(resolve(relative)), environment, policy)
+        .unsafeRunSync()
+        .fold(errors => fail(s"$relative does not load:\n${errors.render}"), identity)
+
+      assert(
+        configured.clusters.forall(_.masking.isEmpty),
+        clue = s"$relative acquired a masking rule and nothing says why"
+      )
+    }
   }
 
   test("the quickstart describes the broker the quickstart starts") {

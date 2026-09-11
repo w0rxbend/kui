@@ -277,19 +277,24 @@ accepted it. The topic and message services wrote `Failed` here and W6-A1 repair
   count and a state, and never a rate.
 - Every operation is audited under a record type that is scheduled for deletion by a failing test
   rather than by a comment (§10).
-<!-- checked: openapi-totals -- verified by ./scripts/feature-matrix-check.sh -- claims: openapi-document, openapi-totals, residue -->
+<!-- checked: openapi-totals -- verified by ./scripts/feature-matrix-check.sh -- claims: openapi-document, openapi-totals, merged-path-prefix, residue -->
 - `services/connect/api/openapi.json` is **7 paths, 7 operations and 10 component schemas** — the
   four contract endpoints, each on its own path (`…/connect/connectors`, and one path per verb under
   `…/connect/{connectName}/connectors/{connectorName}/`), plus the three health probes every KUI
   service serves, one operation per path — generated from the endpoint values and committed. Count
   them with `jq '[(.paths|length), ([.paths[]|keys[]]|length), (.components.schemas|length)]'
   services/connect/api/openapi.json`, which is what `./mill services.connect.api.openApiCheck`
-  regenerates and compares. **Four** is a different figure about the same service: the number of
-  connect operations in the *merged* document, which
-  `jq '[.paths|keys[]|select(test("/connect/"))]|length' docs/api/openapi.json` counts. The two are
-  quoted apart here because they have been quoted together, and the merged document's own totals
-  belong to ADR-048.
+  regenerates and compares. **4** of `docs/api/openapi.json`'s paths are under `/connect/`, which is
+  a different figure about the same service and is counted with
+  `jq '[.paths|keys[]|select(test("/connect/"))]|length' docs/api/openapi.json`. The two are quoted
+  apart here because they have been quoted together, and the merged document's own totals belong to
+  ADR-048.
 <!-- /checked -->
+
+That second figure was published here as a number spelled out and emphasised, with no comparison
+behind it, until 2026-09-11 — neither the `openapi-totals` comparison nor the residue check could
+see it, because both read digits only. It is a digit inside a compared sentence now, and the residue
+refuses an emphasised number word.
 
 ## Alternatives rejected
 

@@ -7,9 +7,9 @@ import cats.effect.{IO, Ref}
 
 import kui.config.{ClusterConfig, MaskingConfig}
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
-import kui.kernel.serde.{PayloadKind, SerdeName}
+import kui.kernel.serde.{PayloadKind, SerdeName, Target}
 import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
-import kui.message.domain.{Decoded, DecodedRecord, RenderedHeader, TimestampType}
+import kui.message.domain.{DecodeError, Decoded, DecodedRecord, RenderedHeader, TimestampType}
 import kui.security.masking.{KeepEnds, MaskingKind, MaskingRule}
 import kui.testkit.KuiIOSuite
 
@@ -222,6 +222,81 @@ final class ConfiguredRecordMaskingSuite extends KuiIOSuite {
       applied <- mask.forTopic(prod, payments)
       masked = applied(record(value = Decoded.absent(SerdeName.String)))
     } yield assertEquals(masked.value, Decoded.absent(SerdeName.String))
+  }
+
+  // -------------------------------------------------------------------- the decode error's cause
+
+  /** What `libs/serde`'s `JsonSerde` writes when a value is not JSON: the payload's first character, quoted.
+    *
+    * Copied in the shape that serde produces rather than invented, because the exposure this case pins is
+    * exactly that shape. `describeFirst` renders anything printable as itself.
+    */
+  private val quotesThePayload: DecodeError =
+    DecodeError(
+      Target.Value,
+      SerdeName.Json,
+      "this is not JSON: a JSON document has to start with `{` or `[`, and this one starts with `4`"
+    )
+
+  test("a masked value's decode error keeps its serde and its target and loses the payload it quoted") {
+    // W9-06/F9, decided. `DecodeError.cause` is the one payload-derived field of a `DecodedRecord` that is
+    // not `key`, `value` or `headers`, and it crosses the wire in `MessageDto` exactly as they do. A
+    // whole-value rule over a text payload exists to hide that text; a serde that could not read the
+    // payload has already put the first character of it into this sentence.
+    //
+    // The decision is written in `RecordMasking`'s scaladoc and implemented in `withheldWhereMasked`: the
+    // cause is replaced, not masked, so that "this record could not be decoded" survives while the
+    // quotation does not.
+    for {
+      mask <- masking(List(rule(valuesPattern = Some(".*"))))
+      applied <- mask.forTopic(prod, payments)
+      masked = applied(
+        record(
+          value = Decoded("4111111111111111", PayloadKind.Text, SerdeName.Json, Map.empty),
+          headers = Nil
+        ).copy(decodeErrors = List(quotesThePayload))
+      )
+    } yield {
+      assertEquals(masked.decodeErrors.map(_.target), List(Target.Value))
+      assertEquals(masked.decodeErrors.map(_.serde), List(SerdeName.Json))
+      assertEquals(masked.decodeErrors.map(_.cause), List(ConfiguredRecordMasking.WithheldCause))
+      // The character itself, named: the assertion above would still pass if the replacement happened to
+      // contain the payload, and this one is the actual promise.
+      assert(!masked.decodeErrors.head.cause.contains("`4`"), clue = masked.decodeErrors.head.cause)
+      // W10-04/F1, closed by W10-A2. The line above compares the cause with the constant it came from,
+      // which is a tautology at every value the constant can take — the empty string included, and the
+      // empty string also satisfies the `contains("`4`")` refusal. So the two assertions that look like
+      // the whole rule are jointly satisfied by `WithheldCause = ""`, and `DecodeError.cause` crosses the
+      // wire in `MessageDto`: the screen would then draw a record with no payload and nothing saying why,
+      // which is the outcome this decision's own scaladoc argues the "drop the error" alternative down
+      // for. The surviving half has to be asserted as literal text, because it is a promise about words.
+      val cause = masked.decodeErrors.head.cause
+      assert(cause.nonEmpty, "the withheld cause is empty, so the record says nothing about itself")
+      assert(cause.contains("could not be decoded"), clue = cause)
+      assert(cause.contains("masking rule"), clue = cause)
+      assertEquals(masked.value.text, "*" * 16)
+    }
+  }
+
+  test("a decode error on a half no rule reaches is left exactly as the serde wrote it") {
+    // The other direction, and it is what keeps this from being a blanket erasure: nothing on an unmasked
+    // half is hidden, so there is nothing to withhold, and a key that failed to decode on a value-masked
+    // topic still tells its reader why.
+    val onTheKey = quotesThePayload.copy(target = Target.Key)
+
+    for {
+      mask <- masking(List(rule(valuesPattern = Some(".*"))))
+      applied <- mask.forTopic(prod, payments)
+      masked = applied(record(headers = Nil).copy(decodeErrors = List(onTheKey)))
+    } yield assertEquals(masked.decodeErrors, List(onTheKey))
+  }
+
+  test("a topic no rule reaches keeps every decode error, because it takes the identity mask") {
+    for {
+      mask <- masking(List(rule(valuesPattern = Some("payments\\..*"))))
+      applied <- mask.forTopic(prod, other)
+      original = record().copy(decodeErrors = List(quotesThePayload))
+    } yield assertEquals(applied(original), original)
   }
 
   // -------------------------------------------------------------------- kui.masking.applied

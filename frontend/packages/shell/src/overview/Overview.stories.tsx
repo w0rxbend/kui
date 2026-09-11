@@ -171,13 +171,17 @@ export const StorageLoading: Story = story(LOADING, `${DASHBOARD}/storage`);
 export const UnknownTab: Story = story(HEALTHY, `${DASHBOARD}/nonsense`);
 
 /**
- * The root address, which names no cluster.
+ * The root address, which names no cluster — and nothing is selected either.
  *
- * The strip is absent rather than disabled: its segments would have no address to point at. The
- * body is unchanged, because the model is fetched for whichever cluster the shell has selected.
+ * This is the screen the product opens on, on every deployment registering more than one cluster,
+ * and for a wave it drew six skeletons under *"Asking the cluster how it is."* with nothing in
+ * flight. The strip is absent rather than disabled: its segments would have no address to point at.
+ * The tiles stay — the row has to read as a row of equals — and each says what nobody asked. The
+ * model handed in is `LOADING`, which is what `App.tsx` holds when it has no cluster to fetch for:
+ * the point of the story is that the screen does **not** believe it.
  */
 export const NoClusterInTheAddress: Story = {
-  args: { model: toOverviewModel(HEALTHY) },
+  args: { model: toOverviewModel(LOADING) },
   render: (args) =>
     dashboardHost("/ui", () => <Overview model={args.model} queries={createQueryRegistry()} />)(),
 };

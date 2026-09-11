@@ -3,18 +3,24 @@
 A Kafka management and observability interface. Scala 3 on the server, TypeScript and SolidJS in
 the browser, built and shipped as two independent halves that talk over HTTP.
 
-> **Status: milestones 0 to 5, with sign-in, access control and the schema registry substantially
-> delivered.** KUI connects to real Kafka clusters and is usable from a browser: a dashboard,
-> clusters and brokers, topics and their configuration, browsing and publishing records, consumer
-> groups with their lag, an offset-reset wizard, and schema subjects with their versions and
-> compatibility. It can also create a topic, change a setting, add partitions, empty a topic and
-> delete one — the three that cannot be undone are confirmed against a plan the server computed and
-> applied against a token naming exactly what you were shown. Sign-in and role-based authorization
-> are built, but **`kui.auth.type` defaults to `disabled`**, so an unconfigured deployment lets
-> anyone who can reach the port do anything KUI can do. What is *not* built is named plainly under
-> [What is built, and what is not](#what-is-built-and-what-is-not) below — Kafka Connect, ksqlDB,
-> ACL and quota management, and metrics among them. See [ROADMAP.md](docs/ROADMAP.md) for what
-> lands when, and [docs/plan/](docs/plan/) for the plan that closes the gap to the current design.
+> **Status: every milestone of [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) is closed except its
+> last one, M10, which is open on two of the five things it defines as done.** KUI connects to real
+> Kafka clusters and is usable from a browser: a dashboard with a traffic tab drawn from a real
+> metrics scrape, clusters and brokers, topics and their configuration, browsing and publishing
+> records, consumer groups with their lag, an offset-reset wizard, schema subjects with their
+> versions and compatibility, an alert feed with a notification bell, Kafka Connect connectors with
+> their per-task state, and ksqlDB objects and statements. It can also create a topic, change a
+> setting, add partitions, empty a topic and delete one — the three that cannot be undone are
+> confirmed against a plan the server computed and applied against a token naming exactly what you
+> were shown. Sign-in and role-based authorization are built, but **`kui.auth.type` defaults to
+> `disabled`**, so an unconfigured deployment lets anyone who can reach the port do anything KUI can
+> do. What is *not* built is named plainly under
+> [What is built, and what is not](#what-is-built-and-what-is-not) below, and the roster there is
+> **compared against `services/` and against the gateway's own contract map** by
+> `./scripts/feature-matrix-check.sh`, because this banner said *milestones 0 to 5* and that list
+> said *no Kafka Connect, no ksqlDB* for four milestones after both shipped, with every gate in the
+> repository green over it. See [ROADMAP.md](docs/ROADMAP.md) for how the backend was built, and
+> [docs/plan/](docs/plan/) for the plan that closes the gap to the current design.
 
 ## What it is
 
@@ -45,15 +51,17 @@ documentation, and — through the committed OpenAPI documents the browser's typ
 **It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
 of it flows from Kafka to the browser without buffering whole topics in memory.
 
-**It can be one process or ten.** The same modules compose into a single JVM for local use, or
-into a gateway and nine services in separate containers for production. No code changes between the
-two: `deployment/compose/docker-compose.yml` runs the second shape, and
-`deployment/compose/smoke.sh` stops one of its containers and shows the other eight carrying on.
-Eight, because the script derives that list from `ServiceContracts.byService` — nine contracted
-services — and checks every one of them except the container it stopped; it said five while there
-were six, and the count is now read out of the script rather than remembered. The tenth and
-eleventh directories under `services/` are the gateway itself and `identity`, which has no routed
-contract yet.
+**It can be one process or eleven.** The same modules compose into a single JVM for local use, or
+into a gateway, nine services and the interface as separate containers for production. No code
+changes between the two: `deployment/compose/docker-compose.yml` runs the second shape — eleven KUI
+containers beside the Kafka broker, the schema registry, the Connect worker, the ksqlDB server and
+the metrics exporter it is pointed at — and `deployment/compose/smoke.sh` stops one of them and
+shows the other eight services carrying on. Eight, because the script derives that list from
+`ServiceContracts.byService` — nine contracted services — and checks every one of them except the
+container it stopped; it said five while there were six, and the count is now read out of the script
+rather than remembered. The tenth and eleventh directories under `services/` are the gateway itself
+and `identity`, which is reached through the gateway's own sign-in routes and has no proxied
+contract by design.
 
 **New here?** `docs/overview/README.md` is one document that describes the eleven services, the
 eight feature packages, the two deployment shapes and the gates, for somebody who has never opened
@@ -85,6 +93,10 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 | Schema registry: subjects, versions, registering a version, compatibility levels and checks, registry-backed Avro and JSON Schema decoding | done |
 | Sign-in and access control: form and OIDC authentication, sessions, CSRF, role-based authorization at the edge | done, and disabled by default |
 | Alerts: four cluster rules, event feed, acknowledgement, Alerts screen, dashboard card and notification bell | done, with an SSE change stream and polling fallback |
+| Kafka Connect: the connector list with each connector's tasks and failure reason, pause, resume, restart | done, over one or many Connect workers per cluster (ADR-054) |
+| ksqlDB: streams, tables and running queries, statement execution, push queries as a stream | done, with plan→token→confirm on `DROP … DELETE TOPIC` (ADR-055, ADR-056) |
+| Broker metrics: the dashboard's Traffic tab — throughput, p99 latency, request-handler idle, top producers, record size | done from one Prometheus exposition; see the limits below |
+| Cross-entity search over topics, consumer groups and subjects, from the top bar | done, and says which services it could not ask |
 | Quickstart, configuration examples, demonstration environment | done |
 
 **What is not built:**
@@ -93,7 +105,28 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   session and CSRF layer at the gateway, and a role-based policy evaluated at the edge — but
   `kui.auth.type` defaults to `disabled`. Until you configure it, anyone who can reach the port can
   do anything KUI can do, including deleting topics. Run it on a network you control.
-- **No Kafka Connect, no ksqlDB, no ACL or quota management.**
+- **No ACL and no client-quota management.** It is the one whole area of the reference products
+  KUI has not begun: no screen, no endpoint, no service. The roster below is what a reader should
+  trust about that, because it is compared against the tree rather than written from memory.
+
+<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: service-count, service-routed-count, service-state, service-roster, residue -->
+KUI is **11 services** under `services/`, **9 of them routed** through the gateway. Every name below
+is compared against a directory on disk and against `ServiceContracts.byService` — the gateway's own
+map, and the single place that association is declared — so a sentence here that says a service is
+not built fails the build instead of misleading a reader for four milestones, which is what the
+sentence this block replaced did.
+
+**Built and routed:** `alerts`, `cluster`, `connect`, `consumer`, `ksql`, `message`, `metrics`,
+`schema`, `topic`.
+
+**Built, not routed:** `gateway`, which is the edge itself, and `identity`, which is reached only
+through the gateway's own sign-in routes and deliberately has no proxied contract — a proxied login
+would answer with a principal in a body and set no cookie.
+
+**Not built:** `acl` and `quota`. Nothing in this repository implements either, and the roster
+above is the whole of what does exist.
+<!-- /checked -->
+
 - **Broker metrics from one Prometheus exposition, and not a metrics system.** KUI scrapes a
   JMX-exporter endpoint the deployment declares under `kui.metrics.sources.<cluster>` and keeps a
   bounded series from it. Five reads come off that one scrape — bytes in and out per second, p99
@@ -112,8 +145,14 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   than a failure. There is still no JMX client: `MetricsSourceKind.Jmx` is declared, refuses with a
   sentence naming the build, and cannot be configured at all while a metrics source's address is an
   `http`/`https` URL (ADR-050).
-- The masking engine exists and is tested but is not yet reachable from a screen; it is marked
-  `IMPLEMENTING` rather than `COMPLETE` in the feature matrix.
+- **Field masking is wired and not yet reachable by an operator.** The engine is called from the
+  browse and track paths, and `kui.clusters.<n>.masking` decodes ten keys into its own rule type at
+  start-up, so a rule an operator writes is a start-up error rather than a policy that loads and
+  masks nothing. The quickstart configures a rule, so there is a deployment to look at, and
+  `docs/operations/masking.md` is the key-by-key page. What is missing is the last step this project
+  requires before anything is called done: **nobody has watched a field come back masked in a
+  browser against a running stack.** It is `IMPLEMENTING` rather than `COMPLETE` in the feature
+  matrix for that reason and no other.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent, residue -->
 70 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
@@ -144,12 +183,15 @@ rather than merely until it has started, seeds it with topics, JSON messages and
 that is behind, starts KUI pointed at it, and prints the URL. `quickstart.sh down` removes all of it,
 volumes included.
 
-What you get is the product against that broker: the cluster and its one node, nine topics with
-their partitions and configuration, the JSON records inside them, a form to publish more, three
-consumer groups with their lag, and a wizard that resets a group's offsets and shows you what it
-would write before it writes it. [`deployment/quickstart/README.md`](deployment/quickstart/README.md)
-explains what runs, why the broker's readiness check is what it is, and how to run it when 8080 or
-9092 are already taken.
+What you get is the product against that broker: two registered clusters, the broker and its node,
+seeded topics with their partitions and configuration, the JSON records inside them, a form to
+publish more, consumer groups with their lag, a schema registry, a Connect worker with a connector
+deployed on it, a ksqlDB server with streams and queries, and a wizard that resets a group's offsets
+and shows you what it would write before it writes it. **The exact counts are published once, in
+[`deployment/quickstart/README.md`](deployment/quickstart/README.md)**, beside the commands that
+recount them — they used to be published here as well and the two copies disagreed, which is what a
+figure in two places does. That file also explains why the broker's readiness check is what it is,
+and how to run the stack when 8080 or 9092 are already taken.
 
 One caveat if you have run KUI before: the quickstart reuses whatever `kui-allinone` image is
 already on the machine and only builds one when none is there, so after changing code run
@@ -389,10 +431,10 @@ rather than saying "build failed". Every one of them is a command you can run yo
 | `compile` | Every module compiles, with warnings treated as errors | `./mill __.compile` |
 | `style` | Formatting and lint rules are clean | `./mill __.checkFormat` then `./mill __.fix --check` |
 | `architecture` | No module dependency breaks the layering rules of ADR-041 | `./mill checkArchitecture` |
-| `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from, and every count this repository publishes about itself still matches what it counts | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` then `./scripts/feature-matrix-check.sh` |
+| `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from, and every count this repository publishes about itself still matches what it counts — and, since 2026-09-11, that the service roster the README above publishes matches `services/` and the gateway's contract map | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` then `./scripts/feature-matrix-check.sh` |
 | `test` | Every unit, property and contract suite passes on the JVM | `./scripts/run-tests.sh` |
 | `frontend` | The interface's own build, with no JDK and no Mill: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and a check that the committed browser types have not drifted from the OpenAPI document they are generated from | — |
-| `compose` | The five container images build and the Compose stack survives one service dying | `./deployment/compose/smoke.sh` |
+| `compose` | The container images build — the list is derived from `docker-compose.yml` rather than remembered — and the Compose stack survives one service dying | `./deployment/compose/smoke.sh` |
 | `browser` | The shipped interface works in a real browser against a real stack: `quickstart.sh` brings the product up, then Playwright drives it | `deployment/quickstart/quickstart.sh up` then `pnpm -C frontend e2e` |
 
 One thing about the `test` stage is worth knowing before you are surprised by it.
@@ -405,13 +447,15 @@ having executed no tests at all. The script asks Mill which test modules exist, 
 selector syntax — `./mill '{a.test,b.test}'`, which really does run them all — and then counts
 `<testcase>` elements in the JUnit reports rather than trusting the number Mill prints at the end,
 which is a count of *build tasks* and roughly twice the number of tests. `./mill resolve '__.test'`
-answers **63 test modules** today, and the script prints how many of them actually contain test
-sources, and how many cases ran, at the end of every run.
+answers **81 test modules** on 2026-09-11, and the script prints how many of them actually contain
+test sources, and how many cases ran, at the end of every run — it has printed *81 with tests* since
+wave 7, which is the first time in this project's history that no module resolved as a test target
+and shipped nothing.
 
-That sentence used to publish a case count and a module count — "4140 test cases across 57
-modules" — and the module half was already wrong when it was read again: 63 modules resolve, not 57.
-A case total moves on almost every commit and nothing compares it with this file, so it is left to
-the script that measures it rather than restated here.
+That sentence used to publish a case count as well — *"4140 test cases across 57 modules"* — and the
+module half was already wrong when it was read again, twice: 63 modules resolved when it said 57,
+and 81 do now. A case total moves on almost every commit and nothing compares it with this file, so it is
+left to the script that measures it rather than restated here, and the module count is dated.
 
 Planned stages that have no build task yet are deliberately not in the workflow. The task that
 creates each one adds its own job. A job that cannot fail is not a check.

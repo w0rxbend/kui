@@ -9,7 +9,8 @@
  * and a columns-on-every-row stream, and every unit case it had was green.
  *
  * The two hand-made documents are named in `ksql.test.tsx`'s header and are the states the service
- * commits no golden for.
+ * commits no golden for. The push query's plan is neither: the service commits no golden for one,
+ * so `testing.ts` derives it from the golden plan beside it and says which two fields it changed.
  */
 import { describe, expect, it } from "vitest";
 import { SharedSseEventNames } from "@kui/api";
@@ -19,7 +20,6 @@ import objectsPartial from "./documents/objects-partial.json" with { type: "json
 import objectsEmpty from "./documents/objects-empty.json" with { type: "json" };
 import planHarmless from "./documents/statement-plan-harmless.json" with { type: "json" };
 import planDrop from "./documents/statement-plan.json" with { type: "json" };
-import planPush from "./documents/statement-plan-push-query.json" with { type: "json" };
 import resultRows from "./documents/statement-rows.json" with { type: "json" };
 import resultStatus from "./documents/statement-status.json" with { type: "json" };
 import streamFrame from "./documents/ksql-stream-frame.json" with { type: "json" };
@@ -37,6 +37,7 @@ import {
   KSQL_ROW_EVENT_NAME,
   Unreadable,
 } from "./wire.js";
+import { pushQueryPlan } from "./testing.js";
 
 /** The section payload of a document, the way `fetchObjects` reaches it. */
 function payload(document: unknown): unknown {
@@ -160,7 +161,7 @@ describe("a plan", () => {
   });
 
   it("reads a push query as a shape to stream rather than a statement to apply", () => {
-    expect(decodePlan(planPush)).toMatchObject({ shape: "push_query", destructive: false });
+    expect(decodePlan(pushQueryPlan)).toMatchObject({ shape: "push_query", destructive: false });
   });
 
   it("refuses a plan whose two flags are missing rather than reading them as false", () => {

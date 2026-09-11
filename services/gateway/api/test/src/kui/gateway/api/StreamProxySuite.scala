@@ -289,6 +289,12 @@ final class StreamProxySuite extends CatsEffectSuite {
   test("aTerminalEventSplitAcrossChunkBoundariesIsStillSeen") {
     // The detection reads bytes as they pass. A chunk boundary inside `event: done` must not hide it — which
     // would append a second terminal event and break the browser's "exactly one" assumption.
+    //
+    // **This case does not reach the carry, and that is stated rather than implied.** It feeds `chunkLimit(1)`
+    // into `withTerminalEvent`, and `relay`'s bounded queue puts the pieces back together before `observe`
+    // runs: measured, the watch sees whole frames here however finely the source is chopped. What this holds
+    // is the end-to-end property — one terminal event out, no second one appended — for a source that
+    // produces tiny chunks. The two cases below hold the carry itself, at the level the split survives to.
     val complete = render(List(messageEvent(1), SseEvent.done(DoneReason.Limit, Some("cursor-9"))))
       .chunkLimit(1)
       .flatMap(Stream.chunk)
@@ -299,5 +305,86 @@ final class StreamProxySuite extends CatsEffectSuite {
       .compile
       .toList
       .map(events => assertEquals(events.map(_.name), List("message", SseEventName.Done)))
+  }
+
+  /* ---------------------------------------------------------------------------------------------------- *
+   * The carry, driven at the level the bytes actually arrive in.
+   *
+   * W10-06. `TerminalWatch` holds two rules and both were held by nothing: the tail of a chunk is carried
+   * into the next one, and an incomplete trailing line is *not* examined. Deleting either left all fourteen
+   * cases above green, because every one of them goes through `relay` and `relay` re-chunks. So these drive
+   * `observe` directly — which is what `private[api]` on the class is for — and each names the mutation it
+   * refuses.
+   * ---------------------------------------------------------------------------------------------------- */
+
+  private def chunkOf(text: String): Chunk[Byte] = Chunk.array(text.getBytes(StandardCharsets.UTF_8))
+
+  test("theTailOfAChunkIsCarriedIntoTheNextOne") {
+    // The mutation: `(Vector.empty, pieces.init)` instead of `(pieces.last, pieces.init)`. A terminal event
+    // whose bytes arrive either side of a chunk boundary is then never seen, the gateway appends an `error`
+    // after a `done` the upstream really sent, and a stream that ended perfectly reaches the browser as one
+    // that broke — the exact defect `withTerminalEvent` exists to prevent, caused by the thing that prevents
+    // it. Three pieces rather than two, so that a carry which survives one boundary and is dropped at the
+    // next does not pass.
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- watch.observe(chunkOf("event: message\ndata: {}\n\nev"))
+      afterFirst <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("ent"))
+      afterSecond <- watch.sawTerminal
+      _ <- watch.observe(chunkOf(": done\ndata: {\"reason\":\"exhausted\"}\n\n"))
+      afterThird <- watch.sawTerminal
+    } yield {
+      assert(!afterFirst, "a `message` event was read as a terminal one")
+      assert(!afterSecond, "a terminal event was announced before its line was complete")
+      assert(afterThird, "a terminal event split across two chunk boundaries was not seen")
+    }
+  }
+
+  test("anIncompleteTrailingLineIsNotReadAsACompleteOne") {
+    // The mutation: `(pieces.last, pieces)` instead of `(pieces.last, pieces.init)`, which examines the
+    // unterminated tail as though a newline had arrived. It invents terminal events: an upstream that dies
+    // in the middle of writing `event: done-ish` — or `event: done` with the newline still to come and the
+    // connection cut — would be recorded as having said `done`, and `withTerminalEvent` would then stay
+    // silent about a stream that really was truncated.
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- watch.observe(chunkOf("event: done"))
+      unterminated <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("-ish\ndata: {}\n\n"))
+      completed <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("event: error\ndata: {}\n\n"))
+      terminal <- watch.sawTerminal
+    } yield {
+      assert(!unterminated, "an unterminated line was read as a complete one")
+      assert(!completed, "`event: done-ish` was read as `event: done`")
+      // Not a vacuous pass: a watch that answered `false` to everything would satisfy both lines above.
+      assert(terminal, "a complete `event: error` line was not seen")
+    }
+  }
+
+  test("theTerminalLatchIsNotClearedByTheBytesThatFollowIt") {
+    // The mutation: `seen.update(_ => complete.exists(isTerminalLine))` instead of `seen.update(_ || ...)`.
+    // `seen` is a latch and the disjunction is the whole of it. Drop it and every chunk that carries no
+    // terminal line clears the flag, so any byte after the terminal frame — a `:` keepalive comment, a final
+    // flush, a stray newline — makes `withTerminalEvent` append an `event: error` after a stream that ended
+    // cleanly. That is verbatim the defect this mechanism exists to prevent, produced by the mechanism
+    // itself, and the tail it needs is the ordinary shape of an SSE body rather than an exotic one.
+    //
+    // The three cases above cannot see it: each of them observes its terminal chunk last, so a latch that
+    // merely remembers the most recent chunk answers exactly as a latch does.
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- watch.observe(chunkOf("event: done\ndata: {\"reason\":\"exhausted\"}\n\n"))
+      afterTerminal <- watch.sawTerminal
+      _ <- watch.observe(chunkOf(": keepalive\n\n"))
+      afterKeepalive <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("\n"))
+      afterFlush <- watch.sawTerminal
+    } yield {
+      assert(afterTerminal, "a complete `event: done` line was not seen")
+      assert(afterKeepalive, "a keepalive comment after the terminal event cleared the latch")
+      assert(afterFlush, "a trailing newline after the terminal event cleared the latch")
+    }
   }
 }

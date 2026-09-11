@@ -4,6 +4,8 @@
  *
  * This is the suite's smoke test. If it fails, nothing else in the run means anything.
  */
+import type { Page } from "@playwright/test";
+
 import { CLUSTER, test, expect, type KuiApi } from "./fixtures";
 
 test.describe("the shell", () => {
@@ -42,6 +44,30 @@ test.describe("the shell", () => {
         `${entry.id} is registered and the frame offers no way to reach it`,
       ).toHaveCount(1);
     }
+
+    /*
+     * And the page under the frame says something.
+     *
+     * This is the half the rewrite above lost. The rail is chrome: it is drawn from the capability
+     * roster, which arrives before any cluster is chosen, so every assertion above is green over a
+     * body that is drawing nothing at all — which is exactly what shipped. Measured on this stack
+     * before the repair: six stat tiles carrying a label apiece, no figure, no sentence, held after
+     * `networkidle` plus fifteen seconds, under the voice line *"Asking the cluster how it is."*
+     * while the only requests in flight were `/auth/me`, `/auth/settings` and
+     * `/capabilities/stream`. Nothing was being asked.
+     *
+     * The two assertions below are deliberately about *whether the screen speaks* rather than about
+     * what it says, because what it says differs legitimately between deployments: with one cluster
+     * registered `soleClusterChoice` selects it and the tiles carry figures; with two, nothing is
+     * selected and each tile says so. Both are honest. A label alone is not, and neither is a claim
+     * to be asking when nothing has been asked.
+     */
+    await page.waitForLoadState("networkidle");
+    await eachTileSaysSomething(page);
+    await expect(
+      page.locator('[data-testid="overview-header"] .kui-page-head__voice'),
+      "the voice line claims a request is in flight on a page that has made none",
+    ).not.toHaveText(/^Asking the cluster/);
   });
 
   test("a deep link renders the page it names, not the root", async ({ page }) => {
@@ -429,6 +455,50 @@ test.describe("the shell", () => {
     await expect(page.getByTestId("nav-drawer")).toContainText(other.name);
   });
 });
+
+/**
+ * The six stat tiles of the cluster dashboard, by the testid each one has carried since `M01`.
+ *
+ * Written out rather than counted off `.kui-stat`, because the defect this guards against is a row
+ * that draws **fewer** tiles than it should: a locator that collects whatever is on the page and
+ * then asserts about each of them passes over an empty row, which is the shape of vacuous coverage
+ * this wave exists to remove.
+ */
+const STAT_TILES = [
+  "stat-brokers",
+  "stat-topics",
+  "stat-in-sync",
+  "stat-production",
+  "stat-consume",
+  "stat-lag",
+] as const;
+
+/**
+ * Every stat tile carries either a figure or a sentence — never its own label and nothing else.
+ *
+ * The label is subtracted rather than matched around, because the assertion has to hold for a
+ * measured `3`, for an em dash with a title, and for a paragraph explaining that nobody asked. What
+ * it must not hold for is the state that shipped, where the only text in the tile was the word
+ * printed above the space the figure was supposed to occupy.
+ *
+ * `expect.poll` rather than a single read: a tile on a cold page is legitimately a skeleton for a
+ * moment, and the claim being made is that it stops being one — not that it never was.
+ */
+async function eachTileSaysSomething(page: Page): Promise<void> {
+  for (const testId of STAT_TILES) {
+    const tile = page.getByTestId(testId);
+    await expect(tile, `${testId} is not drawn at all`).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const label = await tile.locator(".kui-stat__label").innerText();
+          return (await tile.innerText()).replace(label, "").trim();
+        },
+        { message: `${testId} drew its label and nothing else — no figure and no sentence` },
+      )
+      .not.toBe("");
+  }
+}
 
 /**
  * A cluster's own name, made safe to put inside a `RegExp`.

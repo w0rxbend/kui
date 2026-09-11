@@ -16,8 +16,10 @@ import {
   ksqlVoice,
   regionFor,
   rowSentence,
+  unreadableSentence,
   withColumns,
   CELL_ABSENT,
+  MAX_NAMED_UNREADABLE,
   MAX_RESULT_ROWS,
   NO_ROWS,
   NO_ROWS_YET,
@@ -224,5 +226,66 @@ describe("the voice line", () => {
     // Zero is a measured zero here, and a sentence about a cap that was not reached is noise —
     // noise is what stops the sentence being read on the run where it matters.
     expect(ksqlVoice(listing(["stream"]))).not.toContain("left out");
+  });
+});
+
+describe("the banner over rows this build could not describe", () => {
+  it("names them all while there are few, which is every listing this product has seen", () => {
+    expect(unreadableSentence(["(a table the ksqlDB cluster did not name)"])).toBe(
+      "KUI could not describe (a table the ksqlDB cluster did not name). This build and the " +
+        "ksqlDB server disagree about what those rows are, so they are named here rather than " +
+        "left out of the list.",
+    );
+  });
+
+  it("stops naming them at the bound and counts the rest out loud", () => {
+    /*
+     * W10-06. `KsqlObjects.of` bounds `items` at 500 and passes `unreadable` through untouched, so
+     * the length of this list is whatever the ksqlDB server and this build disagree about — and the
+     * banner used to `join(", ")` every one of them into one sentence at the top of the screen.
+     * Ten thousand rows is not a hypothetical shape: it is one `SHOW TOPICS` on a shared cluster
+     * against a build that does not know a kind.
+     *
+     * Counted rather than quietly cut. A sentence that stopped at ten names would be this banner
+     * doing the thing the `unreadable` list exists to refuse — leaving rows out of a list without
+     * saying so.
+     */
+    const many = Array.from({ length: 10000 }, (_, index) => `ROW_${index}`);
+    const sentence = unreadableSentence(many);
+
+    expect(sentence).toContain("ROW_0, ROW_1");
+    expect(sentence, "the banner named more rows than the bound allows").not.toContain(
+      `ROW_${MAX_NAMED_UNREADABLE}`,
+    );
+    expect(sentence).toContain(`and ${many.length - MAX_NAMED_UNREADABLE} other rows`);
+    // The whole sentence, not the list: a bounded banner that ran to a thousand characters would
+    // have missed the point.
+    expect(sentence.length).toBeLessThan(400);
+  });
+
+  it("names ten of them, counted out of the sentence and not derived from the bound", () => {
+    /*
+     * Every assertion in the case above is written in terms of `MAX_NAMED_UNREADABLE` itself, so
+     * the bound cannot disagree with any of them: raising it from 10 to 30 keeps them all green.
+     * The only absolute assertion up there is the 400-character length, which bounds the *sentence*
+     * and not the roster — a three-fold loosening of the number of names slips under it.
+     *
+     * Ten is a chosen number — its own header says so — and a chosen number is asserted where it is
+     * chosen. Counting the names out of the finished sentence, rather than reading the constant
+     * again, is what makes this a case about the screen and not about arithmetic.
+     */
+    expect(MAX_NAMED_UNREADABLE).toBe(10);
+
+    const sentence = unreadableSentence(Array.from({ length: 50 }, (_, index) => `ROW_${index}`));
+    const named = sentence.slice(0, sentence.indexOf(", and ")).match(/ROW_\d+/g) ?? [];
+    expect(named).toHaveLength(10);
+    expect(sentence).toContain("and 40 other rows");
+  });
+
+  it("counts a single extra row as one row", () => {
+    const sentence = unreadableSentence(
+      Array.from({ length: MAX_NAMED_UNREADABLE + 1 }, (_, index) => `ROW_${index}`),
+    );
+    expect(sentence).toContain("and 1 other row.");
   });
 });

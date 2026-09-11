@@ -736,6 +736,33 @@ describe("the tab comes from the route and from nowhere else", () => {
   });
 });
 
+/**
+ * The row, as the design names it (§3.2) — one roster for both of the rows that draw it.
+ *
+ * Written here rather than inside either `describe` because the two rows are built by two different
+ * pieces of production code — `StatRow`'s six hand-written cards and `NoClusterChosen`'s loop over
+ * `STAT_ORDER` — and the thing worth gating is that they agree with the design *and with each
+ * other*. Labels included: the label is the whole of a tile's identity to the operator, and a tile
+ * renamed from `BROKERS ONLINE` to `BROKERS` is a different claim about what the figure counts.
+ */
+const STAT_TESTIDS = [
+  "stat-brokers",
+  "stat-topics",
+  "stat-in-sync",
+  "stat-production",
+  "stat-consume",
+  "stat-lag",
+] as const;
+
+const STAT_LABELS = [
+  "BROKERS ONLINE",
+  "TOPICS",
+  "PARTITIONS IN SYNC",
+  "PRODUCTION",
+  "CONSUME",
+  "CONSUMER LAG",
+] as const;
+
 describe("the healthy dashboard", () => {
   it("draws the five figures and the six panels", () => {
     const { container } = show(HEALTHY);
@@ -764,6 +791,18 @@ describe("the healthy dashboard", () => {
     expect(card?.querySelector(".kui-gauge")?.getAttribute("data-tone")).toBe("success");
   });
 
+  it("draws the design's six tiles in the design's order, and no seventh", () => {
+    // Read off the DOM rather than asked for one testid at a time: `StatRow` writes the order out
+    // by hand and `STAT_ORDER` writes it again for the unasked row, so a reordering — or a card
+    // added to one row and not the other — is a difference no per-testid query can see.
+    const { container } = show(HEALTHY);
+    expect(
+      [...container.querySelectorAll(".kui-overview__stats > .kui-stat")].map((tile) =>
+        tile.getAttribute("data-testid"),
+      ),
+    ).toEqual(STAT_TESTIDS);
+  });
+
   it("has no accessibility violations", async () => {
     const { container } = show(HEALTHY);
     expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
@@ -771,6 +810,139 @@ describe("the healthy dashboard", () => {
 
   it("has no accessibility violations on the storage tab either", async () => {
     const { container } = show(HEALTHY, `${DASHBOARD}/storage`);
+    expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
+  });
+});
+
+/**
+ * `/ui` with nothing selected — the address the product opens on.
+ *
+ * This is the state that shipped for a wave with every gate green: six stat tiles drawing a label
+ * and a skeleton apiece under the sentence *"Asking the cluster how it is."*, held for ever, with
+ * no request about a cluster in flight. Nothing was being asked. The model here is `LOADING`, which
+ * is exactly what `App.tsx` hands the screen when it has nobody to fetch for.
+ *
+ * The six tiles are asserted **one at a time and by their own testid** rather than by counting the
+ * row's text, because the failure was per tile: a row whose first card carried a figure and whose
+ * other five were blank would pass any assertion made over the row as a whole.
+ */
+describe("the address that names no cluster, with nothing selected", () => {
+  const unasked = () =>
+    keep(mount(dashboardHost("/ui", () => <Overview model={toOverviewModel(LOADING)} />)));
+
+  const TILES = STAT_TESTIDS;
+
+  /**
+   * The row as the page actually drew it, rather than the six ids this file already knows.
+   *
+   * Every other case in this block queries one testid at a time, so the row could grow a seventh
+   * tile — the one shape §3.2 forbids, a head with nothing under it — and all of them would still
+   * pass. This reads the row's own children: how many there are, in what order, and that not one of
+   * them is a bare label. It is the case that makes `STAT_ORDER` and `STATS` the production truth
+   * rather than a pair of literals this file happens to agree with today.
+   */
+  it("draws exactly the six tiles, in order, each carrying words and not a bare head", () => {
+    const { container } = unasked();
+    const drawn = [...container.querySelectorAll(".kui-overview__stats > .kui-stat")];
+    expect(drawn.map((tile) => tile.getAttribute("data-testid"))).toEqual(STAT_TESTIDS);
+    expect(drawn.map((tile) => tile.querySelector(".kui-stat__label")?.textContent)).toEqual(
+      STAT_LABELS,
+    );
+    for (const tile of drawn) {
+      const id = tile.getAttribute("data-testid") ?? "(no testid)";
+      const label = tile.querySelector(".kui-stat__label")?.textContent ?? "";
+      const rest = (tile.textContent ?? "").replace(label, "").trim();
+      expect(rest, `${id} carries its label and nothing else`).not.toBe("");
+    }
+  });
+
+  it("gives each tile its own subject and not its neighbour's", () => {
+    // Two tiles describing each other is green under every count, set-size and non-emptiness
+    // assertion in this block, and on the screen it is a page that says produce where it means
+    // consume. The words are the tile's only content here, so they are what has to be read.
+    const { container } = unasked();
+    const note = (testId: string): string =>
+      container.querySelector(`[data-testid="${testId}-note"]`)?.textContent ?? "";
+    expect(note("stat-brokers")).toContain("how many brokers are online");
+    expect(note("stat-topics")).toContain("how many topics there are");
+    expect(note("stat-in-sync")).toContain("partitions are in sync");
+    expect(note("stat-production")).toContain("being produced");
+    expect(note("stat-consume")).toContain("being consumed");
+    expect(note("stat-lag")).toContain("how far the consumers are behind");
+  });
+
+  it("carries a sentence on every one of the six tiles, and a skeleton on none of them", () => {
+    const { container } = unasked();
+    for (const testId of TILES) {
+      const tile = container.querySelector(`[data-testid="${testId}"]`);
+      expect(tile, `${testId} is not on the page at all`).not.toBeNull();
+      // The head is the label; what is asserted here is everything under it. A tile whose only
+      // content is its own label is the defect, and it reads as "the figure has not arrived".
+      const label = tile?.querySelector(".kui-stat__label")?.textContent ?? "";
+      const rest = (tile?.textContent ?? "").replace(label, "").trim();
+      expect(rest, `${testId} carries its label and nothing else`).not.toBe("");
+      expect(rest, `${testId} says nothing about a cluster`).toContain("No cluster is selected");
+      expect(
+        tile?.querySelector(".kui-skeleton"),
+        `${testId} draws a skeleton, which claims a figure is on its way`,
+      ).toBeNull();
+      expect(tile?.getAttribute("aria-busy"), `${testId} says it is busy`).not.toBe("true");
+    }
+  });
+
+  it("says each tile's own subject rather than one sentence six times", () => {
+    // Six identical paragraphs in a row read as a rendering fault, and the tile's subject is the
+    // only thing that makes its blankness informative.
+    const { container } = unasked();
+    const sentences = TILES.map(
+      (testId) => container.querySelector(`[data-testid="${testId}-note"]`)?.textContent ?? "",
+    );
+    expect(new Set(sentences).size).toBe(TILES.length);
+  });
+
+  it("does not claim to be asking anything, because nothing is being asked", () => {
+    const { container } = unasked();
+    const voice = container.querySelector('[data-testid="overview-header"]')?.textContent ?? "";
+    expect(voice).not.toContain("Asking the cluster");
+    expect(voice).toContain("no cluster is selected");
+  });
+
+  it("offers the choice rather than making it, and draws no dashboard behind it", () => {
+    // Not a redirect to the first registered cluster: `soleClusterChoice` already decided that a
+    // deployment with more than one cluster is asking the operator to choose, and choosing twice in
+    // two places is how somebody ends up acting on the cluster they did not name.
+    const { container } = unasked();
+    const chooser = container.querySelector('[data-testid="overview-no-cluster"]');
+    expect(chooser).not.toBeNull();
+    // The words, not merely the node: an empty state whose title and body are blank strings is a
+    // button under a heading-shaped gap, and it renders, mounts and passes an axe sweep. What this
+    // block exists for is that the address which names no cluster *names the choice* — the state it
+    // is in, and where the control that leaves it lives.
+    expect(chooser?.textContent).toContain("No cluster is selected");
+    expect(chooser?.textContent).toContain("environment rail");
+    expect(container.querySelector('[data-testid="no-cluster-manage"]')?.getAttribute("href")).toBe(
+      "/ui/clusters/manage",
+    );
+    expect(container.querySelector('[data-testid="panel-broker-health"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-throughput"]')).toBeNull();
+  });
+
+  it("draws the dashboard the moment a cluster is selected", () => {
+    // The other half of the branch, so that a repair which simply deleted the dashboard from this
+    // address would not pass: the same address with a stored selection is the working screen.
+    const { container } = keep(
+      mount(
+        dashboardHost("/ui", () => <Overview model={toOverviewModel(HEALTHY)} />, {
+          selected: "prod-kyiv-01",
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-testid="overview-no-cluster"]')).toBeNull();
+    expect(container.querySelector('[data-testid="stat-brokers"]')?.textContent).toContain("3");
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = unasked();
     expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
   });
 });

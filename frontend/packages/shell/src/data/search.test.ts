@@ -101,6 +101,20 @@ describe("what the field is showing", () => {
     expect(searchStatus({ kind: "ready", answer })).toBe("ready");
   });
 
+  it("is ready when everybody answered and something matched", () => {
+    /* W10-02, closed by W10-A2. Both cases above hold `searchHitCount === 0`, so the LEFT conjunct
+       of `searchStatus` never decides anything in this file: delete it — leaving
+       `partial.length === 0 ? "empty" : "ready"` — and both stay green, and so does the whole
+       browser suite, while a healthy deployment draws "Nothing matches “orders”." over a full
+       result list. This is the arm that says the search worked, and it is the one of the four that
+       nothing drove: every deployment the e2e suite runs against answers with `partial: []`, so it
+       is the ordinary case rather than an edge one. */
+    const found = decodeSearch(ANSWER);
+    expect(found.partial).toEqual([]);
+    expect(searchHitCount(found)).toBeGreaterThan(0);
+    expect(searchStatus({ kind: "ready", answer: found })).toBe("ready");
+  });
+
   it("reports the other three states as themselves", () => {
     expect(searchStatus({ kind: "idle" })).toBe("idle");
     expect(searchStatus({ kind: "searching" })).toBe("searching");

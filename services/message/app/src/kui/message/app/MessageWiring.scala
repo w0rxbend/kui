@@ -362,8 +362,15 @@ object MessageWiring {
     * were worth hiding, which is itself a map of where this cluster's secrets are; putting that roster into
     * `docker logs` would undo a share of what the rules are for. `MaskingConfig.toString` makes the same
     * choice for the same reason, and this line is what stops the two from disagreeing.
+    *
+    * `private[app]` rather than `private`, and the widening is the point of it. `MaskingConfigSuite` asserts
+    * this discipline for `ClusterConfig.toString`; this is the second place that prints the same fact and it
+    * is the one an operator actually reads, and it had no case at all — changing `.size` to the list printed
+    * every masked field name and topic pattern into `docker logs` with `./scripts/run-tests.sh` green
+    * (W9-06/F3). A rule nothing can reach is a rule nothing can gate, so the seam is landed here and
+    * `MessageWiringSuite` drives it over a captured logger.
     */
-  private def describeMasking[F[_]: Async](
+  private[app] def describeMasking[F[_]: Async](
       clusters: List[ClusterConfig],
       logger: StructuredLogger[F]
   ): F[Unit] =

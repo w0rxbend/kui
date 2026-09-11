@@ -491,6 +491,73 @@ That is a claim worth watching rather than reading.
 [`deployment/demo/README.md`](../../deployment/demo/README.md) brings up three clusters on one
 machine and walks through stopping one of them and starting it again.
 
+### `kui.clusters.<n>.masking` — which fields never leave the service in full
+
+Optional, and absent on every cluster that does not write it. A cluster with no `masking` block
+behaves exactly as every cluster behaved before this section existed: nothing is re-parsed, nothing
+is re-walked, and a browse costs what it always cost.
+
+A rule says **what to do**, **to which fields** and **on which topics**. The shortest useful one is
+five lines:
+
+```yaml
+kui:
+  clusters:
+    - name: Production
+      bootstrapServers: ["kafka:9092"]
+      masking:
+        - kind: mask
+          fields: [cardNumber]
+          keep:
+            suffix: 4
+          topicValuesPattern: "payments\\..*"
+```
+
+[The masking guide](masking.md) is the page to read before writing one: it covers what masking does
+and does not protect, the mistakes this loader refuses, and the two ways of getting a rule wrong
+that it cannot refuse. This section is the key-by-key reference.
+
+| Key | Environment name | Default | Meaning |
+| --- | --- | --- | --- |
+| `kui.clusters.<n>.masking.<i>.kind` | `KUI_CLUSTERS_<N>_MASKING_<I>_KIND` | *(required in an entry)* | `remove`, `mask` or `replace`, matched case-insensitively so a policy copied from Kafbat's upper-case spelling is accepted. |
+| `kui.clusters.<n>.masking.<i>.fields` | `…_MASKING_<I>_FIELDS` | *(unset)* | The field names this rule applies to, at any depth. A YAML list, or comma-separated. Mutually exclusive with `fieldsNamePattern`. |
+| `kui.clusters.<n>.masking.<i>.fieldsNamePattern` | `…_MASKING_<I>_FIELDSNAMEPATTERN` | *(unset)* | A regular expression matched against the **whole** field name, for the fields nobody can enumerate. |
+| `kui.clusters.<n>.masking.<i>.topicKeysPattern` | `…_MASKING_<I>_TOPICKEYSPATTERN` | *(unset)* | A regular expression matched against the **whole** topic name. Set it and the rule applies to those topics' **keys**. |
+| `kui.clusters.<n>.masking.<i>.topicValuesPattern` | `…_MASKING_<I>_TOPICVALUESPATTERN` | *(unset)* | The same, for those topics' **values** — and for their headers, which belong to the record rather than to either half. |
+| `kui.clusters.<n>.masking.<i>.replacement` | `…_MASKING_<I>_REPLACEMENT` | *(required for `kind: replace`)* | The literal a matched field becomes. An empty string is refused: it is a `remove` written the long way and does not even do that. |
+| `kui.clusters.<n>.masking.<i>.maskingCharsReplacement` | `…_MASKING_<I>_MASKINGCHARSREPLACEMENT` | `*` | The characters a `kind: mask` cycles through. One replacement character per input character, never more. |
+| `kui.clusters.<n>.masking.<i>.keep.prefix` | `…_MASKING_<I>_KEEP_PREFIX` | `0` | How many leading characters a `kind: mask` leaves readable. 0–20. |
+| `kui.clusters.<n>.masking.<i>.keep.suffix` | `…_MASKING_<I>_KEEP_SUFFIX` | `0` | The same at the end — "show the last four digits". 0–20, **and the two ends together may not exceed 20**. |
+
+The index must start at `0` and have no gaps, exactly as `kui.clusters` must, and for a sharper
+reason: **order decides the outcome**. A JSON value gets *every* matching rule in the order they are
+written, so "replace this field" followed by "mask everything else" composes, and the same two
+written the other way round do not. Renumbering a deleted entry silently would change which rule
+runs first.
+
+**What each key is read by, because a key that does nothing is refused rather than ignored.**
+`replacement` is read only by `kind: replace`; `maskingCharsReplacement` and `keep` only by
+`kind: mask`. Writing `keep` on a `remove` rule fails the load naming the key, because the symptom
+otherwise is a field that comes back looking wrong with nothing anywhere to explain it.
+
+**Six mistakes fail the load, each naming the entry or the key**: a pattern that will not compile;
+`fields` beside `fieldsNamePattern` (the engine would apply the list and never look at the pattern);
+a `replace` with no `replacement`; a key this `kind` does not read; a `keep` end above 20; and a
+`keep` whose two ends **together** exceed 20. The last one is the subtle member of the set — twenty
+characters at each end of a sixteen-digit card number reveals all of it while reading as a perfectly
+ordinary rule — and the [migration note](masking.md#a-configuration-that-used-to-load) says what to
+do with a file that has one.
+
+**A rule belongs to the registered cluster it is written on and not to the broker.** Two entries in
+`kui.clusters` that point at the same `bootstrapServers` are two profiles over one Kafka, and a rule
+written on one of them does nothing for the other: the same records read through the second profile
+come back in full. That is visible on purpose in the quickstart, whose first cluster masks
+`customers.profiles` and whose second does not.
+
+**Masking is never applied on produce or on a resend**, so what is in the topic is untouched: masking
+a value on the way in would write the mask into Kafka and destroy the original. And it is not access
+control — it hides a field from every reader equally and does not know who is reading.
+
 ### `kui.topics` — the topic service's own dials
 
 Read by the **topic service** only. Every key is optional and every default is a working one: an

@@ -42,21 +42,62 @@ staging-eu-01
   Kafkas — see the `kui.clusters` block in `kui-quickstart.yaml`, which says so at length. The
   second one exists so that the cluster selector in the drawer head has something to select and the
   *"Switched to staging-eu-01"* toast has something to name.
-- **Real data behind both.** The topics screen lists **12** topics (18 counting the internal ones
-  the "show internal topics" switch hides) and **4** consumer groups, one of them genuinely live
-  and behind; the message browser decodes the one Avro topic through the registry
+- **Real data behind both.** The topics screen lists **12** topics, and **16** with the *"show
+  internal topics"* switch on. The message browser decodes the one Avro topic through the registry
   beside the broker; the Connect screen lists `quickstart-file-source` off a real worker; the ksqlDB
   screen lists `QUICKSTART_ORDERS` off a real server; the dashboard's traffic cards read a real JMX
   exporter. Every one of those is a container in the table below and can be asked the same question
   by hand on a published port.
+- **Four consumer groups, and none of them is both live and behind.** The sentence this replaces
+  said *"4 consumer groups, one of them genuinely live and behind"*, and no such group has ever
+  existed on this stack: a group is behind because nothing is reading it, so *live* and *behind* are
+  the two ends of the same axis and the seed deliberately puts one group at each. What is actually
+  there is below, under [What is in the broker](#what-is-in-the-broker).
 - **`staging-eu-01` is deliberately thinner**, and that is the other thing the quickstart now
   demonstrates: it has no metrics source, no Schema Registry, no Connect worker and no ksqlDB
   server, so its dashboard says *"not configured"* where the first cluster draws a figure and its
   drawer hides the three feature rows entirely (ADR-032). A deployment where every cluster has
   everything cannot show that half of the product.
 
-The counts above are this stack's, not promises: re-run the `curl` and count them yourself. The
-broker is still yours to point your own tools at on `localhost:9092`.
+**Both figures in the second bullet were wrong the day they were written, and this is what replaced
+them.** The topic count said *"12 topics (18 counting the internal ones the switch hides)"*. The
+twelve is right; the eighteen never was. Measured on this stack on 2026-09-11:
+
+```
+$ docker exec kui-quickstart-kafka \
+    /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list | wc -l
+16
+
+$ curl -s 'localhost:8080/api/v1/clusters/quickstart/topics?pageSize=100' |
+    jq -r '.topics.data.page.totalItems'
+12
+
+$ curl -s 'localhost:8080/api/v1/clusters/quickstart/topics?pageSize=100&showInternal=true' |
+    jq -r '.topics.data.page.totalItems'
+16
+```
+
+The four the switch hides are `__consumer_offsets` and `__transaction_state`, which Kafka keeps for
+itself; `_schemas`, which the seed creates so that this quickstart has one; and
+`_confluent-ksql-kui-quickstart-_command_topic`, which the ksqlDB server creates on its first
+statement. Of the twelve that are shown, eight come from [`seed/topics.tsv`](seed/topics.tsv) and
+four do not: `connect-configs`, `connect-offsets` and `connect-status` are the Connect worker's own
+bookkeeping, and `connect.file.lines` is what the one registered connector writes into. So the
+broker holds more topics than the seed file lists, and that is the worker and the ksqlDB server
+being real rather than a drift in the seed.
+
+**Nothing in this repository can fail when these numbers drift again.**
+`./scripts/feature-matrix-check.sh` guards every figure this repository publishes about itself, and
+every one of its claim kinds compares a document against the *repository* — a file roster, a table's
+own total, a generated OpenAPI document. The figures above are answers from a *running deployment*,
+and no claim kind can ask a container a question. That is why they survived two waves: each was
+published in a file with no marked region, in a section whose own heading is *"honestly"*. A
+`deployment-claims` kind that runs the three commands above against the stack `quickstart.sh` has
+just started is filed for whoever owns that script next; until it exists, those commands are the
+gate and a reader is the one running it.
+
+The counts here are this stack's, not promises: re-run them and count for yourself. The broker is
+still yours to point your own tools at on `localhost:9092`.
 
 ## What it starts
 
@@ -107,12 +148,35 @@ are listed in [`seed/topics.tsv`](seed/topics.tsv) and the messages in `seed/dat
 | `orders.avro` | 3 | **Avro**, written in the Schema Registry wire format: a magic byte, a schema id, then the encoded body. There is no way to read it without the registry, which is the point — KUI fetches the schema by the id inside each record and shows the decoded JSON, with the schema's type, id and subject beside it |
 | `_schemas` | 1 | an internal topic, the kind a UI hides behind "show internal topics" |
 
-Three consumer groups, in the three states an operator actually has to tell apart:
+Nine rows, and the broker ends up with **16** topics. The other seven belong to the containers
+beside it and not to the seed: `connect-configs`, `connect-offsets`, `connect-status` and
+`connect.file.lines` from the Connect worker and its one connector,
+`_confluent-ksql-kui-quickstart-_command_topic` from the ksqlDB server, and `__consumer_offsets` and
+`__transaction_state` from Kafka itself.
 
-- `order-fulfilment` is **stopped and behind** on `orders.v1`, with uneven lag across partitions;
-- `payments-ledger-sync` is **stopped and caught up**, so zero lag is not the same as no group;
+The seed creates three consumer groups, in the three states an operator actually has to tell apart.
+Measured on this stack on 2026-09-11 with
+`curl -s localhost:8080/api/v1/clusters/quickstart/consumer-groups`, which is where each figure
+below comes from:
+
+- `order-fulfilment` is **stopped and behind** on `orders.v1`: `EMPTY`, no members, `totalLag` 10,
+  with uneven lag across its six partitions;
+- `payments-ledger-sync` is **stopped and caught up**: `EMPTY`, no members, `totalLag` 0 — so zero
+  lag is not the same as no group;
 - `analytics-indexer` is **live**: a real consumer process in the `kui-quickstart-consumer`
-  container, holding the group open with one member and no lag.
+  container, holding the group open — `STABLE`, one member, `totalLag` 0.
+
+**A fourth group is on the broker and the seed does not make it.** `kui-quickstart-connect` is the
+Kafka Connect worker's own group, and KUI reports it as `STABLE` with no members and an
+`incomplete` note saying it could read neither its members nor its offsets — which is a fourth state
+and an honest one. The screen therefore shows **four** groups, not three.
+
+**And the thing the lead section used to claim is not one of them.** No group here is *live and
+behind* at the same time, because a group falls behind precisely when nothing is reading it: the
+one with lag (`order-fulfilment`) has no members, and the one with members (`analytics-indexer`)
+keeps up. Producing faster than the live consumer can read would be the only way to build that
+state, and a quickstart whose numbers depend on the speed of the machine it runs on is one nobody
+trusts — the same argument the paragraph below makes about resetting offsets with a timer.
 
 That last one has to be a separate long-lived container rather than a line in the seed script,
 because a group has members only while some process is holding a session open with the broker. A

@@ -209,6 +209,50 @@ kui:
           - serde: SchemaRegistry
             topicValuesPattern: "orders\\.avro"
 
+      # WHICH FIELDS NEVER LEAVE THE SERVICE IN FULL (DM-001, ADR-023).
+      #
+      # The masking engine has existed since wave 1 and could not be switched on by anybody: there was
+      # no configuration that could define a rule until wave 9, and no deployment that configured one
+      # until this block. It is here so that the feature has a running example a person can look at
+      # rather than a scaladoc — open `customers.profiles` in the message browser and the two rules
+      # below are visible in the payload.
+      #
+      # `customers.profiles` is the seeded topic with something worth hiding in it: every record carries
+      # a customer's full name and email address. The other seeded topics are orders, payments and page
+      # views, and they are deliberately left alone — a quickstart whose every screen is asterisks
+      # demonstrates masking and hides the product.
+      #
+      # THE PATTERN IS MATCHED AGAINST THE WHOLE TOPIC NAME, so `customers\.profiles` is that topic and
+      # not `customers.profiles.v2`, and the dot is escaped for the same reason it is under `serde`
+      # above. `topicValuesPattern` and not `topicKeysPattern`: the key of this topic is a customer id,
+      # which is what a person needs in order to find the record at all.
+      #
+      # MASKING IS A PROPERTY OF THIS REGISTERED CLUSTER AND NOT OF THE BROKER. The second cluster below
+      # points at the same `kafka:9092` and configures no masking, so the SAME records read through
+      # `staging-eu-01` come back in full. That is the single most important thing to know about this
+      # feature and this file is where it can be seen rather than read: a rule protects the profile it
+      # is written on. In a real deployment every profile over a broker carrying this data needs its own
+      # block, and docs/operations/masking.md says so beside this example.
+      #
+      # Masking is never applied on produce or on a resend, so the records in the topic are untouched:
+      # masking a value on the way in would write the mask into Kafka and destroy the original.
+      masking:
+        # The email address, with enough of its tail left to tell two records apart. A `keep` bounds
+        # what the mask REVEALS, so the numbers are small on purpose; `keep.prefix` plus `keep.suffix`
+        # above 20 is refused at start-up, because two legal ends together can reveal a whole field.
+        - kind: mask
+          fields: [email]
+          keep:
+            suffix: 4
+          topicValuesPattern: "customers\\.profiles"
+
+        # And the name, which has no useful partial form: a replaced field says plainly that something
+        # was hidden, where a masked one can be mistaken for the data itself.
+        - kind: replace
+          fields: [name]
+          replacement: "<redacted>"
+          topicValuesPattern: "customers\\.profiles"
+
     # -------------------------------------------------------------------------------------------
     # A SECOND REGISTERED CLUSTER, AND IT POINTS AT THE SAME BROKER ON PURPOSE.
     #

@@ -120,8 +120,19 @@ object StreamProxy {
     * `event: error`. A chunk can end in the middle of a line, so the tail of each chunk is carried into the
     * next one. Only complete lines are examined, which is why a chunk boundary cannot hide a terminal event
     * and cannot invent one either.
+    *
+    * ==Visible to this package's tests, and why it has to be==
+    *
+    * `private[api]` rather than `private`, and the one word is load-bearing. The carry is unreachable from
+    * [[withTerminalEvent]]: everything above goes through [[relay]], whose bounded queue re-chunks the body
+    * before [[observe]] ever sees it, so a split a caller made upstream need not survive to here. W9-A1 found
+    * the consequence and W10-06 measured it: with the carry deleted — `(Vector.empty, pieces.init)` — the
+    * whole suite stayed green, including the case named
+    * `aTerminalEventSplitAcrossChunkBoundariesIsStillSeen`, which feeds `chunkLimit(1)`. It splits the bytes
+    * a layer above the one that reassembles them. The two cases that hold the carry's rules therefore drive
+    * `observe` at this level, which is the only level the split is still there at.
     */
-  final private class TerminalWatch[F[_]: Async](carry: Ref[F, Vector[Byte]], seen: Ref[F, Boolean]) {
+  final private[api] class TerminalWatch[F[_]: Async](carry: Ref[F, Vector[Byte]], seen: Ref[F, Boolean]) {
 
     def observe(chunk: Chunk[Byte]): F[Unit] =
       carry
@@ -157,7 +168,7 @@ object StreamProxy {
 
   private val Newline: Byte = '\n'.toByte
 
-  private object TerminalWatch {
+  private[api] object TerminalWatch {
 
     def apply[F[_]: Async]: F[TerminalWatch[F]] =
       (Ref.of[F, Vector[Byte]](Vector.empty), Ref.of[F, Boolean](false)).mapN(new TerminalWatch[F](_, _))

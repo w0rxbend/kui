@@ -345,6 +345,40 @@ function phrase(value: number, one: string, many?: string): string {
 }
 
 /**
+ * How many undescribable rows the banner names before it starts counting them.
+ *
+ * The service does not bound this list. `KsqlObjects.of` caps `items` at 500 and passes
+ * `unreadable` through untouched, so a ksqlDB this build disagrees with about 10,000 rows puts
+ * 10,000 names on the wire — and the banner joined every one of them into one sentence. Ten is a
+ * **chosen** number and not a measurement: enough names to recognise a pattern in, few enough to
+ * read at the top of a screen. The service half is filed rather than fixed here, because a browser
+ * bound cannot keep a 10,000-entry list out of one JSON document.
+ *
+ * Bounded with the cost stated, like every other cap in this package: the rest are counted out
+ * loud, because a sentence that quietly stopped at ten would be this screen doing the thing the
+ * `unreadable` list exists to refuse.
+ */
+export const MAX_NAMED_UNREADABLE = 10;
+
+/**
+ * The banner over a listing that carries rows this build could not describe.
+ *
+ * A row missing from a list is indistinguishable from a row that is not there, which is why the
+ * service puts these on the wire at all — so they are named here rather than dropped, up to the
+ * bound above, and counted after it.
+ */
+export function unreadableSentence(names: readonly string[]): string {
+  const named = names.slice(0, MAX_NAMED_UNREADABLE);
+  const rest = names.length - named.length;
+  const more = rest === 0 ? "" : `, and ${phrase(rest, "other row", "other rows")}`;
+  return (
+    `KUI could not describe ${named.join(", ")}${more}. ` +
+    "This build and the ksqlDB server disagree about what those rows are, so they are named here " +
+    "rather than left out of the list."
+  );
+}
+
+/**
  * What one cell renders as.
  *
  * Three cases, because the wire has three. A SQL `null` is a value the query produced and is

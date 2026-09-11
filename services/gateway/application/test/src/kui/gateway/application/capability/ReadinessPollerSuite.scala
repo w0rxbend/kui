@@ -3,7 +3,7 @@ package kui.gateway.application.capability
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
-import cats.effect.kernel.Resource
+import cats.effect.kernel.{Ref, Resource}
 import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import munit.CatsEffectSuite
@@ -367,5 +367,176 @@ final class ReadinessPollerSuite extends CatsEffectSuite {
               .use(_ => call)
         }
       }
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // W10-A1. Three rules the `StubServiceClient` fixture cannot express, because it answers the
+  // readiness probe and the capability probe from one `ServiceHealth`: a capability call that fails
+  // while readiness succeeds, a readiness call that fails with an *application* error, and a probe that
+  // throws rather than answering. All three were green under mutation across the whole module.
+  // -----------------------------------------------------------------------------------------------
+
+  /** A `ServiceClient` whose two health probes are scripted independently of each other. */
+  private def scripted(
+      id: ServiceId,
+      readiness: IO[Either[kui.kernel.error.KuiError, kui.contracts.health.ReadinessReport]],
+      capabilities: IO[Either[kui.kernel.error.KuiError, kui.contracts.capability.ServiceCapabilities]]
+  ): kui.gateway.application.client.ServiceClient[IO] =
+    new kui.gateway.application.client.ServiceClient[IO] {
+      val service: ServiceId = id
+
+      def circuitStates: fs2.Stream[IO, kui.http.upstream.CircuitEvent] = fs2.Stream.empty
+
+      def call[I, O](
+          endpoint: sttp.tapir.Endpoint[kui.security.SignedPrincipal, I, kui.contracts.ErrorEnvelope, O, Any],
+          input: I
+      )(ctx: kui.gateway.application.client.CallContext): IO[Either[kui.kernel.error.KuiError, O]] =
+        IO.raiseError(new UnsupportedOperationException("this fixture only answers health probes"))
+
+      def callPublic[I, O](
+          endpoint: sttp.tapir.PublicEndpoint[I, kui.contracts.ErrorEnvelope, O, Any],
+          input: I
+      )(ctx: kui.gateway.application.client.CallContext): IO[Either[kui.kernel.error.KuiError, O]] =
+        if endpoint.info.name.contains("health.ready") then readiness.map(_.map(_.asInstanceOf[O]))
+        else capabilities.map(_.map(_.asInstanceOf[O]))
+
+      def stream[I](
+          endpoint: sttp.tapir.Endpoint[
+            kui.security.SignedPrincipal,
+            I,
+            kui.contracts.ErrorEnvelope,
+            fs2.Stream[IO, Byte],
+            sttp.capabilities.fs2.Fs2Streams[IO]
+          ],
+          input: I
+      )(ctx: kui.gateway.application.client.CallContext): fs2.Stream[IO, kui.http.sse.SseEvent] =
+        fs2.Stream.raiseError[IO](new UnsupportedOperationException("this fixture does not stream"))
+    }
+
+  private def fixtureOf(
+      clients: List[kui.gateway.application.client.ServiceClient[IO]]
+  ): Resource[IO, (CapabilityRegistry[IO], FakeStructuredLogger[IO], Trigger[IO])] =
+    for {
+      logger <- Resource.eval(FakeStructuredLogger[IO])
+      registry <- CapabilityRegistry.resource[IO](
+        RegistryConfig.Default.copy(debounce = 1.millisecond),
+        kui.observability.Telemetry.noop[IO],
+        logger
+      )
+      signals <- Resource.eval(
+        CapabilitySignals.make[IO](RegistryConfig.Default, registry, clients.map(_.service))
+      )
+      trigger <- ReadinessPoller.resource[IO](
+        kui.gateway.application.client.ServiceClients.of(clients),
+        signals,
+        interval,
+        logger
+      )
+      _ <- Resource.eval(registry.attachProbe(trigger.probe))
+    } yield (registry, logger, trigger)
+
+  private val ready: kui.contracts.health.ReadinessReport =
+    kui.contracts.health.ReadinessReport(true, Nil, java.time.Instant.EPOCH)
+
+  test("aCapabilityCallThatFailsLeavesTheLastKnownPayloadInPlace") {
+    // W10-A1: `.orElse(inputs.serviceReport)` had no case, and dropping it left the whole module green.
+    // Losing the payload turns a momentary blip into "this service can do nothing", which is a much
+    // stronger claim than the evidence supports — and here it says the *opposite* of the truth: a service
+    // whose only cluster is not configured goes from a greyed-out feature to a lit one, because the fact
+    // that made it grey was thrown away while the service was still answering its readiness probe.
+    val notConfigured = kui.contracts.capability.ServiceCapabilities(
+      cluster,
+      Map(
+        kui.kernel.ClusterId.unsafe("prod-eu") ->
+          kui.contracts.capability.ClusterCapability(configured = false, Nil, "available")
+      )
+    )
+
+    val program = Ref.of[IO, Boolean](true).flatMap { answering =>
+      val client = scripted(
+        cluster,
+        IO.pure(Right(ready)),
+        answering.get.map {
+          case true => Right(notConfigured)
+          case false =>
+            Left(kui.kernel.error.InfrastructureError.Unreachable(cluster.value, "connection reset"))
+        }
+      )
+
+      fixtureOf(List(client)).use { (registry, _, _) =>
+        for {
+          _ <- IO.sleep(interval * 2)
+          learned <- registry.state(keyOf(cluster))
+          _ <- answering.set(false)
+          _ <- IO.sleep(interval * 2)
+          afterTheBlip <- registry.state(keyOf(cluster))
+        } yield (learned, afterTheBlip)
+      }
+    }
+
+    TestControl.executeEmbed(program).map { (learned, afterTheBlip) =>
+      assertEquals(learned, CapabilityState.NotConfigured)
+      assertEquals(
+        afterTheBlip,
+        CapabilityState.NotConfigured,
+        "a capability call that failed re-lit a feature this deployment has not configured"
+      )
+    }
+  }
+
+  test("aServiceThatAnswersUnsupportedIsNotConfiguredRatherThanUnavailable") {
+    // W10-A1: the `ErrorCode.Unsupported` arm of `reasonOf` had no case, and deleting it left the whole
+    // module green — after a second, visible edit, because `-Werror` then refused the now-unused import.
+    // The two sentences are not interchangeable: `UpstreamUnavailable` is an outage an operator goes
+    // looking for, and `NotConfigured` is a feature this deployment did not ask for. ADR-032 draws the
+    // second with no error styling at all, precisely so that nobody is sent hunting.
+    val program = fixtureOf(
+      List(
+        scripted(
+          cluster,
+          IO.pure(
+            Left(
+              kui.kernel.error.ApplicationError
+                .Unsupported("this build has no cluster service")
+            )
+          ),
+          IO.pure(Left(kui.kernel.error.ApplicationError.Unsupported("no capabilities either")))
+        )
+      )
+    ).use { (registry, _, _) =>
+      IO.sleep(interval * 2) *> registry.state(keyOf(cluster))
+    }
+
+    TestControl.executeEmbed(program).map {
+      case CapabilityState.Unavailable(reason, _, _) =>
+        assertEquals(reason, kui.contracts.capability.ReasonCode.NotConfigured)
+      case other => fail(s"expected an unavailable-because-not-configured verdict, got $other")
+    }
+  }
+
+  test("aProbeThatThrowsIsReportedRatherThanKillingThePollerForGood") {
+    // W10-A1: the `.handleError` on `timed` had no case, and removing it left the whole module green.
+    // Every fixture in this suite returns a `Left` for a failure, which is what a `ServiceClient` promises
+    // — but the promise is the thing being defended, and the cost of it being broken once is not one bad
+    // poll: the fiber dies, nothing restarts it, and that service is reported as whatever it was last
+    // seen as for the rest of the process's life, with nothing anywhere saying the poll stopped.
+    val program = fixtureOf(
+      List(
+        scripted(
+          cluster,
+          IO.raiseError(new IllegalStateException("a client that broke its own promise")),
+          IO.raiseError(new IllegalStateException("a client that broke its own promise"))
+        )
+      )
+    ).use { (registry, _, _) =>
+      IO.sleep(interval * 2) *> registry.state(keyOf(cluster))
+    }
+
+    TestControl.executeEmbed(program).map {
+      case CapabilityState.Unavailable(_, message, _) =>
+        assert(clue(message).contains(cluster.value))
+      case other =>
+        fail(s"a probe that threw left the service reported as $other rather than as unreachable")
+    }
   }
 }

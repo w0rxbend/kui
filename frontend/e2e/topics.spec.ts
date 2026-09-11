@@ -404,11 +404,52 @@ test.describe("the topics list's chips and selection", () => {
     await expect(page.getByText("orders.v1").first()).toBeVisible();
 
     const ticks = page.locator("tbody input[type=checkbox]");
-    await ticks.first().click({ force: true });
-    await ticks.nth(1).click({ force: true });
+    const drawn = await ticks.count();
+    expect(
+      drawn,
+      "this list draws fewer than three rows, so a bar counting the page and a bar counting the " +
+        "selection would print the same figure and the assertions below would distinguish nothing",
+    ).toBeGreaterThan(2);
 
+    /*
+     * W10-02, closed by W10-A2: absent at zero selection, asserted before anything is ticked.
+     *
+     * `TopicListPage` states the rule in its own comment — "a bar that is always in the document
+     * is a strip of the window nobody can use" — and this file referenced the bar only *after* a
+     * tick, so the `await expect(bar).toBeVisible()` below is satisfied by a bar that was never
+     * away. A destructive strip carrying Export, Empty and Delete floating over an untouched list,
+     * reading "0 topics selected", is what that leaves room for. `toHaveCount(0)` rather than
+     * `not.toBeVisible()`: a bar that is merely invisible still swallows the clicks meant for the
+     * row underneath it.
+     */
+    const bulkBar = page.getByTestId("topic-bulk-bar");
+    await expect(bulkBar).toHaveCount(0);
+
+    await ticks.first().click({ force: true });
+
+    /*
+     * One tick, and the figure read before the second one.
+     *
+     * The bar counts the **selection**, and the mutation that matters here counts the rows on the
+     * page instead — which is the misreading that walks an operator into a destructive dialog with
+     * the wrong number in front of them. Ticking two rows of a list that draws two makes those two
+     * counts the same number, which is how `docs/plan/verification/W9-03.md` F4 found that switch
+     * green under both of this file's bulk cases. This list is unfiltered, so the page count is the
+     * cluster's topic count and the singular reading below is the cheapest thing that separates
+     * them. It is also the only place in this suite that drives `BulkActionBar`'s singular.
+     *
+     * There is a second reason that switch survived here, found while re-applying the mutation and
+     * worth writing down because it defeats every count assertion in this file: `toContainText` is
+     * a **substring** match, and `12 topics selected` — which is what the mutated bar printed over
+     * this unfiltered list — contains `2 topics selected`. So the plural assertion below could not
+     * have reddened even with the two figures far apart. The singular has no such overlap: no count
+     * this list can print ends in ` 1 topic selected`.
+     */
     const bar = page.getByTestId("topic-bulk-bar");
     await expect(bar).toBeVisible();
+    await expect(bar).toContainText("1 topic selected");
+
+    await ticks.nth(1).click({ force: true });
     await expect(bar).toContainText("2 topics selected");
     await expect(bar.getByRole("button", { name: /^delete$/i })).toBeVisible();
     await expect(bar.getByRole("button", { name: /^empty$/i })).toBeVisible();
@@ -479,11 +520,23 @@ test.describe("the topics list's chips and selection", () => {
          by the confirmation dialog listing somebody's production topics. */
       const ticks = page.locator("tbody input[type=checkbox]");
       await expect(ticks).toHaveCount(names.length, { timeout: 20_000 });
-      for (let row = 0; row < names.length; row += 1) {
+
+      /*
+       * Ticked one at a time, and the bar read after each.
+       *
+       * The arrangement above is what makes this necessary: the list is filtered on the server to
+       * exactly the rows this case is about to tick, so once both are ticked "rows drawn" and "rows
+       * selected" are the same number and a bar counting either one prints `2`. W9-03's verifier
+       * measured that — switching the bar's count from the selected set to the rows on the page
+       * left this case and the one above it green. Reading the figure while **one** of the two is
+       * ticked is the assertion that tells them apart, and it drives the singular on the way past.
+       */
+      const bar = page.getByTestId("topic-bulk-bar");
+      await ticks.nth(0).click({ force: true });
+      await expect(bar).toContainText("1 topic selected");
+      for (let row = 1; row < names.length; row += 1) {
         await ticks.nth(row).click({ force: true });
       }
-
-      const bar = page.getByTestId("topic-bulk-bar");
       await expect(bar).toContainText(`${names.length} topics selected`);
       await bar.getByRole("button", { name: /^delete$/i }).click();
 

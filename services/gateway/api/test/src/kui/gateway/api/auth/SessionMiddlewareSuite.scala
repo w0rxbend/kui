@@ -192,6 +192,48 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
     }
   }
 
+  test("theSessionCookieIsFoundByItsExactNameAndNotBySubstring") {
+    // W10-A1: `_.find(_.name == CookieName)` had no case, and loosening it to `_.name.contains(...)` left
+    // the whole gateway module green. A `Cookie` header carries every cookie for the domain, so a reverse
+    // proxy or another application on the same host setting `kui_session_backup` — or an attacker setting
+    // one from a subdomain — would be picked up first and the operator's real session would be dropped on
+    // the floor, silently, on every request.
+    GatewayTestServer.resource().use { server =>
+      for {
+        first <- server.get(meUri)
+        session = cookieOf(first)
+        token = tokenOf(first)
+        again <- server.get(meUri, Map("Cookie" -> s"kui_session_backup=planted; $session"))
+        body = decode[AuthMeResponse](again.body).fold(error => fail(s"${again.body} ($error)"), identity)
+      } yield
+        // Same session, so the CSRF secret the browser already holds still works. Under a substring match
+        // the decoy is found first, `planted` resolves to nothing, and a brand new session is minted.
+        assertEquals(body.csrfToken, token, "a decoy cookie displaced the real session")
+    }
+  }
+
+  test("aDeploymentUnderABasePathStillGetsASessionAndScopesItsCookieToThatPath") {
+    // W10-A1: two rules, both ungated, both only visible when `server.basePath` is set — which no case in
+    // this tree did while asserting a cookie. `needsSession` drops the base path's segments before it looks
+    // for the API prefix, and `setCookie` scopes `Path` to the base path. Dropping either left the whole
+    // gateway module green: without the first, a deployment behind a reverse proxy issues no session at
+    // all and every mutation is refused for want of a CSRF token; without the second, the cookie is
+    // written at `/` and two KUI deployments on one host overwrite each other's sessions.
+    GatewayTestServer.resource(basePath = "/kui", devInsecureCookies = false).use { server =>
+      for {
+        mounted <- server.get(s"/kui$meUri")
+        health <- server.get(s"/kui${GatewayEndpoints.ApiPrefix}/health/live")
+      } yield {
+        val cookie = mounted.header("Set-Cookie").getOrElse(fail(s"no session under /kui: ${mounted.body}"))
+        assert(cookie.startsWith(s"${SessionMiddleware.CookieName}="), cookie)
+        assert(cookie.contains("Path=/kui/"), cookie)
+        // The health exclusion moves with the base path too, so an orchestrator's timer still mints
+        // nothing and cannot evict the bounded store one probe at a time.
+        assertEquals(health.header("Set-Cookie"), None, "a health probe under a base path mints a session")
+      }
+    }
+  }
+
   private def cookieOf(response: sttp.client4.Response[String]): String =
     response
       .header("Set-Cookie")

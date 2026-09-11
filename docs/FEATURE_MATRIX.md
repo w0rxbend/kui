@@ -19,14 +19,19 @@ dropped silently.
 - **Owner** — the backend bounded context (short names: `gateway`, `cluster`,
   `topic`, `message`, `consumer`, `schema`, `connect`, `ksql`, `security`, `identity`,
   `metrics`, `config`). `—` means frontend-only.
+<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: package-count, package-roster, residue -->
 - **MFE** — the frontend package that owns the screen, named without its `@kui/` scope
   (`shell`, `kernel`, `feature-alerts`, `feature-clusters`, `feature-topics`, `feature-messages`,
   `feature-consumers`, `feature-schemas`, `feature-connect`, `feature-ksql`,
   `feature-security`, `feature-metrics`, `feature-admin`). `—` means backend-only.
-  **Ten of the thirteen named above exist in `frontend/packages/` as of 2026-09-11**;
-  `feature-security`, `feature-metrics` and `feature-admin` are names reserved by this matrix for
-  milestones that have not started. `frontend/packages/api` is the eleventh directory on disk and
-  is not in this list, because it owns no screen.
+  **10 of the 13 names above exist in `frontend/packages/`**; `feature-security`,
+  `feature-metrics` and `feature-admin` are names reserved by this matrix for
+  milestones that have not started. `frontend/packages/api` is the remaining directory on disk and
+  is deliberately not in this list, because it owns no screen — it is the one exemption the checker
+  knows about, and every other package under `frontend/packages/` has to be named here.
+  Both halves of that sentence were prose nothing read until 2026-09-11, spelled as words so that
+  neither a comparison nor the residue check could see them.
+<!-- /checked -->
   `feature-alerts` was left out of the roster while being counted in the total, and it is named
   here now: a roster that omits a package it counts is the same defect this file's own checker
   exists to catch, found in this file. **No capability row names it in the MFE column**, because
@@ -78,10 +83,14 @@ is dangerous rather than merely untidy:
 
 The recurring failure this project keeps repeating has a name in these notes: **code-only** — a
 component that is built, tested, green and wired into nothing. `MS-007` (the CEL filter engine),
-`DM-001` (the masking engine), `ET-001` (event tracking), `CL-012` (the KRaft quorum), `MS-004`
-(the JSON flattener), `SD-003` (serde resolution) and `CL-006`'s connectivity probe are all in that
-state today. They are marked `IMPLEMENTING`, never `COMPLETE`, because what they need is wiring
-rather than a new implementation.
+`ET-001` (event tracking), `CL-012` (the KRaft quorum), `MS-004` (the JSON flattener), `SD-003`
+(serde resolution) and `CL-006`'s connectivity probe are all in that state today. **`DM-001` (the
+masking engine) left it in wave 9** and is the one worked example of a row moving off this list: it
+gained callers in `BrowseUseCase` and `TrackUseCase` and a configuration section that decodes ten
+keys, and it is still not `COMPLETE`, because no deployment configures a rule — which is the
+difference between *wired* and *reachable*, and it is worth keeping the distinction in the one row
+that has crossed the first line and not the second. The rest are marked `IMPLEMENTING`, never
+`COMPLETE`, because what they need is wiring rather than a new implementation.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, out-of-scope-rows, in-scope-delivered, delivered-percent, residue -->
 **Counts as of the 2026-09-11 wave-8 recount** (189 capability rows): 70 `COMPLETE`, 18 `REVIEW`,
@@ -364,7 +373,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| DM-001 | Config-driven masking (`REMOVE` / `MASK` / `REPLACE`, field paths, topic patterns) | Kafbat, Provectus | P1 | message | — | M3 | M | IMPLEMENTING | Audited 2026-09-04. **Clearest instance of the project's failure mode.** `MaskingEngine` and `MaskingRule` are built and unit-tested with no caller in any service, there is no configuration that can define a rule, and `docs/operations/masking.md` does not exist. |
+| DM-001 | Config-driven masking (`REMOVE` / `MASK` / `REPLACE`, field paths, topic patterns) | Kafbat, Provectus | P1 | message | — | M3 | M | IMPLEMENTING | Audited 2026-09-04 and **re-audited 2026-09-11**, when two of the three clauses this row carried stopped being true and nobody had moved it. It said `MaskingEngine` and `MaskingRule` were built and unit-tested **with no caller in any service** — `BrowseUseCase`, `TrackUseCase` and `MessageWiring` have called them since wave 9 — and that **there is no configuration that can define a rule** — `kui.clusters.<n>.masking` decodes ten keys into a `MaskingRule` at start-up, so a rule that cannot be built is a start-up error naming the key. The third clause — **`docs/operations/masking.md` does not exist** — was still true when this row was re-read, and stopped being true inside the same wave: that page exists, and `deployment/quickstart/kui-quickstart.yaml` now configures one rule, so the feature has a deployment a person can look at. **The row stays `IMPLEMENTING` on the one thing this file has always required and nobody has done: no person has watched a field come back masked in a browser against a running stack.** That is the standard at the top of this file, and it is the only clause left. |
 | DM-002 | UI-managed masking policies bound to user groups (`ALL` / `FIRST_5` / `LAST_5`) | Kouncil | P1 | message (apply) + identity (policy store) | feature-admin | M6 | L | RESEARCHING | Same engine as DM-001 with caller-group scoping (D-6). Needs identity, so M6 not M5. Stored under `masking/<clusterId>` in `__kui_config` (ADR-042, ADR-023). |
 
 ## Serdes (SD)
@@ -637,10 +646,20 @@ is the merged OpenAPI pair, which went from 61 paths, 72 operations and 156 sche
 `frontend/packages/api/README.md` moved with them and are compared by
 `./scripts/feature-matrix-check.sh`.
 
-**A record of the wave-9 pass, 2026-09-11:** 189 rows, of which 72 `RESEARCHING`, 70 `COMPLETE`,
+<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, residue -->
+**A record of the wave-9 pass, 2026-09-11** (189 capability rows): 72 `RESEARCHING`, 70 `COMPLETE`,
 18 `REVIEW`, 7 `TESTING`, 8 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`,
 4 `REJECTED`, and no `BLOCKED` row — recounted here with the same awk over the State column that
-`./scripts/feature-matrix-check.sh` runs. **No row moved, and this time the reason is a scope and
+`./scripts/feature-matrix-check.sh` runs.
+<!-- /checked -->
+
+Every record above this one publishes the same ten figures outside every marker, and every one of
+them is a statement about the table it sits in that nothing compares. They are left as history and
+this one is marked, because a record that is checked is a record that stays true; the five above it
+are dated and were true on their dates. A wave-10 pass found this by mutation: `7 \`TESTING\`` →
+`99 \`TESTING\`` in the paragraph above left the run green at 348 claims, and it does not now.
+
+**No row moved in wave 9, and this time the reason is a scope and
 not a shortage.** The four rows wave 8 named as the next ones to move — `KC-001` and
 `KS-001`/`KS-002`/`KS-003` — were re-read against their own wording in this pass. Each is
 `TESTING`, which this file defines as built, gated and reachable; each would move to `COMPLETE`
@@ -671,26 +690,40 @@ published**; it was taken for the first time on 2026-09-11 and is in
 is not copied here, because a table in two places drifts in one of them. What belongs here is the
 count, and the scope it is true under.
 
-**21 of 23 covered, 1 partial, 1 uncovered**, re-counted on 2026-09-11 from the spec files on disk.
-A screen counts as covered when a browser case asserts the content that capture is a picture of,
-not when a case merely visits the address.
+**23 of 23 covered**, re-counted on 2026-09-11 from the spec files on disk — and the count is over
+**screens**, which is the scope that matters and the reason it is not the same statement as *the
+suite is a gate*. A screen counts as covered when a browser case asserts the content that capture is
+a picture of, not when a case merely visits the address.
 
-* `M20` (ksqlDB) was scored **uncovered** when the mapping was taken, because
-  `frontend/e2e/ksql.spec.ts` had not landed. It has: the directory now holds twelve spec files
-  rather than eleven, and the ksqlDB screen has four cases including *every stream and table the
-  server named is a row, with its kind beside it*. Two of its six are `test.skip`-guarded on a
-  deployment that configures ksqlDB.
-* `M14` (the plural receipt after a **bulk** topic delete) is the partial. Single deletion is
-  covered and the toast machinery is proved elsewhere; this specific receipt is asserted nowhere.
-* `M08` (the toast raised when the cluster selector switches clusters) is the uncovered one, and it
-  has never had a spec, because there is nothing to switch **to**: the quickstart registers one
-  cluster. `M09`'s second-cluster clause is blocked on the same thing. Both need a second registered
-  cluster in the stack, not a case in a spec.
+The two that were open at the wave-8 mapping are closed, and both were closed by the deployment
+rather than by a spec:
 
-**This count was not re-run here.** The specs were read on disk and the per-screen mapping was taken
-by W8-07 against a running stack; running the suite needs a quickstart built from this tree, which
-this pass did not stand up. A reader who wants the number defended rather than reported should
-re-run `pnpm -C frontend e2e` and re-count.
+* `M08` (the toast raised when the cluster selector switches clusters) was the uncovered one, and it
+  had never had a spec because there was nothing to switch **to**: the quickstart registered one
+  cluster. It registers two since wave 9, and `frontend/e2e/shell.spec.ts` carries *switching
+  cluster names where you have arrived, and takes the frame with it*, which **fails rather than skips** on a
+  one-cluster deployment. `M09`'s second-cluster clause was blocked on the same thing and moved with
+  it.
+* `M14` (the plural receipt after a **bulk** topic delete) was the partial.
+  `frontend/e2e/topics.spec.ts` carries *a bulk delete says how many it deleted, in the plural*.
+* `M20` (ksqlDB) was scored uncovered when the mapping was first taken, because
+  `frontend/e2e/ksql.spec.ts` had not landed. It has: the directory holds twelve spec files, and the
+  ksqlDB screen has four cases including *every stream and table the server named is a row, with its
+  kind beside it*.
+
+**Three of the twenty-three covering cases do not discriminate, and the honest reading of the count
+needs that beside it.** `docs/plan/verification/` records that `brokers.spec.ts`'s second-cluster
+case cannot tell one cluster's brokers screen from the other's because both clusters sit on the same
+broker with identical summaries; that `search.spec.ts`'s empty-state arm never executes on any
+deployment this suite runs against, because every query answers with a partial section; and that
+`topics.spec.ts`'s bulk-bar count compares a number with itself. Each was proved green under a
+mutation. The screen is covered in every one of the three — a case does assert the content — and
+**the assertion is weaker than its own header claims**. Repairing them is wave 10's, and this
+paragraph is where the caveat lives until they are.
+
+**This count was not re-run against a stack here.** The specs were read on disk; the per-screen
+mapping was taken by W8-07 against a running stack. A reader who wants the number defended rather
+than reported should re-run `pnpm -C frontend e2e` and re-count.
 
 Every P0 and P1 row has a milestone. After editing rows, run the checker rather than recounting by
 hand:

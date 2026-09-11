@@ -323,7 +323,13 @@ object SessionMiddleware {
         response.headers :+ Header("Set-Cookie", setCookie(session, basePath, secure).toString)
       )
 
-  private def alreadyCarriesSessionCookie[B](
+  /** Whether the route already put a session cookie on this response.
+    *
+    * `private[auth]` rather than `private` so that the rule above it can be asserted directly: this is the
+    * whole session-fixation defence on the login path, and the only route that sets its own cookie is one
+    * that needs an identity service to reach, so a case going through a server could not exercise it.
+    */
+  private[auth] def alreadyCarriesSessionCookie[B](
       response: sttp.tapir.server.model.ServerResponse[B]
   ): Boolean =
     response.headers.exists(header =>

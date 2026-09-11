@@ -153,7 +153,7 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 | --- | --- | --- | --- |
 | cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]`, `ClockPort[F]` | kui-kafka admin adapter, Kafka `ConfigStore` adapter (file adapter for dev), probe clients |
 | topic | `Topic` (NonEmptyList[Partition], ISR ⊆ replicas), `TopicConfig`, `TopicAnalysis` | `TopicAdmin[F]`, `TopicWriter[F]`, `ClusterProfiles[F]`, `ClockPort[F]` | kui-kafka, cluster-service contract client, datasketches |
-| message | `BrowseRequest`, `SeekMode`, `PollingMode`, `OffsetRange`, `MaskingPolicy`, `TrackQuery` | `ClusterProfileSource[F]`, `SerdeSource[F]`, `FilterSource[F]`, `CompiledFilter[F]`, `RecordDeleter[F]` | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL) |
+| message | `BrowseRequest`, `PageRequest`, `PageWindow`, `DecodedRecord`, `PurgePlan`, `TrackQuery`; `SeekMode` and `OffsetRange` are `libs/kernel`'s and are used here rather than declared here | `ClusterProfileSource[F]`, `SerdeSource[F]`, `FilterSource[F]`, `CompiledFilter[F]`, `RecordDeleter[F]` — and `RecordMasking[F]` in **`application`**, with `ConfiguredRecordMasking` its adapter | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL), the configured masking adapter |
 | consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdminPort[F]` | kui-kafka |
 | security | `AclBinding`, `AclFilter`, `ClientQuotaEntity`, `AclPreset` | **not built**: there is no `services/security`, and this row is the intent | not built |
 | schema | `Subject`, `SchemaVersion`, `CompatibilityLevel` | `SchemaRegistryPort[F]` | own sttp client (ADR-014) |
@@ -176,6 +176,31 @@ anything wider cannot live there.
 that does not exist. That roster is read off disk and compared to this sentence by
 `ArchitectureDocumentSuite`, because the previous version of this paragraph published a count that
 had been wrong for two waves and nothing could tell.
+
+**The *Key aggregates* column is not read by anything, and the measurement of what that costs is
+worth more than the correction it prompted.** `MaskingPolicy` stood in the `message` row and
+`grep -rn MaskingPolicy --include='*.scala'` finds it **zero** times in this repository; the real
+type wave 9 shipped is `RecordMasking[F]`, a port in `application`, and the row says so now. But
+`MaskingPolicy` is not the only one. Filtering that column to the tokens that look like Scala
+identifiers and asking, for each, whether
+`grep -rE '(class|trait|object|enum|type) +<Name>' services/<service>` finds a declaration answers
+**no for nine of them**: `Topic` and `TopicAnalysis` (`topic`), `PollingMode` (`message`, now
+removed), `Member` (`consumer`), `MetricSnapshot`, `GraphDescription` and `PromQuery` (`metrics`),
+`AuditRecord` (`identity`), and `MaskingPolicy` itself — beside four more in the `security` row,
+which is the row that says out loud that the service is not built. Several others resolve somewhere
+in the tree but not under the service the row is about: `SeekMode` and `OffsetRange` are
+`libs/kernel`'s, `Principal`, `Role` and `Permission` are `libs/security-core`'s, `Session` is the
+gateway's, and `Subject` is two different types — `libs/kernel`'s opaque subject id and
+`libs/security-core`'s RBAC subject — in the two rows that name it.
+
+So the cheap direction the wave plan proposed — *every name in this column resolves to a `.scala`
+declaration somewhere under that service* — is **false of nine names today, not of one**, and
+landing it as a gate would be a rewrite of five rows rather than a check over a correct table. It is
+filed with the seam instead, in `TECH_DEBT.md`: the check belongs in `ArchitectureDocumentSuite`,
+which already walks `services/<n>/domain/src` and is in `services/gateway/api/test/`, a tree this
+packet does not own. The measurement above is the input that closure needs; what it does not have is
+a decision about whether this column names *types* or names *concepts*, and that decision is the
+whole of the work.
 
 The column was re-read against the tree in wave 7. Eight of the nine rows that had a `domain` then
 named a port (`connect`'s still

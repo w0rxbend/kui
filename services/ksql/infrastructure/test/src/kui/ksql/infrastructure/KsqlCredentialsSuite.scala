@@ -215,4 +215,89 @@ final class KsqlCredentialsSuite extends KuiIOSuite {
     assertEquals(KsqlCredentials.TokenUpstreamName, "ksqldb-oauth")
     assertNotEquals(KsqlCredentials.TokenUpstreamName, KsqlHttp.UpstreamName)
   }
+
+  test("an issuer that answers a blank access_token is a refusal rather than an empty Bearer header") {
+    // W10-A1: `if raw.trim.isEmpty then Left(...)` had no case, and neutering it left the module green.
+    // An issuer under load, or a proxy rewriting a body, answers `""` more often than it answers rubbish,
+    // and the cached result would be the header `Bearer ` — which a secured ksqlDB rejects with a 401 that
+    // reads exactly like a wrong client secret, sending an operator to check a credential that is right.
+    val config = UpstreamAuthConfig.OAuth(
+      SafeUrl.unsafe("https://issuer.example/token"),
+      "client",
+      Secret("secret"),
+      None
+    )
+
+    val issuer: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF(_ =>
+        IO.pure(
+          ResponseStub.adjust(
+            """{"access_token":"   ","expires_in":3600}""",
+            StatusCode.Ok
+          ): sttp.client4.Response[StubBody]
+        )
+      )
+
+    kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>
+      KsqlCredentials
+        .fromConfig[IO](config, Some(issuer), logger)
+        .use(credentials =>
+          credentials
+            .authenticate(
+              basicRequest
+                .get(sttp.model.Uri.unsafeParse("http://ksqldb/ksql"))
+                .response(asStringAlways)
+            )
+            .map {
+              case Left(error) =>
+                assertEquals(error.code, ErrorCode.UpstreamAuth)
+                assert(clue(error.message).contains("empty"))
+              case Right(sent) =>
+                fail(s"an empty token was accepted and sent as ${sent.header("Authorization")}")
+            }
+        )
+    }
+  }
+
+  test("the client secret travels in the Authorization header and never in the form body") {
+    // W10-A1: `.auth.basic(clientId, clientSecret)` had no case, and moving both values into the form —
+    // which RFC 6749 also permits — left the module green. The header is the one every issuer agrees on
+    // and, more to the point, the one that keeps the secret out of a proxy's access log, where a form body
+    // routinely ends up in full.
+    val config = UpstreamAuthConfig.OAuth(
+      SafeUrl.unsafe("https://issuer.example/token"),
+      "client",
+      Secret("hunter2"),
+      Some("ksql.read")
+    )
+
+    val bodies = scala.collection.mutable.ListBuffer.empty[String]
+    val authorizations = scala.collection.mutable.ListBuffer.empty[Option[String]]
+
+    val issuer: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { request =>
+        bodies += request.body.show
+        authorizations += request.header("Authorization")
+        IO.pure(
+          ResponseStub.adjust(
+            """{"access_token":"a-token","expires_in":3600}""",
+            StatusCode.Ok
+          ): sttp.client4.Response[StubBody]
+        )
+      }
+
+    kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>
+      KsqlCredentials
+        .fromConfig[IO](config, Some(issuer), logger)
+        .use(credentials => headerOf(credentials))
+        .map { sent =>
+          assertEquals(sent, Some("Bearer a-token"))
+          assert(clue(authorizations.toList.flatten.headOption.getOrElse("")).startsWith("Basic "))
+          // The grant and the scope are the body's whole content. Neither credential is in it.
+          val body = bodies.toList.mkString
+          assert(!clue(body).contains("hunter2"), "the client secret reached the request body")
+          assert(!clue(body).contains("client_secret"), "the client secret reached the request body")
+        }
+    }
+  }
 }

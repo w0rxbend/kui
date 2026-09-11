@@ -9,6 +9,12 @@ import cats.data.NonEmptyList
   * Kouncil offers `FIRST_5` and `LAST_5` as two fixed policies; this is the same idea with the numbers made
   * parameters, because the useful case — a card number showing its last four digits — is neither of theirs.
   * `KeepEnds(0, 4)` on `4111111111111111` gives `************1111`.
+  *
+  * **Two ends that together leave nothing masked mask the whole value**, rather than returning it. `4242`
+  * under `KeepEnds(0, 4)` is `****`, not `4242`, and `KeepEnds(20, 20)` on a sixteen-digit card number is
+  * sixteen asterisks. These numbers are a bound on what a mask may *reveal*, so the arithmetic running out
+  * has to fail towards hiding; `MaskingEngine.maskKeepingEnds` argues it at the branch, and until wave 10
+  * that branch handed the value back in full.
   */
 final case class KeepEnds(prefix: Int, suffix: Int)
 
@@ -24,11 +30,11 @@ object KeepEnds {
 
 /** What masking does to a matched field.
   *
-  * | Kind      | On a matched field                                                                                                               | Notes                                         |
-  * |:----------|:---------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------|
-  * | `Remove`  | the key is deleted from the object                                                                                               | in an array, the element is removed           |
-  * | `Mask`    | every character replaced, cycling through `replacementChars`, except `keep.prefix` leading and `keep.suffix` trailing characters | **the result is never longer than the input** |
-  * | `Replace` | the value becomes the literal `replacement`                                                                                      | the type becomes string                       |
+  * | Kind      | On a matched field                                                                                                               | Notes                                                                                                       |
+  * |:----------|:---------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|
+  * | `Remove`  | the key is deleted from the object                                                                                               | in an array, the element is removed                                                                         |
+  * | `Mask`    | every character replaced, cycling through `replacementChars`, except `keep.prefix` leading and `keep.suffix` trailing characters | **the result is never longer than the input**, and a `keep` that would leave nothing masked masks all of it |
+  * | `Replace` | the value becomes the literal `replacement`                                                                                      | the type becomes string                                                                                     |
   */
 enum MaskingKind {
   case Remove

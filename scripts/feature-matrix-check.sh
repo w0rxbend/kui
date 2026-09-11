@@ -36,6 +36,14 @@
 #   openapi-totals    the per-service and merged OpenAPI totals ADR-052, ADR-053 and ADR-054
 #                     publish in their Consequences. Nothing read any of the three until
 #                     2026-09-11, and ADR-053's merged figures had been stale for a whole wave
+#   capability-claims the **sentences** in `README.md` that say which services this repository has
+#                     and which of them the gateway routes, against `services/` on disk and against
+#                     `ServiceContracts.byService`; and the frontend-package roster in
+#                     `docs/FEATURE_MATRIX.md` against `frontend/packages/`. Every other section in
+#                     this file compares a *figure*. This one exists because on 2026-09-11 all of
+#                     them were green over a README saying **"No Kafka Connect, no ksqlDB"** against
+#                     a tree that ships, routes and draws both — four milestones stale, in the first
+#                     paragraph a newcomer reads, outside every marker
 #   adr-index         every `docs/adr/ADR-*.md` against the rows of `DECISIONS.md`, and every row
 #                     against a file. ADR-052 was accepted, referenced by four documents and had no
 #                     row in the index for a whole wave; it was repaired by hand, and a
@@ -190,12 +198,33 @@
 # two comparisons that cannot -- the residue, and the Total line's split, whose fact is its own
 # arithmetic -- have fixtures instead.
 #
-# The cheapest attack on the finished file is **two lines**, both in this file, measured on
-# 2026-09-11: `dependency_version_fact` rewritten to `printf '%s' "$2"`, which answers the pin
+# The cheapest attack on the file as wave 9 left it was **two lines**, both in this file, measured
+# on 2026-09-11: `dependency_version_fact` rewritten to `printf '%s' "$2"`, which answers the pin
 # whatever the row says and so defeats the comparison and its audit together, plus fixture 9's
 # disagreeing case compared with itself. With both, `vite` at `9.9.9` against a pin of `8.2.2`
 # printed `348 claims checked, all true` and exited 0. Two is not a large number. It is the
 # measured one, and it is published here rather than in a row nobody re-derives.
+#
+# WHAT SECTION 8 COSTS, MEASURED ON THE FINISHED FILE RATHER THAN ESTIMATED
+# ------------------------------------------------------------------------
+# House rule 17 asks the packet that adds a gate to attack it and publish the price. Attacked here,
+# on this file, with `README.md` edited to move `connect` and `ksql` out of **Built and routed:**
+# and into **Not built:** -- the exact sentence that stood in that file for four milestones:
+#
+#   one line, at the claim site:  `claim service-state "$tok" "$label" "$fact"` -> `"$label"
+#      "$label"`. The claimed-side refusal cannot see it, because the label *is* in the fragment the
+#      comparison struck out of the block. **RED anyway, 2 disagreements**, from `service-audit`.
+#   one line, in the audit:  `"${declared_service_state[$name]}" "$(service_state_fact "$name")"` ->
+#      the declared label twice. **RED, 2 disagreements**, from the claim site.
+#   **both, which is two lines: `404 claims checked, all true`, exit 0**, with README publishing
+#      *"Not built: `acl`, `quota`, `connect` and `ksql`"* over a tree that ships and routes both.
+#
+# So the price is **two**, the same as the rest of this file, and the shape is the same as the
+# merged-document section's: the comparison inside the block and the re-derivation outside it are
+# two statements, and one of them alone is a true statement about nothing. The one thing neither
+# edit reaches is `service-roster`, which compares the names the block reached against
+# `services/` on disk — deleting a service from the page rather than lying about it is one line
+# and still red.
 #
 # The per-section counts are kept beside the registry rather than instead of it. A count still says
 # something the kinds do not -- that a section compared *fewer instances* of a kind it still
@@ -312,10 +341,14 @@ declare -A registry=(
   [milestones]="milestone-line milestone-p0 milestone-p1 milestone-rows total-line total-p0\
  total-p1 total-rows total-split"
   [adr-index]="adr-file adr-row"
-  [guard-fixtures]="claim-refuses-noncomparison claimed-side-read count-assertion\
+  [guard-fixtures]="claim-reads-whole-figure claim-refuses-noncomparison claimed-side-read\
+ count-assertion dependency-audit-coverage dependency-audit-refuses dependency-reader-independence\
  dependency-row-compared empty-block-refused fact-independence figure-published\
- header-kind-inverse marker-list-refused residue-reports-unclaimed total-split-compared"
-  [openapi-totals]="openapi-document openapi-totals residue"
+ header-kind-inverse marker-list-refused openapi-fact-independence residue-reports-unclaimed\
+ total-split-compared"
+  [openapi-totals]="merged-path-prefix openapi-document openapi-roster openapi-totals residue"
+  [capability-claims]="package-count package-roster residue service-audit service-audit-coverage\
+ service-count service-fact-independence service-roster service-routed-count service-state"
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -605,8 +638,14 @@ claim() {
 # route through the ledger was itself unledgered, so nothing anywhere noticed it going quiet. It
 # routes its own answer through `claim` now -- `no unclaimed figure` against what is left -- so the
 # kind is pinned in `registry`, declared in every marked block's `claims:` list, and counted.
+# The number words the residue below will recognise when a document publishes one in bold. Held
+# here so the expression that uses it stays inside 100 columns and so that a reader can see the
+# whole list without unpicking a regular expression.
+number_words='one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen'
+number_words+='|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty'
+
 report_unclaimed_figures() {
-  local where=$1 rest=$2 leftovers=""
+  local where=$1 rest=$2 leftovers="" words
   # A date, an `ADR-nnn` reference and a `wave-n` are not figures about the thing being counted.
   rest=$(printf '%s' "$rest" | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}//g; s/ADR-[0-9]+//g;
                                        s/wave-[0-9]+//g')
@@ -614,9 +653,25 @@ report_unclaimed_figures() {
     leftovers=$(printf '%s' "$rest" | grep -oE '[0-9][0-9.%]*' | sort -u | tr '\n' ' ')
     leftovers=${leftovers% }
   fi
+  # **A figure spelled as a word is still a figure, when it is published as one.** `ADR-054` carried
+  # `**Four**` -- the merged document's connect-path count -- inside a marker on 2026-09-11, and
+  # rewriting it to `**Nine**` left the run green, because every comparison and the residue itself
+  # read digits only. The narrow shape is what is refused: a number word in **bold** is a document
+  # publishing a figure, and it has to be written as a digit so that a comparison can read it.
+  # A number word in ordinary prose -- "one operation per path", "the three health probes" -- is
+  # explanation rather than publication and is deliberately still invisible here; that limit is
+  # stated rather than hidden, because the next attack on this file should know where it is.
+  # `|| true` because a block with no bold number word is the ordinary case, and a `grep` that
+  # matches nothing exits 1 -- which, under `pipefail` inside an assignment, ends the run with
+  # nothing printed at all. That failure mode has cost this file an hour before.
+  words=$(printf '%s' "$rest" \
+    | { grep -oiE "\\*\\*($number_words)\\*\\*" || true; } | sort -u | tr '\n' ' ')
+  words=${words% }
+  [[ -n $words ]] && leftovers="${leftovers:+$leftovers }$words"
   local complaint="$where publishes figures no comparison read: $leftovers. A figure inside a\
  checked block that nothing compares is the state this script exists to end; either a comparison\
- reads it or it does not belong inside the markers."
+ reads it or it does not belong inside the markers. A number word in bold counts as a published\
+ figure and has to be written as a digit."
   claim residue "" "no unclaimed figure" "${leftovers:-no unclaimed figure}" "$complaint"
 }
 
@@ -826,7 +881,7 @@ for file in "$matrix" README.md; do
   check_marked_file rows "$file" check_rows_region
 done
 
-close_section rows 18
+close_section rows 30
 
 # ---------------------------------------------------------------------------------------------
 # 2. The merged OpenAPI document against the figures published about it.
@@ -1311,14 +1366,20 @@ compare_dependency_row() {
 #   `dependency-claim` the claimed side, against `manifest_pins`, which was built by a second `jq`
 #                      program. The mirror-image attack -- both sides taken from the *cell* -- puts
 #                      a version no manifest pins on the claimed side.
-#   `dependency-audit` how many claims this reached, against how many the section made, so an audit
-#                      narrowed with a `continue` is a figure that moves.
+#   `dependency-audit` how many claims this reached, against how many rows the **manifests** asked
+#                      for, so an audit narrowed with a `continue` is a figure that moves.
+#
+# **That last one used to be a tautology, and saying so is the repair.** It compared `audited`, a
+# count taken by this loop, with `recorded`, a count taken by an identical predicate over the same
+# array immediately above it: the two cannot differ for any input, so rewriting the call site to
+# `"$recorded" "$recorded"` changed nothing observable and no fixture could ever drive it.
+# `expected_npm_claims` is counted in section 3's own loop, off the manifests, before a single row
+# is compared -- a second source rather than a second reading -- so the pair is now a real
+# comparison: a dependency the manifests pin whose row is missing returns early from
+# `compare_dependency_row`, makes no claim, and is named here as well as there.
 audit_dependency_rows() {
-  local line a b c pairs name claimed fact row recheck pinned_state audited=0 recorded=0
-  for line in ${ledger+"${ledger[@]}"}; do
-    IFS=$'\t' read -r a b c pairs <<< "$line"
-    [[ $a == dependencies && $c == npm-version ]] && recorded=$(( recorded + 1 ))
-  done
+  local line a b c pairs name claimed fact row recheck pinned_state audited=0
+  local recorded=${expected_npm_claims:-0}
   # `for` expands the array once, so this loop sees the section as it stood when it began and the
   # `dependency-fact` lines it appends are not themselves audited.
   scope dependencies "the dependency ledger"
@@ -1350,13 +1411,20 @@ audit_dependency_rows() {
   done
   claim dependency-audit "" \
     "$audited" "$recorded" \
-    "this audit re-read the rows behind $audited of the dependencies section's $recorded\
- \`npm-version\` claims; a claim it does not reach is one nothing reads the document again for."
+    "this audit re-read the rows behind $audited \`npm-version\` claims and the manifests under\
+ frontend/ pin $recorded dependencies that each need one; a row this audit does not reach is one\
+ nothing reads $deps again for, and a dependency that made no claim at all is one $deps has no row\
+ for."
 }
 
+# Counted here, off the manifests, and not off the ledger the comparisons fill. It is the
+# denominator `audit_dependency_rows` compares its own coverage against, and the whole point of it
+# is that it is derived before any row is read.
+expected_npm_claims=0
 while IFS=$'\t' read -r name version; do
   [[ -z $name ]] && continue
   [[ $name == @kui/* ]] && continue
+  expected_npm_claims=$(( expected_npm_claims + 1 ))
   compare_dependency_row "$deps" "$name" "$version"
 done <<< "$dep_rows"
 
@@ -1643,6 +1711,18 @@ openapi_fact() {
 openapi_totals_shape='`([A-Za-z0-9_./-]+\.json)` is \*\*([0-9]+) paths, ([0-9]+) operations'
 openapi_totals_shape+=' and ([0-9]+) component schemas\*\*'
 
+# How many of one document's paths begin with one prefix. The counterpart to `openapi_fact` for the
+# one figure ADR-054 publishes about a document that is not its own service's.
+path_prefix_fact() {
+  if [[ ! -f $1 ]]; then printf 'not a document in this repository'; return; fi
+  jq -r --arg prefix "$2" \
+    '[.paths | keys[] | select(startswith($prefix) or (index($prefix) != null))] | length
+     | tostring' "$1"
+}
+
+prefix_paths_shape='\*\*([0-9]+)\*\* of `([A-Za-z0-9_./-]+\.json)`'
+prefix_paths_shape+="'s paths are under \`([^\`]+)\`"
+
 check_openapi_totals_region() {
   local where=$1 text=$2 rest tok file present paths operations schemas
   rest=$text
@@ -1667,14 +1747,57 @@ check_openapi_totals_region() {
     rest=${rest#*"$tok"}
   done
 
+  # `**N** of `<document>`'s paths are under `<prefix>``. ADR-054 published this figure as the word
+  # `**Four**` until 2026-09-11, where neither a comparison nor the residue could see it; a figure
+  # about the merged document that sits in a service's own ADR is exactly the shape that goes stale
+  # when a twelfth service moves the merged totals. The document and the prefix are both read out of
+  # the sentence, for the reason `check_document_region` reads a header's name out of the prose:
+  # there is no constant in this file saying which document or which prefix a claim is about.
+  rest=$text
+  while [[ $rest =~ $prefix_paths_shape ]]; do
+    tok=${BASH_REMATCH[0]}
+    file=${BASH_REMATCH[2]}
+    claim merged-path-prefix "$tok" \
+      "${BASH_REMATCH[1]}" "$(path_prefix_fact "$file" "${BASH_REMATCH[3]}")" \
+      "$where says ${BASH_REMATCH[1]} of $file's paths are under ${BASH_REMATCH[3]}; it has\
+ $(path_prefix_fact "$file" "${BASH_REMATCH[3]}")."
+    rest=${rest#*"$tok"}
+  done
+
   report_unclaimed_figures "$where" "$text"
 }
 
-for file in "$adr052" "$adr053" "$adr054"; do
+# Section 6's roster is **read off the ADR tree**, and was a hard-coded three until 2026-09-11.
+# Section 5 globs `docs/adr/ADR-*.md` and section 6 named `$adr052 $adr053 $adr054`, so a marker
+# added to any other ADR was decoration: appending a `<!-- checked: openapi-totals -->` block to
+# `ADR-055` publishing `999 paths` left the run green, because no loop ever read that file. The
+# twelfth service's ADR would have been outside this gate on the day it was written. Globbing makes
+# the marker itself the roster, and the three claims below are the other direction: an ADR that
+# published totals and has had its marker removed is a claim that has gone rather than become false,
+# which is the failure section 7 exists after.
+openapi_total_adrs=()
+while IFS= read -r file; do openapi_total_adrs+=("$file"); done < <(
+  grep -l '<!-- checked: openapi-totals' docs/adr/ADR-*.md | sort)
+
+for file in ${openapi_total_adrs+"${openapi_total_adrs[@]}"}; do
   check_marked_file openapi-totals "$file" check_openapi_totals_region
 done
 
-close_section openapi-totals 11
+for file in "$adr052" "$adr053" "$adr054"; do
+  scope openapi-totals "$file"
+  if printf '%s\n' ${openapi_total_adrs+"${openapi_total_adrs[@]}"} | grep -qxF -- "$file"; then
+    marker_state="carries an openapi-totals marker"
+  else
+    marker_state="carries no openapi-totals marker"
+  fi
+  claim openapi-roster "" \
+    "carries an openapi-totals marker" "$marker_state" \
+    "$file published its service document's totals inside a marker and no longer carries one; the\
+ figures it publishes are unguarded again, which is the state all three of these ADRs were in until\
+ 2026-09-11."
+done
+
+close_section openapi-totals 15
 
 # ---------------------------------------------------------------------------------------------
 # 7. The fixtures: refusals this file makes that nothing in it could drive.
@@ -2005,11 +2128,13 @@ MD
 # whose every figure was consumed, a block with one that was not, and a block whose only digits are
 # the date and the `ADR-nnn` reference that are not figures about the thing being counted.
 verify_residue_reports_unclaimed() {
-  local consumed unclaimed exempt
+  local consumed unclaimed exempt spelled prose
   consumed=$(drive report_unclaimed_figures "a fixture block" "every figure here was struck out")
   unclaimed=$(drive report_unclaimed_figures "a fixture block" "and 999 screens nothing reads")
   exempt=$(drive report_unclaimed_figures "a fixture block" \
              "written 2026-09-11 under ADR-048 in wave-8")
+  spelled=$(drive report_unclaimed_figures "a fixture block" "and **Four** is a different figure")
+  prose=$(drive report_unclaimed_figures "a fixture block" "one operation per path, three probes")
   scope guard-fixtures "the residue"
   claim residue-reports-unclaimed "" \
     "$consumed" "0" \
@@ -2022,7 +2147,16 @@ verify_residue_reports_unclaimed() {
     "$exempt" "0" \
     "a block whose only digits are a date, an ADR reference and a wave number drew $exempt\
  disagreement(s); those are not figures about the thing being counted and striking them out is\
- why the residue can be strict about everything else."
+ why the residue can be strict about everything else." \
+    "$spelled" "1" \
+    "a block publishing \`**Four**\` drew $spelled disagreement(s); that is the shape ADR-054\
+ carried inside a marker until 2026-09-11, where rewriting it to \`**Nine**\` moved no comparison\
+ and no residue, because both read digits only." \
+    "$prose" "0" \
+    "a block whose number words are ordinary prose drew $prose disagreement(s); \"one operation per\
+ path\" explains a figure rather than publishing one, and a residue that refused it would put every\
+ sentence in these ADRs outside the markers. **This is the published limit of the rule**: a figure\
+ spelled as a word and not emphasised is still invisible here."
 }
 
 verify_header_kind_inverse
@@ -2050,10 +2184,419 @@ verify_total_split() {
  has gone rather than become false is the failure this whole section was written after."
 }
 
+# Fixture 12: the branch that routes a *numeric* claimed figure to the whole-token reader. Fixture 8
+# drives `figure_is_published` directly and never through `claim`, so on 2026-09-11
+# `if [[ ${groups[$at]} =~ ^[0-9]+(\.[0-9]+)*%?$ ]]` -> `if false` left the run green: every numeric
+# claim fell back to the substring test, and `70` was then "published" by a paragraph saying
+# `700 \`COMPLETE\``. That mutation plus one self-compare at the `state-total` call site was a
+# measured two-line attack on the file this whole script exists for. It drives the shipped `claim`.
+verify_claim_reads_whole_figure() {
+  local inside_another agrees
+  # `claim` strikes its matched fragment out of the caller's `text`, so a faithful drive gives it
+  # one; shadowed here and restored by the next assignment, as fixture 7 does.
+  local text='`X-Csrf-Token` on 18 operations'
+  inside_another=$(drive claim fixture-kind '`X-Csrf-Token` on 18 operations' \
+                     8 8 'a fixture pair that agrees')
+  text='`X-Csrf-Token` on 8 operations'
+  agrees=$(drive claim fixture-kind '`X-Csrf-Token` on 8 operations' \
+             8 8 'a fixture pair that agrees')
+  scope guard-fixtures "the whole-figure branch of claim"
+  claim claim-reads-whole-figure "" \
+    "$inside_another" "1" \
+    "a claim of \`8\` against a block publishing \`18\` drew $inside_another disagreement(s); the\
+ digits of one figure satisfying another's claim is how a paragraph publishing \`700\` can be\
+ compared against a table holding \`70\` with every other gate in this file standing." \
+    "$agrees" "0" \
+    "a claim of \`8\` against a block publishing \`8\` drew $agrees disagreement(s); the\
+ whole-token\
+ branch must pass the case every real numeric call site is."
+}
+
+# Fixture 13: `dependency_cell_again` reads the row without awk, and is the reader
+# `audit_dependency_rows` compares against for the reason `header_fact_from_document` exists. On
+# 2026-09-11 its body could be replaced by a call to `dependency_cell` -- the very awk it exists to
+# be independent of -- with the run green. A four-cell row discriminates: `dependency_cell` requires
+# `NF >= 6` and answers nothing for it, and the reader that is genuinely separate answers the cell.
+verify_dependency_reader_independence() {
+  local table=$fixtures/four-cell-row.md by_awk without_awk
+  printf '%s\n' '| Package | Version |' '| --- | --- |' '| fixture-narrow | 8.2.2 |' > "$table"
+  by_awk=$(dependency_cell "$table" fixture-narrow)
+  without_awk=$(dependency_cell_again "$table" fixture-narrow)
+  scope guard-fixtures "dependency_cell_again"
+  claim dependency-reader-independence "" \
+    "$without_awk" "8.2.2" \
+    "\`dependency_cell_again\` answered \`${without_awk:-nothing}\` for a four-cell row; it is\
+ reading through the awk it exists to be independent of, which makes the dependency comparison and\
+ its audit one reading wearing two hats." \
+    "${by_awk:-nothing}" "nothing" \
+    "\`dependency_cell\` answered \`$by_awk\` for a four-cell row it should not match at all; the\
+ two readers are no longer distinguishable and this fixture can no longer tell them apart."
+}
+
+# Fixtures 14 and 15: the dependency audit's two refusals and its own coverage, driven over a ledger
+# and a matrix written for the occasion. Three of wave 9's ten filed findings are here, and all
+# three are the same shape -- a gate inside the auditor no input in this repository can make fire:
+#   `recheck=$(dependency_version_fact "$row" "$claimed")` -> `recheck=$fact`   (the second reader
+#      compared with itself, which is the precise defect the auditor was written against)
+#   the whole `manifest_pins` test -> `pinned_state=pinned`                     (the mirror-image
+#      collapse: both sides of the comparison taken out of DEPENDENCY_MATRIX.md)
+#   `claim dependency-audit "" "$audited" "$recorded"` -> `"$recorded" "$recorded"`
+# The third of those is repaired rather than fixtured: see `audit_dependency_rows`, whose
+# denominator now comes off the manifests instead of off the array it is reading.
+dependency_audit_fixture_table() {
+  local table=$fixtures/audit-matrix.md
+  cat > "$table" <<'MD'
+| Package | Version | Scope | Where | ADR |
+| --- | --- | --- | --- | --- |
+| fixture-stale | 9.9.9 | npm (dev) | workspace root | ADR-048 |
+| fixture-true | 8.2.2 | npm (dev) | workspace root | ADR-048 |
+MD
+  printf '%s' "$table"
+}
+
+#
+# **The fixture ledger is set inside the drive's own subshell and never as a local of the fixture
+# function.** `record` appends to `ledger`, so a `local -a ledger` around these drives takes every
+# claim the fixture itself makes down with it when the function returns -- which is a fixture that
+# silently checks nothing, in the section written to stop exactly that.
+verify_dependency_audit_refusals() {
+  local deps stale_fact unpinned_claim agreeing
+  deps=$(dependency_audit_fixture_table)
+  local -A manifest_pins=([fixture-stale]="8.2.2" [fixture-true]="8.2.2")
+  local expected_npm_claims=1
+
+  # The fact recorded is the pin, and the row does not carry it: `dependency-fact` must fire.
+  stale_fact=$(
+    ledger=("dependencies"$'\t'"npm:fixture-stale"$'\t'"npm-version"$'\t'"8.2.2>8.2.2")
+    drive audit_dependency_rows)
+  # Both sides taken out of the cell: nothing under frontend/ pins 9.9.9, so `dependency-claim` must
+  # fire while `dependency-fact` agrees.
+  unpinned_claim=$(
+    ledger=("dependencies"$'\t'"npm:fixture-stale"$'\t'"npm-version"$'\t'"9.9.9>9.9.9")
+    drive audit_dependency_rows)
+  agreeing=$(
+    ledger=("dependencies"$'\t'"npm:fixture-true"$'\t'"npm-version"$'\t'"8.2.2>8.2.2")
+    drive audit_dependency_rows)
+
+  scope guard-fixtures "the dependency audit's refusals"
+  claim dependency-audit-refuses "" \
+    "$stale_fact" "1" \
+    "an \`npm-version\` claim recording the pin as the fact, over a row that carries a different\
+ version, drew $stale_fact disagreement(s); re-reading the row is the only thing that sees a\
+ comparison of the pin with itself." \
+    "$unpinned_claim" "1" \
+    "an \`npm-version\` claim whose claimed version no manifest pins drew $unpinned_claim\
+ disagreement(s); the claimed side of that comparison is the pin, so a comparison taking both of\
+ its sides out of the matrix is a true statement about nothing." \
+    "$agreeing" "0" \
+    "an \`npm-version\` claim whose row and pin agree drew $agreeing disagreement(s); both refusals\
+ must pass the case every true row in DEPENDENCY_MATRIX.md is."
+}
+
+verify_dependency_audit_coverage() {
+  local deps short exact
+  local one_row="dependencies"$'\t'"npm:fixture-true"$'\t'"npm-version"$'\t'"8.2.2>8.2.2"
+  deps=$(dependency_audit_fixture_table)
+  local -A manifest_pins=([fixture-true]="8.2.2")
+  local expected_npm_claims=2
+  short=$(ledger=("$one_row"); drive audit_dependency_rows)
+  expected_npm_claims=1
+  exact=$(ledger=("$one_row"); drive audit_dependency_rows)
+  scope guard-fixtures "the dependency audit's coverage"
+  claim dependency-audit-coverage "" \
+    "$short" "1" \
+    "an audit that re-read one row where the manifests pin two dependencies drew $short\
+ disagreement(s); a dependency whose row is missing makes no claim at all, and a narrowed audit\
+ reaches fewer, and neither is visible from inside the loop that does the narrowing." \
+    "$exact" "0" \
+    "an audit that re-read every row the manifests asked for drew $exact disagreement(s); this\
+ comparison must pass the case a true run is."
+}
+
+# Fixture 16: `openapi_fact` reads the document it is handed, and answers a sentence rather than a
+# figure for a path that is not in this repository. Both halves were green under mutation on
+# 2026-09-11: `printf 'not a document in this repository'` -> `printf '0'` let an ADR publish totals
+# about a document nothing generates and be compared against `0/0/0`. The fixture document's answers
+# -- 1, 1 and 0 -- are held by no other reading in this run, so a body rewritten to read
+# `docs/api/openapi.json` regardless of its argument answers 65 here and is named.
+verify_openapi_fact_independence() {
+  local doc=$fixtures/one-operation.json paths operations schemas missing
+  paths=$(openapi_fact "$doc" paths)
+  operations=$(openapi_fact "$doc" operations)
+  schemas=$(openapi_fact "$doc" schemas)
+  missing=$(openapi_fact "$fixtures/no-such-document.json" paths)
+  scope guard-fixtures "openapi_fact"
+  claim openapi-fact-independence "" \
+    "$paths" "1" \
+    "\`openapi_fact\` answered $paths paths for a fixture document with one; it is reading a\
+ document other than the one it was handed." \
+    "$operations" "1" \
+    "\`openapi_fact\` answered $operations operations for a fixture document with one." \
+    "$schemas" "0" \
+    "\`openapi_fact\` answered $schemas component schemas for a fixture document with none." \
+    "$missing" "not a document in this repository" \
+    "\`openapi_fact\` answered \`$missing\` for a path that is not in this repository; a figure\
+ about a document nothing generates has to be refused rather than compared against a zero."
+}
+
 verify_dependency_row_comparison
 verify_residue_reports_unclaimed
 verify_total_split
-close_section guard-fixtures 13
+verify_claim_reads_whole_figure
+verify_dependency_reader_independence
+verify_dependency_audit_refusals
+verify_dependency_audit_coverage
+verify_openapi_fact_independence
+close_section guard-fixtures 18
+
+# ---------------------------------------------------------------------------------------------
+# 8. The capability claims: sentences naming services and packages, against the tree itself.
+# ---------------------------------------------------------------------------------------------
+#
+# Sections 0 to 7 compare **figures**. This one compares a **sentence**, and it exists because on
+# 2026-09-11 every one of them was green over a `README.md` whose status banner said *milestones 0
+# to 5* and whose *What is not built* list said **"No Kafka Connect, no ksqlDB"** -- against a tree
+# that ships both services, draws both screens, routes both through the gateway and has seven
+# passing browser cases over them. The banner was four milestones stale, `./scripts/feature-matrix-\
+# check.sh` printed `348 claims checked, all true`, and it was right to: **the false sentence sat
+# outside every marker, and no gate in this repository read prose at all.** That is the failure
+# `docs/ROADMAP-SOLID.md` was retired for, committed by the machinery built to prevent it.
+#
+# The comparison is the same one every other section makes; what is new is the fact. A sentence
+# saying a service is or is not built is compared against `services/` on disk, and a sentence saying
+# it is or is not reachable is compared against `ServiceContracts.byService` -- the gateway's own
+# map, the single place that association is declared, read out of the Scala rather than out of a
+# list kept here. A claim is therefore impossible to satisfy by editing this script's own roster,
+# because this script keeps none.
+#
+# Both directions, for section 4's reason. A service named in the prose that is not on disk is the
+# drift that happens when a document is written ahead of the code; a service on disk that the prose
+# does not name is the drift that happened here, and it is the one a table of fixed rows cannot see.
+
+service_contracts_file=services/gateway/api/src/kui/gateway/api/routing/ServiceContracts.scala
+
+for required in "$service_contracts_file"; do
+  if [[ ! -f $required ]]; then
+    echo "feature-matrix-check: $required is missing; the capability claims cannot be checked." >&2
+    exit 2
+  fi
+done
+
+# The service ids the gateway holds a contract for. Newlines are removed first because the map is
+# written for a hundred-column rule and one of its eleven entries wraps `ServiceId.unsafe(` onto
+# three lines -- a grep that assumed one line answered eight where the map holds nine, which is
+# precisely the class of quiet miscount this section is here to refuse.
+routed_service_names() {
+  tr -d ' \n' < "${1-$service_contracts_file}" \
+    | { grep -oE 'ServiceId\.unsafe\("[a-z][a-z-]*"\)' || true; } \
+    | sed -E 's/.*"([a-z][a-z-]*)".*/\1/' | sort -u
+}
+
+service_directory_names() {
+  find "${1-services}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+}
+
+# One service's state, in the vocabulary the prose uses, so that the claimed side of the comparison
+# is the label the document actually printed rather than a code this script invented. The two
+# sources are defaulted rather than fixed, for the reason `header_fact_from_document` takes its
+# document as an argument: a fixture has to be able to drive the shipped function over a tree whose
+# answer no reading in this run holds.
+service_state_fact() {
+  local name=$1 root=${2-services} contracts=${3-$service_contracts_file} built=no routed=no
+  [[ -d "$root/$name" ]] && built=yes
+  if routed_service_names "$contracts" | grep -qxF -- "$name"; then routed=yes; fi
+  if [[ $built == yes && $routed == yes ]]; then printf 'Built and routed'
+  elif [[ $built == yes ]]; then printf 'Built, not routed'
+  elif [[ $routed == yes ]]; then printf 'Not built but routed'
+  else printf 'Not built'
+  fi
+}
+
+package_directory_names() {
+  find "${1-frontend/packages}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+}
+
+# The backticked tokens of one labelled list -- `**Built and routed:** \`a\`, \`b\`.` -- out of a
+# block. The label is the claimed side, so it is returned with them.
+service_labels=("Built and routed" "Built, not routed" "Not built")
+
+# What each block said about each service, filled by the handler below and read by
+# `audit_service_states` after every block has been read. It is the `header table` pattern: the
+# comparison inside the block and the audit outside it are two statements rather than one, so the
+# cheapest attack on this section — comparing the label a document printed with itself, which the
+# claimed-side refusal cannot see because the label *is* in the text it struck out — has to be
+# applied twice before a false sentence goes green. That price is measured and published in
+# `TECH_DEBT.md`'s TD-023 rather than asserted here.
+declare -A declared_service_state=()
+
+check_capability_region() {
+  local where=$1 text=$2 rest tok label names name fact listed="" declared_packages=""
+  local existing="" wanted=""
+
+  if [[ $text =~ \*\*([0-9]+)\ services\*\* ]]; then
+    claim service-count "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$(service_directory_names | wc -l | tr -d ' ')" \
+      "$where says KUI is ${BASH_REMATCH[1]} services; \`services/\` holds\
+ $(service_directory_names | wc -l | tr -d ' ')."
+  fi
+
+  if [[ $text =~ \*\*([0-9]+)\ of\ them\ routed\*\* ]]; then
+    claim service-routed-count "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$(routed_service_names | wc -l | tr -d ' ')" \
+      "$where says ${BASH_REMATCH[1]} services are routed; \`ServiceContracts.byService\` holds\
+ $(routed_service_names | wc -l | tr -d ' ')."
+  fi
+
+  # Each labelled list, name by name. `claim` is handed the label fragment, so the claimed side has
+  # to have been read out of the document: a comparison rewritten to put the derived state on both
+  # sides fails the claimed-side refusal, because the derived state is not in the fragment unless
+  # the document printed it.
+  #
+  # A list runs from its label to the next emphasis marker, so a list whose prose uses `*italics*`
+  # ends early and the names after it go unread. That is not silent: `service-roster` below compares
+  # the names this block reached against every directory under `services/`, so a truncated list is
+  # reported as a service the block does not name, which is the same complaint and the right one.
+  for label in "${service_labels[@]}"; do
+    rest=$text
+    while [[ $rest =~ \*\*${label}:\*\*([^*]*) ]]; do
+      tok=${BASH_REMATCH[0]}
+      names=${BASH_REMATCH[1]}
+      while [[ $names =~ \`([a-z][a-z-]*)\` ]]; do
+        name=${BASH_REMATCH[1]}
+        names=${names#*"$name\`"}
+        listed+="$name"$'\n'
+        declared_service_state[$name]=$label
+        fact=$(service_state_fact "$name")
+        claim service-state "$tok" \
+          "$label" "$fact" \
+          "$where lists \`$name\` under **$label:** and the tree says it is \`$fact\` --\
+ \`services/$name\` and \`ServiceContracts.byService\` are what this was compared against, not a\
+ roster kept in this script."
+      done
+      rest=${rest#*"$tok"}
+      consume text "$tok"
+    done
+  done
+
+  if [[ -n $listed ]]; then
+    # The names this block listed that really are directories, against every directory there is.
+    # A service on disk the block does not name leaves the two unequal, which is the direction a
+    # list of fixed names cannot see -- and is how `connect` and `ksql` were published as not built
+    # for a whole wave beside a `services/` holding both.
+    while IFS= read -r name; do
+      [[ -z $name ]] && continue
+      [[ -d services/$name ]] && existing+="$name"$'\n'
+    done < <(printf '%s' "$listed" | sort -u)
+    wanted=$(service_directory_names | tr '\n' ' ')
+    claim service-roster "" \
+      "$(printf '%s' "$existing" | sort -u | tr '\n' ' ')" "$wanted" \
+      "$where names the services [$(printf '%s' "$existing" | sort -u | tr '\n' ' ')] and\
+ \`services/\` holds [$wanted]. Every directory under \`services/\` has to be named in one of the\
+ three lists, or a service can ship with this page saying nothing about it."
+  fi
+
+  # The frontend packages, the same way. The matrix reserves three names for milestones that have
+  # not started, so the claim is *how many of the names exist* rather than that all of them do.
+  if [[ $text =~ \*\*([0-9]+)\ of\ the\ ([0-9]+)\ names\ above\ exist ]]; then
+    # Taken before the loop below runs: every `[[ =~ ]]` overwrites `BASH_REMATCH`, and reading it
+    # after the loop is an unbound-variable death under `set -u` on the first block with no names.
+    local pkg_tok=${BASH_REMATCH[0]} pkg_present=${BASH_REMATCH[1]} pkg_named=${BASH_REMATCH[2]}
+    rest=$text
+    local named=0 present=0 seen_packages=""
+    # Counted once per **distinct** name: the key names each reserved package again in the sentence
+    # that explains why it is reserved, and a roster that counts a name twice is a count that moves
+    # when somebody adds a sentence.
+    while [[ $rest =~ \`(shell|kernel|feature-[a-z-]+)\` ]]; do
+      tok=${BASH_REMATCH[0]}
+      name=${BASH_REMATCH[1]}
+      rest=${rest#*"$tok"}
+      [[ $'\n'$seen_packages == *$'\n'"$name"$'\n'* ]] && continue
+      seen_packages+="$name"$'\n'
+      named=$(( named + 1 ))
+      if package_directory_names | grep -qxF -- "$name"; then
+        present=$(( present + 1 ))
+        declared_packages+="$name"$'\n'
+      fi
+    done
+    claim package-count "$pkg_tok" \
+      "$pkg_present" "$present" \
+      "$where says $pkg_present of the named packages exist; $present of them are directories\
+ under \`frontend/packages/\`." \
+      "$pkg_named" "$named" \
+      "$where says it names $pkg_named packages; it names $named."
+    # `api` owns no screen and is deliberately outside the list, so it is the one exemption and it
+    # is written here rather than inferred from the list being short.
+    claim package-roster "" \
+      "$(package_directory_names | grep -vx api | tr '\n' ' ')" \
+      "$(printf '%s' "$declared_packages" | sort -u | tr '\n' ' ')" \
+      "$where's package roster and \`frontend/packages/\` disagree; every package but \`api\` owns\
+ screens and has to be named, or a feature package can ship with no row pointing at it."
+  fi
+
+  report_unclaimed_figures "$where" "$text"
+}
+
+# The fact readers, driven over a tree whose answers no real service has. `service_state_fact` is
+# the only thing standing between a published sentence and a roster kept in this file, so a body
+# rewritten to read `services/` regardless of its argument answers `Built and routed` for a fixture
+# service that exists nowhere, and is named here.
+verify_service_fact_independence() {
+  local root=$fixtures/services contracts=$fixtures/Contracts.scala both only_built only_routed
+  mkdir -p "$root/fixture-both" "$root/fixture-built"
+  printf '%s\n' 'ServiceId.unsafe(' '  "fixture-both"' ') -> Nil,' \
+                'ServiceId.unsafe("fixture-routed") -> Nil' > "$contracts"
+  both=$(service_state_fact fixture-both "$root" "$contracts")
+  only_built=$(service_state_fact fixture-built "$root" "$contracts")
+  only_routed=$(service_state_fact fixture-routed "$root" "$contracts")
+  scope capability-claims "service_state_fact"
+  claim service-fact-independence "" \
+    "$both" "Built and routed" \
+    "\`service_state_fact\` answered \`$both\` for a fixture service that is a directory and is in\
+ the fixture contract map; it is reading something other than the two it was handed." \
+    "$only_built" "Built, not routed" \
+    "\`service_state_fact\` answered \`$only_built\` for a fixture service on disk that no contract\
+ map names; the two halves of the answer are no longer independent." \
+    "$only_routed" "Not built but routed" \
+    "\`service_state_fact\` answered \`$only_routed\` for a fixture service that is routed and is\
+ not a directory. The map is read across line breaks, which is why this case is here: the entry it\
+ is modelled on wraps \`ServiceId.unsafe(\` onto three lines in the shipped file."
+}
+
+# The second reading, outside the block, by a statement that is not the one that made the claim.
+# `declared_service_state` is filled beside each `service-state` comparison and read here; the
+# coverage figure below compares how many services this audit reached with how many `service-state`
+# claims the section actually recorded, which are two different places and so cannot be brought into
+# agreement by one edit.
+audit_service_states() {
+  local name audited=0 recorded=0 line a b c
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c _ <<< "$line"
+    [[ $a == capability-claims && $c == service-state ]] && recorded=$(( recorded + 1 ))
+  done
+  scope capability-claims "the service roster ledger"
+  for name in ${!declared_service_state[@]}; do
+    audited=$(( audited + 1 ))
+    claim service-audit "" \
+      "${declared_service_state[$name]}" "$(service_state_fact "$name")" \
+      "the roster says \`$name\` is \`${declared_service_state[$name]}\` and the tree says it is\
+ \`$(service_state_fact "$name")\`. This is the second reading: the comparison inside the block and\
+ this one are two statements, so a label compared with itself at the claim site is still caught."
+  done
+  claim service-audit-coverage "" \
+    "$audited" "$recorded" \
+    "this audit re-derived the state of $audited services and the capability-claims section\
+ recorded $recorded \`service-state\` comparisons; a service the audit does not reach is one only\
+ the claim site speaks for."
+}
+
+verify_service_fact_independence
+
+for file in README.md "$matrix"; do
+  check_marked_file capability-claims "$file" check_capability_region
+done
+
+audit_service_states
+close_section capability-claims 35
 
 # ---------------------------------------------------------------------------------------------
 
@@ -2088,8 +2631,9 @@ printf '  self-check: %d, rows: %d, merged-document: %d, milestones: %d, adr-ind
   "${section_counts[self-check]}" "${section_counts[rows]}" \
   "${section_counts[merged-document]}" \
   "${section_counts[milestones]}" "${section_counts[adr-index]}"
-printf ' openapi-totals: %d, guard-fixtures: %d,' \
-  "${section_counts[openapi-totals]}" "${section_counts[guard-fixtures]}"
+printf ' openapi-totals: %d, guard-fixtures: %d, capability-claims: %d,' \
+  "${section_counts[openapi-totals]}" "${section_counts[guard-fixtures]}" \
+  "${section_counts[capability-claims]}"
 printf ' dependencies: %d over %d named manifests.\n' \
   "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \

@@ -108,6 +108,7 @@ import {
   isLive,
   ksqlVoice,
   regionFor,
+  unreadableSentence,
   withColumns,
   type ResultRegion,
 } from "./model.js";
@@ -346,15 +347,13 @@ export function KsqlScreen(props: KsqlScreenProps): JSX.Element {
         {(held) => (
           <>
             {/* Rows the server returned and KUI could not describe, named rather than dropped: a
-                row missing from a list is indistinguishable from a row that is not there. */}
+                row missing from a list is indistinguishable from a row that is not there. The
+                sentence is bounded — see `MAX_NAMED_UNREADABLE` — because the list on the wire is
+                not, and a banner naming ten thousand rows is a banner nobody reads. */}
             <Show when={held().unreadable.length > 0}>
               <Banner
                 tone="warning"
-                message={
-                  `KUI could not describe ${held().unreadable.join(", ")}. ` +
-                  "This build and the ksqlDB server disagree about what those rows are, so they " +
-                  "are named here rather than left out of the list."
-                }
+                message={unreadableSentence(held().unreadable)}
                 testId="ksql-unreadable"
               />
             </Show>

@@ -43,6 +43,8 @@ import {
   type PermissionGrant,
 } from "@kui/kernel";
 
+import harmlessPlan from "./documents/statement-plan-harmless.json" with { type: "json" };
+
 export interface Mounted {
   readonly container: HTMLElement;
   readonly dispose: () => void;
@@ -171,10 +173,19 @@ export interface Stub {
  * It answers **per path** rather than one document for everything, because this screen makes two
  * different reads (the objects and the cluster's read-only flag) and a single-document stub would
  * feed the object decoder the cluster document and call the result a contract break.
+ *
+ * ## The write hook is given the path, and may decline to answer
+ *
+ * A screen that plans before it applies makes **two** writes, so a hook that could not tell them
+ * apart could only replace both. It is handed the path, and a hook that returns `undefined` lets
+ * the held document answer as it would have anyway — which is what lets a case hold the *apply* in
+ * flight, and only the apply, without restating what either address returns. W10-06's
+ * double-submission case is that shape: it needs the first press to still be running when the
+ * second one lands, and nothing else about the stub changed.
  */
 export function serving(
   documents: Readonly<Record<string, unknown>>,
-  write?: () => Promise<unknown>,
+  write?: (path: string) => Promise<unknown>,
 ): Stub {
   const calls: Call[] = [];
   const held = new Map<string, unknown>(Object.entries(documents));
@@ -184,7 +195,8 @@ export function serving(
     async (path: string, init: { params: { path: Record<string, string> }; body?: unknown }) => {
       calls.push({ method, path, params: init.params.path, body: init.body });
       if (method === "get") return { ok: true, value: held.get(path) ?? null };
-      return write === undefined ? { ok: true, value: held.get(path) ?? null } : await write();
+      const written = write === undefined ? undefined : await write(path);
+      return written ?? { ok: true, value: held.get(path) ?? null };
     };
 
   const api = {
@@ -204,3 +216,46 @@ export function serving(
     },
   };
 }
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The push query's plan                                                                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * The plan document a `SELECT … EMIT CHANGES` produces, derived from a golden rather than written.
+ *
+ * ## Why this is not a file in `documents/`
+ *
+ * It was one — `statement-plan-push-query.json` — and it was the only fixture in this package that
+ * **no encoder had ever produced**. House rule 12 exists to eliminate exactly that: every other
+ * document here is a byte-for-byte copy of a golden `services/ksql/contract` renders from the
+ * service's own encoder, held that way by `wire.golden.test.ts`, so a fixture cannot become a third
+ * opinion about the wire. A hand-written one in the same directory looks identical to the ones that
+ * were captured, and this one was already wrong: it carried `"warnings": []`, where `KsqlUseCases`
+ * gives a push query's plan exactly one warning (`PushQueryElsewhere`, the sentence naming the
+ * stream address that does answer).
+ *
+ * ## What this is instead, and what it deliberately does not invent
+ *
+ * The service commits no push-query plan golden, so there is nothing to copy. This takes the plan
+ * golden it *does* commit — `statement-plan-harmless.json`, a non-destructive statement, held
+ * byte-identical to the service's own by `wire.golden.test.ts` — and changes the **two** fields the
+ * service itself changes for a push query: the statement, and the `shape` it is classified as.
+ * Every other field is the encoder's.
+ *
+ * `warnings` is left as the golden's empty list and **no sentence is invented here**. Copying
+ * `PushQueryElsewhere` out of `KsqlUseCases.scala` by eye would be a second copy of a Scala
+ * constant with nothing comparing the two — the mistake `ALERTS_EVENT_NAME` is this project's
+ * standing example of. It is also inert for every case that uses this: the screen draws a plan's
+ * warnings only inside the confirmation, and a push query is not destructive, so no confirmation
+ * ever opens over one. The field the cases actually route on is `shape`.
+ *
+ * When `services/ksql/contract` commits a push-query plan golden, this goes away and the document
+ * comes back into `documents/` as a copy. `wire.golden.test.ts` holds the half of that which can be
+ * held from this side: no plan document in this package may exist without a golden behind it.
+ */
+export const pushQueryPlan: unknown = {
+  ...harmlessPlan,
+  statement: "SELECT * FROM ORDERS EMIT CHANGES;",
+  shape: "push_query",
+};

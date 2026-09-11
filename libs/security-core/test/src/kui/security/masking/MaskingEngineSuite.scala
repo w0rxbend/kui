@@ -110,6 +110,11 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
   test("keeping more than there is masks everything rather than silently doing nothing") {
     // A rule that quietly returns the input is worse than one that masks more than its author intended: the
     // first looks like it is working.
+    //
+    // THIS CASE CARRIED THAT SENTENCE OVER THE OPPOSITE ASSERTION FOR NINE WAVES. It expected `"abc"` --
+    // the input, in full, from a rule written to hide it -- so the name described the promise and the
+    // assertion pinned the bug. `maskKeepingEnds` now masks the whole value when the kept ends leave
+    // nothing to mask, and this is what the name always said.
     assertEquals(
       MaskingEngine
         .maskText(
@@ -118,7 +123,41 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
           Target.Value,
           "abc"
         ),
-      "abc"
+      "***"
+    )
+  }
+
+  test("two legal ends that overlap do not hand back the card number they were written to hide") {
+    // W9-06/F4, closed at the engine. `MaskingConfig.MaxKeep` is 20 and was enforced per end, so
+    // `keep: {prefix: 20, suffix: 20}` was a rule that loaded, read correctly to its author and returned a
+    // sixteen-digit card number untouched -- measured in wave 9 against this function. The loader now
+    // refuses that pair as well, and this is the half of the repair that does not depend on a loader:
+    // `KeepEnds` is a plain pair of `Int`s and any caller can build one.
+    assertEquals(
+      MaskingEngine
+        .maskText(
+          List(MaskingRule.everything(MaskingKind.Mask("*", KeepEnds(20, 20)))),
+          topic,
+          Target.Value,
+          "4111111111111111"
+        ),
+      "*" * 16
+    )
+  }
+
+  test("a mask whose ends leave nothing to mask still cycles the operator's own characters") {
+    // The whole-value branch is a second place that writes replacement characters, so it is a second place
+    // that can forget whose they are: `maskingCharsReplacement: "#"` has to survive it. Without a case
+    // here the branch could quietly hard-code an asterisk and only a deployment would notice.
+    assertEquals(
+      MaskingEngine
+        .maskText(
+          List(MaskingRule.everything(MaskingKind.Mask("#", KeepEnds(9, 9)))),
+          topic,
+          Target.Value,
+          "4242"
+        ),
+      "####"
     )
   }
 
@@ -290,9 +329,9 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
     // plain pair of `Int`s with no validation, so a negative is constructible by any caller.
     //
     // The two `.min` clamps beside them are inert, and measurably so: without them the arithmetic only
-    // ever drives `maskedCount` below zero, which returns the input unchanged — exactly what the clamped
-    // path returns. The case above ("keeping more than there is masks everything") covers the reachable
-    // half of that pair.
+    // ever drives `maskedCount` below zero, which masks the whole value — exactly what the clamped path
+    // returns, since it drives `maskedCount` to zero and takes the same branch. The case above ("keeping
+    // more than there is masks everything") covers the reachable half of that pair.
     val negativePrefix =
       maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(-1, 0)), "pin")), """{"pin":"1234"}""")
     val negativeSuffix =
