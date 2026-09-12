@@ -327,18 +327,34 @@ kui:
 
       # WHICH FIELDS NEVER LEAVE THE SERVICE IN FULL (DM-001, ADR-023).
       #
-      # THE SAME RULES ./kui-quickstart.yaml CARRIES, and it is here because THIS is the deployment
-      # where it matters. This sentence said "byte for byte" from wave 11 until wave 12 and was
-      # false by three lines of comment — the default file explains `keep` where it first appears
-      # and this one does not, because the reasons are documented once, over there. A claim of
-      # byte-equality about a file this one does not contain is checked by nothing here, so what it
-      # actually says is now the thing a reader can run:
+      # THE SAME RULES ./kui-quickstart.yaml CARRIES, and THE THING THAT COMPARES THEM IS A TEST,
+      # NOT THIS COMMENT: `libs/config/test/src/kui/config/ShippedConfigurationSuite.scala` loads
+      # both files through the shipped loader and asserts that the two rule lists agree, field by
+      # field, after masking a record with them. Measured on 2026-09-12 by editing the
+      # `replacement:` below to "<name>": `./mill --no-daemon libs.config.test` → 395/395, 1
+      # FAILED. That is the gate. Everything the rest of this comment publishes is a reader's aid.
       #
-      #   diff <(awk '/^      masking:/,/^$/' kui-quickstart.yaml       | grep -v '^ *#') \
-      #        <(awk '/^      masking:/,/^$/' kui-quickstart-auth.yaml  | grep -v '^ *#')
+      # It is written that way round because this comment has now been wrong twice about the same
+      # two blocks. Wave 11 claimed they were "byte for byte" identical, which was false by three
+      # lines of explanation — the default file introduces `keep` where it first appears and this
+      # one does not, because the reasons are documented once, over there. Wave 12 replaced the
+      # claim with a command, and the command could not fail: its `awk` range ended at the first
+      # BLANK LINE, and the blank line falls BETWEEN the two rules, so both extracts held the
+      # `kind: mask` rule alone and the `kind: replace` rule below was compared with nothing. With
+      # the `replacement:` mutated as above, that published diff still printed nothing and exited
+      # 0.
       #
-      # is empty — the rules are identical — and the same diff without `grep -v` is `2,4c2`, which
-      # is the comment and nothing else.
+      # The range therefore ends where the block ends — at the next line indented less far than
+      # the rules — rather than at the first blank line inside it:
+      #
+      #   ex='/^      masking:/{f=1;print;next} f&&/^ *[^ ]/&&!/^        /{f=0} f'
+      #   diff <(awk "$ex" kui-quickstart.yaml      | grep -v '^ *#') \
+      #        <(awk "$ex" kui-quickstart-auth.yaml | grep -v '^ *#')
+      #
+      # is empty — the rules are identical, both of them — and it prints `10c10` naming
+      # `replacement:` under the mutation above. The same diff WITHOUT `grep -v` is two hunks,
+      # `2,4c2` and `11,12c9,10`, and both are comment: the wave-12 figure of `2,4c2` alone was
+      # the first hunk of a range that stopped before the second rule.
       #
       # Until wave 11 the default quickstart masked two fields and this file masked none, so
       # `--with-auth` — the one deployment in this repository that has a role called `viewer`, a

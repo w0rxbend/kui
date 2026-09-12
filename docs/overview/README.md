@@ -6,13 +6,17 @@ shapes it deploys in, and the gates that decide whether a change is allowed to l
 README — `README.md` at the root tells you how to run it — and it is not an ADR index:
 `DECISIONS.md` is that, and it lists all fifty-six.
 
-Every figure below is one of three things, and section 5 says which for each of them: a figure a
-gate re-reads out of this page on every run; a snapshot of the build's **shape**, carrying the date
-it was taken on and the command that printed it; or no figure at all, only the command that prints
-it, for the sizes that move on almost every commit. The dates differ because the measurements do,
-and a figure whose date is older than the one beside it is a figure that has not needed re-taking,
-not a page that has forgotten to. Where something could not be measured here it says so in a
-sentence rather than being rounded to something convenient.
+Every figure below is one of two things, and there is no third: a figure a gate re-reads out of this
+page on every run — section 5 marks those, inside an HTML comment naming the claims the checker
+compares — or a figure with the command that prints it written beside it, which a reader re-takes in
+the time it takes to run. There **used** to be a third kind, a snapshot of the build's **shape**
+carrying the date it was taken on, and it is gone because it is the kind that was wrong: three rows
+of section 5's gate table published *1,145 Scala sources* while `git ls-files '*.scala' | wc -l`
+answered **1,152** on 2026-09-12, and the date beside them was the only part of the row still true.
+A date is not a check, and a source count moves with every file added, so the table below names the
+command rather than carrying an eighth figure somebody has to remember to re-take. Where something
+could not be measured here it says so in a sentence rather than being rounded to something
+convenient.
 
 ---
 
@@ -69,7 +73,7 @@ were both a literal somebody forgot to extend.
 
 ### The six layers, and the rule that is enforced by the build
 
-Every service that owns a domain is six Mill modules, and `ls services/ksql` shows all six:
+Every service that owns a domain is these six Mill modules, and `ls services/ksql` shows all six:
 
 ```
 domain           the rules. No Tapir, no Circe, no http4s, no cats-effect IO at the edges of it.
@@ -80,24 +84,36 @@ api              the routes, and the mapping between application types and DTOs 
 app              the wiring and the main class.
 ```
 
+Six is the floor rather than the shape of every service: `ls services/cluster` shows a seventh
+module, `client`, the typed reader the other Kafka-facing services use to turn a cluster id into a
+live connection. ADR-041 rule A11 admits `contract` and `client` across a service boundary and
+nothing else, and it names `client` so that a second module of this kind has to be argued in the
+commit that adds it.
+
 The direction of those dependencies is not a convention here. `./mill checkArchitecture` reads the
-module graph and fails the build on an edge that points the wrong way; run on 2026-09-11 it prints
-`195 modules, 10 rules, no layering violations`. The figure this sentence used to publish was 233,
-which is what Mill prints as its *task* count for the same command and not a count of modules at
-all — the same confusion the `openApiCheck` line below carried. ADR-041 is the decision and its §1a
-explains the one place the rule bends: the gateway owns no domain, so its `application` may hold
-wire types.
+module graph and fails the build on an edge that points the wrong way, **and it prints what it
+read** — the module count, the rule count, and either the violations or `no layering violations` —
+so this page names the command and repeats none of it. The figure this sentence used to publish was
+233, which is what Mill prints as its *task* count for the same command and not a count of modules
+at all — the same confusion the `openApiCheck` line below carried, and the reason no figure out of
+either command survives on this page. ADR-041 is the decision and its §1a explains the one place the
+rule bends: the gateway owns no domain, so its `application` may hold wire types.
 
 ### One contract, two documents
 
 `docs/api/openapi.json` is the merged contract of every routed service, rendered from the Tapir
-endpoints themselves — **65 paths, 76 operations, 160 component schemas, OpenAPI 3.1.0**.
+endpoints themselves, and it declares OpenAPI 3.1.0. Its size — paths, operations and component
+schemas — is in the checked block in section 5 and nowhere else on this page, because it is a figure
+`./scripts/feature-matrix-check.sh` re-reads out of that block on every run and a second copy here
+is a copy that can drift from it.
+
 `docs/api/openapi.browser.json` is the same document with every `X-Kui-*` header parameter removed,
 because those headers are minted by the gateway and stripped from anything a browser sends: a
 browser client generated from the service-facing document would have types obliging every call site
 to send the exact header the security boundary exists to reject. Both are committed and
-`./mill __.openApiCheck` re-renders and byte-compares them — **eleven committed documents over ten
-`openApiCheck` targets**: one per service that publishes a contract, plus the gateway's merged pair.
+`./mill __.openApiCheck` re-renders and byte-compares them, over **eleven committed documents**
+(`git ls-files '*openapi*.json'`) and **ten `openApiCheck` targets** (`./mill resolve
+'__.openApiCheck'`): one per service that publishes a contract, plus the gateway's merged pair.
 This sentence used to say *2629 endpoints*, which is neither: it is what Mill prints as its task
 count for that command, it is not a count of anything in the contract, and it answered 2544 on the
 next run of the same command against the same tree.
@@ -119,11 +135,14 @@ The browser build is TypeScript, SolidJS 2 and Vite, under `frontend/`, with pnp
   `feature-consumers`, `feature-schemas`, `feature-alerts`, `feature-connect` and `feature-ksql`.
 
 A feature package owns its screens and its own wire module and nothing else. It is reached only
-through the shell's registry (`frontend/packages/shell/src/features/registry.ts`, eight
-registrations), which loads it by dynamic import, so a feature cannot be imported by another
-feature and a screen cannot be reached by an address the shell does not publish. The gate on that
-is `pnpm lint:boundaries`, which printed `423 files in 11 packages: no boundary violations` on
-2026-09-12.
+through the shell's registry (`frontend/packages/shell/src/features/registry.ts`), which loads it by
+dynamic import, so a feature cannot be imported by another feature and a screen cannot be reached by
+an address the shell does not publish. The length of that array is not written here either:
+`FEATURE_COUNT`, in the same file, is the number and `registry.test.ts` asserts the array is that
+long — the prose that used to state it had been wrong by inheritance twice, because the render test
+iterates the registry rather than sizing it and nothing in the workspace could see that the two had
+parted company. The gate on the boundaries is `pnpm lint:boundaries`, which prints the files and
+packages it read and names any violation.
 
 Two conventions are worth knowing before you write any of it. **Storybook first**: a component gets
 a story before it gets a screen, because the story is where its states are visible without a
@@ -140,11 +159,16 @@ The same modules compose two ways, with no code change between them.
 This is the local loop, and it is the shape most development happens in.
 
 **Eleven containers.** `deployment/compose/docker-compose.yml` runs the gateway, the nine routed
-services and the frontend as separate containers, against Kafka, a Schema Registry, a Connect
-worker, a ksqlDB server and a metrics exporter. `./mill deployment.docker.__.build` builds the
-eleven images (ten services plus the all-in-one). `deployment/compose/smoke.sh` brings that stack
-up, stops one container and asserts the other eight carry on — deriving the list from
-`ServiceContracts.byService` rather than from a literal.
+services and the frontend as separate containers — `grep -c 'image: kui-'` over that file counts
+them — against Kafka, a Schema Registry, a Connect worker, a ksqlDB server and a metrics exporter.
+`./mill resolve 'deployment.docker.__.build'` also answers **eleven**, and **they are not the same
+eleven**: Mill builds the gateway, the nine routed services and the all-in-one, while the frontend
+image is built from `deployment/frontend/` by Docker, because Mill does not build the browser half
+at all (ADR-048). Mill's eleven holds the all-in-one and not the frontend image; the stack's eleven
+holds the frontend image and not the all-in-one, and the coincidence is spelled out here rather than
+left for a reader to reconcile.
+`deployment/compose/smoke.sh` brings that stack up, stops one container and asserts the other eight
+carry on — deriving the list from `ServiceContracts.byService` rather than from a literal.
 
 `deployment/quickstart/` is a third thing and not a third shape: a single-command demo stack with
 seeded data, which is what the browser evidence in the feature matrix is usually driven against.
@@ -157,11 +181,14 @@ A change lands when every one of these is green. They are run one at a time; two
 ones together have exhausted memory on a developer machine, and a killed subprocess reads as a
 failure that is not one.
 
-**The figures come in two kinds, and the difference is the point of this section.** Three of them
-are re-read by `./scripts/feature-matrix-check.sh` on every run, out of the same ledger and the same
-documents the gate itself reads, so this page cannot be wrong about them for longer than one run.
-The rest need another process — a Scala test run, a Mill task graph, a browser suite — so they are a
-snapshot with a date on it, and a date is not a check.
+**One kind of figure is left in this section, and the difference is the point of it.** The block
+below is re-read by `./scripts/feature-matrix-check.sh` on every run, out of the same ledger and the
+same documents the gate itself reads, so this page cannot be wrong about it for longer than one run.
+Everything else needs another process — a Scala test run, a Mill task graph, a browser suite — and
+every one of those commands prints its own size as it finishes, so the table below names the command
+and carries no number of its own. That is the repair and not an omission: the snapshot that used to
+sit there was wrong in three rows, and a date beside a figure had been the only thing a reader had
+to go on.
 
 That distinction is new on 2026-09-12, and it exists because of what this page did without it.
 Until then it carried no `<!-- checked: -->` marker of any kind, and the row describing the checker
@@ -174,7 +201,7 @@ the wave that owned it. Four of that table's ten rows were stale against the tre
 <!-- checked: gate-table -- verified by ./scripts/feature-matrix-check.sh -- claims: gate-claim-total, gate-section-count, gate-openapi-document, gate-decisions-rows, residue -->
 | What this page publishes | Read back by | Size |
 | --- | --- | --- |
-| the checker's own size | its own ledger, as the run finishes | **438 claims** over **12 sections** |
+| the checker's own size | its own ledger, as the run finishes | **444 claims** over **12 sections** |
 | `docs/api/openapi.json`, the merged contract | the checker's `merged-document` section | **65 paths**, **76 operations** and **160 component schemas** |
 | `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **56 rows**, one per ADR on disk |
 <!-- /checked -->
@@ -184,42 +211,42 @@ figure that would make it true, so repairing this page is a substitution rather 
 investigation — which is what every other document in this repository that publishes a count has
 had since 2026-09-10, and what this one did not.
 
-### The gates, and the sizes that need another process to measure
+### The gates, and the size each one prints for itself
 
-**Three of the rows below carry a command where a figure used to be, and that is the repair rather
-than an omission.** The Scala case count, the component case count and the browser suite's tally
-move on almost every commit; all three were wrong on this page within hours of being written down,
-twice, by the waves that wrote them. A date on a figure is not a check, and a figure somebody has
-to remember to re-take is a figure that is wrong between the commit that moves it and the person
-who notices. So they are written as the command that prints them, which cannot go stale, and the
-reader who wants the number runs it — the same shape `docs/FEATURE_MATRIX.md` now uses wherever it
-cites a size out of another tree.
+**Every row below now carries a command where a figure used to be.** Wave 12 did this for three of
+them — the Scala case count, the component case count and the browser suite's tally, each of which
+had been wrong on this page within hours of being written down, twice, by the waves that wrote them.
+It left the other six as a dated snapshot of the build's **shape**, on the argument that a module
+count and a source count move only when a module or a source tree is added. The argument is true and
+it did not help: the three rows publishing the Scala source count were stale seven sources later,
+and the date beside them was the part of the row a reader trusted most.
 
-The rest of the right-hand column is a snapshot of the **shape** of the build — how many modules,
-how many sources, how many targets — which moves only when a module, a source tree or a task is
-added. Every one of those was printed by the command beside it on **2026-09-12**, at the close of
-wave 11, one gate at a time, against this tree, and none of them was re-measured by the wave-12
-documentation pass that rewrote this section: that pass changed no Scala, no TypeScript and no
-build file, and it says so here rather than republishing a figure it did not take.
+So the right-hand column says what each command prints rather than what it once printed. Every one
+of them ends by printing its own size — Mill prints `N/N` tasks and names each target's source count
+as it goes, `checkArchitecture` prints its module and rule counts, the boundary and accessibility
+sweeps print theirs, `run-tests.sh` and vitest and Playwright print their case tallies — so a reader
+who wants a number is one command away from one nobody had to remember to re-take here.
 
-| Gate | What it checks | Size, or the command that prints it |
+| Gate | What it checks | What running it prints |
 | --- | --- | --- |
-| `./mill __.compile` | Scala compilation under `-Werror` | 8251/8251 build tasks over 1,145 Scala sources |
-| `./scripts/run-tests.sh` | every Scala suite | no figure here: the script prints the case count and the module count as its last line, and both move on almost every commit |
-| `./mill checkArchitecture` | the ADR-041 module dependency direction | **195 modules**, 10 rules |
-| `./mill __.checkFormat` | Scalafmt | **495/495 over 1,145 sources across 162 reporting targets** |
-| `./mill __.fix --check` | Scalafix, including the stricter no-`var` rule set for `libs` and every `domain` | **10672/10672 over the same 1,145 sources — every test tree included**, with `.scalafix-tests.conf` relaxing four sub-rules for `test/src` only |
-| `./mill __.openApiCheck` | the committed OpenAPI documents against a fresh render | 2544/2544 tasks over eleven committed documents and ten `openApiCheck` targets; the merged document's own size is in the checked block above |
-| `pnpm test` | the component and unit suites | no figure here: vitest prints the case and file counts, and both move on almost every commit |
-| `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | 423 files over 11 packages; 782 stories × 2 themes |
-| `pnpm e2e` | Playwright against a quickstart built from the tree | no figure here: Playwright prints passed, skipped and failed, and the skips are deployment-shaped rather than gaps |
-| `./scripts/feature-matrix-check.sh` | every count and every service sentence this repository publishes about itself | in the checked block above, because this is the one gate that can read its own size |
+| `./mill __.compile` | Scala compilation under `-Werror` | the build-task total, as `N/N`. It prints no source count; `git ls-files '*.scala' \| wc -l` is what counts those |
+| `./scripts/run-tests.sh` | every Scala suite | the case count and the module count, as its last line |
+| `./mill checkArchitecture` | the ADR-041 module dependency direction | the module count, the rule count, and either the violations or `no layering violations` |
+| `./mill __.checkFormat` | Scalafmt | the task total, and `Checking format of N Scala sources` once per reporting target — summing those is how the source count in this repository's reports is taken |
+| `./mill __.fix --check` | Scalafix, including the stricter no-`var` rule set for `libs` and every `domain`, over every tree including tests, with `.scalafix-tests.conf` relaxing four sub-rules for `test/src` only | the task total, and the sources and rule count per target |
+| `./mill __.openApiCheck` | the committed OpenAPI documents against a fresh render | the task total over the committed documents and the `openApiCheck` targets §2 counts; the merged document's own size is in the checked block above |
+| `pnpm test` | the component and unit suites | the case count and the file count, from vitest |
+| `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | typecheck prints nothing and exits 0; the boundary sweep prints the files and packages it read; the accessibility sweep prints the stories and themes it swept and every violation |
+| `pnpm e2e` | Playwright against a quickstart built from the tree | passed, skipped and failed — and the skips are deployment-shaped rather than gaps |
+| `./scripts/feature-matrix-check.sh` | every count and every service sentence this repository publishes about itself | its claim total and its per-section sizes. The block above is where this page publishes that total, because this is the one gate that can read its own size |
 
 **The `__.fix --check` row carried a clause that was false when it was read again.** It said *5353
-sources — and no test source anywhere*. Wave 9 widened both style gates to every test tree: 81
-`.test.fix` targets resolve where none did, `./mill resolve '__.fix'` answers 163 targets, and 380
-of the repository's 499 test sources had to be reformatted the first time the formatter reached them.
-`TECH_DEBT.md` TD-027 is closed on those figures.
+sources — and no test source anywhere*. Wave 9 widened both style gates to every test tree, and the
+two figures that say so are ones a reader can re-take in a second: `./mill resolve '__.fix'` answers
+163 targets and 81 of them end in `.test.fix`, where none did. The third — *380 of 499 test sources
+had to be reformatted the first time the formatter reached them* — is wave 9's record of that one
+pass and not a count of this tree; `git ls-files '*.scala' | grep -c /test/` is what counts the test
+sources today, and it has moved since. `TECH_DEBT.md` TD-027 is closed on those figures.
 
 The last one is unusual enough to be worth a paragraph, because it is the gate most likely to
 surprise you. Several documents here publish figures about the code — how many capability rows are
@@ -249,10 +276,28 @@ the very block built to refuse it on 2026-09-12 and the run printed `404 claims 
 Since 2026-09-12 it reads the positive voice as well as the negative one: *"the Connect screen is a
 placeholder"* and *"ksqlDB is a stub"* are refused for the same reason *"neither is built"* is,
 because a service named beside a word that puts it in a state is making the same unheld claim about
-the tree as a service named beside a negation. Its limit is stated where it is implemented: prose
-that names a service only by an ordinary noun this documentation uses for Kafka's own concepts is
-deliberately invisible to it, and a sentence of the refused shape is written four lines below the
-`<!-- /checked -->` rather than inside it.
+the tree as a service named beside a negation.
+
+**The rule refuses honest sentences too, and that is the decision rather than a defect.** *"The
+Connect screen is the placeholder for a worker that is not configured"* is true of an unconfigured
+deployment and this rule refuses it, because the refusal is not *that sentence is false* — it is
+*nothing here can check that sentence, so do not make it where the markers promise everything is
+checked*. So the rule for anybody editing a checked block is one line: **a service's state goes in
+the three labelled lists, where it is compared against `services/` and `ServiceContracts.byService`,
+and prose about a service goes below the `<!-- /checked -->`.** The escape is four lines long and
+`README.md` already keeps every paragraph of that shape there. The alternative — qualifying the rule
+so that `placeholder` is allowed near `configured` — was considered and rejected: it is a heuristic
+about meaning, the next synonym defeats it, and it buys an author the right to make an unchecked
+claim inside the markers. `README.md`'s *Editing the checked blocks above* carries this decision in
+the file it constrains, which is where a document author meets it.
+
+**And the rule reads services, not screens.** *"KUI has no topic detail page and no consumer lag
+chart"* is refused by nothing, measured on 2026-09-12 inside `README.md`'s block: it names no
+service by a backticked id and no product name the alias table carries, so there is nothing for the
+comparison to hold it against. That is the declared scope and not a hole in it — widening the rule
+to every noun this documentation uses for Kafka's own concepts would refuse honest prose far more
+often than a false claim — but it means a green run is **not** a statement that every sentence
+inside the markers is true. It is a statement that every sentence naming a service is.
 
 **The second is a quotation, and it is newer than the sentence.** Wave 11 repaired
 `docs/operations/masking.md` and this repository went on quoting, in the present tense, a sentence
@@ -263,9 +308,14 @@ file against that file. Inside a checked block a backticked or italicised span o
 more is now a quotation of the nearest backticked repository path before it, and it has to occur in
 that file; a backticked token that looks like a path in this repository and is not one is refused
 with the token printed, which is the same check applied to a citation whose file has been deleted.
-The scope is the marked block and not the document, and that is a measurement: run the same reader
-over every markdown file here and it answers a thousand attributions and almost as many failures,
-because a fenced code block, an ASCII diagram and a table column all look like quotations. A
+The scope is the marked block and not the document, and that is a measurement — but not one this
+page prints a figure for any more. Run the same reader over every markdown file here and it answers
+orders of magnitude more attributions than the marked blocks do and finds almost every one of them
+absent, because a fenced code block, an ASCII diagram and a table column all look like quotations.
+How many is a number nobody has reproduced twice: four runs of those same two shipped functions over
+four different file sets answered four different pairs, none of them the pair the gate's own comment
+published. The conclusion survives every reading and the number survives none, so the reader is
+named here and the figure is not. A
 document that wants to say what another file says either puts the quotation inside a block, where
 it is compared, or names the file without quoting it. Both are honest and only one is checked.
 
@@ -275,9 +325,11 @@ it is compared, or names the file without quoting it. Both are honest and only o
 
 * `README.md` — how to run it, and the commands above with their flags.
 * `ARCHITECTURE.md` — the module structure in detail.
-* `DECISIONS.md` — the fifty-six ADRs, one line each, linked.
-* `docs/FEATURE_MATRIX.md` — 189 capability rows with their state, and the rule that a row reaches
-  `COMPLETE` only when a person has done the thing from a browser against a running KUI.
+* `DECISIONS.md` — one line per ADR, linked, and compared row by row against `docs/adr/` by
+  `./scripts/feature-matrix-check.sh`, which prints how many it read.
+* `docs/FEATURE_MATRIX.md` — every capability row with its state, and the rule that a row reaches
+  `COMPLETE` only when a person has done the thing from a browser against a running KUI. The same
+  checker recounts the rows and prints the total; this page does not restate it.
 * `TECH_DEBT.md` — what is known to be wrong and what closing it would take.
 * `docs/plan/ROADMAP.md` — how the work has actually gone, wave by wave, including the parts that
   did not work.

@@ -159,6 +159,14 @@ export interface Stub {
   readonly calls: Call[];
   /** Replaces what the next read of this path answers with, so a case can watch a re-read land. */
   readonly answerWith: (path: string, document: unknown) => void;
+  /**
+   * Makes every later read of this path fail the way an unreachable server does.
+   *
+   * The one state `answerWith` cannot produce. A cached answer plus a failing re-read is what
+   * `useQuery` reports as `stale`, and `stale` is a state the ksqlDB screen reads the read-only
+   * flag out of — so without this there was no way to mount the screen in it.
+   */
+  readonly refuse: (path: string) => void;
 }
 
 /**
@@ -189,11 +197,15 @@ export function serving(
 ): Stub {
   const calls: Call[] = [];
   const held = new Map<string, unknown>(Object.entries(documents));
+  const refused = new Set<string>();
 
   const answer =
     (method: "get" | "post") =>
     async (path: string, init: { params: { path: Record<string, string> }; body?: unknown }) => {
       calls.push({ method, path, params: init.params.path, body: init.body });
+      if (refused.has(path)) {
+        return { ok: false, error: { kind: "unreachable", cause: "KUI cannot reach the server." } };
+      }
       if (method === "get") return { ok: true, value: held.get(path) ?? null };
       const written = write === undefined ? undefined : await write(path);
       return written ?? { ok: true, value: held.get(path) ?? null };
@@ -213,6 +225,9 @@ export function serving(
     calls,
     answerWith: (path, document) => {
       held.set(path, document);
+    },
+    refuse: (path) => {
+      refused.add(path);
     },
   };
 }

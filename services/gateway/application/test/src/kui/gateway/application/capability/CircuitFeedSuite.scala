@@ -28,7 +28,7 @@ final class CircuitFeedSuite extends CatsEffectSuite {
   private def event(state: CircuitState) =
     CircuitEvent(cluster.value, state, Instant.EPOCH, Some("connection refused"))
 
-  private def run(states: List[CircuitState]) = {
+  private def feeding[A](events: List[CircuitEvent])(read: CapabilityRegistry[IO] => IO[A]): IO[A] = {
     val program = StubServiceClient[IO](cluster).flatMap { stub =>
       (for {
         logger <- cats.effect.kernel.Resource.eval(FakeStructuredLogger[IO])
@@ -42,19 +42,34 @@ final class CircuitFeedSuite extends CatsEffectSuite {
         )
         _ <- CircuitFeed.resource[IO](ServiceClients.of(List(stub)), signals)
       } yield registry).use { registry =>
-        states.foldLeft(IO.unit)((acc, state) => acc *> stub.circuit(event(state))) *>
+        events.foldLeft(IO.unit)((acc, one) => acc *> stub.circuit(one)) *>
           IO.sleep(1.second) *>
-          registry.state(key)
+          read(registry)
       }
     }
     TestControl.executeEmbed(program)
   }
+
+  private def run(states: List[CircuitState]) =
+    feeding(states.map(event))(_.state(key))
 
   test("anOpenCircuitIsReportedAsUnavailable") {
     run(List(CircuitState.Open)).map {
       case CapabilityState.Unavailable(reason, _, _) => assertEquals(reason, ReasonCode.CircuitOpen)
       case other => fail(s"expected unavailable, got $other")
     }
+  }
+
+  test("aCircuitEventForANameThatIsNotAServiceIdIsDropped") {
+    // W13-A1: `report`'s comment says "an event for a name that is not a service id is dropped rather than
+    // guessed at" and the code wrapped the name with `ServiceId.unsafe`, which validates nothing — so an
+    // event for any string reached `CapabilitySignals.update`, whose `Map.updated` creates the key it is
+    // given. The breaker's name would then appear in the registry as a capability of its own, unavailable,
+    // and reach the browser beside the real ones. Nothing here drove a name that was not already a
+    // configured service, so the sentence was true of nothing. `ServiceId.from` is now what decides.
+    val stray = CircuitEvent("Not A Service", CircuitState.Open, Instant.EPOCH, Some("connection refused"))
+
+    feeding(List(stray))(_.snapshot.map(_.keySet)).map(keys => assertEquals(keys, Set(key)))
   }
 
   test("aCircuitThatClosesAgainLeavesTheServiceStarting") {

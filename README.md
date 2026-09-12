@@ -4,17 +4,18 @@ A Kafka management and observability interface. Scala 3 on the server, TypeScrip
 the browser, built and shipped as two independent halves that talk over HTTP.
 
 > **Status: every milestone of [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) is closed except its
-> last one, M10, which is open on two of the five things it defines as done.** KUI connects to real
-> Kafka clusters and is usable from a browser: a dashboard with a traffic tab drawn from a real
-> metrics scrape, clusters and brokers, topics and their configuration, browsing and publishing
-> records, consumer groups with their lag, an offset-reset wizard, schema subjects with their
-> versions and compatibility, an alert feed with a notification bell, Kafka Connect connectors with
-> their per-task state, and ksqlDB objects and statements. It can also create a topic, change a
-> setting, add partitions, empty a topic and delete one — the three that cannot be undone are
-> confirmed against a plan the server computed and applied against a token naming exactly what you
-> were shown. Sign-in and role-based authorization are built, but **`kui.auth.type` defaults to
-> `disabled`**, so an unconfigured deployment lets anyone who can reach the port do anything KUI can
-> do. What is *not* built is named plainly under
+> last one, M10, which is open on one of the five things it defines as done — the documentation
+> item, and `docs/plan/ROADMAP.md` names what is open on it with the command that finds each.** KUI
+> connects to real Kafka clusters and is usable from a browser: a dashboard with a traffic tab
+> drawn from a real metrics scrape, clusters and brokers, topics and their configuration, browsing
+> and publishing records, consumer groups with their lag, an offset-reset wizard, schema subjects
+> with their versions and compatibility, an alert feed with a notification bell, Kafka Connect
+> connectors with their per-task state, and ksqlDB objects and statements. It can also create a
+> topic, change a setting, add partitions, empty a topic and delete one — the three that cannot be
+> undone are confirmed against a plan the server computed and applied against a token naming
+> exactly what you were shown. Sign-in and role-based authorization are built, but
+> **`kui.auth.type` defaults to `disabled`**, so an unconfigured deployment lets anyone who can
+> reach the port do anything KUI can do. What is *not* built is named plainly under
 > [What is built, and what is not](#what-is-built-and-what-is-not) below, and the roster there is
 > **compared against `services/` and against the gateway's own contract map** by
 > `./scripts/feature-matrix-check.sh`, because this banner said *milestones 0 to 5* and that list
@@ -183,6 +184,37 @@ and the rows it summarises disagree — which, until this wave, nothing did. Eve
 by reading the code and driving the running application, not by asking whether the work had been
 scheduled. [docs/ROADMAP.md](docs/ROADMAP.md) says what lands when, and [docs/plan/](docs/plan/)
 holds the plan for the rest.
+
+### Editing the checked blocks above
+
+Three regions of this section are marked `<!-- checked: … -->` and read by
+`./scripts/feature-matrix-check.sh`. Two rules govern what may be written inside them, and both cost
+somebody an afternoon to find, so they are written here rather than left in a comment inside a
+3,700-line shell script.
+
+**State goes in the three labelled lists; prose about a service goes outside the markers.** Inside
+`capability-claims` a service's state is stated in *Built and routed*, *Built, not routed* and *Not
+built*, where every name is compared against `services/` and against the gateway's contract map — or
+it is not stated inside the markers at all. Any other sentence naming a service beside a negation
+(*no*, *not*, *neither*, *nor*, *without*, *never*) or beside a word that puts it in a state
+(*placeholder*, *stub*, *stubbed*, *unimplemented*, *not implemented*, *empty*, *todo*, *coming
+soon*) is refused with the service's name printed. **That includes honest sentences.** *"The Connect
+screen is the placeholder for a worker that is not configured"* is true of an unconfigured
+deployment and the gate refuses it — measured here, one disagreement naming `connect`, exit 1 —
+because the refusal is not *that sentence is false*, it is *nothing here can check that sentence, so
+do not make it where the markers promise everything is checked*. The escape is four lines long:
+write it below the `<!-- /checked -->`, which is where every paragraph of that shape in this file
+already lives. Qualifying the rule instead — allowing *placeholder* when *configured* appears
+nearby — was considered and rejected as a heuristic about meaning that the next synonym defeats.
+
+**And the rule reads services, not screens, so a green run says less than it looks like it says.**
+*"KUI has no topic detail page and no consumer lag chart"* appended inside the `capability-claims`
+block leaves the run at *all true*, exit 0 — measured here, on this tree, and restored afterwards.
+It names no service by its backticked id and no product name the gate knows, so there is nothing to
+hold it against. That is the declared scope rather than a hole in it: widening the rule to every
+noun this documentation shares with Kafka's own vocabulary would refuse honest prose far more often
+than it would catch a false claim. But it means a green run says **every sentence in that block that
+names a service is true** — not that every sentence in it is.
 
 ## Quick start
 
@@ -465,7 +497,8 @@ having executed no tests at all. The script asks Mill which test modules exist, 
 selector syntax — `./mill '{a.test,b.test}'`, which really does run them all — and then counts
 `<testcase>` elements in the JUnit reports rather than trusting the number Mill prints at the end,
 which is a count of *build tasks* and roughly twice the number of tests. `./mill resolve '__.test'`
-answers **81 test modules** on 2026-09-11, and the script prints how many of them actually contain
+answers **81 test modules** — that command is the figure's only source here, and re-running it is
+how you check this sentence — and the script prints how many of them actually contain
 test sources, and how many cases ran, at the end of every run — it has printed *81 with tests* since
 wave 7, which is the first time in this project's history that no module resolved as a test target
 and shipped nothing.

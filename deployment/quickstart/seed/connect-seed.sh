@@ -11,14 +11,22 @@
 # NOTHING SHOULD", on the argument that a worker running zero connectors is a state the Connect
 # screens have to render honestly and that seeding one would erase it. Half of that is right and
 # the conclusion was wrong, and the evidence is in the browser suite: `frontend/e2e/connect.spec.ts`
-# has two positive cases -- a connector's rows are listed, and its tasks carry a state -- and both
-# of them SKIP on this stack, because there is nothing to list. The empty-worker state is still
-# covered, by `deployment/compose/docker-compose.yml`, whose worker runs nothing and whose
-# `smoke.sh` asserts exactly that shape. What was covered nowhere was a worker with something on
-# it, which is every Connect deployment anybody actually runs.
+# has two positive cases -- a connector's rows are listed, and its tasks carry a state -- and they
+# used to skip themselves on a stack with nothing to list, which was every stack that existed. The
+# empty-worker state is still covered, by `deployment/compose/docker-compose.yml`, whose worker runs
+# nothing and whose `smoke.sh` asserts exactly that shape. What was covered nowhere was a worker
+# with something on it, which is every Connect deployment anybody actually runs.
 #
 # So the two stacks now hold the two states between them: compose is the empty worker, the
 # quickstart is the busy one.
+#
+# AND THE SKIP IS GONE, WHICH MAKES THIS SEED LOAD-BEARING RATHER THAN DECORATIVE. Wave 9 rewrote
+# that suite so that nothing in it skips: `grep -n 'test.skip' frontend/e2e/connect.spec.ts`
+# answers only its own header describing the old shape, and the two cases now open with
+# `expect(items.length, "no Connect worker on this stack is running a connector, …").
+# toBeGreaterThan(0)`. A quickstart that comes up without this container therefore turns the
+# browser suite RED rather than green-with-skips -- which is the right answer, and it is worth
+# knowing before anybody removes the `connect-seed` service to make a bring-up faster.
 #
 # ---------------------------------------------------------------------------------------------
 # WHY THIS CONNECTOR
@@ -118,6 +126,7 @@ say "registered ${NAME} reading ${SOURCE_FILE} into ${TOPIC}"
 # quickstart whose Connect screen shows a connector nobody can explain, which is worse than no
 # connector at all.
 deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
+announced=""
 while :; do
   status="$(curl -sS "${CONNECT_URL}/connectors/${NAME}/status" 2>/dev/null || true)"
   connector_state="$(printf '%s' "${status}" |
@@ -126,10 +135,33 @@ while :; do
   # answer 1 however many RUNNING states are in it. Two occurrences is the connector's own plus at
   # least one task's, and the connector's is already known from the line above -- so this is the
   # test for "a task is running too", written without depending on the order of the two keys.
-  running="$(printf '%s' "${status}" | grep -o '"state":"RUNNING"' | wc -l | tr -d ' ')"
+  #
+  # AND THE BRACE GROUP IS THE WHOLE POINT OF THIS LINE. `grep` exits 1 when it matches nothing,
+  # which is the NORMAL first poll: `PUT .../config` has just answered 201 and the connector is
+  # still UNASSIGNED with no tasks, so the document holds no RUNNING state at all. Under
+  # `set -euo pipefail` that 1 becomes the pipeline's status, the assignment carries it out of the
+  # command substitution, and `set -e` kills this script HERE -- between the poll and the `die`
+  # below that exists to explain a failure. The container then exits 1 with its own log ending
+  # cleanly on "registered ...", and Compose says only "connect-seed didn't complete successfully:
+  # exit 1", which is the no-stderr shape this project has lost gates to before. It survived
+  # because a warm machine's first poll is usually already RUNNING. `|| true` inside the group
+  # turns "matched nothing" back into zero matches and leaves everything else -- a missing `wc`, a
+  # broken pipe -- still able to fail the pipeline.
+  running="$(printf '%s' "${status}" |
+    { grep -o '"state":"RUNNING"' || true; } | wc -l | tr -d ' ')"
 
   if [ "${connector_state}" = "RUNNING" ] && [ "${running}" -ge 2 ]; then
     break
+  fi
+
+  # Say what is being waited for, once per change of state rather than once per poll. A seed that
+  # waits in silence and a seed that has died are the same two minutes from outside the container,
+  # and the first poll -- the one that used to kill this script -- is exactly the one a reader
+  # needs to see reported rather than inferred.
+  reported="connector ${connector_state:-<not registered yet>}, ${running} RUNNING state(s)"
+  if [ "${reported}" != "${announced}" ]; then
+    say "waiting for ${NAME}: ${reported}"
+    announced="${reported}"
   fi
   if [ "${connector_state}" = "FAILED" ] ||
      printf '%s' "${status}" | grep -q '"state":"FAILED"'; then

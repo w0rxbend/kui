@@ -174,7 +174,7 @@ gateway_contracts() {
   [[ -f "$declaration" ]] || fail "the gateway's contract map is not at $declaration"
   sed -n '/val byService/,/^$/p' "$declaration" |
     tr -d ' \n' |
-    grep -oE 'ServiceId\.unsafe\("[a-z0-9-]+"\)->' |
+    { grep -oE 'ServiceId\.unsafe\("[a-z0-9-]+"\)->' || true; } |
     sed -E 's/.*"([a-z0-9-]+)".*/\1/' |
     LC_ALL=C sort -u
 }
@@ -262,8 +262,8 @@ routed_services() {
 # -- so nothing a service could be called escapes the check by being filtered out here.
 service_containers() {
   "${compose[@]}" config --services |
-    grep -E '^kui-' |
-    grep -Ev '^kui-(gateway|frontend)$' |
+    { grep -E '^kui-' || true; } |
+    { grep -Ev '^kui-(gateway|frontend)$' || true; } |
     sed 's/^kui-//' |
     LC_ALL=C sort
 }
@@ -634,8 +634,14 @@ printf '  the exporter serves the per-topic byte rate the producers card needs\n
 # the rate is a Yammer EWMA that ticks every five seconds, so a scrape taken immediately after a
 # produce can honestly read `0.0` and asserting on it would be a flake. `_total` is exact from the
 # first byte, and the traffic step above is the only thing on this stack that can move it.
-bytes_in="$(grep -E '^kafka_server_brokertopicmetrics_bytesinpersec_total ' <<<"$exposition" |
-  awk '{ print $2 }')"
+# The brace group is not decoration, and it is the same defect `connect-seed.sh` carried (TD-053):
+# an exporter that has not published this series yet makes `grep` exit 1, `pipefail` carries that
+# out of the command substitution, and `set -e` kills this script ON THIS LINE -- two lines above
+# the `fail` written to explain exactly that state, and with nothing printed. The smoke run would
+# then report a missing series as a silent non-zero exit. `|| true` makes "matched nothing" an
+# empty string, which is what the `[[ -n ... ]]` below is already written to catch.
+bytes_in="$({ grep -E '^kafka_server_brokertopicmetrics_bytesinpersec_total ' <<<"$exposition" ||
+  true; } | awk '{ print $2 }')"
 [[ -n "$bytes_in" ]] && awk -v v="$bytes_in" 'BEGIN { exit !(v > 0) }' ||
   fail "the broker reports $bytes_in bytes in since it started, after $TRAFFIC_RECORDS records were
   produced to $TRAFFIC_TOPIC and read back. Either the produce above did not reach this broker, or
@@ -646,8 +652,8 @@ printf '  the broker has taken %s bytes in since it started\n' "$bytes_in"
 # Without this line the consume step had no assertion of its own at all: it could be deleted whole,
 # and the run stayed green with all twelve line shapes served, because the percentile its comment
 # said it created is published from boot.
-bytes_out="$(grep -E '^kafka_server_brokertopicmetrics_bytesoutpersec_total ' <<<"$exposition" |
-  awk '{ print $2 }')"
+bytes_out="$({ grep -E '^kafka_server_brokertopicmetrics_bytesoutpersec_total ' <<<"$exposition" ||
+  true; } | awk '{ print $2 }')"
 [[ -n "$bytes_out" ]] && awk -v v="$bytes_out" 'BEGIN { exit !(v > 0) }' ||
   fail "the broker reports $bytes_out bytes out since it started, after $read_back records were read
   back from $TRAFFIC_TOPIC. A produce alone leaves this counter at zero, so either the consume above

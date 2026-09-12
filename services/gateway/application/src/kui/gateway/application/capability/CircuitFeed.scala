@@ -1,5 +1,6 @@
 package kui.gateway.application.capability
 
+import cats.Applicative
 import cats.effect.kernel.{Async, Resource}
 import cats.effect.syntax.all.*
 import cats.syntax.all.*
@@ -30,8 +31,18 @@ object CircuitFeed {
 
   /** The breaker names its upstream by the service id, which is how `SttpServiceClient` configures it. An
     * event for a name that is not a service id is dropped rather than guessed at.
+    *
+    * `ServiceId.from` and not `unsafe`, because `unsafe` validates nothing and `CapabilitySignals.update`
+    * creates whatever key it is handed: a breaker configured with a name that is not a service — an OAuth
+    * token endpoint, say — would otherwise publish itself to the browser as a capability of its own, in
+    * whatever state the breaker was in. W13-A1 measured that this sentence described nothing.
     */
-  def report[F[_]](event: CircuitEvent, signals: CapabilitySignals[F]): F[Unit] =
+  def report[F[_]: Applicative](event: CircuitEvent, signals: CapabilitySignals[F]): F[Unit] =
     // The service key, always: a breaker is about the connection to a service, not about a cluster.
-    signals.updateService(ServiceId.unsafe(event.upstream))(_.copy(circuit = Some(event.state)))
+    ServiceId
+      .from(event.upstream)
+      .fold(
+        _ => Applicative[F].unit,
+        service => signals.updateService(service)(_.copy(circuit = Some(event.state)))
+      )
 }

@@ -1036,12 +1036,20 @@ fallback panel (reason, `since`, retry, "what still works"); `Degraded` shows an
 Stale data stays on screen greyed with its timestamp; actions are disabled. The frontend
 runs the same `Rbac.decide` on the pre-expanded permission list from `/api/v1/auth/me`.
 
-**Implemented** as of M0 (task UI-010): `kui.ui.shell.nav.Navigation` decides which entries
-exist, `kui.ui.shell.layout.Sidebar` applies the five rendering rules,
-`kui.ui.shell.feature.FeatureGate` decides between the feature and its fallback and is the one
-place that starts a dynamic import, and `kui.ui.kernel.component.ActionPermissionWrapper`
-merges the RBAC and capability reasons into one tooltip. The RBAC half is wired but always
-`true` until M6; see `docs/frontend/README.md` for the rendering-rule and reason-code tables.
+**Implemented**, and re-read against the tree on 2026-09-12 — the four `kui.ui.*` names this
+paragraph carried were the Scala.js implementation ADR-048 deleted, and `git grep` finds no
+occurrence of any of them outside this document. What exists now:
+`frontend/packages/shell/src/nav/navigation.ts` decides which entries exist,
+`frontend/packages/shell/src/chrome/NavDrawer.tsx` and `NavItem.tsx` apply the rendering
+rules, and `frontend/packages/shell/src/features/FeatureGate.tsx` decides between the feature and
+its fallback and is the one place that starts a dynamic import. The fourth,
+`kui.ui.kernel.component.ActionPermissionWrapper`, has **no successor under that name**: the
+permission state it read is `frontend/packages/kernel/src/data/permissions/store.ts`, and no
+component in `frontend/packages/` is the one place both reasons are merged. The clause saying the
+RBAC half is *"always `true` until M6"* is superseded: M6 closed, sign-in and role-based
+authorization are built, and what makes them inert on a default deployment is
+`kui.auth.type: disabled` rather than an unwired frontend. See `docs/frontend/README.md` for the
+rendering-rule and reason-code tables.
 
 ## 13. Observability standard
 
@@ -1089,7 +1097,10 @@ Boundary rules:
 - Regex patterns from config (RBAC values, masking, topic patterns) are compiled once at load
   and linted for catastrophic backtracking; user input never becomes a regex except the
   event-tracking `regex` operator, which runs with a match timeout.
-- Threat model document by M6 (`docs/security/threat-model.md`).
+- Threat model document, planned for M6 as `docs/security/threat-model.md` — **not written**.
+  M6 closed without it and `ls docs/` has no `security/`; nothing else in this repository is
+  that document. It is stated here rather than left as a commitment a reader would assume was
+  kept, and the controls above are the security decisions that were actually made.
 
 ## 15. Errors
 
@@ -1123,23 +1134,47 @@ translated by each client's sealed `UpstreamError` (ADR-037).
 
 ## 16. Repository layout
 
+This tree is what `ls`, `ls libs`, `ls services`, `ls frontend/packages` and `ls deployment` answer,
+and it is written from them rather than from the original plan. The version that stood here until
+2026-09-12 was copied from the plan and never re-read against the tree: it named **four**
+directories that are not on disk, omitted **four** top-level directories that are (`build-tests/`,
+`screens/`, `scripts/` and `mill-build/`), listed `deployment/` **seven** short and
+`frontend/packages/` **two** short, and gave every service the same six modules.
+
 ```
 kui/
-├── build.mill  .mill-version  .scalafmt.conf  .scalafix.conf
-├── libs/      kernel/ contracts-core/ kafka/ kafka-auth/ serde/ serde-confluent/ filter/
-│              cache/ observability/ security-core/ http/ config/ testkit/
-├── services/  gateway/ cluster/ topic/ message/ consumer/ security/ schema/ connect/ ksql/
-│              metrics/ alerts/ identity/  (each: domain application infrastructure contract api app)
-├── frontend/  packages/ api/ kernel/ shell/ feature-clusters/ feature-topics/
-│              feature-messages/ feature-consumers/ feature-schemas/ feature-alerts/
-│              (a pnpm/TypeScript/Vite workspace — its own build, its own image)
-├── apps/allinone/
-├── deployment/ docker/ compose/ helm/
-├── e2e/        JVM Playwright + Testcontainers suites, fault-injection scenarios
-├── benchmarks/ docs/ research/ tools/
+├── build.mill  .mill-version  .scalafmt.conf  .scalafix.conf  .scalafix-pure.conf
+│             .scalafix-tests.conf  .tool-versions
+├── libs/        kernel/ contracts-core/ kafka/ kafka-auth/ serde/ serde-confluent/ filter/
+│                cache/ observability/ security-core/ http/ config/ testkit/
+├── services/    gateway/ cluster/ topic/ message/ consumer/ schema/ connect/ ksql/
+│                metrics/ alerts/ identity/
+│                (each that owns a domain: domain application infrastructure contract api app;
+│                 cluster/ adds client/, and gateway/ has no domain and no infrastructure)
+├── frontend/    packages/ api/ kernel/ shell/ feature-clusters/ feature-topics/
+│                feature-messages/ feature-consumers/ feature-schemas/ feature-alerts/
+│                feature-connect/ feature-ksql/ · e2e/ is the Playwright suite
+│                (a pnpm/TypeScript/Vite workspace — its own build, its own image)
+├── apps/        allinone/
+├── build-tests/ the suites that read build.mill, ci.yml and the Dockerfiles themselves
+├── deployment/  docker/ compose/ quickstart/ demo/ secured/ examples/ frontend/ metrics/
+│                storybook/
+├── screens/     the captures the browser suite is checked against
+├── scripts/     run-tests.sh, feature-matrix-check.sh
+├── docs/ research/ tools/ mill-build/
 ```
 
-The `services/config` service named in the original service list does not exist (§2); it was dissolved (see the decisions log). Mill task names follow the project's build-command conventions.
+**The four it named and does not have, each absence a decision rather than an oversight.**
+`services/security` is the ACL and client-quota service of §2's catalog, which has not been begun —
+no screen, no endpoint, no service — and `libs/security-core` is the authentication and
+authorization *library*, which is a different thing and does exist. `deployment/helm/` has never
+been written. The top-level
+`e2e/` was a JVM Playwright plus Testcontainers tree and was deleted at `41358502` when ADR-048
+replaced the browser build; `frontend/e2e/` is its successor and runs under the frontend's own
+build. `benchmarks/` has no commit in this repository's history at all — it was in the plan this
+listing was copied from and was never written. `services/config`, which this section has always
+said is absent, was dissolved for the reason §2 and the decisions log give. Mill task names follow
+the project's build-command conventions.
 
 ### Naming key
 

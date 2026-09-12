@@ -283,6 +283,12 @@
 #   ./scripts/feature-matrix-check.sh          # exit 0 when every published count is true
 #   ./scripts/feature-matrix-check.sh --claims # and print the ledger: section, scope, kind and the
 #                                              # `claimed>fact` pair every comparison put together
+#   ./scripts/feature-matrix-check.sh --census # run section 9's quotation reader over whole
+#                                              # documents instead of over marked regions, and
+#                                              # print what it answers. This is a measurement and
+#                                              # not a gate: it is here so the figure section 9
+#                                              # publishes about its own reader is re-taken by
+#                                              # running that reader (house rule 17)
 #
 # Every disagreement is printed with the file that carries it and the figure that would make it
 # true, so the repair is a substitution rather than an investigation.
@@ -293,11 +299,16 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 print_claims=0
+# `--census` re-takes the one figure section 9 publishes about its own reader, by running that
+# reader rather than by reasoning about it. See the comment above `quotation_census`.
+print_census=0
 for argument in "$@"; do
   case $argument in
     --claims) print_claims=1 ;;
+    --census) print_census=1 ;;
     *)
-      echo "feature-matrix-check: unknown argument $argument (only --claims is understood)." >&2
+      echo "feature-matrix-check: unknown argument $argument" \
+           "(only --claims and --census are understood)." >&2
       exit 2
       ;;
   esac
@@ -387,19 +398,22 @@ declare -A registry=(
  count-assertion debt-duplicate-refused dependency-audit-coverage dependency-audit-refuses\
  dependency-reader-independence\
  dependency-row-compared empty-block-refused fact-independence figure-published\
- header-kind-inverse marker-list-refused openapi-fact-independence quotation-empty-marker\
+ header-kind-inverse marked-markdown-pruned marker-list-refused openapi-fact-independence\
+ quotation-census-driven quotation-empty-marker\
  quotation-path-claim-site quotation-sweep-reports residue-reports-unclaimed\
+ swept-roster-reconciled sweep-block-count\
  total-split-compared"
   [openapi-totals]="merged-path-prefix openapi-document openapi-roster openapi-totals residue"
   [capability-claims]="capability-prose capability-prose-audit capability-prose-refusal\
  capability-prose-states package-count package-roster\
+ capability-rule-documented\
  residue service-alias-roster service-audit service-audit-coverage service-count\
  service-fact-independence service-fact-roster-independence service-roster service-routed-count\
  service-state"
   [gate-table]="gate-claim-total gate-decisions-rows gate-openapi-document gate-section-count\
  residue"
   [quotations]="quotation quotation-audit quotation-claim-site quotation-drive quotation-path\
- quotation-sweep residue"
+ quotation-roster quotation-sweep residue"
   [debt-register]="debt-ids-unique debt-next-id residue"
 )
 
@@ -2993,7 +3007,63 @@ done
 audit_capability_prose
 audit_service_states
 verify_service_fact_roster_independence
-close_section capability-claims 43
+
+# THE DOCUMENTATION OF THE RULE, AGAINST THE RULE.
+# -----------------------------------------------
+# `README.md`'s *Editing the checked blocks above* enumerates both alternations above in prose, so
+# that a writer refused by this gate can read what it refuses without opening a 4,000-line shell
+# script. Measured on 2026-09-12: deleting `*never*` from that enumeration left the run at
+# `439 claims checked, all true`, exit 0 -- two lists that have to be edited together with nothing
+# reconciling them, which is the shape wave 13 exists to end, in the document wave 13 wrote it into.
+#
+# Both directions matter and they fail differently. A token this script refuses and the README does
+# not name is a writer refused for a word nothing warned them about; a token the README names and
+# this script does not refuse is a writer avoiding a word for no reason. So it is an equality.
+#
+# The one normalisation is stated rather than inferred: `state_tokens` carries `placeholders` and
+# `stubs` beside `placeholder` and `stub` because the regex matches text and text is inflected, and
+# the README enumerates *words*. A token that is another token plus a trailing `s` is therefore
+# folded away before the comparison, mechanically, with no list of exceptions -- so adding a genuine
+# new token ending in `s` still moves both sides.
+enumerated_in_readme() {
+  local index=$1
+  awk '/^### Editing the checked blocks above/ { on = 1 }
+       on && /^## / { on = 0 }
+       on { printf "%s ", $0 }' README.md |
+    grep -oE '\(\*[^)]*\)' | sed -n "${index}p" |
+    sed 's/^(//; s/)$//; s/\*//g; s/, /\n/g' | sed 's/  */ /g; s/^ //; s/ $//' | sort -u |
+    tr '\n' ' ' | sed 's/ $//'
+}
+
+alternation_words() {
+  local alternation=$1 fold=${2-no} word singular
+  {
+    while IFS= read -r word; do
+      if [[ $fold == fold && $word == *s ]]; then
+        singular=${word%s}
+        [[ $'|'$alternation'|' == *"|$singular|"* ]] && continue
+      fi
+      printf '%s\n' "$word"
+    done < <(printf '%s\n' "$alternation" | tr '|' '\n')
+  } | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
+scope capability-claims "the rule's own documentation"
+claim capability-rule-documented "" \
+  "$(enumerated_in_readme 1)" "$(alternation_words "$negation_tokens")" \
+  "\`README.md\`'s \`Editing the checked blocks above\` enumerates the negations this gate refuses\
+ as [$(enumerated_in_readme 1)] and \`negation_tokens\` is [$(alternation_words "$negation_tokens")].\
+ The paragraph exists so that a writer refused by this script can read the rule instead of the\
+ script, and a copy of a list is a list somebody has to remember to edit twice -- which is the\
+ defect this whole file was written about, one document away from where it was written." \
+  "$(enumerated_in_readme 2)" "$(alternation_words "$state_tokens" fold)" \
+  "\`README.md\` enumerates the state words this gate refuses as [$(enumerated_in_readme 2)] and\
+ \`state_tokens\`, with plurals of an already-named word folded away, is\
+ [$(alternation_words "$state_tokens" fold)]. A word this script refuses and that paragraph does\
+ not name is a writer refused for something nothing warned them about; a word it names and this\
+ script does not refuse is a writer avoiding a word for no reason. Neither is discoverable by\
+ reading either side alone."
+close_section capability-claims 44
 
 # ---------------------------------------------------------------------------------------------
 # 6, CONTINUED. The fixtures over the sentence gate.
@@ -3212,14 +3282,29 @@ verify_service_alias_roster_refusal
 # file.*
 #
 # The scope is the marked region, not the file, and that is a measurement rather than a preference.
-# Run this reader over every line of the 113 markdown files this repository tracks outside
-# `docs/plan/` and it answers **1,154 attributions, 1,148 of them absent** -- because a fenced code
-# block is full of `*`-delimited spans, an ASCII architecture diagram is one span eight hundred
-# words long, and a path named in a table's first row sticks to every cell below it. Run it over the
-# twelve marked regions this repository carries and it answers **12 blocks, 0 attributions, 0
-# absent**: a marked region is short, hand-written and opted into, and a sentence inside one is a
-# claim its author asked to have checked. The document-wide reader is not a stricter version of this
-# one, it is a different and useless tool, and the number above is why this file does not ship it.
+# Run this reader over whole documents -- every markdown file this repository carries outside
+# `docs/plan/` -- and it answers thousands of attributions with all but a handful of them absent,
+# because a fenced code block is full of `*`-delimited spans, an ASCII architecture diagram is one
+# span eight hundred words long, and a path named in a table's first row sticks to every cell below
+# it. Run it over the marked regions instead and it answers a dozen-odd blocks and, on an honest
+# tree, no absent attribution at all: a marked region is short, hand-written and opted into, and a
+# sentence inside one is a claim its author asked to have checked. The document-wide reader is not a
+# stricter version of this one, it is a different and useless tool.
+#
+# **No figure is written into this paragraph, and that is deliberate.** Wave 12 published
+# *1,154 attributions, 1,148 of them absent* here, taken against a draft of the reader below; the
+# shipped reader answers something else, and a second reader who lifted the two functions out of
+# this file got four different answers depending on how the document was handed over. The figure sat
+# in a `#` comment, where no gate can reach it, in the section whose subject is figures nobody
+# re-derives. So it is printed by the reader instead of asserted about it, and the command is
+# `./scripts/feature-matrix-check.sh --census`. No number is copied out of that run into this
+# comment, because the run is the answer and the comment would be a snapshot: three invocations of
+# it inside one hour on 2026-09-12 answered three different pairs, for no reason except that two
+# other packets were editing markdown in the tree between them, and the spread between the first and
+# the last was wider than the gap that made the wave-12 figure wrong. A figure about a whole tree,
+# written into a comment, is stale before the paragraph around it is finished. The conclusion above
+# holds at every reading anybody has taken -- seven of them now -- because each is three orders of
+# magnitude above the marked-region answer.
 #
 # **So on the tree this section landed on it measured nothing**, and that is stated here rather than
 # discovered later: the gate is only as wide as the regions documents put around their quotations,
@@ -3293,6 +3378,131 @@ quotation_is_present() {
   fi
 }
 
+# THE MARKDOWN THE SWEEP BELOW IS ENTITLED TO READ, AND WHY IT IS A GLOB AFTER ALL
+# -------------------------------------------------------------------------------
+# Every other input in this file is written out by name, for the reason stated at the top: a glob
+# that matches nothing checks nothing and says so to nobody. This one is derived, because the thing
+# being checked **is the list**. A hand-written roster of the places a gate looks cannot notice the
+# place it was never told about, and that is not a hypothetical: on 2026-09-12 the roster below
+# named eight files and twelve blocks, the repository carried thirteen non-`quotations` blocks, and
+# the thirteenth -- `TECH_DEBT.md`'s, created by the same wave that wrote the roster -- took the
+# exact sentence section 9 exists to refuse with the run green at 438 claims and exit 0.
+#
+# The glob-that-matches-nothing failure is answered by `reconcile_swept_roster` rather than by
+# writing the list out: the derived set and the written-out roster are compared in **both**
+# directions, so a `find` that stops finding is twelve disagreements naming twelve files, and a
+# roster entry whose block has been deleted or renamed is one disagreement naming that file. This
+# is `reconcile_manifests`'s shape -- named list, disk, `comm -3` -- with the sweep reading the disk
+# side rather than the named side, because a block that appears in the tree has to be read on the
+# day it appears and not on the day somebody remembers the roster.
+#
+# The pruned directories are build output and vendored trees, not documents anybody edits: they are
+# named here so that a `.md` appearing in one of them is a deliberate exclusion rather than an
+# accident of whichever glob ran. `docs/plan/` is excluded because the wave plans quote broken
+# sentences on purpose -- this file's own reproduction instructions are written in one.
+marked_markdown_prunes=(.git node_modules out dist storybook-static target .mill-out)
+
+# The directory the three readers below walk. It is `.` -- this script `cd`s to the repository root
+# before anything else -- and it is a variable so that a `guard-fixtures` case can shadow it with a
+# `local` and drive the derivation, the reconciliation and the sweep over pages written for the
+# occasion, the way `sweep_one_marked_file` shadows the roster. That is the seam and it is the whole
+# of it: no reader below branches on this value.
+marked_markdown_root=.
+
+marked_markdown_files() {
+  local -a prune=()
+  local directory
+  for directory in "${marked_markdown_prunes[@]}"; do
+    prune+=(-name "$directory" -prune -o)
+  done
+  find "$marked_markdown_root" "${prune[@]}" -path "$marked_markdown_root/docs/plan" -prune -o \
+    -name '*.md' -print | sed "s|^$marked_markdown_root/||" | sort
+}
+
+# Every `<!-- checked: <kind> -->` marker in that tree, as `file<TAB>kind`, one line per distinct
+# pair. EVERY kind, `quotations` included, and that is a change made on 2026-09-12 after this
+# derivation shipped one kind short.
+#
+# It used to strike `quotations` out here, because `check_quotation_region` reads those blocks
+# directly and sweeping them again would report every attribution twice. That reason is sound for
+# the **sweep** and it is not a reason to hide the pair from the **roster**: with the pair struck
+# out here it was absent from `derived` and absent from `quotation_marked_roster` alike, so
+# `reconcile_swept_roster` was silent about `quotations` blocks in both directions by construction,
+# and the list of files whose `quotations` blocks are read directly was a hand-written two-name
+# `for` loop reconciled against nothing -- the exact defect this section exists to end, surviving
+# one kind over, four lines above the function that ends it. Measured on 2026-09-12 against the
+# bytes that shipped it: a third document acquiring a `checked: quotations` block carrying the
+# sentence this section was written to refuse left the run at `439 claims checked, all true`,
+# exit 0.
+#
+# So the exclusion moved to the one place it is about -- the loop that builds
+# `quotation_swept_kinds` below -- and the derivation answers what is on disk.
+quotation_handled_kind=quotations
+
+# The path is rebuilt against the root rather than used bare, and so is `quotation_census`'s read
+# below. `marked_markdown_files` strips the root prefix so that both sides of the roster comparison
+# are repository-relative names, which is right; the readers then have to put it back, or the seam
+# the comment above advertises hands every reader a path relative to a directory it is not in and
+# `sed` fails to stderr while the `while` loop reads nothing and the function returns 0 with an
+# empty answer. With `marked_markdown_root=.` the two forms are the same string.
+marked_blocks_on_disk() {
+  local file kind
+  while IFS= read -r file; do
+    while IFS= read -r kind; do
+      printf '%s\t%s\n' "$file" "$kind"
+    done < <(sed -nE 's/^<!-- checked: ([A-Za-z0-9_-]+).*/\1/p' "$marked_markdown_root/$file")
+  done < <(marked_markdown_files) | sort -u
+}
+
+# The `quotations` half of that derivation, as bare file names: the documents whose `quotations`
+# blocks `check_quotation_region` opens directly. Derived, so that a document growing one is read on
+# the day it grows one, and reconciled by `reconcile_swept_roster` in both directions like every
+# other kind.
+marked_quotation_files() {
+  local file kind
+  while IFS=$'\t' read -r file kind; do
+    [[ $kind == "$quotation_handled_kind" ]] && printf '%s\n' "$file"
+  done < <(marked_blocks_on_disk)
+}
+
+# THE FIGURE THIS SECTION PUBLISHES ABOUT ITS OWN READER, AND THE COMMAND THAT RE-TAKES IT
+# ----------------------------------------------------------------------------------------
+# The comment at the top of this section argues that the marked region and not the document is the
+# right scope, and it argues it with a number: run the reader over whole documents and it answers
+# thousands of attributions, nearly all of them absent. That number was published in wave 12 from a
+# draft of the reader, and the shipped reader answers something else -- four different somethings,
+# depending on how the document is handed over. It sat in a `#` comment, where no gate could reach
+# it, in the section whose subject is figures nobody re-derives.
+#
+# So the figure is not written in a comment any more. It is printed by the reader, on demand, by
+# `./scripts/feature-matrix-check.sh --census`, and the document is flattened to one line exactly as
+# `regions` flattens a block -- the one reading that makes the comparison with the marked-region
+# answer a comparison of scope rather than of whitespace handling.
+quotation_census() {
+  local file text path quote attributions=0 absent=0 files=0
+  while IFS= read -r file; do
+    files=$(( files + 1 ))
+    text=$(tr '\n' ' ' < "$marked_markdown_root/$file")
+    while IFS=$'\t' read -r path quote; do
+      [[ -z $path ]] && continue
+      attributions=$(( attributions + 1 ))
+      [[ $(quotation_is_present "$path" "$quote") == present ]] || absent=$(( absent + 1 ))
+    done < <(quotation_attributions "$text")
+  done < <(marked_markdown_files)
+  printf 'feature-matrix-check: section 9'\''s reader, run over whole documents.\n'
+  printf '  %d markdown files outside docs/plan/, each flattened to one line the way `regions`\n' \
+    "$files"
+  printf '  hands a marked block over: %d attributions, %d of them absent.\n' \
+    "$attributions" "$absent"
+  printf '  Over the marked regions themselves the same reader answers: see the `quotations`\n'
+  printf '  section of `--claims`.\n'
+}
+
+if (( print_census == 1 )); then
+  quotation_census
+  exit 0
+fi
+
 # The dangling half, and it is the class the plan's integrator named without a mechanism for it.
 # `docs/FEATURE_MATRIX.md` cites three files under `docs/plan/verification/` that `docs/plan/\
 # README.md` says are deleted when the plan closes. A citation whose file has gone is not caught by
@@ -3357,29 +3567,133 @@ check_quotation_region() {
 # The sweep: house rule 25 says *a checked region*, not *a region of this one kind*, so every marked
 # block in this repository is read for attributions and not only the blocks written for them.
 #
-# On the tree this landed on the sweep found **zero** attributions over twelve blocks, so the number
-# of blocks it read is claimed as well as the attributions it found. Without that, a reader that
-# stopped reading -- a renamed marker, a file dropped from the roster, an `awk` that matches
-# nothing -- would answer "no broken quotation anywhere" and be believed, which is the exact failure
-# this file catalogues under `verify_dependency_reader_independence` and refuses to repeat.
+# On the tree this landed on the sweep found **zero** attributions, so the number of blocks it read
+# is claimed as well as the attributions it found. Without that, a reader that stopped reading -- a
+# renamed marker, a document that fell out of the file list, an `awk` that matches nothing -- would
+# answer "no broken quotation anywhere" and be believed, which is the exact failure this file
+# catalogues under `verify_dependency_reader_independence` and refuses to repeat. The other side of
+# that count is now derived from the same file list by a second reader rather than written out as a
+# literal, because a literal is a roster with one entry and this section has already been caught by
+# one of those.
 #
-# The roster is written out rather than globbed, for the reason every input in this file is written
-# out: a glob that matches nothing checks nothing and says so to nobody.
-declare -A quotation_swept_kinds=(
-  [README.md]="capability-claims rows"
-  [$matrix]="capability-claims rows milestones"
+# THE ROSTER IS A CLAIM, WHICH IS HOUSE RULE 26 AND THE WHOLE OF WAVE 13
+# ----------------------------------------------------------------------
+# Until 2026-09-12 the list below was the sweep's **input**, written out by hand, reconciled against
+# nothing. It named eight files and twelve blocks; the repository carried thirteen non-`quotations`
+# blocks. The thirteenth was `TECH_DEBT.md`'s `debt-register`, created three sections down in this
+# very file by the wave that wrote this roster, and a quotation inside it -- the exact sentence this
+# section was built to refuse, attributed to the exact file that no longer contains it -- left the
+# run at *438 claims checked, all true*, exit 0. A hand-maintained list inside the gate whose
+# purpose is to abolish hand-maintained lists everywhere else.
+#
+# It is not the input any more. `marked_blocks_on_disk` is, and the list below is a **claim about
+# the tree**: `reconcile_swept_roster` compares the two in both directions, so
+#
+#   * a marked block of a file/kind pair this list does not name is a disagreement naming it -- the
+#     defect above, and the reason `TECH_DEBT.md` is now swept without anybody adding it to a list;
+#   * an entry here whose file carries no such block is a disagreement naming it -- a marker
+#     deleted, renamed or moved out of a document, which the derivation alone cannot see because
+#     nothing on disk is left to find.
+#
+# Which is `reconcile_manifests` exactly: named list, disk, both directions, one claim. The list
+# below is therefore still worth maintaining and is still worth reading -- it is what this script
+# believes the repository carries -- but forgetting to update it can no longer make a document
+# invisible to the sweep. It can only make the run red.
+#
+# `quotations` entries are in it too, since 2026-09-12. They are the blocks read directly rather
+# than swept, and until that date they were in neither the derived set nor this list, so the roster
+# described twelve of the tree's fifteen markers and said nothing about the other three.
+declare -A quotation_marked_roster=(
+  [README.md]="capability-claims rows quotations"
+  [$matrix]="capability-claims rows milestones quotations"
   [$overview]="gate-table"
   [$apireadme]="merged-document"
   [$adr048]="merged-document"
   [$adr052]="openapi-totals"
   [$adr053]="openapi-totals"
   [$adr054]="openapi-totals"
+  [TECH_DEBT.md]="debt-register"
 )
 
+# The set the sweep actually reads, derived from the tree at the moment the sweep runs. Held in the
+# name the sweep has always used, so that the fixture in section 6 -- which shadows this array with
+# a `local -A` to drive `audit_quotations_in_every_block` over one page written for the occasion --
+# still drives the shipped sweep and not a copy of it.
+#
+# This is the one place `quotations` is struck out, and it is struck out here because this is the
+# set the **sweep** walks: those blocks are read directly by `check_quotation_region`, so sweeping
+# them again would report every one of their attributions twice. The derivation above answers every
+# kind, so the roster reconciliation below sees them and the direct-read loop is driven from them.
+declare -A quotation_swept_kinds=()
+while IFS=$'\t' read -r swept_file swept_kind; do
+  [[ -z $swept_file ]] && continue
+  [[ $swept_kind == "$quotation_handled_kind" ]] && continue
+  quotation_swept_kinds[$swept_file]="${quotation_swept_kinds[$swept_file]:+\
+${quotation_swept_kinds[$swept_file]} }$swept_kind"
+done < <(marked_blocks_on_disk)
+
+# Both directions, one claim, and the two comparisons are written as the two sorted pair lists
+# rather than as counts: a count answers *how many* disagreed and the repair needs *which*. The
+# pairs are `file<TAB>kind` on both sides, so a file that carries a block of a kind the roster names
+# for a different file is a disagreement in both directions at once and prints twice, which is the
+# right amount of noise for a marker that has moved between documents.
+# AND THE HALF OF THIS THAT IS STILL UNGATED, NAMED HERE SO THE NEXT READER CAN RE-APPLY IT.
+# Measured on 2026-09-12 against this file: replacing the `undeclared=$(comm -13 ...)` assignment
+# below with `undeclared=` -- one line -- leaves the run at its baseline and exit status unchanged,
+# and the scratch-file control this section's acceptance names (a `<!-- checked: rows -->` marker in
+# a file nothing declares) goes silent with it. The `unpresent` half is driven by the dead-
+# derivation mutation and the `undeclared` half is driven by nothing. It is the weaker of the two
+# because the **sweep** reads the derived set either way, so emptying it does not let a false
+# quotation through; what it silences is the roster's claim to describe the tree, after which the
+# list above rots quietly and this comment becomes the only thing saying it should not. The case
+# that closes it is a `guard-fixtures` pair in section 6's shape: drive `reconcile_swept_roster`
+# over a one-entry `quotation_marked_roster` and a `marked_markdown_files` seeded with a fixture
+# page carrying an undeclared marker, require the refusal, then declare that marker and require
+# silence.
+reconcile_swept_roster() {
+  local declared derived undeclared unpresent file kind
+  declared=$(
+    for file in "${!quotation_marked_roster[@]}"; do
+      for kind in ${quotation_marked_roster[$file]}; do printf '%s\t%s\n' "$file" "$kind"; done
+    done | sort -u
+  )
+  derived=$(marked_blocks_on_disk)
+  # The blank line is struck out of both sides before they are compared, because an empty side is
+  # the interesting case rather than an impossible one: a derivation that has stopped deriving
+  # hands `printf` an empty string, `printf '%s\n' ''` is one empty line, and an empty line is a
+  # pair neither side holds. Without this the dead-derivation failure printed *"carries marked
+  # blocks the sweep's roster does not name: )"* -- a refusal naming nothing, beside twelve honest
+  # ones naming everything.
+  undeclared=$(comm -13 <(printf '%s\n' "$declared" | sed '/^$/d') \
+                        <(printf '%s\n' "$derived" | sed '/^$/d') \
+    | sed 's/\t/ (checked: /; s/$/)/' | tr '\n' ' ')
+  unpresent=$(comm -23 <(printf '%s\n' "$declared" | sed '/^$/d') \
+                       <(printf '%s\n' "$derived" | sed '/^$/d') \
+    | sed 's/\t/ (checked: /; s/$/)/' | tr '\n' ' ')
+  undeclared=${undeclared% }
+  unpresent=${unpresent% }
+  scope quotations "the swept roster against the tree"
+  claim quotation-roster "" \
+    "every marked block is in the roster" "${undeclared:-every marked block is in the roster}" \
+    "this repository carries marked blocks the sweep's roster does not name: $undeclared. A block\
+ the roster does not name is a block no quotation reader opens, which is how the exact sentence\
+ this section was written to refuse sat inside \`TECH_DEBT.md\`'s own marked region with the run\
+ green. The roster is a claim about the tree and the tree is the fact." \
+    "every roster entry is on disk" "${unpresent:-every roster entry is on disk}" \
+    "the sweep's roster names blocks this repository does not carry: $unpresent. A marker that has\
+ been deleted or renamed cannot be found by a reader looking for it, so the other direction is the\
+ only place it can be noticed -- and a roster entry that quietly matches nothing is the\
+ \`45 claims instead of 49\` failure this whole file was written after."
+}
+
 audit_quotations_in_every_block() {
-  local file kind text index path quote fact blocks=0 broken=""
+  local file kind text index path quote fact blocks=0 expected=0 broken=""
   for file in "${!quotation_swept_kinds[@]}"; do
     for kind in ${quotation_swept_kinds[$file]}; do
+      # The second reader, and it is a `grep` for the opening marker rather than the `awk` that
+      # yields the blocks: the count below is the gate on the reader beside it, so counting the
+      # same thing twice with the same expression would answer the same wrong number twice.
+      expected=$(( expected + $(grep -c "^<!-- checked: $kind" "$file" || true) ))
       index=0
       while IFS= read -r text; do
         index=$(( index + 1 ))
@@ -3398,12 +3712,18 @@ audit_quotations_in_every_block() {
     "no broken attribution" "${broken:-no broken attribution}" \
     "a marked block of another kind attributes a quotation to a file that does not contain it:\
  $broken House rule 25 is about a checked region and not about one kind of region, so every block\
- in this repository is read for attributions." \
-    "$blocks" "12" \
-    "the sweep read $blocks marked blocks and this script was last edited over 12. A reader that\
- has stopped reading answers \`no broken attribution\` for every document at once, and on the tree\
- this section landed on that is exactly the answer the honest reader gives -- so the count it read\
- is claimed beside the answer it gave."
+ of every other kind that this repository carries is read for attributions -- the set is derived\
+ from the tree by \`marked_blocks_on_disk\` and reconciled against the written-out roster in both\
+ directions by \`reconcile_swept_roster\`, so a document that grows a marked block is swept on the\
+ day it grows one." \
+    "$blocks" "$expected" \
+    "the sweep read $blocks marked blocks out of the $expected its own file list carries. A reader\
+ that has stopped reading answers \`no broken attribution\` for every document at once, and on the\
+ tree this section landed on that is exactly the answer the honest reader gives -- so the count it\
+ read is claimed beside the answer it gave, against a second reader that greps for the opening\
+ marker instead of matching the block. Until 2026-09-12 the other side of this comparison was the\
+ literal \`12\`, which was the size of the roster and not a count of anything on disk, so it agreed\
+ with a sweep that was one whole document short."
 }
 
 # The second reading, for `capability-prose`'s reason and with `capability-prose`'s shape. The claim
@@ -3539,12 +3859,19 @@ verify_quotation_claim_site() {
 
 verify_quotation_reader
 verify_quotation_claim_site
-for file in README.md "$matrix"; do
+# Derived, not written out. This loop was `for file in README.md "$matrix"` until 2026-09-12 -- a
+# hand-written two-name roster reconciled against nothing, one line above the function whose whole
+# subject is that a roster is a claim. The shrinking direction was already defended (a block
+# deleted from either file drops three claims and `close_section quotations 12` says so); the
+# growing direction was defended by nothing, and growing is the direction this section exists for.
+while IFS= read -r file; do
+  [[ -z $file ]] && continue
   check_marked_file quotations "$file" check_quotation_region
-done
+done < <(marked_quotation_files)
+reconcile_swept_roster
 audit_quotations_in_every_block
 audit_quotations
-close_section quotations 11
+close_section quotations 12
 
 # ---------------------------------------------------------------------------------------------
 # 10. The debt register's own ids, against the table that holds them.
@@ -3788,11 +4115,202 @@ verify_debt_duplicate_refused() {
  fails its first, which is the difference between a comparison and an assertion that it ran."
 }
 
+# Fixture 26: the roster reconciliation, in BOTH directions, over a tree written for the occasion.
+#
+# MUTATIONS CLOSED, each one line, each measured on 2026-09-12 against the bytes that shipped the
+# claim and each leaving `./scripts/feature-matrix-check.sh` at `439 claims checked, all true`,
+# exit 0:
+#
+#   undeclared=$(comm -13 ...)   ->   undeclared=      # the tree grows a block nobody declared
+#   unpresent=$(comm -23 ...)    ->   unpresent=       # a roster entry whose marker has gone
+#
+# The section's own comment disclosed the first and asserted the second was "driven by the dead-
+# derivation mutation". It is not: emptying `unpresent` alone is green. Both halves of a two-
+# direction comparison have to be driven separately or the run proves one of them and reports two.
+#
+# `marked_markdown_root` and `quotation_marked_roster` are both shadowed with `local`, so the
+# comparison, the derivation and the refusal text are the shipped ones and only the tree and the
+# list are written here. This is also the first case to drive the seam the section advertises --
+# until 2026-09-12 `marked_blocks_on_disk` read its files by the name `marked_markdown_files`
+# hands it, which is relative to the root and not to the process, so every drive over a fixture
+# root failed to stderr and answered the empty set with status 0.
+drive_swept_roster() {
+  local marked_markdown_root=$1
+  shift
+  local -A quotation_marked_roster=()
+  local entry
+  for entry in "$@"; do quotation_marked_roster[${entry%%=*}]=${entry#*=}; done
+  reconcile_swept_roster
+}
+
+verify_swept_roster_reconciled() {
+  local root=$fixtures/roster undeclared_says present_says derived
+  local said_undeclared said_declared said_unpresent said_carried
+  mkdir -p "$root"
+  printf '%s\n' '<!-- checked: rows -- claims: residue -->' 'A row.' '<!-- /checked -->' \
+    > "$root/a.md"
+  printf '%s\n' '<!-- checked: milestones -- claims: residue -->' 'A milestone.' \
+    '<!-- /checked -->' > "$root/b.md"
+  undeclared_says='carries marked blocks the sweep'\''s roster does not name'
+  present_says='names blocks this repository does not carry'
+  # The derivation itself, asserted before the comparison that reads it: a reader that has stopped
+  # reading hands both `comm`s the empty set, and an empty set disagrees with nothing in either
+  # direction. That is the silent-empty failure the seam repair above was made for, and it is the
+  # one failure this fixture would otherwise pass.
+  derived=$(marked_markdown_root=$root marked_blocks_on_disk | tr '\n\t' ' :')
+  said_undeclared=$(drive_says "$undeclared_says" drive_swept_roster "$root" 'a.md=rows')
+  said_declared=$(drive_says "$undeclared_says" drive_swept_roster "$root" \
+    'a.md=rows' 'b.md=milestones')
+  said_unpresent=$(drive_says "$present_says" drive_swept_roster "$root" \
+    'a.md=rows' 'b.md=milestones' 'c.md=rows')
+  said_carried=$(drive_says "$present_says" drive_swept_roster "$root" \
+    'a.md=rows' 'b.md=milestones')
+  scope guard-fixtures "reconcile_swept_roster, both directions"
+  claim swept-roster-reconciled "" \
+    "$derived" "a.md:rows b.md:milestones " \
+    "\`marked_blocks_on_disk\` answered [$derived] over a root carrying two marked pages. Every\
+ comparison below is silent over the empty set in both directions, so a derivation that has\
+ stopped deriving passes the whole of the rest of this fixture -- which is precisely what it did\
+ while it read its files by a name relative to a directory the process was not in." \
+    "$said_undeclared" "reported" \
+    "\`reconcile_swept_roster\` $said_undeclared a tree carrying a \`checked: milestones\` block\
+ the roster handed to it does not name. That direction is the one wave 13 exists for: a block the\
+ roster does not name is a block no reader opens, and the sentence this section refuses sat inside\
+ a marked region for a whole wave because of it." \
+    "$said_declared" "not reported" \
+    "\`reconcile_swept_roster\` $said_declared that refusal over a roster naming every block the\
+ tree carries. A comparison that fires on the agreeing case is an assertion that it ran." \
+    "$said_unpresent" "reported" \
+    "\`reconcile_swept_roster\` $said_unpresent a roster naming \`c.md (checked: rows)\` over a\
+ tree with no \`c.md\` in it. A marker deleted, renamed or moved out of a document leaves nothing\
+ on disk for the derivation to find, so this is the only direction that can notice it -- and the\
+ shipped comment claimed this half was driven by the dead-derivation mutation, which it is not." \
+    "$said_carried" "not reported" \
+    "\`reconcile_swept_roster\` $said_carried that refusal over a roster every one of whose entries\
+ is on disk. Both halves have to be quiet together or neither of them is a comparison."
+}
+
+# Fixture 27: what the derivation walks, and what it refuses to walk.
+#
+# MUTATIONS CLOSED, both green at 439 on 2026-09-12:
+#
+#   marked_markdown_prunes=(.git node_modules out dist storybook-static target .mill-out)
+#     -> marked_markdown_prunes=(.git)
+#   the `-path "$marked_markdown_root/docs/plan" -prune -o` clause deleted from the `find`
+#
+# Both exclusions are inert on this tree, which is why nothing noticed: `find . -name .git -prune
+# -o -name '*.md' -print | wc -l` answers 570 against the pruned 113, and with the prunes cut to
+# `.git` the census reports 536 files and 1730 attributions and the run is still all-true. A
+# vendored `node_modules/**/README.md` whose first line reads `<!-- checked: rows -->` would enter
+# the sweep and the roster reconciliation silently, and `docs/plan/` quotes broken sentences on
+# purpose -- this file's own reproduction instructions are written in one.
+drive_marked_markdown_files() {
+  local marked_markdown_root=$1
+  marked_markdown_files | tr '\n' ' '
+}
+
+verify_marked_markdown_pruned() {
+  local root=$fixtures/pruned walked
+  mkdir -p "$root/docs/plan" "$root/node_modules/vendored" "$root/target"
+  printf 'a page\n' > "$root/keep.md"
+  printf 'a page\n' > "$root/docs/keep-too.md"
+  printf 'a vendored page\n' > "$root/node_modules/vendored/README.md"
+  printf 'a wave plan quoting a broken sentence on purpose\n' > "$root/docs/plan/WAVE-99.md"
+  printf 'build output\n' > "$root/target/generated.md"
+  walked=$(drive_marked_markdown_files "$root")
+  scope guard-fixtures "marked_markdown_files"
+  claim marked-markdown-pruned "" \
+    "$walked" "docs/keep-too.md keep.md " \
+    "\`marked_markdown_files\` walked [$walked] over a root holding two ordinary pages, one\
+ vendored page under \`node_modules/\`, one build artefact under \`target/\` and one wave plan\
+ under \`docs/plan/\`. The prune list and the \`docs/plan\` clause are both inert on this\
+ repository, so nothing on disk distinguishes them from the empty list -- and a vendored README\
+ whose first line happens to open a marked block would be swept, reconciled against the roster and\
+ reported as an undeclared block of a kind nobody wrote."
+}
+
+# Fixture 28: the sweep's block count, against the second reader it is compared with.
+#
+# MUTATION CLOSED: `"$blocks" "$expected" \` -> `"$blocks" "$blocks" \`, one token, green at 439.
+# The section replaced the literal `12` on that side with a second reader precisely so the count
+# could not agree with itself, and then left the comparison site able to compare its own answer
+# with itself -- which is the defect `verify_quotation_claim_site` exists to refuse for `quotation`,
+# one claim above, in the same section.
+#
+# The two readers are genuinely different and the fixture is built out of the difference: `regions`
+# matches the opening marker ANYWHERE on the line and the count greps for it at the START of one.
+# An indented marker is therefore a block the sweep reads and the counter does not, which is a real
+# disagreement rather than a contrived one -- and it is the only shape that can put the two sides
+# of this comparison into different states without touching either reader.
+verify_sweep_block_count() {
+  local page=$fixtures/block-count.md pattern said_disagreeing said_agreeing
+  pattern='marked blocks out of the'
+  {
+    printf '%s\n' '<!-- checked: rows -- claims: residue -->' 'A row.' '<!-- /checked -->'
+    printf '%s\n' '  <!-- checked: rows -- claims: residue -->' 'A row.' '<!-- /checked -->'
+  } > "$page"
+  said_disagreeing=$(drive_says "$pattern" sweep_one_marked_file "$page" rows)
+  {
+    printf '%s\n' '<!-- checked: rows -- claims: residue -->' 'A row.' '<!-- /checked -->'
+    printf '%s\n' '<!-- checked: rows -- claims: residue -->' 'A row.' '<!-- /checked -->'
+  } > "$page"
+  said_agreeing=$(drive_says "$pattern" sweep_one_marked_file "$page" rows)
+  scope guard-fixtures "the sweep's block count"
+  claim sweep-block-count "" \
+    "$said_disagreeing" "reported" \
+    "\`audit_quotations_in_every_block\` $said_disagreeing a page whose two \`checked: rows\`\
+ blocks its own second reader counts as one. A sweep that has stopped reading answers \`no broken\
+ attribution\` for every document at once, and on an honest tree that is exactly the answer the\
+ honest reader gives -- so the number of blocks it opened is claimed beside the answer it gave,\
+ and the comparison is worth nothing the moment it can be pointed at its own answer." \
+    "$said_agreeing" "not reported" \
+    "\`audit_quotations_in_every_block\` $said_agreeing that refusal over a page whose two blocks\
+ both readers see. A count assertion that fires on agreement stops the sweep from ever running."
+}
+
+# Fixture 29: `--census`, which is the figure house rule 17 asked for and the one thing in this
+# section no claim touched.
+#
+# MUTATION CLOSED: `attributions=$(( attributions + 1 ))` -> `attributions=$(( attributions + 0 ))`,
+# green at 439 on 2026-09-12 -- and `--census` then printed `0 attributions, 1614 of them absent`,
+# a pair in which the absent count exceeds the total and the total is zero. `quotation_census` is
+# reachable only behind `--census`, which exits before the ledger is built, so no claim in this
+# file ever touched it and it carried no sanity check of its own either. A figure replaced by a
+# command has exactly as much gate on it as the figure did, unless something drives the command.
+drive_quotation_census() {
+  local marked_markdown_root=$1
+  quotation_census
+}
+
+verify_quotation_census_driven() {
+  local root=$fixtures/census source=$fixtures/census-source.md counted
+  mkdir -p "$root"
+  printf '%s\n' 'The engine writes the replacement literal' \
+                'verbatim and with no length bound at all.' > "$source"
+  printf 'See `%s`, which says *the replacement literal verbatim and with no length bound*.\n' \
+    "$source" > "$root/honest.md"
+  printf 'See `%s`, which says *a masked value is never longer than the value it replaced*.\n' \
+    "$source" > "$root/broken.md"
+  counted=$(drive_quotation_census "$root" | tr -s ' \n' ' ' | sed -E 's/.*over: //; s/\..*//')
+  scope guard-fixtures "quotation_census"
+  claim quotation-census-driven "" \
+    "$counted" "2 attributions, 1 of them absent" \
+    "\`quotation_census\` answered [$counted] over a root of two pages, one quoting a sentence its\
+ named file carries and one quoting a sentence it does not. The census is the figure this section\
+ publishes about its own reader and the argument for reading marked regions rather than whole\
+ documents rests on it, so it is the last figure in this file that should be readable off an\
+ uncounted loop."
+}
+
 verify_quotation_sweep_reports
 verify_quotation_path_claim_site
 verify_quotation_empty_marker
 verify_debt_duplicate_refused
-close_section guard-fixtures 25
+verify_swept_roster_reconciled
+verify_marked_markdown_pruned
+verify_sweep_block_count
+verify_quotation_census_driven
+close_section guard-fixtures 29
 
 # ---------------------------------------------------------------------------------------------
 # 11. The newcomer's overview, against the figures this script derives itself.

@@ -103,6 +103,8 @@ interface Open {
   readonly container: HTMLElement;
   readonly dispose: () => void;
   readonly stub: ReturnType<typeof serving>;
+  /** The registry this mount reads, so a case can make one key re-read while the screen is up. */
+  readonly queries: ReturnType<typeof createQueryRegistry>;
 }
 
 function open(
@@ -136,7 +138,7 @@ function open(
       />
     </KuiProvider>
   ));
-  return { ...mounted, stub };
+  return { ...mounted, stub, queries };
 }
 
 /** A button anywhere on the page, including inside the portalled confirmation dialogue. */
@@ -375,6 +377,40 @@ describe("the statement editor's permission question", () => {
     });
     await settle();
 
+    type(container, "INSERT INTO ORDERS VALUES ('x');");
+    await settle();
+
+    expect(usable(button(container, "Run query"))).toBe(false);
+    button(container, "Run query")?.click();
+    await settle();
+    expect(calls(stub, KSQL_PLAN_PATH)).toBe(0);
+    dispose();
+  });
+
+  it("goes on refusing when the cluster document is stale rather than fresh", async () => {
+    /*
+     * W13-A1: `readOnly()` reads the flag out of `ready` *and* `stale`, and every case above leaves
+     * the query `ready`. Narrowing it to `state.kind === "ready"` left all 1,935 cases green while
+     * re-enabling Run on a read-only cluster the moment its document went stale — which is not an
+     * exotic state but the ordinary one after the server has been unreachable for a moment: the
+     * cached answer still says `readOnly: true` and it is still true. A refusal that lapses because
+     * a re-read failed is worse than one that never appeared, because the reader watched it work.
+     */
+    const { container, stub, queries, dispose } = open(objectsResponse, {
+      grants: MAY_EXECUTE,
+      readOnly: true,
+      plan: planHarmless,
+    });
+    await settle();
+    expect(usable(button(container, "Run query"))).toBe(false);
+
+    stub.refuse(CLUSTER_PATH);
+    queries.invalidate(`cluster-write-state|${TEST_CLUSTER}`);
+    await settle();
+
+    // The re-read happened and it failed, which is what puts the query into `stale` over the last
+    // good answer; the flag in that answer has not changed and neither has the refusal.
+    expect(calls(stub, CLUSTER_PATH)).toBeGreaterThan(1);
     type(container, "INSERT INTO ORDERS VALUES ('x');");
     await settle();
 

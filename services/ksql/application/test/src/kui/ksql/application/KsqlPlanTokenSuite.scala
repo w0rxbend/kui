@@ -55,6 +55,24 @@ final class KsqlPlanTokenSuite extends CatsEffectSuite {
     } yield assert(answer.isLeft, clue = answer)
   }
 
+  test("a token cannot be spent on a cluster whose id merely extends the signed one") {
+    // W13-A1: the cluster clause was `subject == cluster.value` and the case above drives `staging` against
+    // `prod-eu`, which two unrelated names satisfy under `==`, `startsWith`, `endsWith` and `contains` alike.
+    // Weakening it to `subject.startsWith(cluster.value)` left all 1,187 cases in `services.ksql.__.test`
+    // green while turning ADR-045's cluster binding into a prefix search: a plan minted against `prod-eu`
+    // was then spendable against `prod`. Both directions are asserted, because a substring test is wrong
+    // whichever operand it is applied to.
+    for {
+      minted <- tokens.mint(cluster, statement, expiry)
+      onPrefix <- tokens.verify(ClusterId.unsafe("prod"), statement, minted, now)
+      short <- tokens.mint(ClusterId.unsafe("prod"), statement, expiry)
+      onExtension <- tokens.verify(cluster, statement, short, now)
+    } yield {
+      assertEquals(onPrefix.left.toOption.map(_.code), Some(ErrorCode.Validation), clue = onPrefix)
+      assertEquals(onExtension.left.toOption.map(_.code), Some(ErrorCode.Validation), clue = onExtension)
+    }
+  }
+
   test("a token past its expiry is refused, and one a second before it is not") {
     for {
       token <- tokens.mint(cluster, statement, expiry)

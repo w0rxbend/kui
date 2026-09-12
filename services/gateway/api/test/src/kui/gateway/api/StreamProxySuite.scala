@@ -194,6 +194,30 @@ final class StreamProxySuite extends CatsEffectSuite {
       .map(text => assert(text.contains("\"offset\":1"), text))
   }
 
+  test("aNegativeQueueSizeStillMoves") {
+    // W13-A1: `aQueueSizeBelowOneStillMoves` drives exactly 0, and 0 is the one value below one that needs
+    // no floor — `Queue.bounded(0)` is a rendezvous queue and relays perfectly well. Deleting
+    // `math.max(1, queueSize)` therefore left all 1,270 cases in `services.gateway.api.test` green while
+    // leaving `Queue.bounded(-1)` to raise `IllegalArgumentException` out of a stream the browser is
+    // already reading. The scaladoc's rule is "values below one are treated as one", and -1 is below one.
+    textOf(StreamProxy.relay(render(List(messageEvent(1))), queueSize = -1))
+      .map(text => assert(text.contains("\"offset\":1"), text))
+  }
+
+  test("aTerminalEventWrittenWithCrlfLineEndingsIsRecognised") {
+    // Every other fixture here is built by `SseEvent.bytes`, which writes LF, so no case drove a CRLF body
+    // — and the SSE grammar allows CRLF, LF and CR alike. This case holds the property rather than one
+    // line of it: W13-A1 deleted `isTerminalLine`'s `stripSuffix("\r")` and the suite stayed green with
+    // this case in it, because `text.drop("event:".length).trim` already trims the CR. That `stripSuffix`
+    // is therefore redundant, and this case is a gate on the behaviour and not on that expression.
+    val body = "event: message\r\ndata: {}\r\n\r\nevent: done\r\ndata: {}\r\n\r\n"
+    val crlf = Stream.chunk(Chunk.array(body.getBytes(StandardCharsets.UTF_8)))
+
+    textOf(StreamProxy.withTerminalEvent(crlf, envelope)).map(text =>
+      assert(!text.contains(envelope.code), text)
+    )
+  }
+
   test("anUpstreamThatEndsWithoutATerminalEventGetsOne") {
     // The reference product's failure mode, and the one this milestone exists to replace: a connection that
     // simply stops. The browser cannot tell that from a finished search, so it shows what it has and says

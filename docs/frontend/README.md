@@ -80,12 +80,19 @@ frontend/
 ```
 
 ```
-    feature-clusters/   one package per feature: clusters, topics, messages,
-    feature-topics/     consumers, schemas
-    feature-messages/
+    feature-clusters/   one package per feature. `ls frontend/packages` is the
+    feature-topics/     roster: clusters, topics, messages, consumers, schemas,
+    feature-messages/   alerts, connect and ksql.
     feature-consumers/
     feature-schemas/
+    feature-alerts/
+    feature-connect/
+    feature-ksql/
 ```
+
+The last three were absent from this listing until 2026-09-12, while their packages had been on
+disk and registered in the shell for waves — which is what a copy of a directory listing that
+nobody re-reads against the directory does.
 
 Each `feature-*` package is a *microfrontend*: Vite splits it into its own chunk and the browser
 downloads it only when the user actually needs it (ADR-012 as amended by ADR-048 §4). See
