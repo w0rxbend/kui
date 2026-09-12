@@ -132,7 +132,7 @@ services:
   #     http://kafka-metrics:5556/metrics
   # ---------------------------------------------------------------------------------------------
   kafka-metrics:
-    image: bitnamilegacy/jmx-exporter:1.4.0
+    image: soldevelo/jmx-exporter:1.4.0
     container_name: kui-quickstart-kafka-metrics
     # Port first, configuration second: that is the standalone jar's argument order, and the image's
     # own default command is `5556 examples/standalone_sample_config.yml`, which would export a
