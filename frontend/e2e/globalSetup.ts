@@ -72,9 +72,14 @@ async function sectionRows(url: string, key: string): Promise<number | undefined
  * ## What is actually polled, measured rather than guessed
  *
  * Measured on the quickstart on 2026-09-11, restarting `kui-quickstart-kui` and asking every two
- * seconds:
+ * seconds. The three column headings are shortened to fit, and the whole paths are written out here
+ * because until wave 11 they were not and the shortened ones do not exist: readiness is
+ * `${API}/api/v1/health/ready` — plain `/health/ready` answers **404** on the quickstart — and the
+ * other two are `${API}/api/v1/clusters/{id}/brokers` and `.../log-dirs`, which is what the poll
+ * below actually asks for. A reader copying a heading into `curl` got a 404 and no way to tell it
+ * from the outage this table is about. (Filed by W11-03, whose `smoke.sh` asks the real one.)
  *
- * | t     | `/health/ready` | `/brokers`               | `/log-dirs`              |
+ * | t     | ready           | `/brokers`               | `/log-dirs`              |
  * | ----- | --------------- | ------------------------ | ------------------------ |
  * | 0–2s  | connection refused | —                     | —                        |
  * | 4–31s | 200             | `ok`, **1 broker**       | `ok`, **0 directories**  |

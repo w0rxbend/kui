@@ -739,11 +739,27 @@ describe("the tab comes from the route and from nowhere else", () => {
 /**
  * The row, as the design names it (§3.2) — one roster for both of the rows that draw it.
  *
- * Written here rather than inside either `describe` because the two rows are built by two different
- * pieces of production code — `StatRow`'s six hand-written cards and `NoClusterChosen`'s loop over
- * `STAT_ORDER` — and the thing worth gating is that they agree with the design *and with each
- * other*. Labels included: the label is the whole of a tile's identity to the operator, and a tile
- * renamed from `BROKERS ONLINE` to `BROKERS` is a different claim about what the figure counts.
+ * Written here rather than inside either `describe` because the row is drawn twice, once with the
+ * figures a cluster answered and once on the address that names no cluster, and the thing worth
+ * gating is that both agree with the design. Labels included: the label is the whole of a tile's
+ * identity to the operator, and a tile renamed from `BROKERS ONLINE` to `BROKERS` is a different
+ * claim about what the figure counts.
+ *
+ * ## Why this literal stays a literal, now that production has only one
+ *
+ * There were four hand-written rosters of these six tiles: `STAT_ORDER`, `StatRow`'s six elements
+ * in sequence, this pair of arrays, and two more in `e2e/shell.spec.ts` and `e2e/traffic.spec.ts`.
+ * `StatRow` now draws `STAT_ORDER` through `STAT_TILES`, so **production holds one**, and a seventh
+ * id is a compile error until somebody says how it draws.
+ *
+ * This one is not folded into it, and that is the point rather than an omission. Deriving the
+ * expectation from `STAT_ORDER` would make the two cases below tautologies: they would prove that
+ * the page draws what the page says it draws, which is true of any page. The literal here is the
+ * **design's** copy — §3.2's own list, transcribed once — and it is the only thing in this
+ * repository that can notice production and the design disagreeing. Two copies with different
+ * provenance is the right number; four copies with the same provenance was not.
+ *
+ * The two `e2e` rosters are `frontend/e2e/**`, which is W11-02's, and are filed there.
  */
 const STAT_TESTIDS = [
   "stat-brokers",
@@ -939,6 +955,125 @@ describe("the address that names no cluster, with nothing selected", () => {
     );
     expect(container.querySelector('[data-testid="overview-no-cluster"]')).toBeNull();
     expect(container.querySelector('[data-testid="stat-brokers"]')?.textContent).toContain("3");
+  });
+
+  it("enables `Create topic` again the moment there is a cluster to create one on", () => {
+    // The other half of the refusal, so that a repair which simply disabled the button for ever
+    // would not pass. A control that is permanently disabled is a control that should have been
+    // removed, and the reason it carries would then be false on every address but one.
+    let pressed = 0;
+    const { container } = keep(
+      mount(
+        dashboardHost(
+          "/ui",
+          () => (
+            <Overview
+              model={toOverviewModel(HEALTHY)}
+              onCreateTopic={() => {
+                pressed += 1;
+              }}
+            />
+          ),
+          { selected: "prod-kyiv-01" },
+        ),
+      ),
+    );
+    const create = [...container.querySelectorAll("button")].find((button) =>
+      (button.textContent ?? "").includes("Create topic"),
+    );
+    expect(create?.getAttribute("aria-disabled")).toBeNull();
+    create?.click();
+    flush();
+    expect(pressed).toBe(1);
+  });
+
+  /**
+   * The rule this block was one control short of keeping.
+   *
+   * `/ui` with no cluster shipped an **enabled** primary *"Create topic"*. Measured on the running
+   * product at the wave-10 close with no mutation applied: `count 1, enabled true`; the click left
+   * the address at `/ui/` and opened **0** dialogs, because `App.tsx`'s handler reads the
+   * selection, finds none and returns. The wave that made six blank tiles say what nobody had
+   * asked shipped, on the same screen, a control claiming an action it cannot perform — the same
+   * lie as a fabricated figure, one control over, and nothing gated it.
+   *
+   * ## Why this sweeps the DOM instead of naming the button
+   *
+   * `expect(createTopic).toHaveAttribute("aria-disabled")` would pin today's defect and nothing
+   * else: the next enabled-and-inert control added to this address would be invisible to it, and
+   * the whole reason this one survived a wave is that no case was looking. So the case reads every
+   * control the address actually drew and asks each one the design's question — a link has to lead
+   * somewhere, and a button has to navigate or to open something. `AddressProbe` is what makes the
+   * first half observable: `memoryHistory` does not touch `window.location`.
+   *
+   * `onCreateTopic` is deliberately **not** passed. `App.tsx`'s handler returns without navigating
+   * when no cluster is selected, which is exactly this address, so a handler that did anything here
+   * would be a wiring the product does not have and the case would pass for the wrong reason.
+   */
+  it("offers no enabled action this address cannot perform", () => {
+    const { container } = keep(
+      mount(
+        dashboardHost("/ui", () => (
+          <>
+            <Overview model={toOverviewModel(LOADING)} />
+            <AddressProbe />
+          </>
+        )),
+      ),
+    );
+
+    const address = (): string =>
+      container.querySelector('[data-testid="address"]')?.textContent ?? "";
+
+    const controls = [...container.querySelectorAll<HTMLElement>("a, button")];
+    // A sweep over nothing passes every assertion inside it, which is the vacuous shape this whole
+    // file exists to refuse. The address draws at least the header action and the empty state's.
+    expect(controls.length).toBeGreaterThan(1);
+
+    for (const control of controls) {
+      const name = (control.textContent ?? "").trim() || "(no label)";
+      if (control.tagName === "A") {
+        const href = control.getAttribute("href") ?? "";
+        expect(href, `the link "${name}" goes nowhere`).not.toBe("");
+        continue;
+      }
+      // `Button` marks a refusing control with `aria-disabled` rather than the `disabled`
+      // attribute, so that the reason stays reachable by keyboard; its own type refuses a
+      // disablement with no reason, which is why this branch does not re-assert one.
+      if (control.getAttribute("aria-disabled") === "true") continue;
+
+      const before = address();
+      control.click();
+      flush();
+      const navigated = address() !== before;
+      const opened = document.querySelector('[role="dialog"]') !== null;
+      expect(
+        navigated || opened,
+        `the enabled button "${name}" navigates nowhere and opens nothing`,
+      ).toBe(true);
+    }
+  });
+
+  it("says why `Create topic` refuses, in a sentence a keyboard reaches", () => {
+    // Disabled and not removed: SPEC §4.13's rule, which `Button` carries in its type, is that an
+    // action the operator cannot take *right now* explains itself rather than disappearing — a
+    // hidden control makes somebody believe the product cannot do the thing at all. The reason is
+    // not in the document until the control is pointed at or focused, because `Tooltip` mounts its
+    // bubble on demand, so this reaches it the way a keyboard user does.
+    const { container } = unasked();
+    const create = [...container.querySelectorAll("button")].find((button) =>
+      (button.textContent ?? "").includes("Create topic"),
+    );
+    expect(create, "the header draws no Create topic action at all").toBeDefined();
+    expect(create?.getAttribute("aria-disabled")).toBe("true");
+
+    const describedBy = create?.getAttribute("aria-describedby") ?? "";
+    expect(describedBy, "the refusal is not described by anything").not.toBe("");
+    create?.focus();
+    flush();
+    const reason = document.getElementById(describedBy)?.textContent ?? "";
+    expect(reason).toContain("No cluster is selected");
+    expect(reason).toContain("environment rail");
   });
 
   it("has no accessibility violations", async () => {

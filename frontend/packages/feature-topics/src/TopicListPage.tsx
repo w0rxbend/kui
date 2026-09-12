@@ -50,6 +50,7 @@ import {
   Tag,
   TextField,
   VirtualizedTable,
+  formatBytes,
   formatRate,
   type BulkAction,
   type Column,
@@ -767,14 +768,24 @@ function Quantity(props: {
   );
 }
 
-/** Bytes at one decimal place. Decimal units, because that is what a broker's own metrics use. */
-export function formatBytes(bytes: number): string {
-  const units = ["B", "kB", "MB", "GB", "TB", "PB"] as const;
-  let value = Math.max(0, bytes);
-  let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
-    unit += 1;
-  }
-  return `${unit === 0 ? String(value) : value.toFixed(1)} ${units[unit] ?? "B"}`;
-}
+/**
+ * Bytes at one decimal place, from the kernel — re-exported here rather than written again.
+ *
+ * ## Why this is a re-export and not a function
+ *
+ * There were two of these, with one name and one meaning, and both were public surface: the kernel
+ * exports `formatBytes` from `@kui/kernel`, and this file exported a second one that
+ * `feature-topics/src/index.tsx` re-exported to anybody who imported the package. They disagreed
+ * about more than rounding. The kernel's promotes at the value that *rounds* to the next unit, so
+ * `999.96 B` reads `1.0 kB`; this one promoted at a bare `1000` and printed `999.96 B` — a
+ * five-significant-figure byte count in a column of one-decimal ones. Its byte branch was
+ * `String(value)` unrounded, which is how the cluster dashboard once printed
+ * `81.2359955010432 B/s`. The kernel's version is the one with the three-case spelling rule, the
+ * one with a suite, and the one the other three packages already use; this copy's only advantage
+ * was a `PB` on its ladder, which the kernel now has.
+ *
+ * The name stays exported from this module because four files in this package and the package's own
+ * public surface import it from here; changing that would be a rename across files this packet does
+ * not own, for no gain. What is gone is the second implementation.
+ */
+export { formatBytes };

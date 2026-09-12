@@ -44,6 +44,13 @@
 #                     them were green over a README saying **"No Kafka Connect, no ksqlDB"** against
 #                     a tree that ships, routes and draws both — four milestones stale, in the first
 #                     paragraph a newcomer reads, outside every marker
+#   gate-table        the newcomer's overview, `docs/overview/README.md`, against the three figures
+#                     this run derives without starting another process: its own claim total and
+#                     section count, the merged OpenAPI triple, and the `DECISIONS.md` row count.
+#                     That page held no marker of any kind until 2026-09-12, which is how it came
+#                     to publish `390 claims over nine sections` about this script in the row that
+#                     describes this script, in the wave whose subject that gate was, while the run
+#                     printed 404
 #   adr-index         every `docs/adr/ADR-*.md` against the rows of `DECISIONS.md`, and every row
 #                     against a file. ADR-052 was accepted, referenced by four documents and had no
 #                     row in the index for a whole wave; it was repaired by hand, and a
@@ -226,6 +233,35 @@
 # `services/` on disk — deleting a service from the page rather than lying about it is one line
 # and still red.
 #
+# WHAT THE SENTENCE HALF OF SECTION 8 COSTS, MEASURED THE SAME WAY ON 2026-09-12
+# -----------------------------------------------------------------------------
+# Every figure below was printed by the run beside it, with the sentence
+# *"Neither Kafka Connect nor ksqlDB is built: KUI has no Connect screen and no ksqlDB screen."*
+# standing inside `README.md`'s `capability-claims` block and the three lists left true:
+#
+#   the finished gate, nothing edited                                RED, 1 disagreement, exit 1
+#   the claim site alone, `"${offences:-...}"` -> the literal        RED, 1 disagreement, from
+#                                                                    `capability-prose-audit`
+#   `audit_capability_prose` alone, its fact -> `"${pairs#*>}"`      RED, 1 disagreement, from the
+#                                                                    claim site
+#   **both, which is two lines**                                     416 claims, all true, exit 0
+#
+# Two, the same as the rest of this file, and for the same reason. Neither edit touches
+# `capability_prose_offences` itself, because `verify_capability_prose_refusal` drives that
+# function over the sentence directly and asserts it answers `connect ksql`: a body rewritten to
+# answer nothing, and an alias emptied out of `service_aliases`, are each red in the fixture
+# without any document changing.
+#
+# **And the green one, which is this gate's stated limit rather than a hole somebody missed.**
+# Measured on the finished file: *"The event feed and the throughput cards were never built;
+# nothing here reads a broker."* inside the same block prints `416 claims checked, all true` and
+# exits 0. It names no service by its id, by a product alias or by `<id> service|screen|page|
+# feature`, and nothing in this file knows that *the event feed* is `alerts`. Refusing a synonym
+# needs a vocabulary this repository does not have, and a heuristic wide enough to catch one
+# refuses honest prose: matching a bare `gateway` would refuse this block's own true sentence
+# about `identity` having no proxied contract, which was measured before the narrow rule was
+# chosen. The answer if that ever matters is a smaller checked region, not a wider match.
+#
 # The per-section counts are kept beside the registry rather than instead of it. A count still says
 # something the kinds do not -- that a section compared *fewer instances* of a kind it still
 # compares, such as one npm dependency's row going missing -- and it is the cheaper half of the two.
@@ -277,6 +313,11 @@ adr048="docs/adr/ADR-048-solidjs-typescript-vite-frontend.md"
 apireadme="frontend/packages/api/README.md"
 deps="DEPENDENCY_MATRIX.md"
 decisions="DECISIONS.md"
+# Section 9's one file. The newcomer's overview held no marker of any kind until 2026-09-12, which
+# is how it came to publish `390 claims over nine sections` about the run below in the very row
+# that describes it, in the wave whose subject that gate was, and why a figure this script derives
+# itself is now read back out of the page that publishes it.
+overview="docs/overview/README.md"
 # Section 6's three. Each publishes totals about a document the build generates, and until
 # 2026-09-11 `grep -c 'checked:'` over all three answered 0.
 adr052="docs/adr/ADR-052-metrics-endpoints.md"
@@ -309,7 +350,7 @@ manifests=(
 # Every input is named rather than globbed: a glob that matches nothing checks nothing and says so
 # to nobody, which is the failure this script was written to end.
 for required in "$matrix" README.md "$adr048" "$apireadme" "$deps" "$decisions" \
-                "$adr052" "$adr053" "$adr054" \
+                "$adr052" "$adr053" "$adr054" "$overview" \
                 docs/api/openapi.json "${manifests[@]}"; do
   if [[ ! -f $required ]]; then
     echo "feature-matrix-check: $required is missing; the check cannot run." >&2
@@ -341,14 +382,20 @@ declare -A registry=(
   [milestones]="milestone-line milestone-p0 milestone-p1 milestone-rows total-line total-p0\
  total-p1 total-rows total-split"
   [adr-index]="adr-file adr-row"
-  [guard-fixtures]="claim-reads-whole-figure claim-refuses-noncomparison claimed-side-read\
+  [guard-fixtures]="alias-roster-refused capability-prose-claim-site capability-prose-forms\
+ claim-reads-whole-figure claim-refuses-noncomparison claimed-side-read\
  count-assertion dependency-audit-coverage dependency-audit-refuses dependency-reader-independence\
  dependency-row-compared empty-block-refused fact-independence figure-published\
  header-kind-inverse marker-list-refused openapi-fact-independence residue-reports-unclaimed\
  total-split-compared"
   [openapi-totals]="merged-path-prefix openapi-document openapi-roster openapi-totals residue"
-  [capability-claims]="package-count package-roster residue service-audit service-audit-coverage\
- service-count service-fact-independence service-roster service-routed-count service-state"
+  [capability-claims]="capability-prose capability-prose-audit capability-prose-refusal\
+ package-count package-roster\
+ residue service-alias-roster service-audit service-audit-coverage service-count\
+ service-fact-independence service-fact-roster-independence service-roster service-routed-count\
+ service-state"
+  [gate-table]="gate-claim-total gate-decisions-rows gate-openapi-document gate-section-count\
+ residue"
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -2347,7 +2394,13 @@ verify_dependency_reader_independence
 verify_dependency_audit_refusals
 verify_dependency_audit_coverage
 verify_openapi_fact_independence
-close_section guard-fixtures 18
+
+# THIS SECTION DOES NOT CLOSE HERE ANY MORE. Three of its fixtures drive functions declared in section
+# 8, and bash defines a function when the parser reaches its line: called from here they are
+# `command not found`. So the three live at the foot of section 8, under a banner that says they are
+# section 6's, and `close_section guard-fixtures` moved down with them. Nothing else about the section
+# changed -- a fixture's claims are recorded against `guard-fixtures` by `scope`, not by where in the
+# file it sits, and `count_of` reads the ledger.
 
 # ---------------------------------------------------------------------------------------------
 # 8. The capability claims: sentences naming services and packages, against the tree itself.
@@ -2420,6 +2473,130 @@ package_directory_names() {
 # block. The label is the claimed side, so it is returned with them.
 service_labels=("Built and routed" "Built, not routed" "Not built")
 
+# THE SENTENCE HALF OF THIS SECTION, AND WHY THE THREE LISTS WERE NOT ENOUGH
+# --------------------------------------------------------------------------
+# Everything above compares the three labelled lists. Measured on 2026-09-12 against the shipped
+# script, with no edit to it at all, one sentence appended inside `README.md`'s own
+# `capability-claims` block:
+#
+#   Neither Kafka Connect nor ksqlDB is built: KUI has no Connect screen and no ksqlDB screen.
+#
+#   $ ./scripts/feature-matrix-check.sh
+#   feature-matrix-check: 404 claims checked, all true.     exit 0
+#
+# That is the exact sentence that kept definition-of-done item 4 open for four milestones, sitting
+# inside the region built to refuse it, with every section count unchanged. Nothing read it:
+# `check_capability_region` matches backticked tokens that follow one of three literal
+# `**<label>:**` markers, and `report_unclaimed_figures` refuses digits and bold number words. Free
+# prose in the block was struck out by nothing and compared by nothing.
+#
+# The rule this adds is narrow on purpose, and it is a rule about **where** a state may be stated
+# rather than an attempt to parse English: the three labelled lists are the only place in a checked
+# block where a service's state may be declared, because they are the only place a comparison
+# reads. Any other sentence that names a service identity together with a negation token is
+# refused, with the identity printed -- because a sentence like the one above is a claim about the
+# tree that nothing in this file can check, and the repair is to move it into the lists where it is
+# checked, or out of the markers where it is not claimed to be.
+#
+# **The specified shape was the residue -- the block's text once the three lists are consumed --
+# and it does not hold.** A list token is `\*\*<label>:\*\*[^*]*`, so it runs to the next emphasis
+# marker, and the block's last list has none after it: appended at the end of the block, the
+# sentence above is consumed *as part of the `**Not built:**` list* and never reaches the residue
+# at all. Measured here before this was written. So the scan below runs over the block as it
+# arrived, sentence by sentence, and it is the sentence rather than the block that is exempted:
+# a sentence carrying a `**<label>:**` marker has that marker and its backticked names struck out
+# -- those are the claimed side of a comparison that already ran -- and whatever prose is left in
+# it is read like any other. A false clause appended to a list line is therefore read, which is
+# the one thing the residue shape could not do.
+
+# The identities prose uses for a service, held beside `service_labels` and keyed by every service
+# id the block lists and every directory under `services/` -- `service-alias-roster` below compares
+# those two sets, so a twelfth service is a decision taken here rather than a name that silently
+# escapes the scan.
+#
+# An alias is matched **case-sensitively** as a whole word, and most services have none. That is
+# not an omission and it is the honest limit of this gate: `topic`, `message`, `cluster`,
+# `consumer`, `schema`, `metrics`, `alerts`, `gateway`, `identity`, `acl` and `quota` are the nouns
+# this documentation uses for Kafka's own concepts on nearly every line, and an alias for any of
+# them would refuse honest prose more often than a false claim. For those the identity form is the
+# backticked id -- `` `topic` `` -- which is how the lists name them and how a sentence making a
+# claim about the service rather than the concept names them too. `connect` and `ksql` are the two
+# that carry a product name a reader would recognise, they are the two the false sentence above was
+# written about, and their aliases are therefore the ones that exist.
+declare -A service_aliases=(
+  [acl]=""
+  [alerts]=""
+  [cluster]=""
+  [connect]="Kafka Connect|Connect"
+  [consumer]=""
+  [gateway]=""
+  [identity]=""
+  [ksql]="ksqlDB|KSQL"
+  [message]=""
+  [metrics]=""
+  [quota]=""
+  [schema]=""
+  [topic]=""
+)
+
+# A negation in a sentence about a service is a claim about whether it exists. `not` is here
+# despite being the commonest word in the list because `Built, not routed` is a label and labels
+# are struck out before this runs; a sentence that says "not" about a *named* service is making the
+# claim this gate exists for whichever word it uses.
+negation_tokens='no|not|neither|nor|without|never'
+
+# The block, split into sentences. The block arrives flattened to one line -- `regions` joins its
+# lines with spaces -- so a paragraph break is invisible here and a sentence terminator is the only
+# boundary left. A colon is deliberately not one: `**Not built:**` ends with one, and the sentence
+# this gate was written for hides its second clause behind one.
+capability_prose_sentences() {
+  printf '%s' "$1" | sed -E 's/([.!?]) +/\1\n/g'
+}
+
+# The service identities one block names outside the lists' own vocabulary, sorted and space
+# separated. Empty is the answer for a block that makes no such claim, and that is the value the
+# comparison expects.
+capability_prose_offences() {
+  local text=$1 sentence stripped id label found offences="" tick='`'
+  # `|| [[ -n $sentence ]]` because the last sentence of a block carries no newline after it, and
+  # `read` answers non-zero on an unterminated line -- which silently dropped the one sentence this
+  # scan was written for, since a block's last line is exactly where it was appended.
+  while IFS= read -r sentence || [[ -n $sentence ]]; do
+    [[ -z ${sentence// /} ]] && continue
+    stripped=$sentence
+    for label in "${service_labels[@]}"; do
+      [[ $stripped == *"**$label:**"* ]] || continue
+      stripped=${stripped//"**$label:**"/}
+      # The names in a labelled list are the claimed side of a `service-state` comparison that has
+      # already run against the tree, so they are not a claim this scan can add anything to. Only
+      # they are struck: prose written after them on the same line is not a list entry and is read.
+      stripped=$(printf '%s' "$stripped" | sed -E "s/${tick}[^${tick}]*${tick}//g")
+    done
+    printf '%s' "$stripped" \
+      | grep -qiE "(^|[^A-Za-z])($negation_tokens)([^A-Za-z]|\$)" || continue
+    for id in "${!service_aliases[@]}"; do
+      found=""
+      [[ $stripped == *"$tick$id$tick"* ]] && found=$id
+      if [[ -z $found && -n ${service_aliases[$id]} ]]; then
+        printf '%s' "$stripped" \
+          | grep -qE "(^|[^A-Za-z0-9-])(${service_aliases[$id]})([^A-Za-z0-9-]|\$)" && found=$id
+      fi
+      # The one form in which a bare id is unambiguously the service rather than Kafka's noun:
+      # qualified by what a capability sentence is about. `no alerts screen` and `the metrics
+      # service is a stub` are caught by this and were green without it, measured on 2026-09-12;
+      # `the gateway's own map` and `a topic's partitions` still are not, which is the limit
+      # written out above.
+      if [[ -z $found ]]; then
+        printf '%s' "$stripped" \
+          | grep -qiE "(^|[^A-Za-z0-9-])$id (service|screen|page|feature)([^A-Za-z0-9-]|\$)" \
+          && found=$id
+      fi
+      [[ -n $found ]] && offences+="$found "
+    done
+  done < <(capability_prose_sentences "$text")
+  printf '%s' "$offences" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//; s/ *$//'
+}
+
 # What each block said about each service, filled by the handler below and read by
 # `audit_service_states` after every block has been read. It is the `header table` pattern: the
 # comparison inside the block and the audit outside it are two statements rather than one, so the
@@ -2432,6 +2609,10 @@ declare -A declared_service_state=()
 check_capability_region() {
   local where=$1 text=$2 rest tok label names name fact listed="" declared_packages=""
   local existing="" wanted=""
+  # Taken before a single comparison has struck anything out. `text` is what the comparisons above
+  # consume from; the prose scan at the foot of this function reads the block as the document
+  # wrote it, for the reason written out beside `capability_prose_offences`.
+  local whole=$2 offences=""
 
   if [[ $text =~ \*\*([0-9]+)\ services\*\* ]]; then
     claim service-count "${BASH_REMATCH[0]}" \
@@ -2533,6 +2714,19 @@ check_capability_region() {
  screens and has to be named, or a feature package can ship with no row pointing at it."
   fi
 
+  # The sentence half. `claim` is handed no fragment, the way the residue is handed none: there is
+  # no figure to strike out and the claimed side is this file's own statement that a checked block
+  # states a service's state in the three lists and nowhere else.
+  offences=$(capability_prose_offences "$whole")
+  claim capability-prose "" \
+    "no capability sentence outside the lists" \
+    "${offences:-no capability sentence outside the lists}" \
+    "$where publishes a sentence outside the three labelled lists that names [$offences] together\
+ with a negation. A service's state is stated in the lists, where it is compared against\
+ \`services/\` and \`ServiceContracts.byService\`, or it is not stated inside the markers at all --\
+ because free prose here is the exact shape of *\"Neither Kafka Connect nor ksqlDB is built\"*,\
+ which stood in this repository for four milestones with every gate green."
+
   report_unclaimed_figures "$where" "$text"
 }
 
@@ -2587,16 +2781,379 @@ audit_service_states() {
     "this audit re-derived the state of $audited services and the capability-claims section\
  recorded $recorded \`service-state\` comparisons; a service the audit does not reach is one only\
  the claim site speaks for."
+  # The alias map against the services there are. A name with no entry is a name the prose scan
+  # cannot see, so a twelfth service under `services/` -- or a name this block lists that the map
+  # has never heard of -- fails here rather than escaping the sentence gate in silence.
+  claim service-alias-roster "" \
+    "$(printf '%s\n' "${!service_aliases[@]}" | sort -u | tr '\n' ' ' | sed 's/ $//')" \
+    "$( { printf '%s\n' ${!declared_service_state[@]}; service_directory_names; } \
+         | sort -u | tr '\n' ' ' | sed 's/ $//')" \
+    "\`service_aliases\` and the services this run knows about disagree. Every id under\
+ \`services/\` and every id a checked block lists has to have an entry -- an empty one where prose\
+ names the service only as its backticked id -- or a sentence about it is invisible to the prose\
+ scan."
+}
+
+# The last thing this section does, and it runs *after* the audit on purpose.
+# `verify_service_fact_independence` above proves `service_state_fact` reads its two arguments --
+# but it runs at the top of the section, before any document has been read, so `declared_service_
+# state` is empty and it proves that independence only in the state where there is nothing to
+# depend on. Measured on 2026-09-12 against the shipped script: inserting one line as the second
+# line of `service_state_fact` --
+#
+#   if [[ -n ${declared_service_state[$name]+x} ]]; then
+#     printf '%s' "${declared_service_state[$name]}"; return
+#   fi
+#
+# -- and then moving `connect` and `ksql` into **Not built:** in `README.md` left the run printing
+# `404 claims checked, all true`, exit 0, every section count unchanged. Both readings agreed
+# because the fact had become the claim. This one seeds the roster first and requires the fact to
+# contradict it.
+verify_service_fact_roster_independence() {
+  local root=$fixtures/services contracts=$fixtures/Contracts.scala answer
+  mkdir -p "$root/fixture-both" "$root/fixture-built"
+  printf '%s\n' 'ServiceId.unsafe(' '  "fixture-both"' ') -> Nil,' \
+                'ServiceId.unsafe("fixture-routed") -> Nil' > "$contracts"
+  declared_service_state[fixture-routed]='Built and routed'
+  answer=$(service_state_fact fixture-routed "$root" "$contracts")
+  scope capability-claims "service_state_fact against the roster it fills"
+  claim service-fact-roster-independence "" \
+    "$answer" "Not built but routed" \
+    "\`service_state_fact\` answered \`$answer\` for a fixture service the roster declares \`Built\
+ and routed\` and the fixture tree says is routed and absent. It is reading\
+ \`declared_service_state\`, which is the roster it is supposed to be the independent check on --\
+ after which the claim site and the audit are one statement and a false sentence is green."
+}
+
+# The second reading of the sentence gate, and it is here for the reason every second reading in
+# this file is here. `capability_prose_offences` is driven by a fixture, so a body rewritten to
+# answer nothing is red -- but the *claim site* is one line, and
+# `"${offences:-no capability sentence outside the lists}"` rewritten to the literal on both sides
+# is a comparison of a statement with itself that the fixture cannot see, because the fixture never
+# goes through the claim site. So this re-reads each block out of its own file and requires the
+# fact the ledger says that block was measured against to be the answer a fresh read gives. The
+# claim site and this are two statements; silencing the gate means editing both, which is the price
+# the rest of this file is written to.
+audit_capability_prose() {
+  local line a b c pairs file index text fresh
+  scope capability-claims "the capability-prose ledger"
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c pairs <<< "$line"
+    [[ $a == capability-claims && $c == capability-prose ]] || continue
+    file=${b%#*}
+    index=${b##*#}
+    text=$(regions capability-claims "$file" | sed -n "${index}p")
+    fresh=$(capability_prose_offences "$text")
+    claim capability-prose-audit "" \
+      "${pairs#*>}" "${fresh:-no capability sentence outside the lists}" \
+      "the ledger says the \`capability-prose\` claim for \`$b\` was measured against\
+ \`${pairs#*>}\`, and re-reading that block out of \`$file\` answers\
+ \`${fresh:-no capability sentence outside the lists}\`. The comparison inside the block and this\
+ reading are two statements; a claim site rewritten to compare its own answer with itself is\
+ caught here."
+  done
+}
+
+# Both directions over the sentence gate, in section 7's shape but inside the section that owns the
+# function: an honest block with all three lists must offend nothing, and the sentence that stood
+# in `README.md` for four milestones must name both services it lies about. Asserting *which*
+# identities come back rather than merely that something did is what catches the opposite
+# mutation -- a scan widened until it refuses every sentence fails the honest half in the same
+# claim.
+verify_capability_prose_refusal() {
+  local honest attacked none named
+  honest='KUI is **11 services** under `services/`, **9 of them routed** through the gateway. '
+  honest+='Every name below is compared against a directory on disk, so a sentence here that says '
+  honest+='a service is not built fails the build. **Built and routed:** `connect`, `ksql`. '
+  honest+='**Built, not routed:** `gateway`, which has no proxied contract by design. '
+  honest+='**Not built:** `acl` and `quota`.'
+  attacked="$honest Neither Kafka Connect nor ksqlDB is built: KUI has no Connect screen and no"
+  attacked+=" ksqlDB screen."
+  none=$(capability_prose_offences "$honest")
+  named=$(capability_prose_offences "$attacked")
+  scope capability-claims "capability_prose_offences"
+  claim capability-prose-refusal "" \
+    "${none:-nothing}" "nothing" \
+    "\`capability_prose_offences\` named [$none] in a block whose only claims about a service are\
+ inside its three labelled lists. A scan that refuses honest prose is a scan a writer deletes." \
+    "$named" "connect ksql" \
+    "\`capability_prose_offences\` answered [$named] for the sentence that kept item 4 open for\
+ four milestones -- *\"Neither Kafka Connect nor ksqlDB is built\"* -- appended to the end of a\
+ block whose lists are true. It has to name \`connect\` and \`ksql\`."
 }
 
 verify_service_fact_independence
+verify_capability_prose_refusal
 
 for file in README.md "$matrix"; do
   check_marked_file capability-claims "$file" check_capability_region
 done
 
+audit_capability_prose
 audit_service_states
-close_section capability-claims 35
+verify_service_fact_roster_independence
+close_section capability-claims 42
+
+# ---------------------------------------------------------------------------------------------
+# 6, CONTINUED. The fixtures over the sentence gate.
+# ---------------------------------------------------------------------------------------------
+#
+# These three belong to section 6 and say so: every claim below is scoped `guard-fixtures`, they are
+# counted by `close_section guard-fixtures` at the foot of this block, and their kinds are pinned in
+# `registry[guard-fixtures]`. They sit here for one mechanical reason -- `capability_prose_offences`,
+# `service_aliases` and `audit_service_states` are declared a hundred lines above, and bash defines a
+# function when the parser reaches it, so a fixture written where section 6 ends is `command not
+# found`. The alternative was a copy of each function next to its fixture, which is the one thing a
+# fixture may never be: `drive` exists so that the SHIPPED body is what fails.
+#
+# Each of the three closes a rule that was measured green under a one-line mutation of the shipped
+# script on 2026-09-12, by this wave's verification pass over W11-01. The mutation is quoted with the
+# fixture it now reddens.
+
+# The sentence scan's three remaining shapes, and the honest control that stops it being widened.
+#
+# `verify_capability_prose_refusal` above drives exactly one attacking sentence -- the `neither/nor`
+# one that kept item 4 open -- and it is a sentence appended AFTER the lists. Everything else the scan
+# does was asserted by nothing:
+#
+#   `[[ $stripped == *"**$label:**"* ]] || continue`  ->  `... && continue 2`      416 all true, exit 0
+#       (exempt the whole labelled sentence instead of striking only the marker and its backticked
+#       names). A false clause written onto the end of a `**Not built:**` line is then green, and that
+#       line is where an author who is editing the lists is already typing.
+#
+#   the qualified-noun block deleted                                               416 all true, exit 0
+#       `$id (service|screen|page|feature)` is the ONLY thing that can see the nine services with no
+#       alias -- topic, message, cluster, consumer, schema, metrics, alerts, gateway, identity, acl,
+#       quota. Without it `KUI has no alerts screen` is a sentence about a service that no comparison
+#       in this file reads.
+#
+#   `negation_tokens` -> `'no|not|neither|nor'`                                    416 all true, exit 0
+#       Half the vocabulary. `without` and `never` were exercised by nothing.
+#
+# The fourth pair is the one that catches the opposite mutation. A scan widened until it refuses
+# honest prose is a scan the next writer deletes, and `**Built, not routed:** \`gateway\`, which has
+# no proxied contract by design.` is the honest sentence closest to the line: a label containing
+# `not`, a backticked id, and a real negation in the clause after it.
+verify_capability_prose_forms() {
+  local clause qualified vocabulary honest
+  clause='**Not built:** `acl` and `quota`, and neither Kafka Connect nor ksqlDB is built here.'
+  qualified='KUI has no alerts screen, and the metrics service is a stub.'
+  vocabulary='KUI ships without a Kafka Connect screen and never built ksqlDB.'
+  honest='**Built, not routed:** `gateway`, which has no proxied contract by design.'
+  scope guard-fixtures "capability_prose_offences, the forms the block above does not drive"
+  claim capability-prose-forms "" \
+    "$(capability_prose_offences "$clause")" "connect ksql" \
+    "a false clause on the end of a \`**Not built:**\` list line answered\
+ [$(capability_prose_offences "$clause")]. Only the marker and its backticked names are struck out;\
+ prose written after them on the same line is a claim like any other." \
+    "$(capability_prose_offences "$qualified")" "alerts metrics" \
+    "a sentence naming two of the nine services that have no alias, in the one form where a bare id\
+ is unambiguously the service -- \`alerts screen\`, \`metrics service\` -- answered\
+ [$(capability_prose_offences "$qualified")]." \
+    "$(capability_prose_offences "$vocabulary")" "connect ksql" \
+    "a sentence negating with \`without\` and \`never\` answered\
+ [$(capability_prose_offences "$vocabulary")]. Half of \`negation_tokens\` was driven by nothing, and\
+ a vocabulary a synonym defeats is the failure mode this gate was warned about." \
+    "$(capability_prose_offences "$honest")" "" \
+    "the honest sentence closest to the line -- a label carrying \`not\`, a backticked id, and a real\
+ negation in the clause after it -- answered [$(capability_prose_offences "$honest")]. A scan that\
+ refuses this is a scan a writer deletes."
+}
+
+# The claim site's CLAIMED half, which is the half `audit_capability_prose` does not read.
+#
+# That audit compares `${pairs#*>}` -- the fact -- against a fresh read of the block. So the cheapest
+# attack of all survived it, measured, one line:
+#
+#   claim capability-prose "" "no capability sentence outside the lists" "${offences:-...}"
+#     ->  claim capability-prose "" "${offences:-...}" "${offences:-...}"        416 all true, exit 0
+#
+# Both sides become the offences, the fact half still agrees with a fresh read, and the gate is dead
+# for every block. The claimed side of this comparison is not a figure read out of a document -- it is
+# this file's own statement of the rule -- so the one thing that pins it is the literal, read back off
+# the ledger by something that is not the claim site. `matched` is empty at that call, which is why
+# `claim`'s own claimed-side refusal cannot see this.
+#
+# Two readings, because the ledger alone cannot see it on a tree whose documents are honest: with no
+# offence anywhere, `${offences:-$rule}` IS the literal and the mutated call site records exactly the
+# pair the shipped one does. Measured -- the ledger check below passed under the mutation. So the
+# claim site is also DRIVEN, over a fixture block that really does offend, and required to report.
+# That is the pair the mutation cannot survive, and the ledger check is what pins the literal itself
+# on every real block so that the rule cannot be restated into something weaker.
+audit_capability_prose_claim_site() {
+  local line a b c pairs sites=0 audits=0 wrong="" offending honest named quiet pattern
+  local rule="no capability sentence outside the lists"
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c pairs <<< "$line"
+    [[ $a == capability-claims ]] || continue
+    case $c in
+      capability-prose)
+        sites=$(( sites + 1 ))
+        [[ ${pairs%%>*} == "$rule" ]] || wrong+="$b "
+        ;;
+      capability-prose-audit) audits=$(( audits + 1 )) ;;
+    esac
+  done
+  # The claim site itself, over a block written for the occasion. No figures, no labelled lists and
+  # no package sentence, so the only comparison this block can reach is the sentence one.
+  offending='KUI has no alerts screen.'
+  honest='Every claim about a service is stated in one of the three lists.'
+  pattern='publishes a sentence outside the three labelled lists that names'
+  named=$(drive_says "$pattern" check_capability_region "a fixture block" "$offending")
+  quiet=$(drive_says "$pattern" check_capability_region "a fixture block" "$honest")
+
+  scope guard-fixtures "the capability-prose claim site"
+  claim capability-prose-claim-site "" \
+    "$named" "reported" \
+    "the \`capability-prose\` claim $named a block whose one sentence says a service is not built.\
+ Driving the claim site rather than \`capability_prose_offences\` is what catches the site rewritten\
+ to compare the measured offences with themselves -- on an honest tree both sides are then the\
+ literal below and the ledger reads exactly as it should." \
+    "$quiet" "not reported" \
+    "the \`capability-prose\` claim $quiet a block that states nothing about a service outside the\
+ lists. A gate that refuses honest prose is a gate the next writer deletes." \
+    "${wrong:-every capability-prose claim states the rule}" \
+    "every capability-prose claim states the rule" \
+    "the \`capability-prose\` claim for [$wrong] compares something other than \`$rule\` as its\
+ claimed side. That side is this file's statement of the rule and never a figure out of a document,\
+ so a claim site rewritten to put the measured offences on BOTH sides is a comparison of an answer\
+ with itself -- green over every block, for every sentence, in one line." \
+    "$sites" "$audits" \
+    "$sites blocks made a \`capability-prose\` claim and $audits were re-read by\
+ \`audit_capability_prose\`. The two are filled by different loops over different inputs, so a claim\
+ site that stops recording leaves this reading over nothing -- which is the state in which the check\
+ above is vacuously true."
+}
+
+# `service-alias-roster`, whose claimed side is the alias map and whose fact is the services this run
+# knows about. `matched` is empty there too, so the same one-line attack applies and nothing drove it:
+# replacing the claimed side with the fact expression left the run at exit 0. A twelfth DIRECTORY under
+# `services/` is still caught by `service-count` and `service-roster` -- measured, `mkdir
+# services/fixture-twelfth` is red with or without the mutation -- so what this pins is the direction
+# that claim uniquely guards: a checked block listing an id the alias map has never heard of, which is
+# a service the sentence scan is blind to. Seeded into the roster rather than onto the disk, because
+# the disk half already has two gates and this half has none.
+#
+# The roster is REBUILT from the alias map rather than taken as this run left it, and both directions
+# are driven through the same rebuild. Measured while this was being written: driving the shipped
+# `audit_service_states` over the live roster reports the disagreement in BOTH directions, because
+# `verify_service_fact_roster_independence` seeds `fixture-routed` into it four lines above and never
+# takes it out -- so the agreeing half would have been asserting the residue of another fixture. A
+# fixture builds its own input; that is the whole of section 6.
+capability_alias_roster_fixture() {
+  local extra=${1-} id
+  declared_service_state=()
+  for id in "${!service_aliases[@]}"; do
+    declared_service_state[$id]=$(service_state_fact "$id")
+  done
+  [[ -n $extra ]] && declared_service_state[$extra]='Not built'
+  audit_service_states
+}
+
+verify_service_alias_roster_refusal() {
+  local pattern seeded unseeded
+  pattern='and the services this run knows about disagree'
+  seeded=$(drive_says "$pattern" capability_alias_roster_fixture fixture-twelfth)
+  unseeded=$(drive_says "$pattern" capability_alias_roster_fixture)
+  scope guard-fixtures "audit_service_states"
+  claim alias-roster-refused "" \
+    "$seeded" "reported" \
+    "\`audit_service_states\` $seeded the alias-roster disagreement for a roster carrying an id\
+ \`service_aliases\` has never heard of. Every id a checked block lists has to have an entry -- an\
+ empty one where the prose names it only as its backticked id -- or a sentence about that service is\
+ invisible to \`capability_prose_offences\`." \
+    "$unseeded" "not reported" \
+    "\`audit_service_states\` $unseeded that disagreement over this run's own roster, which agrees\
+ with the map. A guard that fires on everything is a guard whose failing case says nothing."
+}
+
+verify_capability_prose_forms
+audit_capability_prose_claim_site
+verify_service_alias_roster_refusal
+close_section guard-fixtures 21
+
+# ---------------------------------------------------------------------------------------------
+# 9. The newcomer's overview, against the figures this script derives itself.
+# ---------------------------------------------------------------------------------------------
+#
+# `docs/overview/README.md` is the document definition-of-done item 4 names by function -- *"an
+# overview a newcomer can read"* -- and on 2026-09-12 `grep -c 'checked:'` over it answered **0**.
+# It published `390 claims over nine sections` about the run below, in the row of its own gate
+# table that describes this script, written by the wave that owned this script, while the run
+# printed 404. Four of that table's ten rows were stale against the tree they describe.
+#
+# This section takes the three figures the run produces without starting another process, because
+# those are the ones that have no excuse: the claim total is this file's own ledger, the merged
+# OpenAPI triple is read in section 2, and the `DECISIONS.md` row count in section 5. The five
+# figures that need another build -- the Scala case count, the browser case count, and the three
+# Mill task totals -- stay a dated snapshot outside the markers, and the page says so in a sentence
+# rather than implying that a date is a check.
+#
+# The claim total is the one figure here that includes itself, which is why the count this section
+# adds is a variable rather than a literal: the fact is the ledger as it stands when the block is
+# opened plus the claims this section is about to make, and `close_section` below pins the same
+# number from the other side. A comparison added here moves both, and the page's figure with them.
+gate_table_claims=5
+
+check_gate_table_region() {
+  local where=$1 text=$2 total_fact
+  total_fact=$(( ${#ledger[@]} + gate_table_claims ))
+
+  if [[ $text =~ \*\*([0-9]+)\ claims\*\* ]]; then
+    claim gate-claim-total "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$total_fact" \
+      "$where says this script compares ${BASH_REMATCH[1]} claims; this run compared\
+ $total_fact. The figure is the length of this script's own ledger, so a page that is wrong about\
+ it is wrong about the run that is reading it."
+  else
+    fail "$where: the block publishes no \`**N claims**\` figure, so the total this script" \
+         "compares is unread by the page that describes it -- which is how \`390\` survived the" \
+         "wave whose subject it was."
+  fi
+
+  if [[ $text =~ \*\*([0-9]+)\ sections\*\* ]]; then
+    claim gate-section-count "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "${#registry[@]}" \
+      "$where says this script is ${BASH_REMATCH[1]} sections; its registry pins\
+ ${#registry[@]}."
+  else
+    fail "$where: the block publishes no \`**N sections**\` figure."
+  fi
+
+  # Held in a variable so the expression stays inside a hundred columns, and written as one match
+  # rather than three because the three figures are one sentence in the page and a claim that
+  # struck out only part of it would leave the rest to the residue.
+  local openapi_triple='\*\*([0-9]+)\ paths\*\*,\ \*\*([0-9]+)\ operations\*\*\ and'
+  openapi_triple+='\ \*\*([0-9]+)\ component\ schemas\*\*'
+  if [[ $text =~ $openapi_triple ]]; then
+    claim gate-openapi-document "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$doc_paths" \
+      "$where says the merged document is ${BASH_REMATCH[1]} paths; \`docs/api/openapi.json\` has\
+ $doc_paths." \
+      "${BASH_REMATCH[2]}" "$doc_ops" \
+      "$where says the merged document is ${BASH_REMATCH[2]} operations; it has $doc_ops." \
+      "${BASH_REMATCH[3]}" "$doc_schemas" \
+      "$where says the merged document is ${BASH_REMATCH[3]} component schemas; it has\
+ $doc_schemas."
+  else
+    fail "$where: the block publishes no \`**N paths**, **N operations** and **N component" \
+         "schemas**\` figure for the merged document."
+  fi
+
+  if [[ $text =~ \*\*([0-9]+)\ rows\*\* ]]; then
+    claim gate-decisions-rows "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "${#adr_row_link[@]}" \
+      "$where says \`$decisions\` carries ${BASH_REMATCH[1]} rows; section 5 read\
+ ${#adr_row_link[@]} of them."
+  else
+    fail "$where: the block publishes no \`**N rows**\` figure for \`$decisions\`."
+  fi
+
+  report_unclaimed_figures "$where" "$text"
+}
+
+check_marked_file gate-table "$overview" check_gate_table_region
+close_section gate-table "$gate_table_claims"
 
 # ---------------------------------------------------------------------------------------------
 
@@ -2634,6 +3191,7 @@ printf '  self-check: %d, rows: %d, merged-document: %d, milestones: %d, adr-ind
 printf ' openapi-totals: %d, guard-fixtures: %d, capability-claims: %d,' \
   "${section_counts[openapi-totals]}" "${section_counts[guard-fixtures]}" \
   "${section_counts[capability-claims]}"
+printf ' gate-table: %d,' "${section_counts[gate-table]}"
 printf ' dependencies: %d over %d named manifests.\n' \
   "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \

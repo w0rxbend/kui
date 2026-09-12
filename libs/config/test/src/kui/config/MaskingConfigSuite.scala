@@ -417,6 +417,172 @@ final class MaskingConfigSuite extends KuiSuite {
 
   // ------------------------------------------------------------------ what a diagnostic may print
 
+  // ------------------------------------------------------------------ the operator page, read at last
+
+  test("the operator's masking page names the kinds this loader accepts, and no others") {
+    // W11-05/3, and the reason it is here rather than in a document linter. `docs/operations/masking.md`
+    // was read by NOTHING: deleting the whole file left `./scripts/run-tests.sh` green at 4,350 cases,
+    // while `MaskingEngine.scala:13` and `MaskingConfig.scala:231` both assert in prose that it exists.
+    // W10-A2 closed the same hole for `observability.md` by comparing its metric table against
+    // `MetricNames.all`; this is the same move over the half of this page that is checkable without
+    // inventing a language.
+    //
+    // Resolving the file is itself half the gate: a page that is deleted or renamed fails here, which is
+    // what makes those two production sentences true rather than merely plausible.
+    val kinds = kindTableRows
+
+    assertEquals(
+      kinds,
+      MaskingConfig.Kind.All.map(_.wire),
+      "docs/operations/masking.md's kind table and MaskingConfig.Kind disagree about what a rule may do"
+    )
+  }
+
+  test("the keep bound the operator page publishes is the bound this loader enforces") {
+    // Four figures on that page, all of them MaxKeep, none of them read by anything until now. The one
+    // that matters is the sum: wave 9 measured `keep: {prefix: 20, suffix: 20}` loading and returning a
+    // sixteen-digit card number in full, and the page carries the migration note for it. A page that
+    // published 40 where the loader enforces 20 would send an operator to write a rule that cannot start.
+    val published = keepBoundFigures
+
+    assertEquals(
+      published.size,
+      4,
+      s"masking.md's four keep-bound figures read as ${published.size}: $published"
+    )
+    published.foreach(figure => assertEquals(figure, MaskingConfig.MaxKeep, clue = published.toString))
+  }
+
+  test("every refusal the operator page lists is a refusal this loader actually makes") {
+    // The sharper direction, and the one a document linter cannot do: each row of "When the file is wrong"
+    // is driven as YAML here and required to fail the load. A refusal removed from the loader turns its
+    // fixture green and this case red; a row added to the page with no fixture behind it fails the count.
+    //
+    // Written as fixtures rather than by parsing the rows into YAML, because the row is English and the
+    // mapping from English to a file is exactly the judgement a reviewer is supposed to make. What is
+    // mechanical is the count, and the count is what caught the drift everywhere else in this repository.
+    val documented = refusalTableRows
+
+    assertEquals(
+      documented.size,
+      DocumentedRefusals.size,
+      s"masking.md lists ${documented.size} refusals and this suite drives ${DocumentedRefusals.size}:\n" +
+        documented.mkString("\n")
+    )
+
+    DocumentedRefusals.foreach { (what, yaml) =>
+      val reported = load(base(yaml))
+      assert(
+        reported.isLeft,
+        s"masking.md says KUI refuses '$what' and this file loaded:\n${base(yaml)}"
+      )
+    }
+  }
+
+  /** One YAML fragment per row of `masking.md`'s "When the file is wrong" table, in the order printed.
+    *
+    * The name beside each is the row it stands for, so a reader comparing the two can do it by eye; the
+    * assertion above compares only how many there are, because the rest is judgement.
+    */
+  private val DocumentedRefusals: List[(String, String)] = List(
+    "a pattern that will not compile" ->
+      """      masking:
+        |        - kind: remove
+        |          fields: [secret]
+        |          topicValuesPattern: "payments\\.((" """.stripMargin,
+    "fields beside fieldsNamePattern" ->
+      """      masking:
+        |        - kind: remove
+        |          fields: [secret]
+        |          fieldsNamePattern: ".*[Ss]ecret.*"""".stripMargin,
+    "kind: replace with no replacement" ->
+      """      masking:
+        |        - kind: replace
+        |          fields: [email]""".stripMargin,
+    "a key this kind does not read" ->
+      """      masking:
+        |        - kind: mask
+        |          fields: [cardNumber]
+        |          replacement: "<redacted>"""".stripMargin,
+    "a keep end above the maximum" ->
+      s"""      masking:
+         |        - kind: mask
+         |          fields: [cardNumber]
+         |          keep:
+         |            suffix: ${MaskingConfig.MaxKeep + 1}""".stripMargin,
+    "a keep whose two ends together exceed the maximum" ->
+      s"""      masking:
+         |        - kind: mask
+         |          fields: [cardNumber]
+         |          keep:
+         |            prefix: ${MaskingConfig.MaxKeep}
+         |            suffix: ${MaskingConfig.MaxKeep}""".stripMargin
+  )
+
+  /** The first column of `masking.md`'s "The three kinds" table, body rows only.
+    *
+    * Sliced to that section and taken after the `| --- |` separator, so the column header (`kind`) is not
+    * read as a kind and neither is any other table on the page — "Where masking happens" puts prose in its
+    * first cell, and "When the file is wrong" puts a phrase there.
+    */
+  private def kindTableRows: List[String] =
+    tableBody("## The three kinds").flatMap(row =>
+      "^\\| `([a-z]+)` \\|".r.findFirstMatchIn(row).map(_.group(1))
+    )
+
+  /** The body rows of `masking.md`'s refusal table. */
+  private def refusalTableRows: List[String] = tableBody("## When the file is wrong")
+
+  /** The rows of the first table under `heading`, after its `| --- |` separator and before the blank line or
+    * next heading that ends it.
+    */
+  private def tableBody(heading: String): List[String] = {
+    val page = maskingPage
+    val start = page.indexOf(heading)
+    assert(start >= 0, s"docs/operations/masking.md has no section '$heading'")
+
+    val section = page.substring(start).linesIterator.drop(1).takeWhile(!_.startsWith("## ")).toList
+    val rows = section.dropWhile(!_.startsWith("| ---")).drop(1).takeWhile(_.startsWith("|"))
+
+    assert(rows.nonEmpty, s"'$heading' in masking.md holds no table rows; the reader matched nothing")
+    rows
+  }
+
+  /** Every figure `masking.md` publishes for the `keep` bound, in the order printed.
+    *
+    * Read off the whitespace-normalised page because two of the four are split across a line wrap, and a
+    * reader that only saw the unwrapped ones would pass while the wrapped ones drifted.
+    */
+  private def keepBoundFigures: List[Int] = {
+    val flat = maskingPage.replaceAll("\\s+", " ")
+
+    List(
+      "each end may be at most \\*{0,2}(\\d+)".r,
+      "the two ends together may be at most \\*{0,2}(\\d+)".r,
+      "a `keep` end above \\*{0,2}(\\d+)".r,
+      "two ends together exceed \\*{0,2}(\\d+)".r
+    ).flatMap(pattern => pattern.findFirstMatchIn(flat).map(_.group(1).toInt))
+  }
+
+  /** `docs/operations/masking.md`, which `MaskingEngine` and `MaskingConfig` both name in prose. */
+  private def maskingPage: String = {
+    val start = java.nio.file.Path.of("").toAbsolutePath
+    val root = Iterator
+      .iterate(Option(start))(_.flatMap(path => Option(path.getParent)))
+      .takeWhile(_.isDefined)
+      .flatten
+      .find(candidate => java.nio.file.Files.exists(candidate.resolve("build.mill")))
+      .getOrElse(fail(s"no build.mill above $start, so the repository root could not be found"))
+
+    val file = root.resolve("docs/operations/masking.md")
+    if java.nio.file.Files.isRegularFile(file) then java.nio.file.Files.readString(file)
+    else
+      fail(
+        "docs/operations/masking.md is missing, and MaskingEngine.scala and MaskingConfig.scala both " +
+          "tell an operator to read it"
+      )
+  }
+
   test("a cluster's diagnostic prints how many rules it has and not one of their field names") {
     val configured = cluster(
       base("""      masking:

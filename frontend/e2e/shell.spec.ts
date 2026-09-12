@@ -4,9 +4,8 @@
  *
  * This is the suite's smoke test. If it fails, nothing else in the run means anything.
  */
-import type { Page } from "@playwright/test";
-
 import { CLUSTER, test, expect, type KuiApi } from "./fixtures";
+import { eachTileSaysSomething } from "./statTiles";
 
 test.describe("the shell", () => {
   /**
@@ -150,92 +149,6 @@ test.describe("the shell", () => {
     // why the name is the assertion and the badge is the sanity check.
     await expect(bell).toHaveAttribute("aria-label", new RegExp(`Notifications, ${open} open`));
     await expect(bell.locator(".kui-bell__badge")).toHaveText(open > 9 ? "9+" : String(open));
-  });
-
-  /**
-   * The other half of M8, and the half no gate in this repository has ever covered: the **stream**.
-   *
-   * `services/alerts` publishes a change frame when an event is acknowledged, the gateway relays it
-   * as ADR-035 SSE, and the kernel store takes the count off the frame and re-reads the feed. Every
-   * one of those three has unit cases. What none of them can establish is that they are joined:
-   * `ContractRouting.derive` decodes and re-encodes JSON and therefore cannot carry a stream at
-   * all, so the relay is hand-written and separate — and a contract entry with a green suite looks
-   * exactly like a routed stream, which is how wave 6 shipped one that answered 404 through the
-   * gateway with every suite passing.
-   *
-   * So the assertion is a browser watching a number change **with no navigation**: the page is
-   * stamped before the acknowledgement and the stamp is checked afterwards, because a bell that
-   * came back right after a reload proves only that the *feed* is readable, which the case above
-   * already covers.
-   *
-   * Acknowledging closes the event (`InMemoryAlertStore.acknowledge` resolves it as
-   * `Acknowledged`), so the open count falls by one. It is done over the API rather than through
-   * `@kui/feature-alerts`' own control, so that a failure here is a failure of the stream and not
-   * of a button in another package.
-   *
-   * **Skipped, with the reason said out loud, on a deployment with nothing open.** The seeded event
-   * comes from setting `diskUsedWarningPercent: 1` in the quickstart configuration; with the
-   * shipped threshold the feed is legitimately empty and there is nothing to acknowledge. A silent
-   * skip is what let three of `alerts.spec.ts`'s four cases pass while asserting nothing.
-   */
-  test("acknowledging an open event moves the bell, with no reload", async ({ page, api }) => {
-    const body = (await api.get(`/api/v1/clusters/${CLUSTER}/alerts/events`)) as {
-      events?: {
-        status?: string;
-        data?: {
-          openCount?: number | null;
-          items?: readonly { id?: string; resolution?: unknown }[];
-        };
-      };
-    };
-    const section = body.events;
-    const open = section?.data?.openCount;
-    const unresolved = (section?.data?.items ?? []).filter(
-      (row) =>
-        typeof row.id === "string" && (row.resolution === null || row.resolution === undefined),
-    );
-
-    test.skip(
-      (section?.status !== "ok" && section?.status !== "stale") ||
-        typeof open !== "number" ||
-        open < 1 ||
-        unresolved.length === 0,
-      "this deployment's alerts feed holds no open event, so there is nothing to acknowledge; " +
-        "seed one with diskUsedWarningPercent: 1 in the quickstart configuration",
-    );
-
-    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
-    const bell = page.getByTestId("notifications");
-    await expect(bell).toHaveAttribute("aria-label", new RegExp(`Notifications, ${open} open`));
-
-    /* The stamp. A reload replaces the window, so this value not surviving is exactly the thing
-       that would make the assertion below meaningless. */
-    await page.evaluate(() => {
-      (window as unknown as Record<string, unknown>)["__kuiStreamWitness"] = "before";
-    });
-
-    const eventId = unresolved[0]!.id!;
-    await api.post(
-      `/api/v1/clusters/${CLUSTER}/alerts/events/${encodeURIComponent(eventId)}/acknowledgement`,
-    );
-
-    const after = (open as number) - 1;
-    /* `toHaveAttribute` retries, which is what lets this wait for the frame rather than sleep for
-       it. If the relay is not routed the bell simply never moves and this fails on its timeout —
-       the symptom the 404 stream had, seen from the browser. */
-    await expect(bell).toHaveAttribute(
-      "aria-label",
-      after === 0
-        ? "Notifications, no open alerts"
-        : new RegExp(`Notifications, ${after} open`),
-    );
-
-    expect(
-      await page.evaluate(
-        () => (window as unknown as Record<string, unknown>)["__kuiStreamWitness"],
-      ),
-      "the page reloaded, so this proves the feed is readable and says nothing about the stream",
-    ).toBe("before");
   });
 
   /**
@@ -454,51 +367,183 @@ test.describe("the shell", () => {
     );
     await expect(page.getByTestId("nav-drawer")).toContainText(other.name);
   });
+
+  /**
+   * The other half of M8, and the half no gate in this repository has ever covered: the **stream**.
+   *
+   * `services/alerts` publishes a change frame when an event is acknowledged, the gateway relays it
+   * as ADR-035 SSE, and the kernel store takes the count off the frame and re-reads the feed. Every
+   * one of those three has unit cases. What none of them can establish is that they are joined:
+   * `ContractRouting.derive` decodes and re-encodes JSON and therefore cannot carry a stream at
+   * all, so the relay is hand-written and separate — and a contract entry with a green suite looks
+   * exactly like a routed stream, which is how wave 6 shipped one that answered 404 through the
+   * gateway with every suite passing.
+   *
+   * So the assertion is a browser watching a number change **with no navigation**: the page is
+   * stamped before the acknowledgement and the stamp is checked afterwards, because a bell that
+   * came back right after a reload proves only that the *feed* is readable, which the case above
+   * already covers.
+   *
+   * Acknowledging closes the event (`InMemoryAlertStore.acknowledge` resolves it as
+   * `Acknowledged`), so the open count falls by one. It is done over the API rather than through
+   * `@kui/feature-alerts`' own control, so that a failure here is a failure of the stream and not
+   * of a button in another package.
+   *
+   * ## It no longer skips on the deployment this suite is meant to be run against
+   *
+   * It skipped for three waves — wave 8, wave 9 and wave 10 — because the quickstart shipped
+   * `diskUsedWarningPercent: 80`, no fact about a laptop running one broker crossed it, and the
+   * feed was legitimately empty. Nothing in this product writes an event, so there was nothing to
+   * acknowledge and `M06`'s acknowledgement path was driven by no browser at all.
+   *
+   * Wave 11 decided it in the open, in the file: `deployment/quickstart/kui-quickstart.yaml` now
+   * ships `diskUsedWarningPercent: 1`, with the reason and the cost written beside the key. The
+   * threshold moves and the fact does not — the event that opens names the real used share of the
+   * real filesystem — so this is a seeded *deployment* rather than a seeded row, which is the only
+   * shape `W6-01` permits. The alternative was for this case to seed and revert, and it cannot: the
+   * threshold is configuration, a change to it needs the gateway restarted, and a browser case that
+   * restarts the shared stack takes every other case in the run down with it.
+   *
+   * **The skip stays**, because it is now a guard rather than an excuse. This suite is also run
+   * against deployments this repository does not ship — one whose broker reports no capacity for
+   * its log directory has no percentage at all (`KafkaClusterFacts.factOf`), and there is again
+   * nothing to acknowledge. The reason names the key, so a reader of a skipped run knows which of
+   * the two they are looking at. A silent skip is what let three of `alerts.spec.ts`'s four cases
+   * pass while asserting nothing.
+   *
+   * ## Why it is the last case in this file
+   *
+   * Acknowledging closes the event, and the next evaluation pass — 60 seconds later — opens a fresh
+   * one, because `AlertRules.evaluate` counts only events that are still open. That is what makes
+   * this case re-runnable against a long-lived stack. It also means the open count moves twice
+   * without anybody touching the screen, so any case that reads the feed and then asserts a figure
+   * off the page has a window in which the two disagree. Every such case in this suite —
+   * `alerts.spec.ts` in full, the bell's count above, and the panel above — runs before this one,
+   * and nothing after it reads alerts. Ordering is the fix rather than a tolerance, because a
+   * tolerance is an assertion that has stopped being one.
+   */
+  test("acknowledging an open event moves the bell, with no reload", async ({ page, api }) => {
+    /*
+     * IT WAITS FOR THE NEXT EVALUATION PASS RATHER THAN SKIPPING PAST IT.
+     *
+     * Filed as W11-02/F-3, and it needs no mutation to reproduce: run this case twice inside the
+     * quickstart's 60s `evaluationInterval` and run 1 is `1 passed`, run 2 is `1 skipped`, both
+     * exit 0. The suite's figure moves from 108/2 to 107/3 and nothing anywhere notices — the skip
+     * is a summary line nobody diffs, and it is the same silence that let three of
+     * `alerts.spec.ts`'s four cases pass while asserting nothing.
+     *
+     * The cause is this case's own success: acknowledging closes the event, and
+     * `AlertRules.evaluate` counts only events that are still open, so the feed is empty until
+     * the next pass reopens one. That is exactly the interval a person re-running the suite is
+     * inside. So the read below polls for it instead of taking the emptiness as the deployment's
+     * answer, and the skip below is left for the deployment that genuinely never opens one.
+     *
+     * Sized off the shipped configuration rather than guessed: `evaluationInterval` is 60s, so a
+     * reopen is at most one interval away and 90 seconds is one and a half of them.
+     * `test.setTimeout` is raised only when there is something to wait for, so a cold suite --
+     * the ordinary case, and the one with an event already open -- is not slowed by a line of it.
+     */
+    const REOPEN_TIMEOUT_MS = 90_000;
+    const REOPEN_POLL_MS = 5_000;
+
+    interface EventsFeed {
+      readonly events?: {
+        readonly status?: string;
+        readonly data?: {
+          readonly openCount?: number | null;
+          readonly items?: readonly { id?: string; resolution?: unknown }[];
+        };
+      };
+    }
+
+    interface FeedReading {
+      readonly status: string | undefined;
+      readonly open: number | undefined;
+      readonly unresolved: readonly { id?: string; resolution?: unknown }[];
+    }
+
+    const read = async (): Promise<FeedReading> => {
+      const body = (await api.get(`/api/v1/clusters/${CLUSTER}/alerts/events`)) as EventsFeed;
+      const section = body.events;
+      const count = section?.data?.openCount;
+      return {
+        status: section?.status,
+        open: typeof count === "number" ? count : undefined,
+        unresolved: (section?.data?.items ?? []).filter(
+          (row) =>
+            typeof row.id === "string" && (row.resolution === null || row.resolution === undefined),
+        ),
+      };
+    };
+
+    const acknowledgeable = (reading: FeedReading): boolean =>
+      (reading.status === "ok" || reading.status === "stale") &&
+      reading.open !== undefined &&
+      reading.open >= 1 &&
+      reading.unresolved.length > 0;
+
+    let reading = await read();
+    if (!acknowledgeable(reading)) {
+      test.setTimeout(REOPEN_TIMEOUT_MS + 60_000);
+      const deadline = Date.now() + REOPEN_TIMEOUT_MS;
+      console.log(
+        "[shell.spec] the alerts feed holds no open event; waiting up to " +
+          `${REOPEN_TIMEOUT_MS / 1000}s for the next evaluation pass to reopen one. ` +
+          "This is the state a re-run inside the 60s evaluationInterval leaves behind.",
+      );
+      while (Date.now() < deadline && !acknowledgeable(reading)) {
+        await new Promise((wake) => setTimeout(wake, REOPEN_POLL_MS));
+        reading = await read();
+      }
+    }
+
+    const open = reading.open;
+    const unresolved = reading.unresolved;
+
+    test.skip(
+      !acknowledgeable(reading),
+      "this deployment's alerts feed held no open event for " +
+        `${REOPEN_TIMEOUT_MS / 1000}s, which is longer than the quickstart's evaluationInterval, ` +
+        "so there is nothing to acknowledge and nothing is about to appear. The quickstart ships " +
+        "alerts.thresholds.diskUsedWarningPercent: 1 so that one is open on it; a deployment " +
+        "whose broker reports no capacity for its log directory has no percentage to compare " +
+        "and reaches this skip honestly",
+    );
+
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    const bell = page.getByTestId("notifications");
+    await expect(bell).toHaveAttribute("aria-label", new RegExp(`Notifications, ${open} open`));
+
+    /* The stamp. A reload replaces the window, so this value not surviving is exactly the thing
+       that would make the assertion below meaningless. */
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>)["__kuiStreamWitness"] = "before";
+    });
+
+    const eventId = unresolved[0]!.id!;
+    await api.post(
+      `/api/v1/clusters/${CLUSTER}/alerts/events/${encodeURIComponent(eventId)}/acknowledgement`,
+    );
+
+    const after = (open as number) - 1;
+    /* `toHaveAttribute` retries, which is what lets this wait for the frame rather than sleep for
+       it. If the relay is not routed the bell simply never moves and this fails on its timeout —
+       the symptom the 404 stream had, seen from the browser. */
+    await expect(bell).toHaveAttribute(
+      "aria-label",
+      after === 0
+        ? "Notifications, no open alerts"
+        : new RegExp(`Notifications, ${after} open`),
+    );
+
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>)["__kuiStreamWitness"],
+      ),
+      "the page reloaded, so this proves the feed is readable and says nothing about the stream",
+    ).toBe("before");
+  });
 });
-
-/**
- * The six stat tiles of the cluster dashboard, by the testid each one has carried since `M01`.
- *
- * Written out rather than counted off `.kui-stat`, because the defect this guards against is a row
- * that draws **fewer** tiles than it should: a locator that collects whatever is on the page and
- * then asserts about each of them passes over an empty row, which is the shape of vacuous coverage
- * this wave exists to remove.
- */
-const STAT_TILES = [
-  "stat-brokers",
-  "stat-topics",
-  "stat-in-sync",
-  "stat-production",
-  "stat-consume",
-  "stat-lag",
-] as const;
-
-/**
- * Every stat tile carries either a figure or a sentence — never its own label and nothing else.
- *
- * The label is subtracted rather than matched around, because the assertion has to hold for a
- * measured `3`, for an em dash with a title, and for a paragraph explaining that nobody asked. What
- * it must not hold for is the state that shipped, where the only text in the tile was the word
- * printed above the space the figure was supposed to occupy.
- *
- * `expect.poll` rather than a single read: a tile on a cold page is legitimately a skeleton for a
- * moment, and the claim being made is that it stops being one — not that it never was.
- */
-async function eachTileSaysSomething(page: Page): Promise<void> {
-  for (const testId of STAT_TILES) {
-    const tile = page.getByTestId(testId);
-    await expect(tile, `${testId} is not drawn at all`).toBeVisible();
-    await expect
-      .poll(
-        async () => {
-          const label = await tile.locator(".kui-stat__label").innerText();
-          return (await tile.innerText()).replace(label, "").trim();
-        },
-        { message: `${testId} drew its label and nothing else — no figure and no sentence` },
-      )
-      .not.toBe("");
-  }
-}
 
 /**
  * A cluster's own name, made safe to put inside a `RegExp`.

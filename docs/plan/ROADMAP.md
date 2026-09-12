@@ -660,7 +660,27 @@ recorded — **unmet: no connector has ever been deployed on the quickstart's wo
 that would assert it skip. Wave 8 deploys one, rewrites the spec against the golden the service already
 ships, and runs both against images built from the tree.
 
-## M10 — Close the book  ·  no new service  ·  **open on one definition-of-done item after wave 10**
+## M10 — Close the book  ·  no new service  ·  **open on one definition-of-done item after wave 11**
+
+> **Status after wave 11, measured at its close on 2026-09-12, one command at a time, and not read
+> off a report.** **Four of the five definition-of-done items are met**: the browser suite is
+> **108 passed, 2 skipped, 0 failed** and **23 of 23** captures in `screens/` have a case that ran
+> green in that run; `/ui/` is honest and its inert primary button is `aria-disabled` in the shipped
+> image; eleven services with nine routed are compared against disk by the gate itself;
+> `run-tests.sh` is **4,389 cases over 81 modules** with `pnpm test` at 1,938, `pnpm typecheck`
+> covering `frontend/e2e/` for the first time and the a11y sweep clean over 790 stories × 2 themes;
+> and `quickstart.sh` and `smoke.sh` both pass over the two deployment shapes. **Item 4 is open, and
+> for the first time it is not open for the reason the wave was written against.** Wave 11's own
+> acceptance — the sentence *"Neither Kafka Connect nor ksqlDB is built…"* appended inside
+> `README.md`'s checked block — **now turns the script red**, reproduced at this close. What is open
+> is a class nobody had named: **nothing in this repository compares a quotation of one file against
+> that file**, and `README.md:159` and `docs/FEATURE_MATRIX.md:379` both quote a sentence
+> `docs/operations/masking.md` no longer contains, made false by wave 11's own repair. Seven more are
+> named in `docs/plan/WAVE-12.md` with the command that finds each, including three positive-voice
+> false capability sentences still green inside the checked block. `docs/plan/` is therefore not
+> reduced. Everything below this box is wave 8's record of the same section and is kept because its
+> measurements are still the ones a reader needs; the wave-9 and wave-10 boxes it replaces are in the
+> git history.
 
 > **Status after wave 10, measured at its close on 2026-09-12, one command at a time, and not read
 > off a report.** **Four of the five definition-of-done items are met**: the browser suite covers
@@ -673,7 +693,8 @@ ships, and runs both against images built from the tree.
 > against a fact does not read sentences — the original defect sentence, *"Neither Kafka Connect nor
 > ksqlDB is built"*, was appended inside the new checked region at this close and the script printed
 > `404 claims checked, all true` and exited 0. Five more false sentences are named in
-> `docs/plan/WAVE-11.md` with the command that finds each. `docs/plan/` is therefore not reduced.
+> `docs/plan/WAVE-11.md` — deleted at the wave-11 close and readable in the git history — with the
+> command that finds each. `docs/plan/` is therefore not reduced.
 > Everything below this box is wave 8's record of the same section and is kept because its
 > measurements are still the ones a reader needs; the wave-9 box it replaces is in the git history.
 
@@ -716,7 +737,7 @@ directions at **56 rows over 56 ADRs**. The a11y sweep is clean over **790 stori
    neither was `pnpm -C frontend e2e`; both were run here instead, and one of the two was red. The
    distributed eleven-container stack is the one deployment shape nobody in wave 8 drove.
 4. **`docs/plan/` is not reduced to `README.md` and this file.** It holds the current wave file
-   (`WAVE-09.md` when this was written; `WAVE-11.md` now) and
+   (`WAVE-09.md` when this was written; `WAVE-12.md` now) and
    `docs/plan/verification/`, and the wave that still needs a plan file cannot be the wave that
    deletes it. This is M10's own last bullet and it is now the last one standing.
 
@@ -2028,3 +2049,208 @@ read prose. A repository that fails the build when a figure disagrees with a tab
 left is six documents, four gates that cannot fail, one inert button and one file with no test. Its
 acceptance is not a prediction this time: the sentence reproduced above is in `WAVE-11.md`, and the
 wave closes when that sentence turns the script red.
+
+---
+
+## What wave 11 actually did
+
+Wave 11 was **five building packets and two adversaries**, written as a repair wave against the one
+definition-of-done item wave 10 left open. It ran to the end without an interruption and **all seven
+packets landed.** **Four of the five definition-of-done items are met and re-judged here one command
+at a time. Item 4 is not — and for the first time in three waves, it is not open for the reason the
+wave was written against.**
+
+**Judge the tree, not the reports. All seven packets landed.** Re-checked file by file at this close
+against `git status --porcelain`, which is 60 entries — 47 modified, 13 untracked — over `fcd184fe`:
+
+| Packet | What is on disk | Filed its own verification file? |
+| --- | --- | --- |
+| W11-01 | the tenth checked section (`gate-table`), the `capability-prose` claim and its alias map, `service_fact_roster_independence`; **404 claims over 9 sections → 419 over 10**; `README.md`, `docs/overview/README.md`, `FEATURE_MATRIX.md`, `TECH_DEBT.md` repaired | yes |
+| W11-02 | the third browser skip killed (`diskUsedWarningPercent: 1`), `pnpm typecheck` widened to `frontend/e2e/**`, the search-ready arm, `statTiles.ts`; **106/3 → 108/2** | yes |
+| W11-03 | `ForkedDocumentRun` extracted into `build-tests` with a suite, the two `runMain` call sites gone, `smoke.sh`'s SSE `phase` assertion, the Dockerfile roster step, `kui-quickstart-auth.yaml`'s masking block | yes |
+| W11-04 | the inert `Create topic` button repaired to `aria-disabled`, `formatBytes` de-duplicated into the kernel with a PB rung, the address sweep, `StatusPill` | yes |
+| W11-05 | `docs/operations/masking.md` scoped to `mask`, `MaskingRule`'s header, `maskingFor` extracted as a seam, `AggregationSection` added to `MetricNames.all` | yes |
+| W11-A1 | 73 mutations over `identity`, `gateway/auth`, `libs/filter`, `libs/kafka-auth`; 18 ungated, 16 closed, 21 new cases across 5 files, 2 new suites | yes |
+| W11-A2 | 16 filed rows closed, 11 production files mutated and restored from bytes, 12 files written | yes |
+
+**House rule 18 is repaired and the repair held. Seven packets, seven verification files, every one
+written by the packet it is about.** Wave 9 lost one to the partition argument and wave 10 lost
+three. Amending the rule so that the file belongs to the packet and to no directory owner cost one
+sentence and fixed it completely.
+
+### The definition of done, judged at this close
+
+Every figure printed by the command beside it, on 2026-09-12, against the quickstart brought up from
+this tree (`kui-quickstart-kui` `sha256:765834d8101c`, `kui-quickstart-frontend`
+`sha256:39f236d7d04e`, both built from it). **Nothing here is read off a packet report.**
+
+1. **Every screen renders real data — MET.** `pnpm -C frontend e2e` is **108 passed, 2 skipped, 0
+   failed**, and `ls screens/` is 23 captures of which **23 have a case that ran green in that run**.
+   The two skips are the right two — each describes a *different deployment* (no alerts service, no
+   ksqlDB) — and the third skip, which stood for three waves, is dead and stays dead across a
+   back-to-back re-run. `/ui/` was probed in a browser on the shipped image: six tiles each carrying
+   a sentence, `Create topic` **`aria-disabled`** and swallowing its own press, 0 page errors. On the
+   cluster dashboard: `BROKERS ONLINE 1`, `TOPICS 12 · 169 partitions`, `PRODUCTION 1.2 kB/s`,
+   `CONSUME 105.6 B/s`, and **0** figures with three or more decimals across 2,311 `<td>` cells over
+   two tabs.
+2. **Every backend capability exists — MET.** `ls services/` → 11, nine routed, compared against disk
+   and against `ServiceContracts.byService` by the gate itself. `__.openApiCheck` 2544/2544;
+   `checkArchitecture` 195 modules, 10 rules.
+3. **Tested — MET.** `./scripts/run-tests.sh` **81 modules, 4,389 cases** (wave 10: 4,350);
+   `pnpm test` **83 files, 1,938** (1,933); `pnpm typecheck` exit 0 **including `frontend/e2e/` for
+   the first time**; a11y **790 stories × 2 themes, no violations**; `pnpm e2e` above.
+   `__.compile` 8251/8251, `__.checkFormat` 495/495, `__.fix --check` 10672/10672,
+   `lint:boundaries` 425 files in 11 packages.
+4. **Documented — NOT MET.** See below.
+5. **One command — MET.** `quickstart.sh` exits 0 with eight healthy containers and *"KUI is running:
+   http://localhost:8090/ui/"*; `./deployment/compose/smoke.sh` **PASSED** over the eleven-container
+   distributed stack, fault isolation and recovery included.
+
+### The wave's own prediction was tested, and it held — which has never happened before
+
+`WAVE-11.md` wrote its acceptance as a sentence rather than an intention: *"the wave closes when that
+sentence turns the script red."* Reproduced at this close by the closer, on the shipped script,
+`README.md` restored byte-identical (`md5sum` `ffd2e65225ffe97d781f785319919980`):
+
+```
+$ # appended inside README.md's <!-- checked: capability-claims --> block:
+$ #   Neither Kafka Connect nor ksqlDB is built: KUI has no Connect screen and no ksqlDB screen.
+$ ./scripts/feature-matrix-check.sh
+feature-matrix-check: 1 disagreement(s) over 419 compared claims.     # exit 1
+```
+
+**That is the exact sentence that kept item 4 open for four milestones, and it is now a build
+failure.** House rule 23 — *a wave plan's "if this lands, the item becomes a gate" is a prediction,
+and the closer tests it* — was written in wave 11 after wave 10's claim kind did not land and nobody
+noticed. It earned its place in one wave, in both directions: it confirmed the prediction, and the
+same reproduction found the gate reads **one grammatical mood**.
+
+### Why item 4 is still open, and this time it is a class nobody had named
+
+**The gate refuses a negated claim about a named service and does not refuse a positive-voice false
+one.** Five sentences, each appended inside `README.md`'s checked block, one at a time:
+
+| Sentence | Script |
+| --- | --- |
+| `Neither Kafka Connect nor ksqlDB is built: KUI has no Connect screen and no ksqlDB screen.` | **red** |
+| `KUI ships without a Kafka Connect screen and never built ksqlDB.` | **red** |
+| `Kafka Connect remains unimplemented, and ksqlDB is a stub.` | green |
+| `The Connect screen is a placeholder and the ksqlDB page is empty.` | green |
+| `KUI has no topic detail page and no consumer lag chart.` | green |
+
+Row 4 names both service identities *and* the qualified noun the gate was taught to read, and escapes
+for want of a negation token. W11-01's own verifier filed it before freeze; it is not a discovery.
+
+**And the thing that decides the verdict is new, and it is the sharpest single finding of nine
+waves.** W11-05 repaired `docs/operations/masking.md` — correctly, in the open, scoping *"a masked
+value is never longer than the value it replaced"* to the `mask` kind. **Two of the five documents
+definition-of-done item 4 names by name still quote that sentence as a live defect:**
+
+```
+$ grep -rn "masked value is never longer" . --exclude-dir=.git | grep -v docs/plan/
+README.md:159 · docs/FEATURE_MATRIX.md:379
+$ grep -c "a masked value is never longer than the value it replaced" docs/operations/masking.md
+0
+```
+
+Both sentences are false. Both were true when written. **Both were made false inside wave 11, by
+wave 11's own repair, in the wave whose entire subject was documents going stale.** Neither sits
+inside a checked region, and **nothing in this repository has ever compared a quotation of one file
+against that file.** That is the class: a document that quotes another file's sentence acquires a
+dependency on it, and every wave has discovered that dependency already broken. It is also the one
+kind of prose that is mechanically checkable without a parser — a string attributed to a file either
+occurs in it or it does not — which is why wave 12 is small.
+
+Six more, each measured with the command beside it, not read off a report: `docs/overview/README.md`
+publishes **4,350 / 1,933 / 106-3** against commands that print **4,389 / 1,938 / 108-2**, three rows
+made stale by this wave's own work, in a page carrying two different measurement dates;
+`TECH_DEBT.md` TD-047 publishes *"deleting `masking.md` leaves `run-tests.sh` green"* and deleting it
+is **3 failed** in `libs.config.test`; `deployment/quickstart/README.md:162` states the
+`order-fulfilment` lag as *"single digits"* against a measured **10** on a stack brought up fresh at
+this close — the fifth consecutive false statement of one figure, contradicting its own paragraph
+four lines below, which correctly says the figure *"only ever goes up"*;
+`kui-quickstart-auth.yaml:294` says *"Byte for byte the block `./kui-quickstart.yaml` carries"*
+against a `diff` of `2,4c2`; `StreamProxy.scala:124-133` asserts as production fact a property
+W11-A2 measured to be a **coin flip, red in 1 run of 4**; and `frontend/e2e/tsconfig.json`'s
+**5,169**, corrected in this wave from 4,961, is **5,229** today because the packet that wrote it
+then edited a file in that directory.
+
+### Did the mechanism work? Six numbers, then the answer.
+
+**The hunter's rate went DOWN, and it is the best single piece of evidence in this plan that the
+sweeps are working.** W11-A1 measured **73 mutations, 3 argued down as equivalent, 18 genuinely
+ungated — 26% of 70 non-equivalent mutants**, against wave 10's **83%**, wave 9's **70%** and wave
+8's **32–42%**. It swept `identity`, `gateway/auth`, `libs/filter` and `libs/kafka-auth`; the two
+gateway trees beside it were swept by W10-A1 and hold 13 closed rules. It closed **16 of 18 (89%)**
+with 21 new cases across five files and two new suites, and left two open with reasons. This is the
+first wave in which the number went down, and it went down in code adjacent to code that had been
+swept.
+
+**The closer converted 89%, and 94% inside its ownership.** 27.5% (wave 9) → 60% (wave 10) → **16 of
+18 filed rows closed**, and **16 of 17** whose closing case was inside its ownership. It hunted
+nothing while filed rows remained, and argued two down with the algebra rather than a shrug — one of
+which (`App.tsx`'s no-cluster guard) is **equivalent by accident of there being one caller**, the
+same shape W10-A1 found, and the new composition case exists to keep the accident visible.
+
+**Owned rules: 5 of 5, and 51 of 51 across eleven waves.** Naming one ungated rule per packet and
+making its owner close it has never failed, once, in eleven waves.
+
+**The disclosure rate did not move, ninth wave running.** The five verifiers filed **18 new ungated
+rules** against the five building packets, and **every one of the five had disclosed exactly the one
+its brief demanded**. 18 filed plus 18 hunted against 5 disclosed. This is now the most stable
+measurement in the project and the mechanism is built around it rather than against it.
+
+**One number that is a mechanism finding rather than a rate.** `./mill a.test b.test` runs **zero**
+tests and exits 0 — the second word is a munit *name filter*, not a second target. W11-A1's first
+pass over `libs/filter` reported all twelve mutations green on exactly that command; re-run
+correctly, **eleven of twelve were gated**. An acceptance line of that shape measures nothing, and
+this plan has been printing lines of that shape.
+
+**And a compiler measurement worth budgeting for.** `-Werror` + `-Wunused` refused **14 of 73**
+mutations with four distinct messages. It fires when a guard's *inputs* stop being read; it never
+fires for a changed constant, a flipped boolean, or `&& false` appended to a condition. So it raises
+the cost of **deleting** a guard by one edit and the cost of **disabling** one by nothing — and **10
+of the 14 turned out to be gated anyway.**
+
+### What surprised us
+
+**A gate can be silenced by making it agree with itself, and that is now the third distinct instance
+of the same idea.** Wave 8 found `claim "$k" "$tok" "$fact" "$fact"`. Wave 11's W11-01 published a
+two-line price for its own capability-prose gate; its verifier found a **one-line** one —
+`claim capability-prose "" "no capability sentence outside the lists" "${offences:-...}"` with the
+claimed side replaced by the fact — because `audit_capability_prose` compares only the ledger pair's
+fact half against a fresh read, so `connect ksql>connect ksql` agrees with itself and `claim`'s
+claimed-side refusal never runs, `matched` being empty. **Sixth consecutive wave in which the packet
+that hardens this script published a price a verifier halved within the hour**, in the wave whose
+house rule 17 was amended for exactly that.
+
+**A CI step can say "every name matched" over an image that ships without a manifest.** Reproduced
+at this close by the closer, not read off a report: both derivations in the *"The interface image
+copies every workspace manifest"* step reduce with a `sed` that reads only the **package name**, so
+`COPY frontend/packages/api/package.json` → `COPY frontend/packages/api/tsconfig.json` prints
+*"11 packages, 11 manifests copied, every name matched"* and exits 0 while `packages/api` ships with
+no manifest. The step's own failure message already states the invariant it does not enforce.
+
+**Mill cached a suite on inputs that exclude the three files the suite reads.** `BuildWiringSuite`
+reads `build.mill`, `.github/workflows/ci.yml` and `frontend/package.json` at runtime; with the
+`typecheck` script mutated, `./mill --no-daemon build-tests.test` printed **137/137 SUCCESS without
+running the suite**. Harmless in CI on a fresh checkout; locally it means anybody reproducing one of
+these gates measures the previous tree.
+
+**A production scaladoc asserted a scheduling outcome as a property, and four runs settled it.**
+`StreamProxy.scala` says the carry is unreachable from `withTerminalEvent`. Run it four times with
+the carry deleted and **run 2 is red**: `relay` drains a `Queue.bounded` from a second fibre, so how
+many source chunks are coalesced is an interleaving, not an invariant. The suite-side comment now
+carries the table and says the case must never be counted as a gate on the carry; the production
+sentence is unchanged and owned by nobody.
+
+**And the thing that keeps being true, in its sixth form.** Every one of item 4's false sentences —
+in wave 9, wave 10, and again in wave 11's own output — sits outside every `<!-- checked: -->`
+region, or inside one that reads the wrong thing. A repository that fails the build when a figure
+disagrees with a table printed `419 claims checked, all true` over two of its five flagship documents
+quoting a sentence a third of them no longer contains.
+
+**Wave 12 is written.** It is **four building packets and two adversaries** at 2:1 — the smallest
+wave here has ever been. Its load-bearing item is a `quotation` claim kind that is a `grep`, not a
+parser and not a heuristic, and its acceptance is the two sentences above going red and the `grep`
+returning nothing.

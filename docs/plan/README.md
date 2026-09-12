@@ -16,21 +16,22 @@ The working plan for turning this repository into the product drawn in
 There is at most **one** `WAVE-NN.md` at a time. If you are looking at two, the older one was not
 pruned and its exit criteria should be checked before anything in it is believed.
 
-**One deliberate exception, live right now.** `verification/` holds seventeen files and **they were
-carried past `WAVE-10.md`'s deletion rather than deleted with it.** The eight `W10-*` files are
-wave 11's input. Of the nine older ones, three cannot be deleted without creating a dangling
-reference — `W8-04.md` and `W8-07.md` are cited from `docs/FEATURE_MATRIX.md`, and `W9-03.md` from
-`frontend/e2e/topics.spec.ts` and `brokers.spec.ts` — and `W8-07.md` §1 is in any case the only
-published screen-to-spec-to-case mapping in this repository. W11-01 either moves those citations or
-records that the files stay. The remaining six (`W8-02`, `W9-01`, `W9-02`, `W9-04`, `W9-06`,
-`W9-A2`) are discharged and cited by nothing.
+**One deliberate exception, live right now.** `verification/` holds **twenty-four** files and
+**they were carried past `WAVE-11.md`'s deletion rather than deleted with it.** The seven `W11-*`
+files are wave 12's input. Of the seventeen older ones, three cannot be deleted without creating a
+dangling reference — `W8-04.md` and `W8-07.md` are cited from `docs/FEATURE_MATRIX.md`, and
+`W9-03.md` from `frontend/e2e/topics.spec.ts` and `brokers.spec.ts` — and `W8-07.md` §1 is in any
+case the only published screen-to-spec-to-case mapping in this repository. W12-01 either moves those
+citations or records that the files stay, and W12-01's own quotation gate is the first mechanism in
+this repository that would notice a dangling one. The remaining fourteen are discharged and cited by
+nothing but the wave files that are already gone.
 
-**Three wave-10 building packets filed nothing and none was idle** — `W10-01`, `W10-03` and
-`W10-06`. Each reasoned that this directory belonged to the adversarial closer and left its rows in
-a packet result; each verifier then wrote the file itself. That is the same partition failure that
-lost `W9-A1`'s report a wave earlier, and it is why the rule changed: **`verification/W<NN>-<packet>.md`
-belongs to the packet the file is about, always, and is never inside any other packet's `Owns`.**
-The directory is nobody's tree.
+**House rule 18 is repaired, and the repair held.** Wave 9 lost one verification file to a partition
+argument and wave 10 lost three — each packet reasoned that this directory belonged to the
+adversarial closer and left its rows in a packet result, and each verifier then wrote the file
+itself. The rule was amended so that **`verification/W<NN>-<packet>.md` belongs to the packet the
+file is about, always, and is never inside any other packet's `Owns`.** Wave 11 ran seven packets and
+filed **seven** files, every one written by the packet it is about. The directory is nobody's tree.
 
 ## How a wave runs
 

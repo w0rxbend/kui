@@ -104,6 +104,10 @@ object MetricNames {
   val MaskingApplied: String = "kui.masking.applied" // {cluster, topic, target}                      (M3)
 
   /** Every name, in the order PLAN §30 lists them followed by the `ARCHITECTURE.md` §13 additions.
+    *
+    * Every name declared above is in here. There is no "declared but unpinned" tier: a constant that is not
+    * in this list is invisible to `MetricNamesSuite`, to the operator table that suite compares against, and
+    * to anybody counting what this build emits.
     */
   val all: List[String] = List(
     HttpServerDuration,
@@ -120,6 +124,11 @@ object MetricNames {
     CursorRejected,
     PrincipalRejected,
     ConfigVersion,
+    // W10-04 found this declared, emitted at `TopicOverviewUseCase.scala:230` and missing from this list,
+    // so the process emitted twenty-seven series while every gate that reads `all` pinned twenty-six. A
+    // name that is absent here is a name a rename cannot break, which is the one thing this file exists
+    // to prevent. Placed where `docs/operations/observability.md` prints it, so the two read in step.
+    AggregationSection,
     ClusterProfileFetch,
     ClusterProfileSubscribed,
     SerdeDeserializeFailures,

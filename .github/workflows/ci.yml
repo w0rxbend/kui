@@ -163,15 +163,37 @@ jobs:
       # the only trace is `Scope: all 11 workspace projects` in the build log where the correct
       # roster prints `all 12`. A line in a build log that nobody reads is not a gate.
       #
-      # So the two numbers are compared. The self-test first, for the reason the compose job's image
-      # derivation has one: both counts are equal on every passing run, so a `grep` pattern that had
-      # stopped matching -- an anchor removed, the path changed -- would answer zero against zero
-      # somewhere, or two equal wrong numbers, and read as agreement. The fixture gives the
-      # derivation a Dockerfile with a KNOWN count that is not the real one.
+      # SO THE NAMES ARE COMPARED, AND THE COUNTS ARE ONLY THE MESSAGE. This step compared two
+      # counts until wave 11, and W10-05's verifier walked through it twice with the roster broken:
+      #
+      #   * delete the `feature-ksql` COPY line and duplicate the `kernel` one. Eleven lines, eleven
+      #     packages: `11 packages, 11 manifests copied`, exit 0, and the image ships without the
+      #     ksqlDB chunk.
+      #   * keep every line and misspell one destination only -- `./packages/feature-kqsl/`. The
+      #     count is untouched, the manifest lands in a directory pnpm's workspace does not name,
+      #     and `--frozen-lockfile` resolves the smaller workspace in silence exactly as above.
+      #
+      # The `diff` that names the missing package existed for both of those and sat INSIDE the
+      # failure branch, so on an equal count it never ran. A derivation whose only assertion is its
+      # own cardinality cannot see a substitution, and a substitution is what drift looks like.
+      #
+      # Both ENDS of each line are derived, because those are two different mistakes: the source
+      # names the package that is read and the destination names the directory pnpm will find it in,
+      # and the second one fails with no trace at all. A line whose two halves disagree is caught by
+      # the destination list even when the source list is perfect.
+      #
+      # The self-test first, for the reason the compose job's image derivation has one: on every
+      # passing run all three lists are equal, so a `sed` that had stopped matching -- an anchor
+      # removed, the path changed -- would answer an empty list against an empty list somewhere and
+      # read as agreement. The fixture gives the derivation a Dockerfile with a KNOWN roster that is
+      # not the real one, and carries each of the shapes the anchors exist to reject.
       - name: The interface image copies every workspace manifest
         working-directory: .
         run: |
-          rostered() { grep -c '^COPY frontend/packages/' "$1"; }
+          sources() { grep '^COPY frontend/packages/' "$1" |
+                        sed -E 's#^COPY frontend/packages/([^/]+)/.*#\1#' | sort; }
+          targets() { grep '^COPY frontend/packages/' "$1" |
+                        sed -E 's#^.*[[:space:]]\./packages/([^/]+)/[[:space:]]*$#\1#' | sort; }
 
           fixture="$(mktemp)"
           cat > "$fixture" <<'FIXTURE'
@@ -180,32 +202,44 @@ jobs:
           COPY frontend/packages/kernel/package.json ./packages/kernel/
            COPY frontend/packages/indented/package.json ./packages/indented/
           RUN echo 'COPY frontend/packages/quoted/package.json'
+          COPY frontend/packages/shell/package.json ./packages/typo/
           FIXTURE
-          probe="$(rostered "$fixture")"
+          probe="$(sources "$fixture" | tr '\n' ' ')"
+          [ "$probe" = "api kernel shell " ] || {
+            echo "the manifest-roster source derivation is broken: a Dockerfile with three anchored" \
+                 "COPY lines, one indented line and one inside a RUN, derived [$probe] and not" \
+                 "[api kernel shell ]."
+            rm -f "$fixture"; exit 1
+          }
+          probe="$(targets "$fixture" | tr '\n' ' ')"
+          [ "$probe" = "api kernel typo " ] || {
+            echo "the manifest-roster destination derivation is broken: the fixture's third line" \
+                 "copies packages/shell to ./packages/typo/ and the derivation answered [$probe]" \
+                 "instead of [api kernel typo ]. A destination that is never read is how a" \
+                 "correctly-spelled COPY lands where pnpm will not look for it."
+            rm -f "$fixture"; exit 1
+          }
           rm -f "$fixture"
-          [ "$probe" = "2" ] || {
-            echo "the manifest-roster count is broken: a Dockerfile with two anchored COPY lines," \
-                 "one indented and one inside a RUN, counted [$probe] and not [2]."
-            exit 1
-          }
 
-          packages="$(ls frontend/packages | wc -l)"
-          copies="$(rostered deployment/frontend/Dockerfile)"
-          [ "$packages" = "$copies" ] || {
-            echo "frontend/packages holds $packages packages and" \
-                 "deployment/frontend/Dockerfile copies $copies manifests."
-            echo "Add the missing 'COPY frontend/packages/<name>/package.json ./packages/<name>/'" \
-                 "line, or remove the stale one. Missing lines do not fail the image build:" \
-                 "pnpm resolves the smaller workspace and only says so in 'Scope: all N workspace" \
-                 "projects'."
-            # Both sides sorted, because the roster is written in dependency order and `ls` is
-            # alphabetical: without this the diff names ten packages instead of the one missing.
-            diff <(ls frontend/packages | sort) \
-                 <(grep '^COPY frontend/packages/' deployment/frontend/Dockerfile |
-                     sed -E 's#^COPY frontend/packages/([^/]+)/.*#\1#' | sort) || true
+          # THE ASSERTION. Both sides sorted, because the roster is written in dependency order and
+          # `ls` is alphabetical: unsorted, the diff names ten packages instead of the one missing.
+          # `diff` and not a count, and its exit status and not a branch it is printed inside.
+          present="$(ls frontend/packages | sort)"
+          if ! diff <(printf '%s\n' "$present") <(sources deployment/frontend/Dockerfile) ||
+             ! diff <(printf '%s\n' "$present") <(targets deployment/frontend/Dockerfile); then
+            echo ""
+            echo "deployment/frontend/Dockerfile's manifest roster does not name the packages that" \
+                 "exist. '<' is a package in frontend/packages with no COPY line; '>' is a COPY" \
+                 "line naming something that is not a package -- which is what a misspelling looks" \
+                 "like, on either end of the line."
+            echo "Each line reads exactly:" \
+                 "COPY frontend/packages/<name>/package.json ./packages/<name>/"
+            echo "Neither mistake fails the image build: pnpm resolves the smaller workspace and" \
+                 "says so only in 'Scope: all N workspace projects', in a build log nobody reads."
             exit 1
-          }
-          echo "frontend/packages: $packages packages, $copies manifests copied"
+          fi
+          echo "frontend/packages: $(ls frontend/packages | wc -l) packages," \
+               "$(sources deployment/frontend/Dockerfile | wc -l) manifests copied, every name matched"
       - uses: actions/setup-node@v4
         with:
           # The versions in `.tool-versions`, and pnpm is exact: `frontend/package.json` names the

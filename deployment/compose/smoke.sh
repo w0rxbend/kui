@@ -924,8 +924,57 @@ log "every contracted service answers a signed read, and not only a capability p
 readonly STREAM_READS="message:\
 /api/v1/clusters/{clusterId}/topics/$TRAFFIC_TOPIC/messages/stream?limit=1"
 
+# The name of the first event an SSE response frames, or nothing if it framed none.
+#
+# THE STATUS CODE IS NOT THE ASSERTION FOR A STREAM, AND THAT IS WHY THIS EXISTS. An SSE endpoint
+# answers `HTTP/1.1 200 OK` the moment the gateway decides to open the stream, which is before it
+# has asked the service anything, so every refusal downstream arrives in the BODY at status 200.
+# Measured by W10-05's verifier on this stack, with `kui-message`'s `KUI_PRINCIPAL_KEY` set to a
+# wrong value: the loop below printed `message answers .../messages/stream?limit=1: 200` and the
+# script PASSED, while the body it never read was
+# `event: error` / `data: {"code":"KUI-UPSTREAM-UNAVAILABLE","message":"message could not be
+# reached",...}`. The one service whose read had to be hand-written above was the one service this
+# block could not fail on -- which is the wave-9 defect the block was added to close, surviving in
+# the ninth of nine.
+#
+# `-N` disables curl's output buffering, so the first frame is readable without waiting for a
+# stream that is designed not to end; `head -c` bounds what is read rather than what is sent, and
+# the `-m` bounds the rest. `tr -d '\r'` because SSE frames are CRLF-terminated on the wire and a
+# trailing carriage return would make every comparison below fail against a correct stream. The
+# first `event:` line and not a grep for `error`: a stream that frames `phase` first and errors
+# later is a different report from one that refuses outright, and only the second is this
+# assertion's business.
+#
+# `awk` remembering rather than `sed ... | head -1`: this file runs under `pipefail`, and a stage
+# that quits on the first match sends SIGPIPE to the stage above it, so the happy path would exit
+# 141 and the whole derivation would be a coin toss on how the kernel scheduled two tiny processes.
+# Reading all four hundred bounded bytes and printing once is the same answer without the race.
+first_sse_event() {
+  head -c 400 | tr -d '\r' | awk '/^event: / && !seen { print substr($0, 8); seen = 1 }'
+}
+
+# SELF-TESTED, for the reason every derivation in this file is: on a passing run the stream frames
+# `phase` and the failure modes are invisible. A `sed` whose anchor had been lost would match the
+# `event:` inside a `data:` payload; one whose `head -1` had been dropped would answer three names
+# and compare as a mismatch against every one of them; and a filter that read the body without
+# stripping CR would answer `phase\r`, which is not `phase`. The fixture is the shape this stack
+# actually frames, CRLF and all.
+frame="$(printf 'event: phase\r\ndata: {"event":"error","phase":"assigned"}\r\n\r\nevent: consumed\r\n' |
+  first_sse_event)"
+[[ "$frame" == "phase" ]] || fail "the first-frame derivation is broken: a stream framing \`phase\`
+  and then \`consumed\`, with a \`data:\` payload that itself contains the word event, derived
+  [$frame] and not [phase]. Check the anchor, the carriage-return strip and the head -1 in
+  first_sse_event."
+# And that it can say `error`, which is the whole point: a derivation that could only ever answer
+# the happy name would pass this block on a refusal exactly as the status code did.
+frame="$(printf 'event: error\r\ndata: {"code":"KUI-UPSTREAM-UNAVAILABLE"}\r\n' | first_sse_event)"
+[[ "$frame" == "error" ]] || fail "the first-frame derivation cannot see a refusal: a stream whose
+  first frame is \`event: error\` derived [$frame] and not [error], so the stream read below would
+  pass over the exact failure it exists to catch."
+
 for service in $expected; do
   path="$(service_read_path "$service")"
+  streamed=""
 
   if [[ -z "$path" ]]; then
     # Every service whose only read is a stream is named above with its substitution. One that is
@@ -938,6 +987,7 @@ for service in $expected; do
   the third fact: the contract is in ServiceContracts.byService and its routes are derived from it,
   or it is not and this service is reachable by nothing."
     path="$written"
+    streamed="yes"
   fi
 
   # `%{http_code}` rather than `curl -sf`, because the number is the assertion. A 401 and a 404 and
@@ -949,6 +999,20 @@ for service in $expected; do
   # and every other assertion in this file gives that the same ninety seconds.
   await "$service answers $path" "200" \
     "curl -s -o /dev/null -m 20 -w '%{http_code}' '$base${path/\{clusterId\}/measured}'"
+
+  # AND FOR A STREAM, THE STATUS CODE IS NOT THE READ. The assertion above has just proved that the
+  # gateway agreed to open the stream; what it cannot prove is that anything was on the other end
+  # of it. A stream whose first frame is `error` is a refusal delivered at 200, and it is the exact
+  # state a wrong signing key on `kui-message` produces.
+  #
+  # `phase` rather than "not error": the browse stream's contract (ADR-035) is that it announces
+  # the phase it has reached before it sends a record, so the honest first frame is a fact about
+  # this stream and not the absence of one bad word. A stream that started framing something else
+  # would be a contract change, and a smoke test that shrugged at it would be checking nothing.
+  if [[ -n "$streamed" ]]; then
+    await "$service frames a stream rather than refusing at 200" "phase" \
+      "curl -sN -m 20 '$base${path/\{clusterId\}/measured}' | first_sse_event"
+  fi
 done
 
 log "stopping kui-cluster: one real process dies"

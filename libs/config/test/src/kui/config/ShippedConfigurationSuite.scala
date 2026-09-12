@@ -10,7 +10,7 @@ import cats.effect.unsafe.implicits.global
 
 import kui.kernel.TopicName
 import kui.kernel.serde.{PayloadKind, Target}
-import kui.security.masking.{KeepEnds, MaskingEngine, MaskingKind}
+import kui.security.masking.{KeepEnds, MaskingEngine, MaskingKind, MaskingRule}
 import kui.testkit.KuiSuite
 
 /** That every configuration file this repository ships actually loads.
@@ -311,7 +311,52 @@ final class ShippedConfigurationSuite extends KuiSuite {
     }
   }
 
-  test("the quickstart ships the masking rules its comment describes, and the second profile has none") {
+  /** The two shipped quickstart configurations, which mask the same two fields of `customers.profiles`.
+    *
+    * `--with-auth` is the deployment with a **viewer** role, and until wave 11 it was the one with no masking
+    * at all: its header claimed to be `kui-quickstart.yaml` "with nothing else changed" while
+    * `grep -c masking` was 0 against 6. W11-03 landed the block; this suite is what stops the pair from
+    * separating again, and it is why the case below drives a list instead of one path.
+    */
+  /** A masking rule as a value that can be compared.
+    *
+    * `MaskingRule` holds `scala.util.matching.Regex`, which has reference equality, so two rules parsed from
+    * two files are never equal however identical the YAML is. The patterns are compared as the text an
+    * operator wrote, which is also what a failure has to print to be worth reading.
+    */
+  private def describe(
+      rules: List[MaskingRule]
+  ): List[(MaskingKind, Option[List[String]], Option[String], Option[String], Option[String])] =
+    rules.map { rule =>
+      // THE PROJECTION IS HAND-WRITTEN, SO IT CANNOT NOTICE A FIELD IT WAS NEVER TOLD ABOUT. A sixth
+      // field on `MaskingRule` with a default value compiles at every call site in this repository,
+      // is silently dropped from the five-tuple below, and the two shipped quickstarts could then
+      // disagree on it with this suite green -- which is the whole point of the cross-file comparison
+      // this feeds. Filed as W11-05/V-3. `productArity` is the one thing that moves when a field is
+      // added, so it is asserted beside the projection rather than left to a reader to notice.
+      assertEquals(
+        rule.productArity,
+        5,
+        clue = "MaskingRule has gained or lost a field and `describe` still projects five of them, so " +
+          "the two shipped quickstarts are being compared on a subset of what a rule now holds"
+      )
+      (
+        rule.kind,
+        rule.fields.map(_.toList),
+        rule.fieldsNamePattern.map(_.regex),
+        rule.topicKeysPattern.map(_.regex),
+        rule.topicValuesPattern.map(_.regex)
+      )
+    }
+
+  private val quickstarts: List[String] = List(
+    "deployment/quickstart/kui-quickstart.yaml",
+    "deployment/quickstart/kui-quickstart-auth.yaml"
+  )
+
+  test(
+    "both quickstarts ship the masking rules their comments describe, and neither second profile has any"
+  ) {
     // DM-001/ADR-023 AS A DEPLOYMENT AND NOT ONLY AS A TYPE. Wave 9 wired the masking engine into the
     // message service and left it unreachable: no file in this repository configured a rule, so the
     // feature could be read about and not looked at. This case is the other end of that repair -- the
@@ -323,53 +368,90 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // not a KUI configuration key". The overlay this replaces wrote three of those keys into a second
     // document over the quickstart; the shipped file now writes five of them itself, which is a stronger
     // statement of the same fact: deleting a `Known` entry stops the quickstart booting.
-    val quickstart = "deployment/quickstart/kui-quickstart.yaml"
+    // W11-03 -> W11-05, THE ONE DECLARED EDGE OF THIS WAVE. This case used to read one path and assert
+    // that every OTHER shipped file masked nothing -- which was true, and was the defect: the
+    // `--with-auth` deployment is the one with a viewer role, and it was the one with no masking, under
+    // a header claiming it was the default file "with nothing else changed". The guard was pinning the
+    // hole in place. It now reads both, requires them to agree, and keeps the "nobody else" half.
+    val loadedQuickstarts = quickstarts.map { relative =>
+      relative -> KuiConfigSource
+        .loadFrom[IO](Nil, List(resolve(relative)), Map.empty, UrlPolicy.Dev)
+        .unsafeRunSync()
+        .fold(errors => fail(s"$relative does not load:\n${errors.render}"), identity)
+    }
 
-    val loaded = KuiConfigSource
-      .loadFrom[IO](Nil, List(resolve(quickstart)), Map.empty, UrlPolicy.Dev)
-      .unsafeRunSync()
-      .fold(errors => fail(s"$quickstart does not load:\n${errors.render}"), identity)
-
-    val rules = loaded.clusters.head.masking.rules
-    assertEquals(rules.size, 2, clue = s"the quickstart's masking rules: ${rules.map(_.kind)}")
-    assertEquals(
-      rules.map(_.kind),
-      List(
-        MaskingKind.Mask(MaskingConfig.DefaultReplacementChars, KeepEnds(0, 4)),
-        MaskingKind.Replace("<redacted>")
-      )
-    )
-    assertEquals(rules.map(_.fields.map(_.toList)), List(Some(List("email")), Some(List("name"))))
-    assertEquals(
-      rules.map(_.topicValuesPattern.map(_.regex)),
-      List(Some("customers\\.profiles"), Some("customers\\.profiles"))
-    )
-
-    // AS THE ENGINE READS IT, over a record shaped like the ones `seed/data/customers.profiles` writes.
-    // A case that stopped at the parse would prove the loader agrees with itself, and the promise made
-    // in the file's own comment is about what the message browser draws.
-    assertEquals(
-      MaskingEngine
-        .maskPayload(
-          rules,
-          TopicName.unsafe("customers.profiles"),
-          Target.Value,
-          PayloadKind.Json,
-          """{"customerId":"CUST-8812","name":"Marta Zielinska","email":"marta.zielinska@example.com"}"""
+    loadedQuickstarts.foreach { (relative, loaded) =>
+      val rules = loaded.clusters.head.masking.rules
+      assertEquals(rules.size, 2, clue = s"$relative's masking rules: ${rules.map(_.kind)}")
+      assertEquals(
+        rules.map(_.kind),
+        List(
+          MaskingKind.Mask(MaskingConfig.DefaultReplacementChars, KeepEnds(0, 4)),
+          MaskingKind.Replace("<redacted>")
         ),
-      """{"customerId":"CUST-8812","name":"<redacted>","email":"***********************.com"}"""
-    )
+        clue = relative
+      )
+      assertEquals(
+        rules.map(_.fields.map(_.toList)),
+        List(Some(List("email")), Some(List("name"))),
+        clue = relative
+      )
+      assertEquals(
+        rules.map(_.topicValuesPattern.map(_.regex)),
+        List(Some("customers\\.profiles"), Some("customers\\.profiles")),
+        clue = relative
+      )
 
-    // AND THE SECOND PROFILE, WHICH CONFIGURES NONE ON PURPOSE. `staging-eu-01` points at the same
-    // `kafka:9092` as the cluster above, so the same records read through it come back in full: a
-    // masking rule protects the registered profile it is written on and not the broker underneath it.
-    // That is the property `docs/operations/masking.md` warns about, and this is where it is true.
-    // Copying the block onto the second cluster would take the demonstration away.
-    assertEquals(loaded.clusters(1).masking, MaskingConfig.empty)
+      // AS THE ENGINE READS IT, over a record shaped like the ones `seed/data/customers.profiles`
+      // writes. A case that stopped at the parse would prove the loader agrees with itself, and the
+      // promise made in the file's own comment is about what the message browser draws.
+      assertEquals(
+        MaskingEngine
+          .maskPayload(
+            rules,
+            TopicName.unsafe("customers.profiles"),
+            Target.Value,
+            PayloadKind.Json,
+            """{"customerId":"CUST-8812","name":"Marta Zielinska","email":"marta.zielinska@example.com"}"""
+          ),
+        """{"customerId":"CUST-8812","name":"<redacted>","email":"***********************.com"}""",
+        clue = relative
+      )
+
+      // AND EVERY PROFILE AFTER THE FIRST CONFIGURES NONE ON PURPOSE. The default quickstart's
+      // `staging-eu-01` points at the same `kafka:9092` as the cluster above, so the same records read
+      // through it come back in full: a masking rule protects the registered profile it is written on
+      // and not the broker underneath it. That is the property `docs/operations/masking.md` warns
+      // about, and this is where it is true; copying the block onto the second profile would take the
+      // demonstration away. Written over `drop(1)` rather than over `clusters(1)` because the
+      // `--with-auth` file registers one profile and not two -- which is one of the three omissions its
+      // own header lists -- and an index would throw there instead of asserting anything.
+      assert(
+        loaded.clusters.drop(1).forall(_.masking.isEmpty),
+        s"$relative masks on a profile after the first, which takes the demonstration away"
+      )
+    }
+
+    // AND THE TWO AGREE, ASSERTED DIRECTLY RATHER THAN INFERRED FROM TWO PASSING LOOPS. A reader
+    // comparing the files by eye is what let them drift for a wave; a rule added to one and not the
+    // other is what this line is for, and it does not need the roster above to be exhaustive.
+    //
+    // Over `describe` and not over the rules themselves, because `MaskingRule` carries `Regex`, and
+    // `Regex` does not implement value equality -- two identical patterns parsed from two files are
+    // never `==`, so a direct comparison would fail on files that agree and would look like a finding.
+    val (defaultFile, defaultConfig) = loadedQuickstarts.head
+    val (authFile, authConfig) = loadedQuickstarts(1)
+
+    assertEquals(
+      describe(authConfig.clusters.head.masking.rules),
+      describe(defaultConfig.clusters.head.masking.rules),
+      s"$authFile and $defaultFile mask different things, and the one with a viewer role is the one a " +
+        "reader is least likely to check"
+    )
 
     // Every other shipped file is unchanged by the section existing, which is the standing rule for
     // every configuration section this project has added: an existing YAML still boots unchanged.
-    val others = shipped.filterNot((relative, _, _) => relative == quickstart)
+    val others = shipped.filterNot((relative, _, _) => quickstarts.contains(relative))
     others.foreach { (relative, policy, environment) =>
       val configured = KuiConfigSource
         .loadFrom[IO](Nil, List(resolve(relative)), environment, policy)
@@ -420,6 +502,21 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // throughput answers `not_configured`. Four lines of YAML take that subject away again; this is the
     // assertion that notices. Filed as W9-01/V2.
     assertEquals(loaded.metrics.sources.keys.map(_.value).toList, List("quickstart"))
+
+    // AND THE THRESHOLD THE BROWSER SUITE'S THIRD SKIP TURNS ON. `frontend/e2e/shell.spec.ts`'s
+    // acknowledgement case -- SCREENS-V4 M06's path, the one screen that was covered by half a case for
+    // three waves -- is a `test.skip` unless the alerts feed has an open event, and the only reason a
+    // freshly booted quickstart has one is this literal. `80` is the default and the value this file
+    // shipped until wave 11; restoring it is a one-character edit that takes the suite back to 107 passed
+    // / 3 skipped and exit 0, with no gate anywhere in the repository disagreeing -- measured, and filed
+    // as W11-02/F-1. The YAML argues for the value at length forty lines above; this is the assertion that
+    // holds it there.
+    assertEquals(
+      loaded.alerts.thresholds.diskUsedWarningPercent,
+      1,
+      clue = "the quickstart no longer seeds a storage warning on first boot, so shell.spec.ts's " +
+        "acknowledgement case goes back to being a skip and the browser suite silently loses a case"
+    )
   }
 
   test("the production example's secrets are all resolved and none is left as its own reference") {

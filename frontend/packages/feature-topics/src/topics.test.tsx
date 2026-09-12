@@ -29,7 +29,12 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createSignal, flush } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { clearToasts, toasts, type KuiContextValue } from "@kui/kernel";
+import {
+  clearToasts,
+  formatBytes as kernelFormatBytes,
+  toasts,
+  type KuiContextValue,
+} from "@kui/kernel";
 import { mount } from "./testing.js";
 import {
   DEFAULT_TOPIC_QUERY,
@@ -389,6 +394,18 @@ describe("the topic list", () => {
     expect(formatBytes(4096)).toBe("4.1 kB");
     expect(formatBytes(0)).toBe("0 B");
     expect(formatBytes(128_000_000_000)).toBe("128.0 GB");
+
+    // THE MERGE ITSELF, WHICH THE THREE FIGURES ABOVE CANNOT SEE. `TopicListPage.tsx` used to carry a
+    // second implementation of this function and now re-exports the kernel's; wave 11 deleted the copy
+    // and nothing asserted the deletion. Measured and filed as W11-04/U1: pasting the old body back in
+    // left this file, `packages/kernel`, `packages/shell`, `tsc --build` and `lint:boundaries` all green,
+    // because all three figures above are IDENTICAL under both implementations. Two assertions, because
+    // each catches what the other cannot: the identity catches a re-divergence that happens to agree on
+    // every figure anybody writes down, and the figure catches a re-export that is re-pointed at a third
+    // function. `999.96` is the promotion threshold the kernel's header argues for at length -- the
+    // deleted copy promoted at a bare `1000` and printed `999.96 B` here.
+    expect(formatBytes).toBe(kernelFormatBytes);
+    expect(formatBytes(999.96)).toBe("1.0 kB");
   });
 });
 

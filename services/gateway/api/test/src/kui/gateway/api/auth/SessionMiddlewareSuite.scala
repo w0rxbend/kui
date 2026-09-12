@@ -1,8 +1,12 @@
 package kui.gateway.api.auth
 
+import java.time.Instant
+
+import cats.effect.IO
 import io.circe.parser.decode
 
-import kui.gateway.api.GatewayTestServer
+import kui.gateway.api.{GatewayApi, GatewayTestServer}
+import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionId}
 import kui.gateway.contract.GatewayEndpoints
 import kui.gateway.contract.dto.AuthMeResponse
 import kui.security.rbac.{ClusterScope, Resource}
@@ -122,8 +126,15 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         )
         afterLogout <- server.get(meUri, Map("Cookie" -> cookie))
         afterBody = decode[AuthMeResponse](afterLogout.body).toOption.get
+        // W11-A1: nothing here asked the *store*. Replacing `store.delete(session.id)` with `unit` — a
+        // logout that logs nobody out — left the whole gateway module green, because every assertion
+        // below is satisfied by a session that is still very much alive: the reply is still `200`, and
+        // `/auth/me` still says `disabled` whether the old session survived or a new one replaced it.
+        // A revoked session that is not revoked is the failure an operator reaches for logout to prevent.
+        revoked <- server.sessions.get(SessionId.unsafe(cookie.split('=').last), Instant.now())
       } yield {
         assertEquals(loggedOut.code.code, 200, loggedOut.body)
+        assertEquals(revoked, None, "the session survived the logout that was supposed to delete it")
         // The old session is gone; a request that presents its cookie again gets a *new* anonymous
         // session rather than an error — anonymous mode has nothing to fail on, and a fresh session is
         // exactly what ADR-019 says happens for a cookie the store no longer recognises.
@@ -230,6 +241,46 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         // The health exclusion moves with the base path too, so an orchestrator's timer still mints
         // nothing and cannot evict the bounded store one probe at a time.
         assertEquals(health.header("Set-Cookie"), None, "a health probe under a base path mints a session")
+      }
+    }
+  }
+
+  test("everyMutatingRouteTheGatewayServesSitsInsideTheSessionMintingSet") {
+    // W11-A1, and it is an *invariant* rather than a behaviour: `SessionMiddleware`'s CSRF step reads
+    // `session.fold(PrincipalKind.Anonymous)(_.principal.kind)`, and replacing that default with
+    // `PrincipalKind.Bearer` is a fail-open — a mutation with no session at all would be exempted from the
+    // CSRF check outright. W10-A1 argued that mutant down as equivalent, correctly, and said why it is only
+    // equivalent *by accident of the route table*: nothing outside `/api/v1` declares a non-safe method, so
+    // no request that reaches the check can be missing a session.
+    //
+    // "By accident of the route table" is not a property anything was checking. The first `POST` added
+    // under `/ui/`, or under a new prefix, turns an equivalent mutant into a live CSRF hole with no test
+    // going red anywhere. This case is the guard on that accident: every endpoint this gateway serves whose
+    // method is not safe must sit on a path `needsSession` says gets one.
+    val safeMethods = Set("GET", "HEAD", "OPTIONS")
+
+    InMemorySessionStore.resource[IO](SessionConfig.Default).use { sessions =>
+      IO {
+        val routes = GatewayApi.routes[IO](GatewayTestServer.configView("/"), Nil, sessions)
+
+        val mutating = routes.flatMap { route =>
+          val method = route.endpoint.method.map(_.method).getOrElse("GET")
+          Option.when(!safeMethods.contains(method))(
+            method -> route.endpoint.showPathTemplate().split('/').toList.filter(_.nonEmpty)
+          )
+        }
+
+        // If this is ever empty the case has stopped measuring anything, which is the failure mode a
+        // green gate hides best.
+        assert(mutating.nonEmpty, "no non-safe-method endpoint was found, so this case proves nothing")
+
+        mutating.foreach { (method, path) =>
+          assert(
+            SessionMiddleware.needsSession(path, ""),
+            s"$method /${path.mkString("/")} is served outside the session-minting set, so a request to " +
+              "it can reach the CSRF check with no session — and the Anonymous default is what refuses it"
+          )
+        }
       }
     }
   }

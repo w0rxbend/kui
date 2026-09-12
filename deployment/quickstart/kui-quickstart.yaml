@@ -114,7 +114,32 @@ kui:
       offlinePartitions: 1
       underReplicatedPartitions: 1
       rebalanceDuration: "5m"
-      diskUsedWarningPercent: 80
+      # ONE, AND IT IS A DEMONSTRATION VALUE RATHER THAN A RECOMMENDATION. Copy 80 from
+      # `deployment/compose/kui-service.yaml` into a real deployment; do not copy this line.
+      #
+      # The quickstart's job is that every screen has something true on it. It seeds topics,
+      # consumer groups, messages and a second cluster profile for exactly that reason, and the
+      # alerts feed was the one screen it left permanently empty — because nothing in this product
+      # writes an event, an event is opened by a rule reading a fact, and no fact about a laptop
+      # running one broker crosses any of the four thresholds above. So the Alerts tab, the
+      # notification bell and the notifications panel had nothing in them on the deployment a
+      # newcomer runs, and `frontend/e2e/shell.spec.ts`'s acknowledgement case — `M06`, and the one
+      # case in the suite that drives the alerts **stream** end to end — skipped for three waves.
+      #
+      # This is the seam the product allows: the threshold moves, the fact does not. The event that
+      # opens names the real number off the real filesystem — "Log directory /var/lib/kafka/data is
+      # N% full on broker 1", where N is whatever share of your disk is actually used. Nothing is
+      # fabricated and no row is written by hand, which is the rule (`W6-01`: do not seed an event
+      # to make a screen look alive) this obeys rather than bends.
+      #
+      # The cost, said out loud because a reader meets it in their first minute: a first boot of the
+      # quickstart opens one `storage` warning. `diskUsedCriticalPercent` stays at 90, so a disk
+      # that is genuinely nearly full still reads as critical and not as this.
+      #
+      # Acknowledging it does not make it permanent: `AlertRules.evaluate` only counts events that
+      # are still open, so the next pass (`evaluationInterval` above, 60s) opens a fresh one. That
+      # is what makes the browser case re-runnable rather than green once per stack.
+      diskUsedWarningPercent: 1
       diskUsedCriticalPercent: 90
 
   # ---------------------------------------------------------------------------------------------

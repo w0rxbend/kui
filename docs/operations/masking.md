@@ -44,11 +44,20 @@ the comment above the `masking:` block says why each line is the way it is.
 | `mask` | every character is replaced, cycling through `maskingCharsReplacement`, except the ends `keep` preserves | `maskingCharsReplacement`, `keep` |
 | `replace` | the value becomes the literal you wrote, and its type becomes string | `replacement` |
 
-Three things hold for all of them, and each is a decision rather than an accident:
+Three things hold, and each is a decision rather than an accident. **Read the scope on the first
+one**, because it is the one an operator is most likely to build a policy on:
 
-* **A masked value is never longer than the value it replaced.** A mask that padded a four-digit
-  field out to sixteen characters would announce that the field was not a card number, and somebody
-  counting characters would learn what the mask was hiding.
+* **A `mask` never returns a value longer than the value it replaced** — and `remove` returns no
+  value at all. A mask that padded a four-digit field out to sixteen characters would announce that
+  the field was not a card number, and somebody counting characters would learn what the mask was
+  hiding. **This does not hold for `replace`**, and cannot: `replacement` is a literal you write, so
+  `replacement: "<redacted by policy>"` over a four-character field returns twenty-two characters.
+  `MaskingEngine` writes that literal verbatim with no length bound, deliberately: a `replace`
+  whose text was truncated to fit the field would be unreadable exactly where it must be read.
+  So if you are relying on the length of a masked field carrying no information, use `mask` or
+  `remove`, or choose a `replacement` no longer than the shortest value it will cover. It is worth
+  saying plainly: this page invited you to rely on the sentence unscoped until wave 11, and for
+  `kind: replace` that invitation was wrong.
 * **A masked number comes back as a string.** Masking a number and keeping it a number would either
   change its magnitude or fail to hide it.
 * **A matched object or array is masked leaf by leaf**, not flattened into one long string.

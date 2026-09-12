@@ -140,16 +140,30 @@ describe("formatBytes", () => {
 
   it("stops at the top unit rather than dividing off the end of the scale", () => {
     // The promotion loop's `unit < units.length - 1` is the only thing keeping `units[unit]` inside
-    // the table; without it a petabyte-scale figure divides one step too far, `units[5]` is
-    // `undefined`, and the `?? "B"` fallback prints `1.5 B` for a million gigabytes — a figure that
-    // is wrong by twelve orders of magnitude and reads as perfectly ordinary.
+    // the table; without it an exabyte-scale figure divides one step too far, `units[6]` is
+    // `undefined`, and the `?? "B"` fallback prints `1.5 B` for a billion gigabytes — a figure that
+    // is wrong by eighteen orders of magnitude and reads as perfectly ordinary.
     //
-    // The second line is the price of that cap, asserted rather than left to be discovered: TB is
-    // the ceiling, so the header's "the printed figure is always in [0, 1000)" holds at every unit
-    // below the top and the top unit keeps counting. If a `PB` is ever added to the table, this is
-    // the line that has to be rewritten deliberately.
+    // The last line is the price of that cap, asserted rather than left to be discovered: `PB` is
+    // the ceiling, so the header's "[0, 1000) at every unit below the last one" holds everywhere
+    // below it and the last unit keeps counting. This is the line the previous ceiling's header
+    // falsified — `TB` was the top until this wave, so the plausible `1.5e15` printed `1500.0 TB`
+    // under a header promising `[0, 1000)` unconditionally.
     expect(formatBytes(1_500_000_000_000)).toBe("1.5 TB");
-    expect(formatBytes(1_500_000_000_000_000)).toBe("1500.0 TB");
+    expect(formatBytes(1_500_000_000_000_000)).toBe("1.5 PB");
+    expect(formatBytes(1.5e18)).toBe("1500.0 PB");
+  });
+
+  it("spells a petabyte the way `feature-topics` did, because it is now the same function", () => {
+    // The list of topics on a cluster used to carry its own copy of this function with its own
+    // ladder — `B` through `PB`, promoting at a bare 1000 and printing an unrounded byte count —
+    // and `feature-topics/src/index.tsx` re-exported it, so two functions with one name and one
+    // meaning were both public surface and disagreed about more than rounding. The copy is gone and
+    // its call sites read this one; these are the three figures its own suite pinned, kept here so
+    // the merge is asserted rather than assumed.
+    expect(formatBytes(4096)).toBe("4.1 kB");
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(128_000_000_000)).toBe("128.0 GB");
   });
 
   it("never prints a four-digit figure under a three-digit unit", () => {

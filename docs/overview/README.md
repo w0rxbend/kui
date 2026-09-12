@@ -153,23 +153,52 @@ A change lands when every one of these is green. They are run one at a time; two
 ones together have exhausted memory on a developer machine, and a killed subprocess reads as a
 failure that is not one.
 
-Every figure in the right-hand column was printed by the command beside it on **2026-09-11**, one
-gate at a time. Two of them — the Scala and browser case counts — move on almost every commit, which
-is why the column is dated rather than maintained; the rest move only when the shape of the build
-does.
+**The figures come in two kinds, and the difference is the point of this section.** Three of them
+are re-read by `./scripts/feature-matrix-check.sh` on every run, out of the same ledger and the same
+documents the gate itself reads, so this page cannot be wrong about them for longer than one run.
+The rest need another process — a Scala test run, a Mill task graph, a browser suite — so they are a
+snapshot with a date on it, and a date is not a check.
 
-| Gate | What it checks | Size, measured 2026-09-11 |
+That distinction is new on 2026-09-12, and it exists because of what this page did without it.
+Until then it carried no `<!-- checked: -->` marker of any kind, and the row describing the checker
+published *390 claims over nine sections* against a run that printed **404** — a false figure about
+this repository's own flagship gate, in the row of this page that describes that gate, published by
+the wave that owned it. Four of that table's ten rows were stale against the tree they described.
+
+### The figures this page is not trusted about
+
+<!-- checked: gate-table -- verified by ./scripts/feature-matrix-check.sh -- claims: gate-claim-total, gate-section-count, gate-openapi-document, gate-decisions-rows, residue -->
+| What this page publishes | Read back by | Size |
+| --- | --- | --- |
+| the checker's own size | its own ledger, as the run finishes | **419 claims** over **10 sections** |
+| `docs/api/openapi.json`, the merged contract | the checker's `merged-document` section | **65 paths**, **76 operations** and **160 component schemas** |
+| `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **56 rows**, one per ADR on disk |
+<!-- /checked -->
+
+A figure in that block that stops being true fails `./scripts/feature-matrix-check.sh` and names the
+figure that would make it true, so repairing this page is a substitution rather than an
+investigation — which is what every other document in this repository that publishes a count has
+had since 2026-09-10, and what this one did not.
+
+### The gates, and the sizes that need another process to measure
+
+Every figure in the right-hand column was printed by the command beside it on **2026-09-12**, at the
+close of wave 10, one gate at a time, against this tree. Two of them — the Scala and browser case
+counts — move on almost every commit, which is why the column is dated rather than maintained; the
+rest move only when the shape of the build does.
+
+| Gate | What it checks | Size, measured 2026-09-12 |
 | --- | --- | --- |
 | `./mill __.compile` | Scala compilation under `-Werror` | 8251/8251 build tasks over 1,145 Scala sources |
-| `./scripts/run-tests.sh` | every Scala suite | **4,310 cases over 81 modules**, all 81 carrying tests |
+| `./scripts/run-tests.sh` | every Scala suite | **4,350 cases over 81 modules**, all 81 carrying tests |
 | `./mill checkArchitecture` | the ADR-041 module dependency direction | **195 modules**, 10 rules |
 | `./mill __.checkFormat` | Scalafmt | **495/495 over 1,145 sources across 162 reporting targets** |
 | `./mill __.fix --check` | Scalafix, including the stricter no-`var` rule set for `libs` and every `domain` | **10672/10672 over the same 1,145 sources — every test tree included**, with `.scalafix-tests.conf` relaxing four sub-rules for `test/src` only |
-| `./mill __.openApiCheck` | the committed OpenAPI documents against a fresh render | 11 documents over 10 targets; the merged one is 65 paths, 76 operations, 160 schemas |
-| `pnpm test` | the browser suites | **1,908 cases** |
+| `./mill __.openApiCheck` | the committed OpenAPI documents against a fresh render | 2544/2544 tasks over eleven committed documents and ten `openApiCheck` targets; the merged document's own size is in the checked block above |
+| `pnpm test` | the component and unit suites | **1,933 cases over 83 files** |
 | `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | 425 files over 11 packages; 790 stories × 2 themes |
-| `pnpm e2e` | Playwright against a quickstart built from the tree | 105 passed, 3 skipped, 0 failed |
-| `./scripts/feature-matrix-check.sh` | every count and every service claim this repository publishes about itself | **390 claims over nine sections** |
+| `pnpm e2e` | Playwright against a quickstart built from the tree | 106 passed, 3 skipped, 0 failed |
+| `./scripts/feature-matrix-check.sh` | every count and every service sentence this repository publishes about itself | in the checked block above, because this is the one gate that can read its own size |
 
 **The `__.fix --check` row carried a clause that was false when it was read again.** It said *5353
 sources — and no test source anywhere*. Wave 9 widened both style gates to every test tree: 81
@@ -188,13 +217,20 @@ comparator is driven into both of its states before a document is read, and a wh
 each of its refusals over a fixture built for the occasion, because a refusal whose failing case
 never arrives in this repository is a line nothing distinguishes from `true`.
 
-**And since 2026-09-11 it compares one thing that is not a figure.** Every gate in this list was
-green over a `README.md` whose *What is not built* section said *"No Kafka Connect, no ksqlDB"* —
-against a tree that ships both services and routes both through the gateway — because the false
-sentence sat outside every marker and nothing here read prose. The `capability-claims` section
-compares the service roster that README publishes against `services/` on disk and against
+**And it compares two things that are not figures.** Every gate in this list was once green over a
+`README.md` whose *What is not built* section said *"No Kafka Connect, no ksqlDB"* — against a tree
+that ships both services and routes both through the gateway — because the false sentence sat
+outside every marker and nothing here read prose. The `capability-claims` section compares the
+service roster that README publishes against `services/` on disk and against
 `ServiceContracts.byService`, in both directions: a service named as not built that is built fails,
-and so does a service on disk the page does not mention at all.
+and so does a service on disk the page does not mention at all. Since 2026-09-12 it also reads the
+**sentences** around those lists: inside a checked block a service's state is stated in the three
+labelled lists, where it is compared, or it is not stated there at all, and a sentence that names
+`connect` or `ksql` — or any service by its backticked id — beside a negation is refused with the
+identity printed. That rule exists because the original sentence was appended, unchanged, inside
+the very block built to refuse it on 2026-09-12 and the run printed `404 claims checked, all true`.
+Its limit is stated where it is implemented: prose that names a service only by an ordinary noun
+this documentation uses for Kafka's own concepts is deliberately invisible to it.
 
 ---
 

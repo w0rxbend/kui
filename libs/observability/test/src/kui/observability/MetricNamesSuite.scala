@@ -6,9 +6,18 @@ import munit.FunSuite
 
 /** That the metric names in the code are the ones the documentation promises.
   *
-  * This suite is the contract between `ARCHITECTURE.md` §13 and what KUI actually emits. The expected list
-  * below is written out in full rather than derived from `MetricNames.all`, which is the entire point: a name
-  * that changes has to be changed in two places, and the second place is a test whose diff a reviewer reads.
+  * The expected list below is written out in full rather than derived from `MetricNames.all`, which is the
+  * entire point: a name that changes has to be changed in two places, and the second place is a test whose
+  * diff a reviewer reads.
+  *
+  * ==What this suite actually reads, because the operator page used to overstate it==
+  *
+  * Two counterparties, and `ARCHITECTURE.md` is neither of them. The list `expected` holds is *copied from*
+  * PLAN §30 and `ARCHITECTURE.md` §13 by hand; nothing here opens either file, so a §13 edit on its own
+  * breaks nothing. What is read from disk is `docs/operations/observability.md`'s metric table (since wave
+  * 10) and `MetricNames.scala`'s own declarations (since wave 11). `observability.md:76-78` claimed the first
+  * sentence as if it were the second; it is corrected there and stated here so the two cannot drift apart
+  * again.
   */
 final class MetricNamesSuite extends FunSuite {
 
@@ -29,6 +38,7 @@ final class MetricNamesSuite extends FunSuite {
     "kui.cursor.rejected",
     "kui.principal.rejected",
     "kui.config.version",
+    "kui.gateway.aggregation.section",
     "kui.cluster.profile.fetch",
     "kui.cluster.profile.subscribed",
     // M3: the serde layer, the smart filters and the masking engine
@@ -80,7 +90,7 @@ final class MetricNamesSuite extends FunSuite {
     val table = documentedMetricNames
 
     assertEquals(
-      table.diff(MetricNames.all).filterNot(_ == EmittedButUnpinned),
+      table.diff(MetricNames.all),
       Nil,
       "docs/operations/observability.md documents a metric this build does not declare in MetricNames"
     )
@@ -89,12 +99,34 @@ final class MetricNamesSuite extends FunSuite {
       Nil,
       "this build declares a metric docs/operations/observability.md's table does not name"
     )
-    // The one documented exception, asserted rather than silently tolerated: the row says in its own words
-    // that this series is emitted and is not in `MetricNames.all`. If it is ever added there, the filter
-    // above stops being needed and this line is what says so.
+  }
+
+  test("no metric name is declared and then left out of the list every gate reads") {
+    // W10-04/F-carry-over, closed here. `kui.gateway.aggregation.section` was declared at
+    // `MetricNames.scala:42`, emitted at `TopicOverviewUseCase.scala:230` and absent from `all` — so this
+    // process emitted twenty-seven series while every gate that reads `all` pinned twenty-six, and the
+    // suite above tolerated the gap through a named exception. A name outside `all` is a name a rename
+    // cannot break, which is the one failure this whole file exists to prevent.
+    //
+    // Read off the declarations rather than off `all`, because reading `all` is what the previous version
+    // of this file did and it agrees with whatever it is given. `MetricNames.scala` is the source of
+    // truth for what is declared; `all` is a hand-maintained list beside it, and a hand-maintained list
+    // is exactly the thing that drifts.
+    val declared = declaredMetricNames
+
     assert(
-      table.contains(EmittedButUnpinned) && !MetricNames.all.contains(EmittedButUnpinned),
-      s"observability.md's exception for $EmittedButUnpinned no longer matches MetricNames.all"
+      declared.sizeIs > 20,
+      s"MetricNames.scala read as ${declared.size} declarations: $declared"
+    )
+    assertEquals(
+      declared.diff(MetricNames.all),
+      Nil,
+      "MetricNames declares a metric name that MetricNames.all does not carry, so nothing pins it"
+    )
+    assertEquals(
+      MetricNames.all.diff(declared),
+      Nil,
+      "MetricNames.all carries a name that is not declared as a constant above it"
     )
   }
 
@@ -122,8 +154,28 @@ final class MetricNamesSuite extends FunSuite {
     assertEquals(UpstreamOutcome.ofStatus(503), UpstreamOutcome.ServerError)
   }
 
-  /** The series `observability.md` documents as emitted and deliberately absent from `MetricNames.all`. */
-  private val EmittedButUnpinned: String = "kui.gateway.aggregation.section"
+  /** Every `kui.` metric name declared as a constant in `MetricNames.scala`, read off the source.
+    *
+    * Anchored on the assignment, `val <Name>: String = "kui...."`, which is the shape of every metric
+    * declaration in that file and of nothing else in it: the attribute keys next door are bare words
+    * (`"service"`, `"route"`), and the `UpstreamOutcome` wire strings are underscored and un-dotted.
+    *
+    * READ OVER THE FILE WITH ITS WHITESPACE FLATTENED, AND NOT LINE BY LINE. The line-anchored version of
+    * this reader missed any declaration `scalafmt` wraps -- which is the shape the formatter itself produces
+    * past `maxColumn = 110`, so it is not a hypothetical. Measured and filed as W11-05/V-2: a constant
+    * declared over two lines and left out of `all` left this case, `observability.md`'s table check and
+    * `libs.observability.checkFormat` all green at 453/453, which is the exact hole the case exists to close
+    * surviving in the shape the formatter forces. A digit in the val name -- the second half of the same miss
+    * -- is allowed here for the same reason.
+    */
+  private def declaredMetricNames: List[String] = {
+    val source = Files
+      .readString(resolve("libs/observability/src/kui/observability/MetricNames.scala"))
+      .replaceAll("\\s+", " ")
+    val declaration = "val [A-Za-z0-9]+: String = \"(kui\\.[a-z0-9.]+)\"".r
+
+    declaration.findAllMatchIn(source).map(_.group(1)).toList
+  }
 
   /** Every metric named in the first column of `observability.md`'s metric table, in the order printed.
     *

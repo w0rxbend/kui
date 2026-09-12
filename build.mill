@@ -11,7 +11,7 @@ import com.goyeau.mill.scalafix.ScalafixModule
 import mill.contrib.docker.DockerModule
 
 // Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
-import kui.build.{ArchitectureRules, BuildFacts, ModuleFacts}
+import kui.build.{ArchitectureRules, BuildFacts, ForkedDocumentRun, ModuleFacts}
 
 /** Every third-party version KUI pins, in one place.
   *
@@ -130,6 +130,13 @@ trait KuiJvmModule extends KuiModule {
     *
     * `check = false` is the whole mechanism: it is what makes the non-zero exit a value this task
     * can read the streams beside, rather than an exception thrown before it gets the chance.
+    *
+    * THE DECISION ITSELF IS NOT HERE. `ForkedDocumentRun.decide` holds it, in `build-tests/src`,
+    * and `build-tests.test` cases its three branches. This file is outside `__.checkFormat`,
+    * outside `__.fix` and outside every test module (TD-036), and W10-05's verifier measured what
+    * that costs: changing the failure below to a log line left `services.topic.api.openApiCheck`
+    * reporting 629/629 SUCCESS over a genuinely stale committed document. What is left here is the
+    * fork, which is the part a suite cannot arrange.
     */
   def runDocumentMain(mainClass: String, args: String*): Task[Unit] = Task.Anon {
     val ran = mill.util.Jvm.callProcess(
@@ -145,21 +152,12 @@ trait KuiJvmModule extends KuiModule {
       check = false
     )
 
-    val said = Seq(ran.out.text().trim, ran.err.text().trim).filter(_.nonEmpty).mkString("\n")
-
-    if (ran.exitCode == 0) {
+    ForkedDocumentRun.decide(mainClass, ran.exitCode, ran.out.text(), ran.err.text()) match {
       // The generators are quiet on success, so this is usually nothing. It is forwarded anyway:
       // a warning printed by a run that still exited 0 is exactly the kind of thing that goes
       // unread for three waves.
-      if (said.nonEmpty) Task.log.info(said)
-    } else if (said.isEmpty) {
-      Task.fail(
-        s"$mainClass exited ${ran.exitCode} and printed nothing on stdout or stderr.\n" +
-          "The fork died before it reached `main`, so this is not a stale document: re-run this\n" +
-          "one module on an unloaded machine before touching any openapi.json."
-      )
-    } else {
-      Task.fail(s"$mainClass exited ${ran.exitCode}:\n$said")
+      case Right(said) => said.foreach(Task.log.info)
+      case Left(finding) => Task.fail(finding)
     }
   }
 }
@@ -876,7 +874,12 @@ object frontend extends Module {
     (mill.api.BuildCtx.workspaceRoot / "frontend" / "packages" / "api" / "src" / "constants.generated.ts").toString
 
   def apiConstants(args: String*): Command[Unit] = Task.Command {
-    tools.errorCodes.runMain("kui.tools.BrowserConstantsMain", (apiConstantsTarget +: args)*)()
+    // `runDocumentMain` and not `runMain`, for the reason its own scaladoc gives -- and this is the
+    // call site that reason was measured on. `.github/workflows/ci.yml` runs this task on every
+    // push, so the failure shape `runMain` produces, a bare `Subprocess failed` with no exit code
+    // and no stderr, is the one a contributor meets most often and the one that costs an hour to
+    // tell apart from a genuinely stale `constants.generated.ts`.
+    tools.errorCodes.runDocumentMain("kui.tools.BrowserConstantsMain", (apiConstantsTarget +: args)*)()
   }
 }
 
@@ -3291,7 +3294,14 @@ object services extends Module {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
-          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time, declared by W11-A1 in its first hour and landed here (house rule 15).
+          // `KsqlCredentials` replaces an OAuth token a `RefreshMargin` BEFORE its stated expiry so
+          // that no request is ever made with a token that dies in flight. That margin is thirty
+          // seconds of wall clock: a suite that proved it by sleeping would take half a minute and
+          // still be a race, and the mutation that deletes the margin is green without a clock to
+          // read it against.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
         )
       }
     }
@@ -4187,9 +4197,11 @@ object docs extends Module {
     (mill.api.BuildCtx.workspaceRoot / "docs" / "api" / "error-codes.md").toString
 
   def errorCodes(args: String*): Command[Unit] = Task.Command {
-    // `runMain` and not `run`: the module now holds two `main` methods (the Markdown table and the
-    // browser's TypeScript constants), so the class to run has to be named.
-    tools.errorCodes.runMain("kui.tools.ErrorCodeDocMain", (errorCodesTarget +: args)*)()
+    // Named and not `run`: the module holds two `main` methods (the Markdown table and the
+    // browser's TypeScript constants), so the class to run has to be named. `runDocumentMain` and
+    // not `runMain` for the third fact the task can report -- a fork that died before `main` --
+    // which `runMain` renders identically to a stale committed table.
+    tools.errorCodes.runDocumentMain("kui.tools.ErrorCodeDocMain", (errorCodesTarget +: args)*)()
   }
 }
 

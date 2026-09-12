@@ -580,6 +580,14 @@ export function App() {
           onCreateTopic={() => {
             // No cluster, no topic list to send anybody to. The dashboard's own empty state is
             // where that case is explained; a button that navigates nowhere is not.
+            //
+            // This guard is no longer the *only* thing keeping that rule. It used to be, and it
+            // was not enough: the button stayed enabled and drew a primary affordance whose press
+            // reached here and returned, so the screen offered an action it could not perform.
+            // `CreateTopicAction` now disables it with the reason. The guard stays because it is
+            // the honest behaviour for a handler that can be called with no cluster — a press
+            // swallowed by `aria-disabled` is a browser promise, not a program invariant — and
+            // because a second caller would otherwise inherit the old defect.
             const chosen = clusterForFrame();
             if (chosen !== undefined) navigate(paths.topics(chosen), AlreadyPrefixed);
           }}

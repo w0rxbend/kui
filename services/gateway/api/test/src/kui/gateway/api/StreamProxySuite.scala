@@ -290,11 +290,30 @@ final class StreamProxySuite extends CatsEffectSuite {
     // The detection reads bytes as they pass. A chunk boundary inside `event: done` must not hide it — which
     // would append a second terminal event and break the browser's "exactly one" assumption.
     //
-    // **This case does not reach the carry, and that is stated rather than implied.** It feeds `chunkLimit(1)`
-    // into `withTerminalEvent`, and `relay`'s bounded queue puts the pieces back together before `observe`
-    // runs: measured, the watch sees whole frames here however finely the source is chopped. What this holds
-    // is the end-to-end property — one terminal event out, no second one appended — for a source that
-    // produces tiny chunks. The two cases below hold the carry itself, at the level the split survives to.
+    // **This case USUALLY does not reach the carry, and "usually" is the corrected word.** It feeds
+    // `chunkLimit(1)` into `withTerminalEvent`; `relay`'s bounded queue normally puts the pieces back
+    // together before `observe` runs, and W10-06 wrote here — and `StreamProxy.scala:124-133` still writes,
+    // as a production scaladoc and as fact — that "measured, the watch sees whole frames here however
+    // finely the source is chopped". **That sentence is not true**, and W11-A2 was asked to settle it.
+    //
+    // Measured on 2026-09-12, four consecutive `./mill --no-daemon services.gateway.api.test` runs with
+    // `(pieces.last, pieces.init)` -> `(Vector.empty, pieces.init)` in `TerminalWatch.observe` and nothing
+    // else changed:
+    //
+    //   run 1   theTailOfAChunkIsCarriedIntoTheNextOne red;  THIS CASE GREEN
+    //   run 2   both red — this case failed on `List(message)` against `List(message, done)`
+    //   run 3   the tail case red;  this case green
+    //   run 4   the tail case red;  this case green
+    //
+    // One run in four. `relay`'s queue is a `Queue.bounded` drained by a second fibre, so how many source
+    // chunks are coalesced into one dequeued chunk depends on how the two fibres interleave — it is a
+    // scheduling outcome, not a property. So this case is honest about what it holds and only that: the
+    // end-to-end property — one terminal event out, no second one appended — for a source that produces
+    // tiny chunks. It is NOT a gate on the carry, and it must never be counted as one; on the runs where
+    // the split does survive to `observe` it becomes a second, non-deterministic reading of the two cases
+    // below, which is worth less than nothing because a gate that fires a quarter of the time reads as a
+    // flake and gets quarantined. The two cases below hold the carry itself, deterministically, at the
+    // level the split always survives to.
     val complete = render(List(messageEvent(1), SseEvent.done(DoneReason.Limit, Some("cursor-9"))))
       .chunkLimit(1)
       .flatMap(Stream.chunk)

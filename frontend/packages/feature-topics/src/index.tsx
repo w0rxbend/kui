@@ -15,6 +15,10 @@ export {
   TopicListPage,
   isServerFacet,
   matchCount,
+  /* The kernel's `formatBytes`, which this package used to have a second implementation of. It
+     stays on the public surface because this package's own tests and four of its components import
+     it from here, and one name reaching one function is the whole of the repair — but anything
+     outside this package should import it from `@kui/kernel`, which is where it lives. */
   formatBytes,
   type TopicListPageProps,
   type TopicListQuery,

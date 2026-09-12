@@ -82,6 +82,22 @@ final class PasswordRulesSuite extends KuiSuite {
     assert(PasswordRules.check(Secret("a" * (PasswordRules.MaximumLength + 1))).isLeft)
   }
 
+  test("the upper bound is an absolute number of characters, not whatever the constant happens to say") {
+    // W11-A1: the case above is written against `MaximumLength` itself, so raising the constant to 64 MiB
+    // keeps it green — the assertion compares the product against itself and can never fail. The bound is
+    // a denial-of-service bound: PBKDF2 spends real time per byte, the endpoint is reachable without a
+    // session, and "whatever is configured" is not a defence. Eight kilobytes is already far past any
+    // passphrase a person types, so a deployment that needs more has a different problem.
+    assert(
+      PasswordRules.check(Secret("a" * 8192)).isLeft,
+      s"an 8 KiB password was accepted; MaximumLength is ${PasswordRules.MaximumLength}"
+    )
+    assert(
+      PasswordRules.MaximumLength <= 8192,
+      s"MaximumLength is ${PasswordRules.MaximumLength}, which is a key derivation function's problem"
+    )
+  }
+
   test("there is no composition rule, deliberately") {
     // A long passphrase with no digit and no symbol is exactly what SP 800-63B asks for, and a rule that
     // refused it would be pushing people back towards `Password1!`.

@@ -1243,6 +1243,65 @@ describe("the frame, given a cluster in the address", () => {
 
     app.dispose();
   });
+
+  /**
+   * The same button on the address that names no cluster, pressed.
+   *
+   * Filed as W11-04/U2 by that packet's verifier: `App.tsx`'s handler guards on
+   * `chosen !== undefined` and nothing held the guard — `navigate(paths.topics(chosen ?? ""))` left all
+   * 557 shell cases green. Measured here before this case was written, and the finding is argued down
+   * rather than closed by it, because the algebra says the mutant is **equivalent today**:
+   * `CreateTopicAction` marks the button `aria-disabled` whenever `params.clusterId ?? kui.cluster()`
+   * is undefined, `kui.cluster()` IS `clusterForFrame()` (App.tsx:371) and `params.clusterId` is
+   * `routeCluster()` by another name, so the button is inert on exactly the addresses the guard
+   * refuses, and `Button` swallows an inert press before the handler runs. The guard is unreachable —
+   * by accident of there being one caller, not by construction.
+   *
+   * So this is the case that makes the accident stay visible, in the shape wave 11 asks for. It is the
+   * only place in the repository that presses this button at `/ui` through the composition root:
+   * `overview.render.test.tsx` mounts `Overview` directly and deliberately passes no `onCreateTopic`,
+   * so nothing asserted that the ROUTE hands the component a cluster of `undefined` here. Enabling the
+   * button — restoring the defect wave 11's W11-04 came to repair — reddens this and not that.
+   *
+   * Measured, three ways, on 2026-09-12:
+   *
+   *   guard removed, disablement kept      this case GREEN -- the mutant is equivalent, as argued above
+   *   disablement removed, guard kept      RED on `aria-disabled` alone; the address stayed `/ui`,
+   *                                        which is the guard doing the work the button stopped doing
+   *   both removed                         RED twice, the second on `/ui/clusters//topics`
+   *
+   * Two guards on one rule, and this is the only case that sees them as one rule.
+   */
+  it("presses `Create topic` on the address that names no cluster and goes nowhere", async () => {
+    // The selection is persisted, and the cases above have been choosing clusters. `/ui` recovers the
+    // stored one, so a case about "no cluster" has to start from a browser that has never chosen.
+    window.localStorage.clear();
+    window.history.replaceState({}, "", "/ui");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+
+    const create = [...app.host.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+      button.textContent?.includes("Create topic"),
+    );
+    expect(create, "the dashboard draws no Create topic action at all on /ui").toBeDefined();
+    // `soft`, so that the press below is still made and reported when this half fails: the two halves
+    // are two different guards on one rule, and a run that stopped here would say nothing about
+    // whether the address moved.
+    expect
+      .soft(
+        create!.getAttribute("aria-disabled"),
+        "the root dashboard offers an enabled primary action it cannot perform",
+      )
+      .toBe("true");
+
+    create!.click();
+    await settled();
+
+    expect(window.location.pathname).toBe("/ui");
+
+    app.dispose();
+  });
 });
 
 /**

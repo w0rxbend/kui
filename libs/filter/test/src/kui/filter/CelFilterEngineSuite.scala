@@ -215,21 +215,43 @@ final class CelFilterEngineSuite extends KuiIOSuite {
   }
 
   test("an evaluation that outruns the deadline is a Timeout, not a hang") {
-    // A one-nanosecond deadline is the honest way to assert the deadline exists without depending on how
-    // long a real program takes on the machine running the suite.
-    val limits = FilterLimits.default.copy(evaluationDeadline = 1.nanosecond)
-    engine(limits).use { port =>
-      for {
-        id <- orFail(port.register("record.partition == 3"))
-        predicate <- orFail(port.predicate(id, None))
-        result <- predicate.test(record)
-      } yield result match {
-        case Left(FilterError.Timeout(afterMs)) => assertEquals(afterMs, 0L)
-        // A trivial program can legitimately finish inside a one-nanosecond window on a fast machine after
-        // the JIT has warmed up, so a success is accepted; what must never happen is an exception escaping.
-        case Right(_) => ()
-        case Left(other) => fail(s"expected a timeout or a result, got $other")
+    // W11-A1: this case used to accept `Right(_)` as well as `Left(Timeout)` — "a trivial program can
+    // legitimately finish inside a one-nanosecond window" — which made it an assertion with no failing
+    // input at all. Deleting `.timeoutTo(limits.evaluationDeadline, ...)` from `CelFilterEngine` left both
+    // `libs.filter.test` (33 cases) and `services.message.__.test` (1,442 targets) green, and with it goes
+    // the whole per-record budget: `FilterError.Timeout` becomes unreachable, `consecutiveTimeoutLimit`
+    // becomes unreachable, and a browse spends its entire deadline inside one user's expression.
+    //
+    // The repair is to stop asking one evaluation to be slow and to ask a *population* instead. A
+    // one-nanosecond deadline cannot be met fifty times in a row by anything that has to cross the
+    // scheduler; a deadline that is not applied is met every time. Both directions are asserted, so a
+    // mutation that makes everything time out fails here too.
+    val instant = FilterLimits.default.copy(evaluationDeadline = 1.nanosecond)
+    val attempts = 50
+
+    def runAll(limits: FilterLimits): IO[List[Either[FilterError, Boolean]]] =
+      engine(limits).use { port =>
+        for {
+          id <- orFail(port.register("record.partition == 3"))
+          predicate <- orFail(port.predicate(id, None))
+          results <- List.fill(attempts)(()).traverse(_ => predicate.test(record))
+        } yield results
       }
+
+    for {
+      impatient <- runAll(instant)
+      patient <- runAll(generous)
+    } yield {
+      val timedOut = impatient.collect { case Left(FilterError.Timeout(afterMs)) => afterMs }
+      assert(
+        timedOut.nonEmpty,
+        s"no evaluation of $attempts hit a one-nanosecond deadline, so no deadline is being applied"
+      )
+      // The reported figure is the deadline itself, in milliseconds, because that is what reaches the
+      // browse's `done` event and the user's screen.
+      assert(timedOut.forall(_ == 0L), timedOut.toString)
+      // Nothing escapes as an exception, and nothing times out when there is time.
+      assertEquals(patient, List.fill(attempts)(Right(true)), "a generous deadline still refused a record")
     }
   }
 

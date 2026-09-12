@@ -151,10 +151,28 @@ export function relativeTime(timestamp: string, now: number): string {
  *
  * `999.96` bytes is below the threshold and rounds to `1000.0` at one decimal, which prints a
  * four-digit figure under a unit that has three. The loop promotes at the value that *rounds* to
- * the next unit instead, so the printed figure is always in `[0, 1000)`.
+ * the next unit instead, so the printed figure is in `[0, 1000)` **at every unit below the last
+ * one**.
+ *
+ * ## Why that sentence is scoped, and what the last unit does
+ *
+ * It used to read *"always in `[0, 1000)`"*, with no qualifier, over a ladder that stopped at `TB`
+ * — so `formatBytes(1.5e15)` printed `1500.0 TB`, a four-digit figure under a three-digit unit,
+ * which is the exact defect the threshold above exists to remove. A petabyte is an ordinary size
+ * for a Kafka cluster's retained log, so that was not a corner: it was the shipped answer for a
+ * plausible number, and the header promised the opposite of it for a wave.
+ *
+ * The ladder now ends at `PB` — the same ceiling `feature-topics` had chosen independently, which
+ * is why this function is now the only one — and the loop still stops there rather than dividing
+ * past it. So `formatBytes(1.5e18)` prints `1500.0 PB` and the qualifier above is doing real work.
+ * That saturating spelling is deliberate and is the least wrong of the three options: dividing off
+ * the end of the table prints `1.5 B` for 1.5 exabytes, which is wrong by eighteen orders of
+ * magnitude and reads as perfectly ordinary; clamping invents a ceiling the cluster does not have;
+ * and adding `EB` moves this same seam one unit up without removing it. A figure that reads as
+ * implausible is the right rendering of an implausible figure.
  */
 export function formatBytes(bytes: number): string {
-  const units = ["B", "kB", "MB", "GB", "TB"] as const;
+  const units = ["B", "kB", "MB", "GB", "TB", "PB"] as const;
   let value = Math.max(0, bytes);
   let unit = 0;
   while (value >= 999.95 && unit < units.length - 1) {

@@ -19,7 +19,7 @@ dropped silently.
 - **Owner** — the backend bounded context (short names: `gateway`, `cluster`,
   `topic`, `message`, `consumer`, `schema`, `connect`, `ksql`, `security`, `identity`,
   `metrics`, `config`). `—` means frontend-only.
-<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: package-count, package-roster, residue -->
+<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: package-count, package-roster, residue, capability-prose -->
 - **MFE** — the frontend package that owns the screen, named without its `@kui/` scope
   (`shell`, `kernel`, `feature-alerts`, `feature-clusters`, `feature-topics`, `feature-messages`,
   `feature-consumers`, `feature-schemas`, `feature-connect`, `feature-ksql`,
@@ -85,18 +85,21 @@ The recurring failure this project keeps repeating has a name in these notes: **
 component that is built, tested, green and wired into nothing. `MS-007` (the CEL filter engine),
 `ET-001` (event tracking), `CL-012` (the KRaft quorum), `MS-004` (the JSON flattener), `SD-003`
 (serde resolution) and `CL-006`'s connectivity probe are all in that state today. **`DM-001` (the
-masking engine) left it in wave 9** and is the one worked example of a row moving off this list: it
-gained callers in `BrowseUseCase` and `TrackUseCase` and a configuration section that decodes ten
-keys, and it is still not `COMPLETE`, because no deployment configures a rule — which is the
-difference between *wired* and *reachable*, and it is worth keeping the distinction in the one row
-that has crossed the first line and not the second. The rest are marked `IMPLEMENTING`, never
-`COMPLETE`, because what they need is wiring rather than a new implementation.
+masking engine) left it in wave 9 and reached `COMPLETE` at the wave-10 close**, and it is the one
+worked example in this file of a row walking the whole distance: it gained callers in
+`BrowseUseCase` and `TrackUseCase`, then a configuration section that decodes ten keys, then a
+shipped rule in `deployment/quickstart/kui-quickstart.yaml`, then an operator page, and finally the
+thing this file has always required last — a person watching a field come back masked in a browser
+against a running stack. The row's own cell carries that record. The rest are marked
+`IMPLEMENTING`, never `COMPLETE`, because what they need is wiring rather than a new
+implementation.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, out-of-scope-rows, in-scope-delivered, delivered-percent, residue -->
-**Counts as of the 2026-09-11 wave-8 recount** (189 capability rows): 70 `COMPLETE`, 18 `REVIEW`,
-7 `TESTING`, 8 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 72 `RESEARCHING` (not started),
+**Counts as of the 2026-09-12 recount** (189 capability rows): 71 `COMPLETE`, 18 `REVIEW`,
+7 `TESTING`, 7 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 72 `RESEARCHING` (not started),
 7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. Excluding the 11 deferred and rejected rows,
-**70 of 178 in-scope capabilities are delivered — 39%**.
+**71 of 178 in-scope capabilities are delivered — 40%**. One row moved since the last count: the
+config-driven masking row, whose last clause was discharged at the wave-10 close.
 <!-- /checked -->
 
 These are what `./scripts/feature-matrix-check.sh` recounts out of the rows, and it fails the build
@@ -373,7 +376,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| DM-001 | Config-driven masking (`REMOVE` / `MASK` / `REPLACE`, field paths, topic patterns) | Kafbat, Provectus | P1 | message | — | M3 | M | IMPLEMENTING | Audited 2026-09-04 and **re-audited 2026-09-11**, when two of the three clauses this row carried stopped being true and nobody had moved it. It said `MaskingEngine` and `MaskingRule` were built and unit-tested **with no caller in any service** — `BrowseUseCase`, `TrackUseCase` and `MessageWiring` have called them since wave 9 — and that **there is no configuration that can define a rule** — `kui.clusters.<n>.masking` decodes ten keys into a `MaskingRule` at start-up, so a rule that cannot be built is a start-up error naming the key. The third clause — **`docs/operations/masking.md` does not exist** — was still true when this row was re-read, and stopped being true inside the same wave: that page exists, and `deployment/quickstart/kui-quickstart.yaml` now configures one rule, so the feature has a deployment a person can look at. **The row stays `IMPLEMENTING` on the one thing this file has always required and nobody has done: no person has watched a field come back masked in a browser against a running stack.** That is the standard at the top of this file, and it is the only clause left. |
+| DM-001 | Config-driven masking (`REMOVE` / `MASK` / `REPLACE`, field paths, topic patterns) | Kafbat, Provectus | P1 | message | — | M3 | M | COMPLETE | Audited 2026-09-04, **re-audited 2026-09-11** and **closed at the wave-10 close on 2026-09-12**, when two of the three clauses this row carried stopped being true and nobody had moved it. It said `MaskingEngine` and `MaskingRule` were built and unit-tested **with no caller in any service** — `BrowseUseCase`, `TrackUseCase` and `MessageWiring` have called them since wave 9 — and that **there is no configuration that can define a rule** — `kui.clusters.<n>.masking` decodes ten keys into a `MaskingRule` at start-up, so a rule that cannot be built is a start-up error naming the key. The third clause — **`docs/operations/masking.md` does not exist** — was still true when this row was re-read, and stopped being true inside the same wave: that page exists, and `deployment/quickstart/kui-quickstart.yaml` now configures one rule, so the feature has a deployment a person can look at. **That last clause was the only one left — *no person has watched a field come back masked in a browser against a running stack* — and it was discharged at the wave-10 close**, on the quickstart, by opening `/ui/clusters/quickstart/topics/customers.profiles/messages` and pressing **Read**: `{"customerId":"CUST-8812","name":"<redacted>","email":"***********************.com","tier":"gold","country":"PL","createdAt":"2025-09-11T22:50:12Z","marketingOptIn":true}`. `Marta Zielinska` and `marta.zielinska@example.com` — the seed record's real values, in `deployment/quickstart/seed/data/customers.profiles` — are **absent from the page**; the `mask` rule preserved the email's length and kept its four-character suffix, and the `replace` rule named itself rather than disguising itself. The row moves to `COMPLETE` on that, which is the standard at the top of this file and not a weaker one. **One caveat travels with it and is not a reason to hold the row:** `docs/operations/masking.md` publishes *"a masked value is never longer than the value it replaced"* as an invariant an operator is invited to rely on, and it holds for `mask` and not for `replace` — `MaskingEngine.scala:202` writes the replacement literal with no length bound. Scoping that sentence is `docs/operations/**`'s owner's, not this row's. |
 | DM-002 | UI-managed masking policies bound to user groups (`ALL` / `FIRST_5` / `LAST_5`) | Kouncil | P1 | message (apply) + identity (policy store) | feature-admin | M6 | L | RESEARCHING | Same engine as DM-001 with caller-group scoping (D-6). Needs identity, so M6 not M5. Stored under `masking/<clusterId>` in `__kui_config` (ADR-042, ADR-023). |
 
 ## Serdes (SD)
@@ -481,7 +484,7 @@ security research flagged.
 | KU-031 | Plugin SDK for third-party microfrontends (Option C, web-component boundary) | KUI-new | P2 | — | kernel, shell | M9 | XL | RESEARCHING | ADR after M8. |
 | KU-032 | Alerting on lag, offline partitions and capability transitions | KUI-new | P2 | metrics | feature-metrics | M9 | L | RESEARCHING | Research first. |
 | KU-033 | Fault-isolation E2E suite: for every service, stop its container and assert the shell, the other features and the fallback panels still work | KUI-new | P0 | e2e | — | M1 | M | REVIEW | Audited 2026-09-04, re-read 2026-09-06. **Corrected downward from COMPLETE.** The suite covers the cluster service only — 1 of 4 Kafka-facing services: `e2e/test/src/kui/e2e/ClusterServiceDownSuite.scala` is the only caller of the reusable `FaultIsolationScenario`. **The reason recorded here was wrong in two of its three parts.** `topic`, `message` and `consumer` each have a `Main.scala` under `services/<name>/app/` and each has a container image in `deployment/compose/docker-compose.yml`. Only *no client module* survives: `services/cluster/client` is the sole client module in the tree. The other half of this row's problem is that the suite lives in the Scala `e2e/` module, which no job in `.github/workflows/ci.yml` runs — the only `e2e` CI step is `pnpm e2e`, the TypeScript suite — so the one scenario that does exist is not a gate either. |
-| KU-034 | Cross-entity search at the gateway: one query folded over topics, groups and subjects, with `partial` naming any service that could not be asked | KUI-new | P1 | gateway | shell | M6 | M | COMPLETE | **Row added 2026-09-06: the capability shipped in wave 3 and had no row in this file at all**, which is the drift this matrix exists to catch — SF-001 is per-list substring search and SF-002 is the deferred Lucene index, and neither describes it. `GET /api/v1/search?q=` (ADR-049) asks the topic, consumer and schema services per cluster and answers `{results:{topics,groups,subjects}, partial:[serviceId]}`. A section that is `Stale` contributes its rows and is **not** named in `partial`; one that is `Unavailable`, `Forbidden` or `NotConfigured` names its service and contributes nothing; a deployment with no clusters at all is distinguishable from a search that matched nothing; and the per-kind `limit` is applied to the whole fold rather than per cluster. The shell's top-bar field is wired to it. Measured on the running quickstart 2026-09-06: `?q=orders` answers three topics and one subject with `"partial":[]`, and `frontend/e2e/search.spec.ts` drives five cases in a browser. **Gap:** `limit` is applied after the per-cluster results are concatenated in cluster-list order, so on a multi-cluster deployment a term with `limit` matches on the first cluster can leave the second cluster's matches unreachable |
+| KU-034 | Cross-entity search at the gateway: one query folded over topics, groups and subjects, with `partial` naming any service that could not be asked | KUI-new | P1 | gateway | shell | M6 | M | COMPLETE | **Row added 2026-09-06: the capability shipped in wave 3 and had no row in this file at all**, which is the drift this matrix exists to catch — SF-001 is per-list substring search and SF-002 is the deferred Lucene index, and neither describes it. `GET /api/v1/search?q=` (ADR-049) asks the topic, consumer and schema services per cluster and answers `{results:{topics,groups,subjects}, partial:[serviceId]}`. A section that is `Stale` contributes its rows and is **not** named in `partial`; one that is `Unavailable`, `Forbidden` or `NotConfigured` names its service and contributes nothing; a deployment with no clusters at all is distinguishable from a search that matched nothing; and the per-kind `limit` is applied to the whole fold rather than per cluster. The shell's top-bar field is wired to it. Measured on the running quickstart 2026-09-06: `?q=orders` answers three topics and one subject with `"partial":[]`. `frontend/e2e/search.spec.ts` drives **eight** cases in a browser — `grep -c 'test(' frontend/e2e/search.spec.ts`, answered on 2026-09-12; the cell said *five* for two waves after the file grew past it, which is why the command is written here beside the figure rather than the figure alone. **Gap:** `limit` is applied after the per-cluster results are concatenated in cluster-list order, so on a multi-cluster deployment a term with `limit` matches on the first cluster can leave the second cluster's matches unreachable |
 
 ## Decisions required
 
@@ -647,10 +650,15 @@ is the merged OpenAPI pair, which went from 61 paths, 72 operations and 156 sche
 `./scripts/feature-matrix-check.sh`.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, residue -->
-**A record of the wave-9 pass, 2026-09-11** (189 capability rows): 72 `RESEARCHING`, 70 `COMPLETE`,
-18 `REVIEW`, 7 `TESTING`, 8 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`,
-4 `REJECTED`, and no `BLOCKED` row — recounted here with the same awk over the State column that
-`./scripts/feature-matrix-check.sh` runs.
+**A second count, taken independently on 2026-09-12** (189 capability rows): 72 `RESEARCHING`,
+71 `COMPLETE`, 18 `REVIEW`, 7 `TESTING`, 7 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`,
+7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row — recounted here with the same awk over the State
+column that `./scripts/feature-matrix-check.sh` runs. **This block used to call itself a record of
+the wave-9 pass, and that was a claim it could not keep**: it sits inside a `checked: rows` marker,
+so the checker compares it against the table as it stands today and a row moving makes a *record of
+a past count* fail. It is what it can be — a second reading of the same column in the same run,
+which is the thing that catches a paragraph edited without the table. The wave-9 figures it used to
+carry are in the git history.
 <!-- /checked -->
 
 Every record above this one publishes the same ten figures outside every marker, and every one of
@@ -690,6 +698,17 @@ published**; it was taken for the first time on 2026-09-11 and is in
 is not copied here, because a table in two places drifts in one of them. What belongs here is the
 count, and the scope it is true under.
 
+**`docs/plan/verification/` is cited from files that outlive it, and this is the decision on that.**
+`docs/plan/README.md` says the directory is deleted when the plan closes. Three of its files are
+load-bearing references rather than a backlog: `W8-07.md` §1 holds the screen-to-case mapping this
+section refuses to duplicate; `W8-04.md` holds the Connect browser measurement `KC-001`'s cell
+cites; and `W9-03.md` is cited from inside `frontend/e2e/brokers.spec.ts` and
+`frontend/e2e/topics.spec.ts` as the record of what those two cases used to fail to assert.
+**Those three stay until the file that cites them stops citing them**, and deleting them without
+that is how a dangling reference is created — which is the drift this file exists to catch. The two
+e2e citations are not in this file's ownership; moving them is a change to the specs. Every other
+`W8-*` and `W9-*` report in that directory is discharged and cited by nothing.
+
 **23 of 23 covered**, re-counted on 2026-09-11 from the spec files on disk — and the count is over
 **screens**, which is the scope that matters and the reason it is not the same statement as *the
 suite is a gate*. A screen counts as covered when a browser case asserts the content that capture is
@@ -711,15 +730,29 @@ rather than by a spec:
   ksqlDB screen has four cases including *every stream and table the server named is a row, with its
   kind beside it*.
 
-**Three of the twenty-three covering cases do not discriminate, and the honest reading of the count
-needs that beside it.** `docs/plan/verification/` records that `brokers.spec.ts`'s second-cluster
-case cannot tell one cluster's brokers screen from the other's because both clusters sit on the same
-broker with identical summaries; that `search.spec.ts`'s empty-state arm never executes on any
-deployment this suite runs against, because every query answers with a partial section; and that
-`topics.spec.ts`'s bulk-bar count compares a number with itself. Each was proved green under a
-mutation. The screen is covered in every one of the three — a case does assert the content — and
-**the assertion is weaker than its own header claims**. Repairing them is wave 10's, and this
-paragraph is where the caveat lives until they are.
+**Three of the twenty-three covering cases did not discriminate. Two are repaired and the third is
+narrower than it was; this paragraph is the caveat, and it is now two thirds shorter than when it
+was written.** `docs/plan/verification/` recorded, each proved green under a mutation, that
+`brokers.spec.ts`'s second-cluster case could not tell one cluster's brokers screen from the other's
+because both clusters sat on the same broker with identical summaries; that `search.spec.ts`'s
+empty-state arm never executed on any deployment this suite runs against, because every query
+answers with a partial section; and that `topics.spec.ts`'s bulk-bar count compared a number with
+itself.
+
+* **The brokers case is repaired.** It starts on the first cluster's screen, switches with the
+  environment rail's tile and asserts the address and the identity of what is drawn, so a route
+  pinned to the first cluster's document reddens whatever the figures say. It **fails rather than
+  skips** on a one-cluster deployment, with the configuration key to fix in the message.
+* **The bulk-bar case is repaired**, and `topics.spec.ts` now also asserts the bar is absent at zero
+  selection rather than comparing a count with itself.
+* **The search arm is still a deployment fact rather than a defect, and it is now said out loud in
+  the one place a reader of a green run will see it.** `/api/v1/search` is global and this
+  deployment registers a cluster with no schema registry, so every query answers
+  `partial: ["schema"]` and the *everybody answered* arm cannot execute against this stack. The
+  honest empty state is driven by a separate case that rewrites `partial` and nothing else. The
+  branch prints its own "arm not exercised" line through `console.log` as well as pushing an
+  annotation, because `playwright.config.ts` selects the `list` reporter for every non-CI run and
+  `list` prints stdout and not annotations — so for two waves that warning reached nobody.
 
 **This count was not re-run against a stack here.** The specs were read on disk; the per-screen
 mapping was taken by W8-07 against a running stack. A reader who wants the number defended rather

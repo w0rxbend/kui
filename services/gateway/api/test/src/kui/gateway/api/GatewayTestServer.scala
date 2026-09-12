@@ -12,6 +12,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.config.{AuthConfig, GatewayConfig, ServerConfig}
 import kui.gateway.api.auth.SessionMiddleware
+import kui.gateway.application.client.ServiceClient
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionStore}
 import kui.http.health.ReadinessCheck
 import kui.http.{ErrorInterceptor, KuiServer}
@@ -51,6 +52,32 @@ object GatewayTestServer {
     def post(path: String, headers: Map[String, String] = Map.empty): IO[Response[String]] =
       request(basicRequest.post(at(path)), headers)
 
+    /** A `GET` that stops at the redirect instead of following it.
+      *
+      * [[get]] is built from `basicRequest`, which follows redirects by default — so a case written against
+      * [[get]] never sees a `302`, its `Location` or its `Set-Cookie`: it sees whatever is at the other end.
+      * The OpenID Connect callback is the one route in this gateway whose entire successful answer *is* a
+      * redirect, and a case asserting `302` through [[get]] silently asserts the static SPA fallback instead.
+      */
+    def getWithoutFollowing(
+        path: String,
+        headers: Map[String, String] = Map.empty
+    ): IO[Response[String]] =
+      request(basicRequest.get(at(path)).followRedirects(false), headers)
+
+    /** A `POST` carrying a JSON body, which is what every sign-in route takes.
+      *
+      * Separate from [[post]] rather than a defaulted parameter on it, so that the bodyless form keeps
+      * sending no `Content-Type` at all — three suites assert what the gateway does with a request that
+      * declares none, and a default would quietly give them one.
+      */
+    def postJson(
+        path: String,
+        body: String,
+        headers: Map[String, String] = Map.empty
+    ): IO[Response[String]] =
+      request(basicRequest.post(at(path)).body(body).contentType("application/json"), headers)
+
     private def request(
         builder: Request[Either[String, String]],
         headers: Map[String, String]
@@ -69,13 +96,26 @@ object GatewayTestServer {
   def resource(
       basePath: String = "/",
       extraRoutes: List[ServerEndpoint[Fs2Streams[IO], IO]] = Nil,
-      devInsecureCookies: Boolean = true
+      devInsecureCookies: Boolean = true,
+      // The identity service, when a case wants the sign-in routes to do something other than refuse.
+      //
+      // W10-A1 filed this as the seam it could not open: every suite in this tree built a gateway with
+      // `identity = None`, so `/auth/login` answered `KUI-UNSUPPORTED` before `signIn` ran, and the whole
+      // sign-in surface — the password-change path's deliberate absence of a new cookie, the OIDC
+      // callback's refusal of a `PasswordChangeRequired`, the "this deployment has no identity service"
+      // sentence — had no behavioural case at all. It is a parameter rather than a second constructor so
+      // that the twenty-nine suites that want no identity service keep getting one word: nothing.
+      identity: Option[ServiceClient[IO]] = None,
+      // Which kind of sign-in this deployment says it uses, for `/auth/settings` and `/auth/me`.
+      auth: AuthConfig = AuthConfig.Default,
+      rbac: RbacPolicy = RbacPolicy.Disabled
   ): Resource[IO, Running] =
     for {
       logger <- Resource.eval(FakeStructuredLogger[IO])
       sessions <- InMemorySessionStore.resource[IO](SessionConfig.Default)
       readiness = List(ReadinessCheck.always[IO]("process"))
-      routes = GatewayApi.routes[IO](configView(basePath), readiness, sessions, extraRoutes)
+      routes =
+        GatewayApi.routes[IO](configView(basePath, auth, rbac), readiness, sessions, extraRoutes, identity)
       interceptors = EdgeHeaders.interceptors[IO] ++
         SessionMiddleware.interceptors[IO](sessions, logger, basePath, secureCookies = !devInsecureCookies) ++
         ErrorInterceptor.interceptors[IO](logger)
@@ -84,14 +124,23 @@ object GatewayTestServer {
       backend <- HttpClientFs2Backend.resource[IO]()
     } yield Running(binding, backend, logger, sessions)
 
-  /** The configuration the routes read: this deployment's server settings, and no upstream services. */
-  private def configView(basePath: String): GatewayServiceConfigView =
+  /** The configuration the routes read: this deployment's server settings, and no upstream services.
+    *
+    * `private[api]` rather than `private` so that a suite in this package can build the same view with a
+    * different `AuthConfig` — the sign-in routes answer `/auth/settings` out of it — without assembling the
+    * whole route list itself.
+    */
+  private[api] def configView(
+      basePath: String,
+      auth: AuthConfig = AuthConfig.Default,
+      rbac: RbacPolicy = RbacPolicy.Disabled
+  ): GatewayServiceConfigView =
     GatewayServiceConfigView(
       ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath),
       GatewayConfig.Default,
-      AuthConfig.Default,
+      auth,
       secureCookies = true,
-      RbacPolicy.Disabled
+      rbac
     )
 
   /** The telemetry a suite uses when it needs one at all: records nothing, costs nothing. */

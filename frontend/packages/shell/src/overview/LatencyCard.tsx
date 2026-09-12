@@ -24,6 +24,13 @@
  * the hidden data table, where a measured value prints its figure — and a fold that turned a null
  * into a zero would draw a broker that stopped answering as a broker answering instantly, which is
  * the most reassuring possible rendering of "we were not looking".
+ *
+ * That `—` is the half of the rule this card and the throughput card do **not** keep well, and the
+ * decision is written out once in `ThroughputCard.tsx`'s header: the hidden table is the screen
+ * reader's only copy, so the em dash in it is read aloud as punctuation where a sighted reader gets
+ * a visible gap and a caption counting the gaps in words. The repair is a spelling prop on the
+ * kernel's `ChartDataTable`, which this packet does not own; it is filed, and it is deliberately
+ * **not** the `aria-hidden` the original finding asked for.
  */
 
 import { Show, createMemo } from "solid-js";

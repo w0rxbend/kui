@@ -25,6 +25,33 @@
  * The first is `BarChart`'s and the other two are this file's. None of them survives a fold that
  * turns a null rate into a zero, which is what makes the rule gateable.
  *
+ * ## The dash in the hidden table, decided in the open rather than inherited again
+ *
+ * The hidden data table is where the first of those three rules lands, and there is a real defect
+ * in it that has been recorded against this card for two waves and charged to nobody. W10-01's
+ * verifier counted **1,144** bare `<td>—</td>` cells under `panel-throughput` and `panel-latency`
+ * on a running stack and filed them as carrying *"no `aria-hidden` and no visually-hidden
+ * alternative"*, beside `feature-topics`' own `Quantity`, which pairs its dash with the words *"not
+ * known"*.
+ *
+ * Read against the source — `ChartDataTable.tsx:45` prints `format.ts`'s `ABSENT` into each cell of
+ * a `<table class="kui-visually-hidden">` — the comparison with `Quantity` does not hold and the
+ * prescription in it is the wrong repair. `Quantity` draws a **visible** dash and hides a sentence
+ * beside it, so `aria-hidden` on the glyph is right: the words are the screen reader's copy. This
+ * table has no visible copy at all. It *is* the screen reader's copy, reached through the plot's
+ * `aria-describedby`, and clipped rather than `display: none` precisely so it stays in the
+ * accessibility tree. `aria-hidden` on those cells would delete the only rendering an unmeasured
+ * bucket has for the one audience that cannot see the gap in the bars.
+ *
+ * What is genuinely wrong is narrower and still worth fixing: a screen reader reading that cell
+ * announces an em dash, which readers voice as *"dash"* or as silence, where the sighted reader
+ * gets a gap they can see *and* a caption counting the gaps in words. The repair is for
+ * `ChartDataTable` to take the absent spelling as a prop — *"not measured"* in a table nobody looks
+ * at, the em dash everywhere a figure is being replaced on screen — and that is one change in
+ * `frontend/packages/kernel/src/components/charts/`, which this packet does not own. It is filed
+ * rather than done, and it is filed as this rather than as the `aria-hidden` the original finding
+ * asked for, because doing what that finding said would have made the page less accessible.
+ *
  * ## Why the header keeps its controls in every state
  *
  * `Card` renders `headerEnd` whatever the body is doing, and that is the behaviour this card wants:

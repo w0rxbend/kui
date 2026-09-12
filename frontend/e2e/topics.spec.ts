@@ -421,6 +421,15 @@ test.describe("the topics list's chips and selection", () => {
      * reading "0 topics selected", is what that leaves room for. `toHaveCount(0)` rather than
      * `not.toBeVisible()`: a bar that is merely invisible still swallows the clicks meant for the
      * row underneath it.
+     *
+     * **And it has now been watched failing, which W10-A2 said plainly it had not done.** W11-02
+     * substituted `BulkActionBar`'s guard in the bundle on its way to the browser —
+     * `<Show when={props.count > 0}>` compiled to `get when(){return e.count>0}`, served as
+     * `e.count>=0` — and this line reported `Expected: 0, Received: 1` after resolving to one
+     * element 34 times. The unit case beside it (`surfaces.test.tsx`, "renders nothing at all at
+     * zero selection") holds the same rule one layer down and is the cheaper of the two; what it
+     * cannot see is `TopicListPage` handing the bar a count, which is the half that made the strip
+     * appear over a real list here.
      */
     const bulkBar = page.getByTestId("topic-bulk-bar");
     await expect(bulkBar).toHaveCount(0);

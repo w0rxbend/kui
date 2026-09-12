@@ -5,6 +5,29 @@
     "types": ["node"],
     // Playwright's own runner compiles these; nothing here is part of the browser bundle, so it has
     // no project reference to the packages and is not built by `tsc -b packages/*`.
+    //
+    // `composite: false` is why this project cannot be a reference from `../tsconfig.json`: the
+    // solution file's `tsc --build` refuses a referenced project that does not emit declarations,
+    // and making it emit them would mean writing `.d.ts` files for a directory nothing imports
+    // (`wc -l frontend/e2e/*.ts`, **5,169** on 2026-09-12 — the command is written here beside the
+    // figure because the one it replaced said 4,961 and had drifted by two hundred lines inside the
+    // wave that wrote it). So `pnpm typecheck` runs this project as a **second** `tsc` invocation
+    // instead — see `package.json`'s `typecheck` script, which is two commands for this reason and
+    // is the only place the arrangement is visible.
+    //
+    // Until wave 11 it was neither referenced nor invoked: `tsc --build` at the root checked ten
+    // packages and not this directory, `npx tsc --noEmit -p e2e/tsconfig.json` exited 0 and was
+    // run by nothing in the repository, and the browser suite — the largest single body of
+    // TypeScript outside `packages/` — was outside both type gates for eight waves.
+    //
+    // Proved in both directions on 2026-09-12, against this tree. Red: `const x: number = "not a
+    // number";` appended to `shell.spec.ts` makes `pnpm typecheck` exit 2 with
+    // `e2e/shell.spec.ts(561,7): error TS2322` — so the file is genuinely read, and `noUnusedLocals`
+    // fires on the same line. Green, and worth knowing before anybody calls this coverage:
+    // `getByTestId("notification-panel")` misspelled to `"notification-pane"` in the same file
+    // leaves it at exit 0. What this gate reads is the types; every selector, URL, API path and
+    // `as {...}` claim about the wire in this directory is a string to it, and only a run
+    // against a stack can tell whether one of them is true.
     "composite": false,
     "lib": ["ES2023", "DOM"]
   },

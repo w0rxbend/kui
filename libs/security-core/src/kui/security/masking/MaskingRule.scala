@@ -69,11 +69,20 @@ object MaskingKind {
   * reading. Per-group policies are DM-002 in M6, and adding the field now would ship an access control
   * nothing enforces, which is worse than not having one.
   *
-  * ## What it protects, exactly
+  * ## What it protects, exactly, and where the protection stops
   *
-  * A masked value is never *longer* than the value it replaced. That is a rule about a side channel: a mask
-  * that padded a four-digit field out to sixteen characters would announce that the field was not a card
-  * number, and a reader counting characters would learn something the mask was there to hide.
+  * A **`Mask`** never returns a value *longer* than the value it replaced, and `Remove` returns no value at
+  * all. That is a rule about a side channel: a mask that padded a four-digit field out to sixteen characters
+  * would announce that the field was not a card number, and a reader counting characters would learn
+  * something the mask was there to hide.
+  *
+  * **`Replace` is outside that rule and cannot be inside it.** `replacement` is a literal the operator wrote,
+  * and `MaskingEngine.maskLeaf` emits it verbatim with no length bound, so `"<redacted by policy>"` over a
+  * four-character field returns twenty-two characters. Truncating it to fit would make the one kind whose
+  * whole purpose is to say *why* a field is gone unreadable at exactly the moment it is read. The kind table
+  * above scopes the sentence to the `Mask` row for this reason; `docs/operations/masking.md` published it
+  * unscoped, with a security rationale attached, until wave 11, and this paragraph is what stops the two
+  * files from disagreeing again.
   */
 final case class MaskingRule(
     kind: MaskingKind,

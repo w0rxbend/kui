@@ -99,6 +99,7 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 | Cross-entity search over topics, consumer groups and subjects, from the top bar | done, and says which services it could not ask |
 | Quickstart, configuration examples, demonstration environment | done |
 
+<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: service-count, service-routed-count, service-state, service-roster, residue, capability-prose -->
 **What is not built:**
 
 - **Authentication and authorization ship disabled.** Both are built — form and OIDC sign-in, a
@@ -109,12 +110,14 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   KUI has not begun: no screen, no endpoint, no service. The roster below is what a reader should
   trust about that, because it is compared against the tree rather than written from memory.
 
-<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: service-count, service-routed-count, service-state, service-roster, residue -->
 KUI is **11 services** under `services/`, **9 of them routed** through the gateway. Every name below
 is compared against a directory on disk and against `ServiceContracts.byService` — the gateway's own
 map, and the single place that association is declared — so a sentence here that says a service is
 not built fails the build instead of misleading a reader for four milestones, which is what the
-sentence this block replaced did.
+sentence this block replaced did. The three lists are the only place inside these markers where a
+service's state may be stated: any other sentence that names one beside a negation is refused by
+`./scripts/feature-matrix-check.sh` with the name printed, because a claim it cannot compare is a
+claim it has to refuse.
 
 **Built and routed:** `alerts`, `cluster`, `connect`, `consumer`, `ksql`, `message`, `metrics`,
 `schema`, `topic`.
@@ -145,18 +148,21 @@ above is the whole of what does exist.
   than a failure. There is still no JMX client: `MetricsSourceKind.Jmx` is declared, refuses with a
   sentence naming the build, and cannot be configured at all while a metrics source's address is an
   `http`/`https` URL (ADR-050).
-- **Field masking is wired and not yet reachable by an operator.** The engine is called from the
-  browse and track paths, and `kui.clusters.<n>.masking` decodes ten keys into its own rule type at
-  start-up, so a rule an operator writes is a start-up error rather than a policy that loads and
-  masks nothing. The quickstart configures a rule, so there is a deployment to look at, and
-  `docs/operations/masking.md` is the key-by-key page. What is missing is the last step this project
-  requires before anything is called done: **nobody has watched a field come back masked in a
-  browser against a running stack.** It is `IMPLEMENTING` rather than `COMPLETE` in the feature
-  matrix for that reason and no other.
+- **Field masking is configured, applied and has been watched in a browser.** The engine is called
+  from the browse and track paths, and `kui.clusters.<n>.masking` decodes ten keys into its own rule
+  type at start-up, so a rule an operator writes is a start-up error rather than a policy that loads
+  and masks nothing. The quickstart configures a rule, `docs/operations/masking.md` is the
+  key-by-key page, and at the wave-10 close a person opened the seeded `customers.profiles` topic
+  in a browser and read back `"name":"<redacted>"` with the seed record's real values absent from
+  the page. That was the last step this project requires before anything is called done, so the row
+  is `COMPLETE` in the feature matrix, which records the record it was closed on. One sentence on
+  the operator page overstates what the engine guarantees — *a masked value is never longer than
+  the value it replaced* holds for the `mask` kind and not for `replace` — and that page is
+  repaired where it lives rather than here.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent, residue -->
-70 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
-delivered end to end — about 39%.
+71 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
+delivered end to end — about 40%.
 <!-- /checked -->
 
 That figure is recounted from the rows every time it is written down, never adjusted from the

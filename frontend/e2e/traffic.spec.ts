@@ -19,6 +19,7 @@
  * that a person can find the thing.
  */
 import { test, expect, CLUSTER, type KuiApi } from "./fixtures";
+import { STAT_TILES, theStatRowIsExactlyTheSixTiles } from "./statTiles";
 
 /** One bucket as the metrics service writes it. Every rate is nullable and null means unsampled. */
 interface WireBucket {
@@ -139,14 +140,25 @@ test.describe("the Traffic tab", () => {
   });
 
   test("carries the same stat cards as Overview, and its own last row", async ({ page }) => {
-    const cards = ["BROKERS ONLINE", "TOPICS", "PARTITIONS IN SYNC", "PRODUCTION", "CONSUME", "CONSUMER LAG"];
-
+    /* The roster is `e2e/statTiles.ts`'s, not a copy of it. This file kept its own list of the same
+       six tiles until wave 11 — labels here, testids in `shell.spec.ts` — which is two edits before
+       either browser case notices a renamed tile and no edit at all that would make one notice a
+       seventh. `theStatRowIsExactlyTheSixTiles` is the half that counts, and it is the one place
+       this file breaks its own header rule about `data-testid`: an *unknown* seventh tile has no
+       role and no text this file could name, so the census can only be taken over the class every
+       tile carries. The six that are known are still asserted by the word each one prints. */
     await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
-    for (const label of cards) await expect(page.getByText(label, { exact: true })).toBeVisible();
+    await theStatRowIsExactlyTheSixTiles(page);
+    for (const { label } of STAT_TILES) {
+      await expect(page.getByText(label, { exact: true })).toBeVisible();
+    }
 
     await page.goto(`/ui/clusters/${CLUSTER}/dashboard/traffic`);
     // §4.2: the tab changes the voice line, the last row and the address, and nothing else.
-    for (const label of cards) await expect(page.getByText(label, { exact: true })).toBeVisible();
+    await theStatRowIsExactlyTheSixTiles(page);
+    for (const { label } of STAT_TILES) {
+      await expect(page.getByText(label, { exact: true })).toBeVisible();
+    }
     await expect(page.getByRole("heading", { name: "Cluster overview" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Broker health" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Partition health" })).toBeVisible();

@@ -270,6 +270,11 @@ const STATS: Readonly<Record<StatId, { readonly head: StatHead; readonly questio
 const NO_CLUSTER_LEDE =
   "Nothing has been asked yet, because no cluster is selected. Pick one and this page fills in.";
 
+/** Why `Create topic` refuses on the address naming no cluster. See {@link CreateTopicAction}. */
+const NO_CLUSTER_CREATE_REASON =
+  "No cluster is selected, and a topic is created on a cluster. Choose one from the environment " +
+  "rail and this becomes available.";
+
 export function Overview(props: OverviewProps): JSX.Element {
   const params = useParams<{ readonly clusterId?: string; readonly tab?: string }>();
   const kui = useKui();
@@ -411,11 +416,7 @@ export function Overview(props: OverviewProps): JSX.Element {
             ? NO_CLUSTER_LEDE
             : ledeFor(tab(), props.model, throughput.state())
         }
-        actions={
-          <Button variant="primary" icon="plus" onClick={() => props.onCreateTopic?.()}>
-            Create topic
-          </Button>
-        }
+        actions={<CreateTopicAction cluster={cluster()} press={props.onCreateTopic} />}
         testId="overview-header"
       />
 
@@ -481,6 +482,53 @@ export function Overview(props: OverviewProps): JSX.Element {
         />
       </Show>
     </div>
+  );
+}
+
+/**
+ * The header's one action, and the rule it exists to keep.
+ *
+ * ## What was wrong with it
+ *
+ * `/ui` with no cluster drew this button **enabled**. Measured on the shipped stack with no
+ * mutation applied: `count 1, enabled true`; clicking it left the address at `/ui/` and opened
+ * **0** dialogs. The handler in `App.tsx` reads the selection, finds none and returns — and the
+ * comment beside that early return states the rule the button was breaking: *"a button that
+ * navigates nowhere is not"* honest. The repair that made the six tiles say what nobody had asked
+ * shipped, on the same screen and in the same wave, a control claiming an action it could not
+ * perform. A fabricated affordance is the same lie as a fabricated figure, one control over.
+ *
+ * ## Why disabled rather than removed or rewired
+ *
+ * Removed is worse: SPEC §4.13's rule, which `Button` enforces in its own type, is that an action
+ * the operator cannot take right now is *disabled with a reason*, never hidden — a hidden control
+ * makes somebody believe the product cannot do the thing at all. Rewired to open a chooser is worse
+ * too, and for the reason {@link NoClusterChosen} gives at length: the environment rail is already
+ * the product's cluster chooser, `ClusterSelector` is already a second one with zero production
+ * callers, and a third would be a third thing to keep in step with the roster. So it refuses, and
+ * the refusal names the rail — the same place the empty state below it names.
+ *
+ * ## Why one button whose disablement flips, rather than a `<Show>` over two
+ *
+ * `Button` deliberately keeps its tooltip wrapper mounted in both states rather than switching it
+ * in, because swapping a live node moves the element the operator may be pointing at or focused in.
+ * Two `<Button>`s under a `<Show>` would put that swap back one level up, so the disablement is a
+ * spread over one element instead.
+ */
+function CreateTopicAction(props: {
+  /** Which cluster this dashboard is about. `undefined` on exactly one address: `/ui` itself. */
+  readonly cluster: string | undefined;
+  readonly press: (() => void) | undefined;
+}): JSX.Element {
+  const disablement = (): { readonly disabled: true; readonly disabledReason: string } | object =>
+    props.cluster === undefined
+      ? { disabled: true, disabledReason: NO_CLUSTER_CREATE_REASON }
+      : {};
+
+  return (
+    <Button variant="primary" icon="plus" {...disablement()} onClick={() => props.press?.()}>
+      Create topic
+    </Button>
   );
 }
 
@@ -636,6 +684,101 @@ interface BodyProps {
 
 type BodyComponent = (props: BodyProps) => JSX.Element;
 
+/** What every one of the six tiles is handed, whether or not it reads all of it. */
+interface StatRowProps {
+  readonly model: OverviewModel;
+  readonly throughput: Fetched<ThroughputSeries>;
+  readonly range: ThroughputRange;
+}
+
+/**
+ * How each of the six tiles draws itself — one entry per {@link StatId}, and no order of its own.
+ *
+ * ## Why this is a table and not six elements in a row
+ *
+ * The row is drawn **twice**: here, with the figures a cluster answered, and in
+ * {@link NoClusterChosen}, where each tile says in words what nobody asked. Both used to write the
+ * order out by hand, so `STAT_ORDER` governed one row and a sequence of JSX elements governed the
+ * other, and a tile added to one was a tile missing from the other with every count assertion still
+ * green. There is now one order in this file and both rows read it.
+ *
+ * `Record<StatId, …>` rather than an array of pairs, because a seventh id added to `STAT_ORDER` is
+ * then a **compile error** here until somebody says how it draws — which is the property a roster
+ * of literals cannot have, whichever file it is written in.
+ */
+const STAT_TILES: Readonly<Record<StatId, (props: StatRowProps) => JSX.Element>> = {
+  brokers: (props) => (
+    <StatCard
+      {...STATS.brokers.head}
+      tone="success"
+      figure={figureOf(props.model.brokerCount)}
+      pill={props.model.brokerPill}
+    />
+  ),
+  topics: (props) => (
+    <StatCard
+      {...STATS.topics.head}
+      tone="accent"
+      figure={figureOf(props.model.topicCount)}
+      pill={pillForPartitions(props.model.partitionTotal)}
+    />
+  ),
+  inSync: (props) => (
+    <StatCard
+      {...STATS.inSync.head}
+      tone="primary"
+      figure={inSyncFigure(props.model.inSync)}
+      /* The design's third micro-visual (§3.2), and the one card on this screen whose good end of
+         the domain is the *high* end — hence `goodDirection`, which `RingGauge` refuses to guess.
+         The slot is left empty rather than filled with a plain track when the share is not a
+         number: §3.2's own rule is that a card with no series draws no visual, because an
+         unmeasured ring beside an em dash says the same absence twice and reserves a box for it. */
+      visual={
+        props.model.inSync.kind === "value" ? (
+          <RingGauge
+            value={props.model.inSync.value}
+            goodDirection="high"
+            caption="IN SYNC"
+            diameter={44}
+            strokeWidth={5}
+            decimals={1}
+          />
+        ) : undefined
+      }
+    />
+  ),
+  /* The design's "PRODUCTION 86.4 MB/s" and "CONSUME 71.2 MB/s" (§3.2), each with the jagged
+     sparkline the same table gives it. Two of §3.2's four sparkline cards; the other two — Topics
+     and Partitions in sync — draw none, because KUI keeps no history of either figure and §3.2's
+     own absent rule is that a card with no series has no sparkline rather than a flat line at
+     zero. */
+  production: (props) => (
+    <RateCard
+      {...STATS.production.head}
+      noun="this cluster's produce rate"
+      instead="Per-topic message counts are on each topic's page."
+      state={props.throughput}
+      pick={(rates) => ({ current: rates.latest?.produce ?? null, points: rates.produce })}
+    />
+  ),
+  consume: (props) => (
+    <RateCard
+      {...STATS.consume.head}
+      noun="this cluster's consume rate"
+      state={props.throughput}
+      pick={(rates) => ({ current: rates.latest?.consume ?? null, points: rates.consume })}
+    />
+  ),
+  lag: (props) => (
+    <StatCard
+      {...STATS.lag.head}
+      tone="warning"
+      figure={figureOf(mapLagTotal(props.model.lag))}
+      pill={props.model.lagPill}
+    />
+  ),
+};
+
 /**
  * The row of stat cards, which every tab carries unchanged.
  *
@@ -645,71 +788,22 @@ type BodyComponent = (props: BodyProps) => JSX.Element;
  * browse, a partition sweep — would be a card that quietly became a different measurement, which is
  * what the contract between this packet and the feature packets forbids.
  */
-function StatRow(props: {
-  readonly model: OverviewModel;
-  readonly throughput: Fetched<ThroughputSeries>;
-  readonly range: ThroughputRange;
-}): JSX.Element {
+function StatRow(props: StatRowProps): JSX.Element {
   return (
     <div class="kui-overview__stats">
-      <StatCard
-        {...STATS.brokers.head}
-        tone="success"
-        figure={figureOf(props.model.brokerCount)}
-        pill={props.model.brokerPill}
-      />
-      <StatCard
-        {...STATS.topics.head}
-        tone="accent"
-        figure={figureOf(props.model.topicCount)}
-        pill={pillForPartitions(props.model.partitionTotal)}
-      />
-      <StatCard
-        {...STATS.inSync.head}
-        tone="primary"
-        figure={inSyncFigure(props.model.inSync)}
-        /* The design's third micro-visual (§3.2), and the one card on this screen whose good end of
-           the domain is the *high* end — hence `goodDirection`, which `RingGauge` refuses to guess.
-           The slot is left empty rather than filled with a plain track when the share is not a
-           number: §3.2's own rule is that a card with no series draws no visual, because an
-           unmeasured ring beside an em dash says the same absence twice and reserves a box for it. */
-        visual={
-          props.model.inSync.kind === "value" ? (
-            <RingGauge
-              value={props.model.inSync.value}
-              goodDirection="high"
-              caption="IN SYNC"
-              diameter={44}
-              strokeWidth={5}
-              decimals={1}
-            />
-          ) : undefined
-        }
-      />
-      {/* The design's "PRODUCTION 86.4 MB/s" and "CONSUME 71.2 MB/s" (§3.2), each with the jagged
-          sparkline the same table gives it. Two of §3.2's four sparkline cards; the other two —
-          Topics and Partitions in sync — draw none, because KUI keeps no history of either figure
-          and §3.2's own absent rule is that a card with no series has no sparkline rather than a
-          flat line at zero. */}
-      <RateCard
-        {...STATS.production.head}
-        noun="this cluster's produce rate"
-        instead="Per-topic message counts are on each topic's page."
-        state={props.throughput}
-        pick={(rates) => ({ current: rates.latest?.produce ?? null, points: rates.produce })}
-      />
-      <RateCard
-        {...STATS.consume.head}
-        noun="this cluster's consume rate"
-        state={props.throughput}
-        pick={(rates) => ({ current: rates.latest?.consume ?? null, points: rates.consume })}
-      />
-      <StatCard
-        {...STATS.lag.head}
-        tone="warning"
-        figure={figureOf(mapLagTotal(props.model.lag))}
-        pill={props.model.lagPill}
-      />
+      {/* `Dynamic` rather than a call in the container, for the reason the tab body below gives:
+          the JSX compiler wraps a call in a tracked computation, and this row would then be rebuilt
+          whole on every model change instead of the tiles updating in place. */}
+      <For each={STAT_ORDER}>
+        {(id) => (
+          <Dynamic
+            component={STAT_TILES[id]}
+            model={props.model}
+            throughput={props.throughput}
+            range={props.range}
+          />
+        )}
+      </For>
     </div>
   );
 }

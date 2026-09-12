@@ -6,16 +6,17 @@
  * Nothing in this product seeds an alert event: one is opened by a rule reading a fact about the
  * cluster — an offline partition, a stuck rebalance, a log directory past its threshold — and there
  * is no endpoint that writes one, which is the design (`W6-01`: *"do not seed an event to make a
- * screen look alive"*). A healthy quickstart therefore has an empty feed, and until wave 7 three of
- * the four cases here answered that by skipping, so the branches that draw a **row** had never been
- * run in a browser at all.
+ * screen look alive"*). A quickstart shipping the 80% threshold a real deployment wants therefore
+ * had an empty feed, and until wave 7 three of the four cases here answered that by skipping, so
+ * the branches that draw a **row** had never been run in a browser at all.
  *
  * The event is seeded by moving the threshold instead of by writing a row, which is the only way
- * this product can produce one honestly: set `diskUsedWarningPercent: 1` in
- * `deployment/quickstart/kui-quickstart.yaml`, restart `kui-quickstart-kui`, and one `storage`
- * event opens against the broker's real log directory. That is how M8's exit criterion was
- * produced, and it is how this suite is meant to be run before it is believed. Revert the file
- * afterwards.
+ * this product can produce one honestly. **Since wave 11 the quickstart ships that threshold**:
+ * `alerts.thresholds.diskUsedWarningPercent: 1` in `deployment/quickstart/kui-quickstart.yaml`,
+ * with the reason and the cost written beside the key, so one `storage` event opens against the
+ * broker's real log directory on a first boot. That is how M8's exit criterion was produced, and
+ * for three waves it was a thing a reader had to do by hand and revert — which meant the seeded run
+ * was the one nobody ever made. Nothing has to be edited or reverted to run this file now.
  *
  * ## What still branches, and why that is not a skip
  *
@@ -164,10 +165,11 @@ test.describe("the alerts screen", () => {
   /**
    * The seeded event, drawn.
    *
-   * This is the branch the old suite skipped past. With `diskUsedWarningPercent: 1` the disk-usage
-   * rule opens one `storage` event against a real log directory, and everything below is read off
-   * the API's own document rather than written here: the title the service composed, the count it
-   * counted, and the acknowledgement control that only an *open* row may carry.
+   * This is the branch the old suite skipped past. With the quickstart's shipped
+   * `diskUsedWarningPercent: 1` the disk-usage rule opens one `storage` event against a real log
+   * directory on a first boot, and everything below is read off the API's own document rather than
+   * written here: the title the service composed, the count it counted, and the acknowledgement
+   * control that only an *open* row may carry.
    *
    * On a healthy cluster the same case asserts what an empty page earns, so it never passes by
    * looping over nothing.

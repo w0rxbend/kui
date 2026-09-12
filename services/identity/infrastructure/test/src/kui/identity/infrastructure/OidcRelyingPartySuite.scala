@@ -11,7 +11,7 @@ import com.nimbusds.jose.{JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import sttp.client4.Backend
 import sttp.client4.impl.cats.implicits.*
-import sttp.client4.testing.BackendStub
+import sttp.client4.testing.{BackendStub, ResponseStub}
 import sttp.model.StatusCode
 
 import kui.config.OidcConfig
@@ -224,5 +224,89 @@ final class OidcRelyingPartySuite extends KuiIOSuite {
       assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unsupported))
       assert(result.left.toOption.exists(_.message.contains("kui.auth.oidc")), result.toString)
     }
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // W11-A1's four
+  // -----------------------------------------------------------------------------------------------
+
+  test("the callback half refuses too, so an unconfigured deployment cannot be signed in to") {
+    // W11-A1: only `start` was asserted. Replacing `UnconfiguredOidcProvider.complete`'s refusal with a
+    // `Right(Identity(...))` left `services.identity.__.test` green — and `complete` is the half that
+    // hands somebody a principal. The object exists so that the OIDC use case is built in *every*
+    // deployment rather than in some of them, which means its fail-open half is reachable in all of them.
+    UnconfiguredOidcProvider[IO].complete("a-code", pending).map { result =>
+      assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unsupported), result.toString)
+      assert(result.left.toOption.exists(_.message.contains("kui.auth.oidc")), result.toString)
+    }
+  }
+
+  test("a token with no expiry at all is refused, which nimbus does not do for us") {
+    // W11-A1: "an expired token is refused" above stays green when `checkClaims`'s expiry branch is
+    // disabled, because the JWT processor rejects a *past* `exp` itself. What only this file's own check
+    // refuses is a token that carries **no** `exp` — a token that never stops being a login. Measured:
+    // `expiry.forall(_.isBefore(now)) && false` left all twelve cases here green.
+    party(provider(tokenWithoutExpiry)).flatMap(_.complete("the-code", pending)).map { result =>
+      assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unauthenticated), result.toString)
+    }
+  }
+
+  test("the PKCE challenge is SHA-256, pinned to RFC 7636's own vector rather than to our own function") {
+    // W11-A1: the authorization-URL case above asserts
+    // `url.contains(s"code_challenge=${OidcRelyingParty.codeChallenge(verifier)}")` — the product compared
+    // against itself. Replacing the digest with the verifier's plain bytes kept it green, which is PKCE
+    // downgraded to `plain` while the request still says `S256`: an intercepted authorization code becomes
+    // exchangeable again. The vector is RFC 7636 Appendix B, so nothing here can drift with the code.
+    assertEquals(
+      OidcRelyingParty.codeChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+      "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    )
+  }
+
+  test("a failed discovery is not remembered, so the next sign-in tries the provider again") {
+    // W11-A1: caching a placeholder on the failure path left every case here green. The scaladoc states
+    // the rule — "a provider that was unreachable during the first sign-in of the morning must not be
+    // unreachable for the rest of the day because this process remembered a `None`" — and a poisoned cache
+    // is indistinguishable, from the outside, from a provider that is still down.
+    for {
+      failFirst <- IO.ref(true)
+      backend = BackendStub[IO](summon)
+        .whenRequestMatches(_.uri.toString.contains("openid-configuration"))
+        .thenRespondF(
+          failFirst.getAndSet(false).map {
+            case true => ResponseStub.adjust("gateway timeout", StatusCode.GatewayTimeout)
+            case false => ResponseStub.adjust(discovery)
+          }
+        )
+        .whenRequestMatches(_.uri.toString.endsWith("/token"))
+        .thenRespondAdjust(s"""{"access_token":"opaque","id_token":"${idToken()}"}""")
+        .whenRequestMatches(_.uri.toString.contains("jwks"))
+        .thenRespondAdjust(jwks)
+      relyingParty <- party(backend)
+      first <- relyingParty.complete("the-code", pending)
+      second <- relyingParty.complete("the-code", pending)
+    } yield {
+      assert(first.isLeft, "the first attempt should have failed at discovery")
+      assertEquals(
+        second.toOption.map(_.name.value),
+        Some("ada@example.com"),
+        s"discovery was still broken on the second attempt: $second"
+      )
+    }
+  }
+
+  /** An ID token that is correct in every way except that it never expires. */
+  private def tokenWithoutExpiry: String = {
+    val claims = new JWTClaimsSet.Builder()
+      .issuer(issuer)
+      .audience("kui")
+      .subject("ada@example.com")
+      .claim("email", "ada@example.com")
+      .claim("nonce", "the-nonce")
+      .build()
+
+    val jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID).build(), claims)
+    jwt.sign(new RSASSASigner(key))
+    jwt.serialize
   }
 }

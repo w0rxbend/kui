@@ -73,13 +73,23 @@ then be silently missing in production.
 ## The metrics
 
 Every metric KUI emits is in this table. The names are constants in
-`libs/observability`'s `MetricNames`, and `MetricNamesSuite` pins that list — in full, in order,
-written out a second time inside the suite — against `ARCHITECTURE.md` §13, so a renamed metric is
-a failing build.
+`libs/observability`'s `MetricNames`, and `MetricNamesSuite` pins that list two ways. Be precise
+about which is which, because the previous wording overstated one of them by a hop:
 
-**What that suite does not do is read this page**, and this table was eleven rows short of
-`MetricNames.all` until wave 10 while the sentence above claimed otherwise. Nothing compares the
-two: if you add a metric, add its row here by hand.
+* **Against a second hand-written copy of the list, inside the suite itself**, in full and in order.
+  That is the gate a rename hits: the name has to be changed in two places, and the second place is
+  a test whose diff a reviewer reads. `ARCHITECTURE.md` §13 is where that copy came *from*, and it
+  is named in a comment inside the suite; **the suite does not read that file**, so a §13 edit on
+  its own breaks nothing.
+* **Against the first column of the table below**, both directions, since wave 10. A name in this
+  table that the build does not declare is a panel that stays empty for ever; a name the build
+  declares that this table omits is a number no operator will ever look at. The reader that finds
+  those rows refuses to pass on fewer than twenty of them, so a table it stopped matching cannot go
+  green by matching nothing.
+
+This table was eleven rows short of `MetricNames.all` until wave 10, while the sentence above
+claimed otherwise and nothing compared the two. It is compared now. If you add a metric, add its
+row here — the build will tell you if you forget.
 
 "Live from" is when the metric starts being *emitted*. Every name is declared from M0, so a
 later milestone cannot accidentally reuse one for something else.
@@ -100,7 +110,7 @@ later milestone cannot accidentally reuse one for something else.
 | `kui.cursor.rejected` | `reason` | M3 | Paging cursors refused, by why. |
 | `kui.principal.rejected` | `reason` | M0 | Signed principal headers refused, by why. |
 | `kui.config.version` | `section` | M1 | The version of each configuration section in use. |
-| `kui.gateway.aggregation.section` | `aggregation`, `section`, `status` | M2 | How often each section of an aggregated response is served in each state. It is the number that answers "how often do operators see a degraded topic page, and which part of it is degrading" — which no per-endpoint metric can, because an aggregation that answers 200 with four missing sections looks healthy to a status-code histogram. **It is emitted and it is not in `MetricNames.all`**, so `MetricNamesSuite` does not pin its name. |
+| `kui.gateway.aggregation.section` | `aggregation`, `section`, `status` | M2 | How often each section of an aggregated response is served in each state. It is the number that answers "how often do operators see a degraded topic page, and which part of it is degrading" — which no per-endpoint metric can, because an aggregation that answers 200 with four missing sections looks healthy to a status-code histogram. |
 | `kui.cluster.profile.fetch` | `outcome` | M2 | Cluster-profile fetches by a Kafka-facing service, by how they ended (ADR-046). |
 | `kui.cluster.profile.subscribed` | *(none)* | M2 | Whether that service's change subscription is open. With the counter above it answers the question asked when a cluster edit does not take effect: is this service being *told* about changes, or polling because the stream is broken? Those look identical in a latency graph. |
 | `kui.serde.deserialize.failures` | `serde`, `target`, `topic` | M3 | Records whose intended serde could not read them, so the fallback rendered them instead. The metric that says a default serde is wrong for a topic; without it that misconfiguration is visible only as a screen full of mojibake nobody reports. |

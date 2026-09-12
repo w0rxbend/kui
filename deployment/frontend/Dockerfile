@@ -52,15 +52,24 @@ WORKDIR /build
 # directory and there is no Docker form that preserves the per-package path. It is therefore a
 # roster, and the sentence that stood here said a roster "has to be checked by a reader", with the
 # two commands a reader was meant to run. IT IS NOW CHECKED BY A JOB — `.github/workflows/ci.yml`,
-# in the `frontend` job, step "The interface image copies every workspace manifest", which compares
-# exactly those two numbers and names the package that is missing:
+# in the `frontend` job, step "The interface image copies every workspace manifest".
 #
-#   ls frontend/packages | wc -l
-#   grep -c '^COPY frontend/packages/' deployment/frontend/Dockerfile
+# THE JOB COMPARES NAMES AND NOT COUNTS, AND THAT SENTENCE IS THE WHOLE OF WAVE 11'S REPAIR HERE.
+# It compared counts until then, and this comment said so and called it a gate. W10-05's verifier
+# broke the roster twice under an equal count and the step stayed green both times: deleting the
+# `feature-ksql` line while duplicating the `kernel` one, and — worse, because the line still looks
+# right — misspelling only its destination, `./packages/feature-kqsl/`. A count cannot see a
+# substitution, and a substitution is what drift looks like once a roster is the length it should be.
 #
-# 11 and 11 as this is written (2026-09-11). Deleting one line below now fails that step with
-# `frontend/packages holds 11 packages and deployment/frontend/Dockerfile copies 10 manifests` and
-# a one-line diff naming it — measured, on `feature-ksql`, before this comment was written.
+# What the step derives now is three sorted lists — the package directories that exist, the package
+# named on the LEFT of each COPY line, and the directory named on its RIGHT — and `diff` between
+# them is the exit status rather than something printed inside a failure branch. Measured, on this
+# tree, with each of the two mutations above re-applied by hand:
+#
+#   6d5 < feature-ksql / 9a9 > kernel        (the deleted line and its duplicate), exit 1
+#   6c6 < feature-ksql --- > feature-kqsl    (the destination alone), exit 1
+#
+# and `frontend/packages: 11 packages, 11 manifests copied, every name matched`, exit 0, restored.
 #
 # The gate exists because the drift is otherwise invisible. What it costs when it is not benign: the
 # install layer resolves a *different* workspace from the one the lockfile describes, so

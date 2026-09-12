@@ -1,13 +1,29 @@
 package kui.message.app
 
 import java.nio.file.{Files, Path}
+import java.util.concurrent.atomic.AtomicReference
+
+import scala.jdk.CollectionConverters.*
 
 import cats.data.NonEmptyList
 import cats.effect.IO
+import io.opentelemetry.sdk.OpenTelemetrySdk
+import io.opentelemetry.sdk.common.CompletableResultCode
+// `export` is a Scala 3 keyword, so the package that holds the SDK's reader interfaces needs backticks.
+import io.opentelemetry.sdk.metrics.`export`.{
+  AggregationTemporalitySelector,
+  CollectionRegistration,
+  MetricReader
+}
+import io.opentelemetry.sdk.metrics.data.{AggregationTemporality, MetricData}
+import io.opentelemetry.sdk.metrics.{InstrumentType, SdkMeterProvider}
+import org.typelevel.otel4s.oteljava.metrics.Metrics
 
 import kui.config.{ClusterConfig, MaskingConfig}
-import kui.kernel.ClusterId
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
+import kui.kernel.serde.Target
+import kui.kernel.{ClusterId, TopicName}
+import kui.observability.MetricNames
 import kui.security.masking.{KeepEnds, MaskingKind, MaskingRule}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
@@ -125,23 +141,75 @@ final class MessageWiringSuite extends KuiIOSuite {
     }
   }
 
-  test("the wiring hands the masking mask the recording metrics adapter and not the silent one") {
-    // W10-04/F2, and it is the most serious hole the verification passes filed. `MessageWiring` is the
-    // only place that decides which `MaskingMetrics` the running process gets, and nothing asserted the
-    // choice: `MaskingMetrics.otel4s[F](meter)` -> `MaskingMetrics.noop[F].pure[F]` is one compiling,
-    // -Werror-clean line under which `kui.masking.applied` is never emitted in production while all 1,442
-    // cases of this service stay green. `MaskingMetricsSuite` drives the real adapter directly and
-    // `ConfiguredRecordMaskingSuite` drives a counting fake; neither can see which one RUNS.
+  test("the mask this process browses through records kui.masking.applied to a real meter") {
+    // W10-04/F2, THE RULE THIS PACKET OWNS, and wave 10 could only guard it by reading source text.
+    // `MessageWiring` is the only place that decides which `MaskingMetrics` the running process gets, and
+    // nothing asserted the choice: `MaskingMetrics.otel4s[F](meter)` -> `MaskingMetrics.noop[F].pure[F]`
+    // is one compiling, -Werror-clean line under which `kui.masking.applied` is never emitted in
+    // production while all 1,442 cases of this service stay green. `MaskingMetricsSuite` drives the real
+    // adapter directly and `ConfiguredRecordMaskingSuite` drives a counting fake; neither can see which
+    // one RUNS, because neither is reached from the composition root.
     //
-    // This reads the composition root's own source, which is second best and is said so plainly: the
-    // assertion a seam would allow — widen `resource` to publish the constructed `MaskingMetrics`, the
-    // same `private[app]` widening `describeMasking` already has, and record a masked read through an
-    // `OtelJavaTestkit` meter — needs a production edit, and `services/message/app` belongs to another
-    // packet this wave. It is filed. What this does hold is the exact defect: a `noop` adapter reaching
-    // the production path, for masking or for either of the other two metric families wired beside it.
+    // `maskingFor` is the seam W10-04 named, landed here: it is the production expression, `private[app]`
+    // the way `describeMasking` is, and this case takes it, hands it a meter over an in-memory SDK reader,
+    // masks a topic through what comes back and reads the point off the meter. The assertion is about
+    // what the process HOLDS rather than about either adapter on its own, so the one-word mutation has
+    // nowhere left to hide.
+    val reader = new CollectingMetricReader
+
+    for {
+      meter <- recordingMeter(reader)
+      masking <- MessageWiring.maskingFor[IO](List(masked(twoRules)), meter)
+      // `payments.settlements` is what `twoRules`' first rule scopes itself to, so this is a read on
+      // which a rule really is in force — the only shape on which the series is written at all.
+      _ <- masking.forTopic(ClusterId.unsafe("prod"), TopicName.unsafe("payments.settlements"))
+    } yield {
+      val points = applications(reader.collected)
+
+      assert(
+        points.nonEmpty,
+        "nothing recorded kui.masking.applied for a masked read, so this process holds a silent adapter"
+      )
+      // Both halves of the record, because `ConfiguredRecordMasking` decides them separately and the
+      // second rule of `twoRules` is unscoped, so it reaches the keys as well as the values.
+      assertEquals(
+        points.map(_(MetricNames.Attr.Target)).sorted,
+        List(Target.Key.label, Target.Value.label).sorted
+      )
+      // And the attributes an operator's panel filters on, which a noop and a mis-labelled adapter both
+      // fail differently: `MaskingMetricsSuite` owns that argument and this is the process-level echo.
+      points.foreach { attributes =>
+        assertEquals(attributes(MetricNames.Attr.Cluster), "prod")
+        assertEquals(attributes(MetricNames.Attr.Topic), "payments.settlements")
+      }
+    }
+  }
+
+  test("the two metric families with no seam are still constructed, read off the composition root") {
+    // `CacheMetrics` and `FilterMetrics` are wired beside the masking metrics and have the same defect
+    // and no seam of their own: nothing they feed is reachable from this module without building a Kafka
+    // consumer and a CEL engine. So they keep wave 10's source read, which is second best and is said so
+    // plainly here rather than left to look like a real assertion. `MaskingMetrics` is deliberately NOT
+    // in this list any more — the case above is the real thing, and leaving it here as well would let a
+    // reader think the source read is what gates it.
     val wiring = wiringSource
 
-    List("MaskingMetrics", "CacheMetrics", "FilterMetrics").foreach { family =>
+    // AND THE SEAM'S USE, which is the half the case above cannot reach. `maskingFor` is driven in
+    // isolation there, so `make`'s `masking <- Resource.eval(maskingFor[F](clusters, meter))` replaced by
+    // an inline `MaskingMetrics.noop[F]` construction -- leaving `maskingFor` in the file, compiling,
+    // -Werror-clean and simply uncalled -- left `./mill -k services.message.__.test` at 1442/1442 SUCCESS.
+    // That is W10-04/F2's actual defect, the running process holding a silent adapter, reachable again in
+    // one edit that never touches the function the assertion reads. Filed as W11-05/V-1. Wave 10's source
+    // read, `wiring.contains("MaskingMetrics.otel4s")`, had exactly this reach over the whole file and was
+    // narrowed to the two families when the seam landed; this puts the call site back under a gate.
+    assert(
+      wiring.contains("maskingFor[F](clusters, meter)"),
+      "MessageWiring.make no longer calls maskingFor, so the seam the case above drives is not the one " +
+        "the running process holds and kui.masking.applied can go silent in production with this " +
+        "service's whole suite green"
+    )
+
+    List("CacheMetrics", "FilterMetrics").foreach { family =>
       assert(
         wiring.contains(s"$family.otel4s"),
         s"MessageWiring no longer constructs $family.otel4s, so nothing in this process writes its series"
@@ -164,7 +232,58 @@ final class MessageWiringSuite extends KuiIOSuite {
     } yield assertEquals(entries.size, 1, clue = entries.map(_.message).mkString("\n"))
   }
 
-  /** The composition root's own text, for the one claim about it that has no seam to be made through. */
+  /** An otel4s meter over an SDK that keeps its points in memory, for `reader` to hand back.
+    *
+    * Built from `opentelemetry-sdk-metrics` and `otel4s-oteljava`, both of which reach this module through
+    * `libs/observability`'s own compile dependencies. The testkit artifact every other suite in this
+    * repository uses for the same job — `otel4s-oteljava-testkit`, and `OtelJavaTestkit.inMemory` — is not on
+    * this module's classpath, and adding it is an edit to `build.mill`, which belongs to another packet this
+    * wave. Thirty lines of reader beats a cross-packet dependency for a gate that has waited a wave already;
+    * the note is here so whoever adds the artifact knows this can collapse into two lines.
+    */
+  private def recordingMeter(reader: CollectingMetricReader): IO[org.typelevel.otel4s.metrics.Meter[IO]] =
+    Metrics
+      .fromJOpenTelemetry[IO](
+        OpenTelemetrySdk
+          .builder()
+          .setMeterProvider(SdkMeterProvider.builder().registerMetricReader(reader).build())
+          .build()
+      )
+      .meterProvider
+      .get(MessageWiring.Instrumentation)
+
+  /** The attributes of every recorded point of `kui.masking.applied`. */
+  private def applications(metrics: List[MetricData]): List[Map[String, String]] =
+    metrics
+      .filter(_.getName == MetricNames.MaskingApplied)
+      .flatMap(_.getLongSumData.getPoints.asScala.toList)
+      .map(point => point.getAttributes.asMap.asScala.map((key, value) => key.getKey -> value.toString).toMap)
+
+  /** A metric reader that collects on demand instead of exporting.
+    *
+    * The SDK hands a `CollectionRegistration` to every registered reader and that object is the only way to
+    * pull the recorded points out of a meter provider, so this keeps it and exposes one call. Cumulative
+    * temporality because the assertion is "was this ever recorded", and a delta reader answers that only if
+    * you ask before the next collection.
+    */
+  final private class CollectingMetricReader extends MetricReader {
+
+    private val registration: AtomicReference[CollectionRegistration] =
+      new AtomicReference(CollectionRegistration.noop())
+
+    def register(collection: CollectionRegistration): Unit = registration.set(collection)
+
+    def getAggregationTemporality(instrument: InstrumentType): AggregationTemporality =
+      AggregationTemporalitySelector.alwaysCumulative().getAggregationTemporality(instrument)
+
+    def forceFlush(): CompletableResultCode = CompletableResultCode.ofSuccess()
+
+    def shutdown(): CompletableResultCode = CompletableResultCode.ofSuccess()
+
+    def collected: List[MetricData] = registration.get().collectAllMetrics().asScala.toList
+  }
+
+  /** The composition root's own text, for the two claims about it that have no seam to be made through. */
   private def wiringSource: String = {
     val start = Path.of("").toAbsolutePath
     val root = Iterator

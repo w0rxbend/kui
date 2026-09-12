@@ -5,6 +5,7 @@ import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import fs2.io.file.Files
 import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.otel4s.metrics.Meter
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.Backend
 import sttp.client4.httpclient.fs2.HttpClientFs2Backend
@@ -23,7 +24,7 @@ import kui.message.api.{MessageApi, MessageRoutes}
 import kui.message.application.cursor.CursorCodec
 import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.{PurgeToken, PurgeUseCase}
-import kui.message.application.{BrowseUseCase, FilterUseCase, TrackUseCase}
+import kui.message.application.{BrowseUseCase, FilterUseCase, RecordMasking, TrackUseCase}
 import kui.message.infrastructure.{
   BrowseTuning,
   CelFilterSource,
@@ -126,8 +127,7 @@ object MessageWiring {
       // every consumer of a decoded record — the record event, both filters, the DTO — sees the same
       // masked value. There is no second placement that satisfies "before any DTO leaves the service"
       // for all of them at once.
-      maskingMetrics <- Resource.eval(MaskingMetrics.otel4s[F](meter))
-      masking = ConfiguredRecordMasking.of[F](clusters, maskingMetrics)
+      masking <- Resource.eval(maskingFor[F](clusters, meter))
       _ <- Resource.eval(describeMasking[F](clusters, logger))
       browse = BrowseUseCase.make[F](
         profiles,
@@ -209,6 +209,32 @@ object MessageWiring {
       readiness = readiness,
       capabilities = MessageApi.capabilityDocument[F](profiles.ids)
     )
+
+  /** The record mask this process browses and tracks through, over a metrics adapter that really records.
+    *
+    * ==Why this is a named function and not two lines inside [[make]]==
+    *
+    * It is the only place in the running product that decides which `MaskingMetrics` the mask is handed, and
+    * that choice had no case at all. `MaskingMetrics.otel4s[F](meter)` → `MaskingMetrics.noop[F].pure[F]` is
+    * one compiling, `-Werror`-clean line under which `kui.masking.applied` — declared in wave 1, given its
+    * first writer in wave 10 — is never emitted in production again, with `services.message.__.test`
+    * reporting 1442/1442 SUCCESS (W10-04/F2). `MaskingMetricsSuite` drives the real adapter directly and
+    * `ConfiguredRecordMaskingSuite` drives a counting fake; neither can see which of the two RUNS, because
+    * neither is reached from here.
+    *
+    * `private[app]` is the same widening `describeMasking` already carries and it is here for the same
+    * reason: a rule nothing can reach is a rule nothing can gate. `MessageWiringSuite` takes this function,
+    * hands it a meter backed by an in-memory SDK reader, masks a topic through the result and reads the point
+    * back — an assertion about what the process holds rather than about either adapter on its own.
+    *
+    * The two metric families wired beside this one — `CacheMetrics` and `FilterMetrics` — have no such seam
+    * yet and are still guarded by a source read in that suite, which says so plainly.
+    */
+  private[app] def maskingFor[F[_]: Async](
+      clusters: List[ClusterConfig],
+      meter: Meter[F]
+  ): F[RecordMasking[F]] =
+    MaskingMetrics.otel4s[F](meter).map(ConfiguredRecordMasking.of[F](clusters, _))
 
   /** One CEL filter engine per configured cluster.
     *

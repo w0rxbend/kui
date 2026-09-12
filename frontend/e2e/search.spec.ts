@@ -157,12 +157,23 @@ test.describe("cross-entity search", () => {
        * is what pins that sentence; this annotation is what stops the reader of a green run from
        * believing this case did.
        */
-      test.info().annotations.push({
-        type: "arm not exercised",
-        description:
-          `this deployment answered partial: [${partial.join(", ")}], so the "everybody answered ` +
-          `and nothing matched" arm did not run; it is driven by the case below`,
-      });
+      const unexercised =
+        `[search.spec.ts] arm not exercised: this deployment answered partial: ` +
+        `[${partial.join(", ")}], so the "everybody answered and nothing matched" arm did not ` +
+        `run; it is driven by the case below`;
+      /*
+       * Written twice, because the two reporters this suite runs under read different things and
+       * the annotation alone reached nobody.
+       *
+       * `playwright.config.ts` selects `list` for every non-CI run — including the acceptance
+       * command this annotation was added for — and the `list` reporter prints a test's stdout and
+       * not its annotations, so for two waves this said "the green run above did not cover what its
+       * name suggests" into a report nobody was reading. `console.log` is what `list` shows. The
+       * annotation stays for the `html` and `github` reporters CI selects, where it is attached to
+       * the case rather than to the run's output and survives being scrolled past.
+       */
+      console.log(unexercised);
+      test.info().annotations.push({ type: "arm not exercised", description: unexercised });
       await expect(overlay).toContainText(/Not searched/i);
       await expect(overlay).toContainText(/missing, not empty/i);
       await expect(overlay).not.toContainText(/Nothing matches/i);
@@ -235,6 +246,96 @@ test.describe("cross-entity search", () => {
     /* And neither of the other two sentences: an answer that reached everybody has nothing to
        caveat, and nothing failed. Drawing either over this one tells the operator two different
        things about one answer. */
+    await expect(overlay).not.toContainText(/Not searched/i);
+    await expect(overlay).not.toContainText(/not answering/i);
+
+    expect(
+      served,
+      "the search endpoint was never called through the browser, so the assertions above ran " +
+        "against a panel this case did not put there",
+    ).toBeGreaterThan(0);
+  });
+
+  /**
+   * The ordinary arm, and it is the one the browser suite has never driven.
+   *
+   * `searchStatus` decides between the result list and the empty sentence with a conjunction:
+   * `searchHitCount(answer) === 0 && answer.partial.length === 0 ? "empty" : "ready"`. Four states
+   * cross it and this suite reached three of them. **Delete the left conjunct** — leaving
+   * `partial.length === 0 ? "empty" : "ready"` — and the whole browser suite stayed green at 106
+   * passed with 23 substitutions served (measured by W10-02's verifier), while a healthy deployment
+   * drew *"Nothing matches “orders”."* over a full result list. That is the product's worst
+   * available failure in a search box: an answer that found three things, telling the operator it
+   * found none.
+   *
+   * It survived because the two conjuncts agreed everywhere this suite looked. The case above it
+   * picks a query that matches nothing **and** forces `partial: []`, so `false && true` and
+   * `true && true` differ nowhere; every other case here runs on this deployment's real answer,
+   * which is `partial: ["schema"]` — the right-hand conjunct false, the whole expression `"ready"`
+   * whichever way the left one goes. W10-A2 closed it in the unit tree (`search.test.ts`, *"is
+   * ready when everybody answered and something matched"*); the **browser** arm — everybody
+   * answered, something matched, and the panel has to draw the rows — was driven by nothing.
+   *
+   * So this is the mirror of the case above and it rewrites exactly the same one field for exactly
+   * the same reason: `partial` is a fact about which services this deployment runs, not about the
+   * rendering under test, and `staging-eu-01` having no schema registry is the only thing standing
+   * between this suite and the arm every healthy deployment takes. The results are the gateway's
+   * own — a real query, really answered, really matching — and the case fails if it stops matching.
+   *
+   * **Measured, both ways, before this was believed.** With the conjunct deleted in the bundle on
+   * its way to the browser — `og(e.answer)===0&&e.answer.partial.length===0?\`empty\`:\`ready\``
+   * served as `e.answer.partial.length===0?\`empty\`:\`ready\`` — this case fails on the listbox
+   * below (`element(s) not found` — the panel drew *"Nothing matches “orders”."* over an answer
+   * this stack filled) and **the other seven cases in this file stay green**, which is the whole
+   * reason it exists. Unmutated, it passes.
+   */
+  test("draws the results when everybody answered and something matched", async ({ page }) => {
+    const query = "orders";
+    let served = 0;
+
+    await page.route(
+      (url) => url.pathname === "/api/v1/search",
+      async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          results?: {
+            topics?: readonly unknown[];
+            groups?: readonly unknown[];
+            subjects?: readonly unknown[];
+          };
+        };
+        const hits =
+          (body.results?.topics?.length ?? 0) +
+          (body.results?.groups?.length ?? 0) +
+          (body.results?.subjects?.length ?? 0);
+        /* The precondition, asserted rather than assumed: with no hits the honest rendering *is*
+           the empty sentence, and every assertion below would then be pinning the wrong arm. The
+           quickstart seeds `orders.v1`, so a zero here is a broken fixture, not a passing test. */
+        expect(
+          hits,
+          `the gateway matched nothing for "${query}", so "everybody answered and something ` +
+            `matched" is not the state this panel is in and this case would assert nothing`,
+        ).toBeGreaterThan(0);
+        served += 1;
+        await route.fulfill({ response, json: { ...body, partial: [] } });
+      },
+    );
+
+    await search(page, query);
+    const overlay = page.getByTestId("search");
+
+    /* The listbox is claimed only in `ready` — `SearchField` gives the container its role and its
+       accessible name on that status alone, precisely so that an empty panel is not announced as a
+       list box of zero items. So this locator resolving is the status assertion, read off the
+       accessibility tree rather than off a class name. */
+    await expect(overlay.getByRole("listbox", { name: /Search results/i })).toBeVisible();
+    await expect(overlay.getByRole("option").first()).toBeVisible();
+    await expect(overlay).toContainText(query);
+
+    /* And the sentence that must not be here. Under the mutation this case exists for, it is: the
+       panel says nothing matched, above the rows that matched. */
+    await expect(overlay).not.toContainText(/Nothing matches/i);
+    /* Nor either of the other two: everybody answered, and nothing failed. */
     await expect(overlay).not.toContainText(/Not searched/i);
     await expect(overlay).not.toContainText(/not answering/i);
 

@@ -159,12 +159,38 @@ Measured on this stack on 2026-09-11 with
 `curl -s localhost:8080/api/v1/clusters/quickstart/consumer-groups`, which is where each figure
 below comes from:
 
-- `order-fulfilment` is **stopped and behind** on `orders.v1`: `EMPTY`, no members, `totalLag` 10,
-  with uneven lag across its six partitions;
+- `order-fulfilment` is **stopped and behind** on `orders.v1`: `EMPTY`, no members, and **behind by
+  single digits with uneven lag across its six partitions** — see the note below before quoting a
+  number;
 - `payments-ledger-sync` is **stopped and caught up**: `EMPTY`, no members, `totalLag` 0 — so zero
   lag is not the same as no group;
 - `analytics-indexer` is **live**: a real consumer process in the `kui-quickstart-consumer`
   container, holding the group open — `STABLE`, one member, `totalLag` 0.
+
+**Why `order-fulfilment`'s lag is described rather than published, and what it depends on.** This
+line has carried a number three times and been wrong three times: 8, then 10, and 10 again after
+wave 10 replaced it. Measured by W10-05's verifier on 2026-09-12, on a stack `quickstart.sh` had
+just built and that nothing but read-only cases had touched: `totalLag` **9**, per-partition
+`0,0,0,1,2,6`. On an older stack in the same pass, **11**. Both are correct reports about the stack
+they were taken on, and that is the problem with writing either one down.
+
+The figure is a subtraction and the subtrahend is fixed while the minuend is not:
+
+- `seed.sh` commits `order-fulfilment` at **offset 2 in every one of `orders.v1`'s six partitions**
+  (`--to-offset 2`), and clamps to the log end on a partition holding fewer than two records, so the
+  committed side is at most 12 and in practice 7;
+- `seed/data/orders.v1` holds **16** records, which is the whole of the other side **on a stack
+  nobody has produced to**;
+- and every record produced into `orders.v1` afterwards adds exactly one to the lag: the message
+  browser's produce form, a browser case that produces, a second seed run against a broker whose
+  volume survived.
+
+So: **the lag is `orders.v1`'s length minus seven**, it is 9 on a cold stack, and it only ever goes
+up. A reader comparing the screen against a number here would be reading a fact about how much the
+stack has been used, which is not what this paragraph is about. What is stable, and is the whole
+point of the row, is `EMPTY` with no members and a non-zero lag spread unevenly across six
+partitions. Nothing in this repository compares this file to a running stack; that is why it drifted
+three times, and it is filed for the `deployment-claims` claim kind W10-05 asked for.
 
 **A fourth group is on the broker and the seed does not make it.** `kui-quickstart-connect` is the
 Kafka Connect worker's own group, and KUI reports it as `STABLE` with no members and an
