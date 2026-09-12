@@ -10,12 +10,32 @@ the gateway's jar does not contain it, and the two halves talk over HTTP like an
 server. Two things follow, and both are the point: the backend builds and tests with nothing but a
 JDK, and the interface can be rebuilt or rolled back without reassembling a jar.
 
-> **A note on this document.** KUI's browser code was Scala.js and Laminar until 2026-09-05, and
-> most of the *policy* below — how failures are shaped, what a feature may own, what the user sees
-> when a service is down, how staleness is drawn — was ported rather than redesigned, which is why
-> it is still here. The mechanisms were not. Where a passage below still shows Scala, a `Var`, a
-> `Signal` or an Airstream `EventStream`, read the rule and not the syntax, and check the TypeScript
-> for the current spelling. Sections marked with their real paths and commands have been reconciled.
+> **A note on this document, and what it does and does not promise.** KUI's browser code was
+> Scala.js and Laminar until 2026-09-05, and most of the *policy* below — how failures are shaped,
+> what a feature may own, what the user sees when a service is down, how staleness is drawn — was
+> ported rather than redesigned, which is why it is still here. The mechanisms were not.
+>
+> **What is reconciled, and it is measurable rather than asserted.** As of 2026-09-12 this page
+> contains **no Scala code fence** (`grep -c '^```scala' docs/frontend/README.md` → `0`) and **no
+> `kui.ui.*` identifier** outside this note, where the one below is a quotation of a sentence that
+> was removed (`tail -n +40 docs/frontend/README.md | grep -c 'kui\.ui\.'` → `1`). Every path this
+> page names is resolved against `git ls-files` and not against a working tree, and the examples
+> under *Talking to the gateway*, *Server state*, *Where the wire meets the kernel*, *User
+> preferences* and *What each reason code says out loud* are taken from the TypeScript that ships.
+>
+> **What is not, named section by section rather than covered by a general disclaimer** — because a
+> disclosure that overstates itself is the defect this project has repaired in five documents. These
+> passages still describe the Scala.js implementation and their identifiers have no TypeScript
+> counterpart: *Page elements are built once, not once per navigation* (`lazy val`), *When
+> something throws* (`ErrorReporting.install`, `ErrorReporting.renderSafely` — SolidJS has no
+> equivalent hook and the replacement has not been written down here), *Which error surface to
+> use*'s middle row
+> (`KuiFeature.unavailableView`), *Data that has gone stale* (`StaleDataOverlay`,
+> `FeatureFallbackPanel`, `KernelCss.StaleActive`), and the timers bullet under *Streaming*
+> (*"Airstream timers, not `js.timers`"*). Four suite names this page cites as proof —
+> `FeatureStateSuite`, `FeatureGateSuite`, `DashboardPageSuite`, `StaleDataOverlaySuite` — have no
+> file: `git ls-files '*FeatureGateSuite.scala'` and its three siblings each answer nothing. Read
+> the rule in those sections and not the syntax, and do not cite a suite from them as evidence.
 
 If you have written a React application, the two ideas that will feel unfamiliar are worth stating
 up front:
@@ -40,6 +60,7 @@ frontend/
   packages/
 ```
 
+<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-phantom, listing-omission, listing-count, residue -->
 ```
     api/                @kui/api — the contract seam, and nothing else
       src/
@@ -80,19 +101,24 @@ frontend/
 ```
 
 ```
-    feature-clusters/   one package per feature. `ls frontend/packages` is the
-    feature-topics/     roster: clusters, topics, messages, consumers, schemas,
-    feature-messages/   alerts, connect and ksql.
+    feature-clusters/   one package per feature. The roster is
+    feature-topics/     `git ls-files 'frontend/packages/*/package.json'`, which answers
+    feature-messages/   **11**: the three above — api, kernel, shell — and these eight.
     feature-consumers/
     feature-schemas/
     feature-alerts/
     feature-connect/
     feature-ksql/
 ```
+<!-- /checked -->
 
 The last three were absent from this listing until 2026-09-12, while their packages had been on
 disk and registered in the shell for waves — which is what a copy of a directory listing that
-nobody re-reads against the directory does.
+nobody re-reads against the directory does. Two things changed with that repair and the second is
+the one that matters. The roster is now derived from `git ls-files` rather than from `ls`: a
+working tree carries build output and ignored directories, so `ls frontend/packages` is a reading a
+clone does not reproduce, and this sentence said *"`ls frontend/packages` is the roster"* while
+naming eight of the eleven entries that command returns.
 
 Each `feature-*` package is a *microfrontend*: Vite splits it into its own chunk and the browser
 downloads it only when the user actually needs it (ADR-012 as amended by ADR-048 §4). See
@@ -173,77 +199,97 @@ renders only the selected panel, so the failure mode is "unstyled but correct".
 
 ### How a feature makes an API call
 
-A feature never builds an HTTP request. It asks the kernel's `ApiClient` to run an *endpoint* — a
-value from a `contract` module that describes one URL, its inputs and its outputs, and that the
-gateway implements from the same source. Renaming a field in the contract is therefore a compile
-error in the browser and on the server at the same moment, which is the whole reason those modules
-are cross-compiled.
+A feature never builds an HTTP request and never writes a URL of its own invention. It calls the
+one client — `KuiApiClient` from `@kui/api` (`frontend/packages/api/src/client.ts`), reached as
+`useKui().api` — whose `get`, `post`, `put`, `delete` and `patch` are `openapi-fetch`'s methods with
+the answer replaced by an `ApiResult` that cannot throw. They are typed from `paths` in
+`frontend/packages/api/src/schema.d.ts`, which is generated from `docs/api/openapi.browser.json`, so
+the path, its parameters, its query and its body are all checked against the server's own contract
+and renaming a field on the server is a type error in the browser as soon as that document is
+regenerated. The cross-compiled `contract` modules that used to give this property went with the
+Scala.js build (ADR-048); the generated document is what replaced them.
 
-```scala
-import kui.ui.kernel.api.{ApiClient, ApiError}
+```ts
+// `api` is handed down by the shell's provider (`useKui().api`). A feature never makes a client.
+export async function fetchClusters(
+  api: KuiApiClient,
+): Promise<Fetched<readonly ClusterSummary[]>> {
+  const answer = await api.get("/api/v1/clusters", {});
+  if (!answer.ok) return apiFailure(answer.error); // a value the page draws, never a thrown failure
 
-// `client` is handed down from the shell. `ClusterApi.list` is an endpoint value from a
-// contract module; `()` is its input.
-val clusters: EventStream[Either[ApiError, List[ClusterSummary]]] =
-  client.call(ClusterApi.list, ())
-
-div(
-  child <-- clusters.map {
-    case Right(found)  => renderTable(found)
-    case Left(failure) => renderFailure(failure)   // never a blank page
-  }.toSignal(loadingPlaceholder)
-)
+  // Aggregated answers arrive in sections (ADR-039): the request succeeded, and each part of the
+  // answer says separately whether it did. `decodeSection` is the one boundary that asserts a
+  // payload shape the generated types stop at `unknown` for.
+  const section = decodeSection<readonly ClusterEntryPayload[]>(
+    (answer.value as { clusters?: unknown }).clusters,
+  );
+  return fromSection(section, (entries) => entries.map(toClusterSummary));
+}
 ```
 
 Three rules follow from that, and all three are enforced by the shape of the API rather than by
 review:
 
-1. **Features never construct a backend.** There is exactly one `sttp` backend in the frontend, made
-   by `ApiClient.make`, and it is the only thing configured with `credentials: "include"` — the
-   option that makes the session cookie travel. A feature that made its own would be unauthenticated
-   in production and would work perfectly in every test.
-2. **A call never fails the stream, it emits a `Left`.** An Airstream error propagates to the
-   unhandled-error handler and kills the subscription, so a page that was rendering a list stops
-   rendering anything at all. Every outcome is therefore an ordinary value of type
-   `Either[ApiError, O]` that a `Signal` can hold and a view can draw.
+1. **Features never construct a client.** There is exactly one, made by `createApiClient`, and it is
+   the only thing built with `credentials: "include"` — the option that makes the session cookie
+   travel. A feature that made its own would be unauthenticated in production and would work
+   perfectly in every test.
+2. **A call never throws, it answers an `ApiResult`.** In SolidJS an error thrown inside a
+   computation propagates to the nearest `<Errored>` boundary and unmounts everything below it, so a
+   page that was rendering a list stops rendering anything at all — which is a blank screen this
+   product has already shipped once, under Airstream, for the same reason. Every outcome is
+   therefore an ordinary value, `{ ok: true, value }` or `{ ok: false, error }`, that a signal can
+   hold and a component can draw; `frontend/packages/api/src/result.ts` records the defect in full.
 3. **Nothing retries by itself.** A silent browser retry turns a five-minute outage into a
    five-minute spinner. Retrying is an action the user takes (ADR-032's "Retry now").
 
-A call is also *lazy* and *memoised*: building the stream sends nothing, the first subscriber sends
-the request, and a second subscriber joins that request rather than issuing another.
+The call itself is eager: an `await` sends a request. Laziness and sharing live one level up, in the
+kernel's `useQuery` and `QueryCache` — the request happens when a component *reads* the state inside
+a reactive scope, and two components asking for the same key join one request rather than issuing
+two. The section on `QueryCache` below is where that behaviour is written down.
 
 ### The headers the kernel adds, so no feature has to
 
 | Header | On | Where it comes from |
 | --- | --- | --- |
-| `X-Csrf-Token` | every request that is not a `GET` | `AuthState.csrfToken`, filled by `/auth/me` (ADR-019) |
-| `X-Kui-Request-Id` | every request | generated per call, for support correlation |
+| `X-Csrf-Token` | every request that is not a `GET` | the `CsrfTokens` pair, filled by `/auth/me` (ADR-019); the client waits for it rather than sending a mutation without one |
 
-The CSRF header is deliberately **not** called `X-Kui-Csrf`, and the name is not written out in
-either half of the codebase: both read it from `kui.contracts.HttpHeaders.Csrf`. The gateway strips
-every inbound `X-Kui-*` header at the edge, because that family is how the gateway talks to itself
+**And exactly one row, because the browser sends no `X-Kui-*` header at all.** This table carried a
+second row — `X-Kui-Request-Id`, *"generated per call, for support correlation"* — until 2026-09-12,
+and the client has not sent it since ADR-048: the gateway strips every inbound `X-Kui-*` header at
+the edge (ADR-040), so one the browser sent would be discarded and appear in no log. It is asserted
+rather than described — `client.test.ts`'s case *"no X-Kui-\* header is ever sent"* reads the
+headers off a recording transport and requires the `x-kui-` list to be empty.
+
+The CSRF header is deliberately **not** called `X-Kui-Csrf`, and the name is not written out by hand
+in either half of the codebase: the browser reads `CsrfHeaderName` from
+`frontend/packages/api/src/constants.generated.ts`, which `./mill frontend.apiConstants` generates
+from the server's own `kui.contracts.HttpHeaders`. The gateway strips every
+inbound `X-Kui-*` header at the edge, because that family is how the gateway talks to itself
 and no browser ever legitimately sets one (ADR-040) — so a CSRF header inside the family would be
 deleted before the check that needs it ever ran. When the two halves each spelled the name out for
 themselves they drifted apart, and nothing failed to compile: the browser sent a header the gateway
 did not read and every mutation came back `403`. Sharing one constant is what makes that impossible.
 
-The gateway still mints the authoritative correlation id (GW-001). `X-Kui-Request-Id` is a second
-thread to pull on when a user says "it failed at about ten past three", and it is not yet built on:
-treat it as a hook, not as a feature.
+The correlation id is the gateway's alone (GW-001). It mints one per request and returns it as
+`X-Kui-Correlation-Id` and in the body of every error envelope, so the thread to pull on when a user
+says "it failed at about ten past three" is the one on the answer, not one the browser tried to
+supply.
 
 ### The four shapes a failure takes
 
-`ApiError` has four cases because a caller genuinely treats them differently.
+`ApiError` is a discriminated union on `kind`, with four cases because a caller genuinely treats
+them differently (`frontend/packages/api/src/errors.ts`).
 
-| Case | What happened | What the UI does |
+| `kind` | What happened | What the UI does |
 | --- | --- | --- |
-| `Envelope(code, message, …)` | the server answered and said what was wrong (ADR-034) | render `message`; offer a retry when `retryable` |
-| `Unreachable(cause)` | nothing answered — offline, DNS, gateway down | counts towards the full-screen state (UI-011) |
-| `Timeout` | nothing answered in time | as above |
-| `Decoding(cause)` | something answered, and it was not the contract | a bug, not an outage: never the full-screen state |
+| `"envelope"` | the server answered and said what was wrong (ADR-034) | render `message`; offer a retry when `retryable` |
+| `"unreachable"` | nothing answered — offline, DNS, gateway down | counts towards the full-screen state (UI-011) |
+| `"timeout"` | nothing answered in time | as above |
+| `"decoding"` | something answered, and it was not the contract | a bug, not an outage: never the full-screen state |
 
-`code` is a `String` and not the `ErrorCode` enum on purpose: a browser built today has to render a
-failure a gateway built tomorrow invented, rather than fail to parse it.
+`code` is a plain `string` widened from the generated `ErrorCodes` union on purpose: a browser built
+today has to render a failure a gateway built tomorrow invented, rather than fail to parse it.
 
 ### Where the base URL comes from
 
@@ -262,36 +308,53 @@ the breadcrumb and the table on a cluster page all begin by asking for the clust
 that is three identical requests and three different answers on screen while they are in flight.
 
 `QueryCache` is the answer: components ask it, it asks the server at most once, and everybody
-watches the same value. It is what react-query does in the reference implementation.
+watches the same value. It is what react-query does in the reference implementation. A screen does
+not usually touch it directly — `useQuery` (`frontend/packages/kernel/src/data/query/useQuery.ts`)
+is the component-facing door, and it hands back the same six-case `Fetched` every feature's
+`data.ts` already produces.
 
-```scala
-val clusters = QueryCache.make[ClusterId, Cluster](id => client.call(ClusterApi.get, id))
+```tsx
+// frontend/packages/feature-clusters/src/ClustersRoute.tsx, near enough verbatim.
+const kui = useKui();
+const { state, reload } = useQuery<readonly ClusterSummary[]>({
+  // Nothing is fetched here. The request happens when something *reads* `state()` inside a
+  // reactive scope — a component's JSX, a memo, an effect — and only if what is held is missing
+  // or stale. A key of `undefined` means "not yet", and asks nothing.
+  key: () => CLUSTERS_KEY,
+  load: () => fetchClusters(kui.api),
+});
 
-// Nothing is fetched here. The request happens when this signal is subscribed to — which in
-// Laminar means when the element holding it is mounted — and only if what is cached is missing
-// or stale.
-div(child <-- clusters.get(id).map {
-  case Pending(_)                  => spinner
-  case Resolved(_, Right(value), _) => renderCluster(value)
-  case Resolved(_, Left(failure), _) => renderFailure(failure)
-})
+return (
+  <ClusterList
+    clusters={valueOf(state(), [])} // the last good answer, or the fallback — never a blank page
+    loading={state().kind === "loading"}
+    failure={failureOf(state(), reload)}
+    hrefFor={(id) => kui.paths.brokers(id)}
+  />
+);
 ```
 
 Four behaviours are worth knowing before you use it:
 
-- **Demand-driven.** When the last subscriber goes away the entry stops being refreshed and becomes
+- **Demand-driven.** When the last reader is disposed the entry stops being refreshed and becomes
   a candidate for eviction, so a page the user left behind does not keep talking to the server.
-- **Failures are cached too**, but for five seconds instead of thirty. Not caching them at all means
-  every component that wanted the data retries independently, and a struggling endpoint is hit by
-  the whole page at once.
+  Solid 2 gives that exactly: a `createMemo(…, { lazy: true })` computes on its first subscriber and
+  is torn down when its last one goes away.
+- **Failures are cached too**, but for `NEGATIVE_STALE_AFTER_MS` (five seconds) instead of
+  `DEFAULT_STALE_AFTER_MS` (thirty). Not caching them at all means every component that wanted the
+  data retries independently, and a struggling endpoint is hit by the whole page at once.
 - **`invalidateWhere` is prefix invalidation.** After creating a topic on cluster A, every cached
   list belonging to cluster A is wrong and everything belonging to cluster B is still good;
   invalidating everything would be correct and would also refetch the entire application.
-- **`fetchedAt(key)`** is the timestamp ADR-032 puts next to stale data that stays on screen.
+- **`QueryState.lastGoodAt`** is the timestamp ADR-032 puts next to stale data that stays on screen,
+  and it sits beside `lastGood` and `stale` in one type precisely so that no screen has to keep a
+  private shadow copy of its own last good answer. This bullet named a `fetchedAt(key)` method until
+  2026-09-12, which the TypeScript `QueryCache` does not have — `grep -n 'fetchedAt'
+  frontend/packages/kernel/src/data/query/cache.ts` answers nothing.
 
 ### Streaming: which of the two wrappers to use
 
-| | `Sse.eventSource` | `Sse.fetchStream` |
+| | `openEventSource` | `openFetchStream` |
 | --- | --- | --- |
 | Underlying mechanism | the browser's `EventSource` | `fetch` plus KUI's own parser |
 | Reconnects by itself | yes | no |
@@ -299,7 +362,7 @@ Four behaviours are worth knowing before you use it:
 | Can be aborted | no | yes |
 | Use it for | `GET` streams — the capability stream | streams with a request body, or that the user must be able to stop |
 
-The rule of thumb: **`eventSource` unless you need a body or cancellation.** The browser's own
+The rule of thumb: **`openEventSource` unless you need a body or cancellation.** The browser's own
 object handles reconnection, cookies and a backgrounded tab better than anything written by hand.
 Reach for `fetchStream` when the stream cannot be a `GET` (M3's message browsing sends a filter) or
 when stopping it matters — aborting propagates all the way down, cancelling the gateway's stream,
@@ -398,21 +461,26 @@ The distinction that matters is the third row. The full-screen state takes the e
 away from the user. That is right when the gateway is genuinely not there — nothing works, and
 pretending otherwise wastes their time — and it is a catastrophe when it is triggered by one
 feature's endpoint being down, because everything else still worked and they have just been thrown
-out of it. So every call declares its scope, and only `CallScope.Shell` can lead to the full-screen
-state:
+out of it. So every call declares its scope, and only the `"shell"` scope can lead to the
+full-screen state:
 
-```scala
-ShellHealth.report(CallScope.Shell, outcome)     // /auth/me, /info, the capability endpoints
-ShellHealth.report(CallScope.Feature, outcome)   // everything a feature asks for
+```ts
+// `Health.report` in frontend/packages/shell/src/health.ts. A feature reaches it as
+// `useKui().report`, which takes the scope and whether the call failed.
+health.report("shell", outcome); //   /auth/me, /info, the capability endpoints
+health.report("feature", outcome); // everything a feature asks for
 ```
 
 Three further rules follow from what "unreachable" actually means:
 
-- **three consecutive failures, not one.** A laptop's wifi hiccups several times a day, and a
-  full-screen takeover per hiccup is worse than the hiccup. Any success resets the count.
+- **three consecutive failures, not one** (`FailuresBeforeGivingUp`). A laptop's wifi hiccups
+  several times a day, and a full-screen takeover per hiccup is worse than the hiccup. Any success
+  resets the count.
 - **a `403` or a `404` is not unreachable.** The gateway answered, and answering is the opposite of
-  being unreachable; escalating one would hide a permission problem behind a network one. Only
-  `ApiError.Unreachable` and `ApiError.Timeout` count — `ApiError.isTransport` is that test.
+  being unreachable; escalating one would hide a permission problem behind a network one. That is
+  why `report` takes three outcomes and not two — `"ok"`, `"answered"` and `"transport-failure"` —
+  and only the third is evidence about the gateway. `isTransportFailure` in `@kui/api` is the test
+  that tells `"unreachable"` and `"timeout"` from the two kinds the server answered.
 - **a success from a *feature* still counts as contact.** If a feature's request came back, the
   gateway is reachable whatever the shell's last attempt did, and leaving the full-screen state on
   top of a demonstrably working application would be absurd.
@@ -471,13 +539,24 @@ A worked example. You are building the topic list.
 **When they disagree, the research wins.** If the design implies a behaviour that contradicts the
 researched behaviour — an action that would delete without confirming, a screen that would show data
 KUI does not fetch — implement the researched behaviour and *record the difference* in
-`research/design/gaps.md` and in the task file: which artboard implied what, what was done instead,
-and why. Do not resolve it silently; the next person will otherwise re-open the same argument with no
-record that it was already settled.
+`research/design/SCREENS-V4.md` §7 and in the task file: which artboard implied what, what was done
+instead, and why. Do not resolve it silently; the next person will otherwise re-open the same
+argument with no record that it was already settled.
 
 Note which file: `research/design/REFERENCE.md` is a faithful reading of *what the design is* —
 identity, revision, values under the design's own names — and nothing about a disagreement belongs in
-it. `research/design/gaps.md` is the register of disagreements.
+it. **`research/design/SCREENS-V4.md` §7 *Open findings* is the register of disagreements**, with
+`research/design/SCREENS.md` §6 holding the ones §7 says it does not restate; a finding is numbered
+there so it can be cited, and it is closed by name in the same section rather than in a commit
+message.
+
+**This paragraph named `research/design/gaps.md` four times until 2026-09-12 and that file has never
+existed** — `git ls-files research/design` answers `REFERENCE.md`, `SCREENS-V4.md` and `SCREENS.md`,
+and `git log --all -- 'research/design/gaps.md'` is empty. A process document that sends a reader to
+a register nobody can open is a process nobody can follow, so the instruction now names the register
+that is actually there. If a disagreement genuinely does not belong in either numbered section,
+that is an argument for writing `gaps.md` and linking it from here — not for citing it before it
+exists.
 
 One rule sits above both: **a colour pair from the design that fails WCAG AA contrast is adjusted,
 not adopted**, and the adjustment is written down. Accessibility outranks fidelity to a mockup.
@@ -502,10 +581,10 @@ and the next person will read all three as specified behaviour.
 
 So: take the design's *treatment* of the table — its widths, alignment, header type scale, row
 density — and render only the columns the research and `docs/FEATURE_MATRIX.md` establish. Record the
-extra column in `research/design/gaps.md` as a bucket C item (UI-013 step 5). If it looks like a
-feature KUI should have, a feature-matrix row is **proposed** there; it is not added, because matrix
-rows come from research and product scope. Once such a row exists and is researched, the column gets
-built by the task that owns that row — not by the styling pass.
+extra column in `research/design/SCREENS-V4.md` §7 as a bucket C item (UI-013 step 5). If it looks
+like a feature KUI should have, a feature-matrix row is **proposed** there; it is not added,
+because matrix rows come from research and product scope. Once such a row exists and is
+researched, the column gets built by the task that owns that row — not by the styling pass.
 
 **2. The design shows a button in a place where the researched behaviour has no such action.**
 
@@ -527,8 +606,8 @@ Two follow-on points that catch people out:
 - **A button that KUI already has, drawn differently, is not this case at all.** That is styling, and
   the design wins outright.
 
-Record it in `research/design/gaps.md` the same way, with the researched position written beside the
-design's so the disagreement stays visible.
+Record it in `research/design/SCREENS-V4.md` §7 the same way, with the researched position written
+beside the design's so the disagreement stays visible.
 
 **3. The design's palette fails contrast in dark mode.**
 
@@ -613,28 +692,38 @@ Two rules about *loading* ride along with this table, and both are ADR-012's:
   **names the feature**, because a bare spinner leaves a user on a slow connection unable to tell
   whether the thing they clicked is the thing that is loading.
 
-`kui.ui.hideForbidden` turns the `Forbidden` row into a hidden entry, for deployments that consider
+`hideForbidden` — ADR-032's deployment switch, read by `isHidden` in
+`frontend/packages/kernel/src/data/capabilities/featureState.ts` and by the shell's
+`nav/navigation.ts` — turns the `Forbidden` row into a hidden entry, for deployments that consider
 the existence of a feature sensitive. It is off by default: most organisations find a
 visible-but-disabled entry more helpful than a menu that changes shape per user.
 
 ### What each reason code says out loud
 
 One sentence per `ReasonCode`, written for an operator deciding what to do next rather than for a
-developer reading a log — which is why none of them names an HTTP status. They live in
-`kui.ui.shell.Messages` (ADR-024: strings centralised per module, no i18n runtime), and the shell
-prefers the gateway's own `message` when it sent one, because that is the more specific of the two
-and it mentions the actual upstream.
+developer reading a log — which is why none of them names an HTTP status. **The sentences are not
+written in the browser at all**: they are reviewed on the server with the codes they belong to and
+generated into `ReasonSentences` in `frontend/packages/api/src/constants.generated.ts`, which
+`./mill frontend.apiConstants` writes from `kui.contracts.capability.ReasonCode`. The shell's
+`frontend/packages/shell/src/messages.ts` is the prose *around* them — `reasonSentence` capitalises
+the generated fragment and ends it, and falls back to the `UNKNOWN` sentence for a code a newer
+gateway invented, so an older browser degrades to "something is wrong" rather than to a blank.
+ADR-024 still applies: one module, no i18n runtime. The shell prefers the gateway's own `message`
+when it sent one, because that is the more specific of the two and it mentions the actual upstream.
 
-| `ReasonCode` | what the user reads |
-| --- | --- |
-| `UpstreamUnavailable` | The service is not responding. |
-| `UpstreamTimeout` | The service is taking too long to answer. |
-| `CircuitOpen` | KUI has stopped calling this service for a moment after repeated failures, and will try again by itself. |
-| `UpstreamAuth` | The service refused KUI's credentials. |
-| `NotConfigured` | This is not configured in this deployment. |
-| `Forbidden` | You do not have permission to use this. |
-| `Starting` | KUI has not checked this service yet. |
-| `Unknown` | Something is wrong with this service, and KUI cannot say what. |
+The table below is the generated fragment, verbatim, and not a paraphrase of it — the version that
+stood here until 2026-09-12 was a hand copy that had drifted from all eight.
+
+| `ReasonCode` | wire value | the fragment the user reads |
+| --- | --- | --- |
+| `UpstreamUnavailable` | `UPSTREAM_UNAVAILABLE` | the cluster is not answering |
+| `UpstreamTimeout` | `UPSTREAM_TIMEOUT` | the cluster is answering too slowly |
+| `CircuitOpen` | `CIRCUIT_OPEN` | KUI has paused its calls while the cluster recovers |
+| `UpstreamAuth` | `UPSTREAM_AUTH` | KUI's credentials for this cluster were rejected |
+| `NotConfigured` | `NOT_CONFIGURED` | this deployment has no such thing configured |
+| `Forbidden` | `FORBIDDEN` | you are not allowed to see this |
+| `Starting` | `STARTING` | KUI has not finished reading this cluster yet |
+| `Unknown` | `UNKNOWN` | KUI could not refresh this |
 
 ### When the capability stream drops
 
@@ -790,50 +879,56 @@ The pattern the broker detail page sets, and later features copy:
 
 ### User preferences: what is stored, and the rule about reading it
 
-Four preferences, all of them browser-local. There is no per-user store on the server until M6, and
-none of these is an operator concern.
+<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-count, residue -->
+**Three preferences, all of them browser-local**, declared in
+`frontend/packages/kernel/src/theme/appearance.ts` and stored through `rootPreference.ts`. There is
+no per-user store on the server, and none of these is an operator concern.
 
 | preference | `localStorage` key | default | how it takes effect |
 | --- | --- | --- | --- |
-| theme | `kui.theme` | follows the system | `data-theme` on `<html>`, stylesheet keys off it |
-| accent | `kui.accent` | Blue | `data-accent` on `<html>`; the default writes no attribute |
-| table density | `kui.density` | Comfortable | `data-density` on `<html>`; the default writes no attribute |
-| timezone | `kui.timezone` | the browser's own zone | passed into `Timestamps` by whoever renders a time |
-| refresh rate | `kui.refreshRate` | `Off` | a stream of ticks a screen may subscribe to |
+| theme | `kui.theme` | follows the system (`auto`) | `data-theme` on `<html>`, stylesheet keys off it |
+| accent | `kui.accent` | `blue` | `data-accent` on `<html>`; the default writes no attribute |
+| table density | `kui.density` | `comfortable` | `data-density` on `<html>`; the default writes no attribute |
+<!-- /checked -->
 
-The first three are purely visual and therefore follow ADR-024 exactly: Scala writes an attribute
-and the stylesheet decides what it looks like. The last two are not matters of appearance, which is
-why they live in `kui.ui.kernel.prefs` rather than in `kui.ui.kernel.theme`.
+All three are purely visual and therefore follow ADR-024 exactly: the code writes an attribute on
+the root element and the stylesheet decides what it looks like. There is no second module of
+non-visual preferences, and the sentence here that said so — *"the last two … live in
+`kui.ui.kernel.prefs` rather than in `kui.ui.kernel.theme`"* — named two Scala.js packages ADR-048
+deleted and two preferences this build does not have.
 
-**Three behaviours that are deliberate, not incidental.**
+**Two preferences this table listed until 2026-09-12 and the product does not store: a timezone and
+a refresh rate.** `SettingsPage.tsx` says why, in the code rather than here: *nothing in KUI reads
+either preference*, and a control that writes a value no code consults answers the operator's
+question — "can I change this?" — with a yes that is false, while timestamps go on being rendered in
+the browser's own zone. `docs/FEATURE_MATRIX.md` KU-012 records the absence as an absence.
+`grep -rn 'refreshRate' frontend/packages` answers nothing; `grep -rn timezone frontend/packages`
+answers four lines, two of them comments explaining the absence and one of them the test
+*"offers no timezone and no refresh rate, because nothing would read either"*.
 
-- **An unrecognised stored value reads as the default, silently, for all five.** `localStorage`
+**Two behaviours that are deliberate, not incidental.**
+
+- **An unrecognised stored value reads as the default, silently, for all three.** `localStorage`
   outlives upgrades, so a value written by a later build can be read by an earlier one. Of the two
   ways to be wrong, starting in the default beats failing to start, and an error message on a
   settings page is a page the user cannot use to fix the problem.
 - **`localStorage` being unavailable is not an error state.** In a private window, or under an
   enterprise policy, every preference quietly becomes an in-memory value that works for the session
   and is forgotten on reload. Nothing is shown to the user about it.
-- **The timezone is not written until the user chooses one.** The default is read fresh each time
-  from the browser. Persisting it at start-up would freeze yesterday's zone into a laptop that has
-  since been carried across an ocean.
 
 **The rule about reading a preference.** A component takes the preference it needs as a parameter;
 it never reaches for the singleton. The singletons are backed by real `localStorage` and are shared
 by the whole page, so a component that read one directly could not be tested without a browser
-storage and would leak state into the next test. `SettingsPage` takes all five as `Var`s and the
-shell is the one place that hands it the real ones — which is what makes
-`changingAControlWritesToItsVarAndNothingElse` possible to write at all.
+storage and would leak state into the next test. `SettingsPage` takes all three as props and the
+shell is the one place that hands it the real ones — which is what makes "changing this control
+writes to this preference and to nothing else" possible to assert at all. There is no Save button,
+for the same reason: each of the three is an attribute on `<html>` written the moment it is chosen,
+so the page being changed is the demonstration of the change.
 
-**The refresh rate, and the promise it makes.** KUI's browser does not poll clusters (M1 DEVPLAN
-§10 D10). What this setting re-reads is a snapshot the server has already computed: it costs one
-cached HTTP response, it cannot reach a broker, and it is off unless somebody turns it on. The
-shortest interval offered is thirty seconds, matching the server's own scrape cadence, because a
-faster one would return identical bytes. Two rules keep the distinction real: a tick never asks the
-server to re-scrape — that is the refresh *button* — and a refetch never puts a loader over rows
-that are already on screen. `RefreshRateSuite.offEmitsNothing` asserts that the `Off` setting starts
-no timer at all, rather than starting one and filtering it, because a filtered timer is still a
-browser waking up on somebody's laptop every thirty seconds.
+**KUI's browser does not poll clusters** (M1 DEVPLAN §10 D10), which is the rule the absent refresh
+rate would have had to keep: a tick may never ask the server to re-scrape — that is the refresh
+*button* — and a refetch may never put a loader over rows that are already on screen. When the
+setting arrives it arrives with the code that reads it.
 
 ### Data that has gone stale, and the one component that draws it
 
@@ -894,12 +989,13 @@ two and through `KernelCss.StaleActive`.
 
 ### Where the wire meets the kernel
 
-`FeatureState` is also the one place the capability DTOs are named. `KuiFeature.unavailableView` takes
-the kernel's own `UnavailableReason(code, message, since)` and never the wire type, so a new field on
-the DTO changes nothing below this line. The translation is
-`FeatureState.unavailableReason`, and it belongs here rather than in `kui.ui.kernel.feature`
-deliberately: the kernel's primitives are the bottom of the frontend, and the bottom must not depend
-on the shape of one service's response.
+`FeatureState` is the one place the capability DTOs are named
+(`frontend/packages/kernel/src/data/capabilities/featureState.ts`). Everything above it takes the
+kernel's own five-case union — `ready`, `degraded`, `unavailable`, `forbidden`, `not_configured`,
+each carrying only `code`, `message` and `since` — and never the wire type, so a new field on the
+DTO changes nothing below this line. The translation is `deriveFeatureState`, and it belongs in
+`data/capabilities/` rather than in `feature/` deliberately: the kernel's registration contract is
+the bottom of the frontend, and the bottom must not depend on the shape of one service's response.
 
 ## The development loop
 

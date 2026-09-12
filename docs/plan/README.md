@@ -1,8 +1,12 @@
 # `docs/plan/`
 
-The working plan for turning this repository into the product drawn in
-[`screens/`](../../screens) and read in
-[`research/design/SCREENS-V4.md`](../../research/design/SCREENS-V4.md).
+The working plan for turning this repository into the product read in
+[`research/design/SCREENS-V4.md`](../../research/design/SCREENS-V4.md) from twenty-three screenshots
+that are **not in this repository**. Until 2026-09-12 this line linked `screens/`, and that link
+went nowhere in a clone: the captures live in a working-tree directory `.gitignore:43` ignores and
+that has never been committed — `git ls-files screens` answers `0` and `git log --all -- 'screens*'`
+is empty. [ADR-057](../adr/ADR-057-design-captures-stay-outside-the-repository.md) is the decision
+that keeps them out and says what it costs.
 
 ## What lives here
 
@@ -16,9 +20,11 @@ The working plan for turning this repository into the product drawn in
 There is at most **one** `WAVE-NN.md` at a time. If you are looking at two, the older one was not
 pruned and its exit criteria should be checked before anything in it is believed.
 
-**One deliberate exception, live right now.** `verification/` holds **thirty** files and **they were
-carried past `WAVE-12.md`'s deletion rather than deleted with it.** The six `W12-*` files are wave
-13's input. Of the twenty-four older ones, three cannot be deleted without creating a dangling
+**One deliberate exception, live right now.** `verification/` holds **thirty-four** files and **they
+were carried past `WAVE-13.md`'s deletion rather than deleted with it.** The four `W13-*` files are
+wave 14's input — and there are four rather than five, because `W13-A1.md` was never written: that
+packet's harness forbade it writing a report file, and its findings survive only in `ROADMAP.md`'s
+wave-13 retrospective. Of the thirty older ones, three cannot be deleted without creating a dangling
 reference — `W8-04.md` and `W8-07.md` are cited from `docs/FEATURE_MATRIX.md`, and `W9-03.md` from
 `frontend/e2e/topics.spec.ts` and `brokers.spec.ts` — and `W8-07.md` §1 is in any case the only
 published screen-to-spec-to-case mapping in this repository, used again at the wave-12 close to count
@@ -27,12 +33,17 @@ files that are already gone. After W13-01's roster reconciliation, a dangling ci
 checked region is a gate failure rather than a broken link, which is the first time that decision has
 had a mechanism behind it.
 
-**House rule 18 is repaired, and the repair held.** Wave 9 lost one verification file to a partition
-argument and wave 10 lost three — each packet reasoned that this directory belonged to the
+**House rule 18 is repaired for building packets and has now failed twice for adversaries, both
+times because of the harness rather than the partition.** Wave 9 lost one verification file to a
+partition argument and wave 10 lost three — each packet reasoned that this directory belonged to the
 adversarial closer and left its rows in a packet result, and each verifier then wrote the file
 itself. The rule was amended so that **`verification/W<NN>-<packet>.md` belongs to the packet the
 file is about, always, and is never inside any other packet's `Owns`.** Wave 11 ran seven packets and
 filed **seven** files, every one written by the packet it is about. The directory is nobody's tree.
+**And that amendment was insufficient, twice.** W9-A1 and W13-A1 each ran a full adversarial sweep
+and filed nothing, because naming an owner does not give it a pen: both were launched under harness
+instructions that forbid writing report `.md` files at all. Wave 14 amends the rule again, about the
+harness rather than the owner — **a packet that cannot write its verification file is not launched.**
 
 ## How a wave runs
 

@@ -660,7 +660,27 @@ recorded — **unmet: no connector has ever been deployed on the quickstart's wo
 that would assert it skip. Wave 8 deploys one, rewrites the spec against the golden the service already
 ships, and runs both against images built from the tree.
 
-## M10 — Close the book  ·  no new service  ·  **open on one definition-of-done item after wave 12**
+## M10 — Close the book  ·  no new service  ·  **open on one definition-of-done item after wave 14**
+
+> **Status after wave 14, measured at its close on 2026-09-12, one command at a time, and not read
+> off a report.** **Four of the five definition-of-done items are met** and were re-run here rather
+> than read off a packet: `pnpm -C frontend e2e` is **108 passed, 2 skipped, 0 failed** with **23 of
+> 23** captures driven by a named case that ran green, and for the first time `git ls-files screens`
+> answers **23** rather than 0, so item 1's denominator is finally a fact about the repository;
+> `ls services/` is 11 with `__.openApiCheck` 2544/2544 and `checkArchitecture` 195 modules;
+> `run-tests.sh` is **4,420 cases over 81 modules**, `pnpm test` 1,936, a11y clean over **782 stories
+> × 2 themes**, `lint:boundaries` 423 files; and `quickstart.sh` and `smoke.sh` both pass over the
+> two deployment shapes. **Item 4 is open, and what is open has changed shape: three of the five
+> reasons are defects in the readers themselves.** The listing claim wave 14 built is real — a
+> phantom `├── benchmarks/` in `ARCHITECTURE.md` §16 is one disagreement over 472 claims, and it
+> caught a commit that arrived from outside the wave — but `├── NOTICE  CODEOWNERS  Makefile` in the
+> same fenced tree leaves the run at **472 claims, all true, exit 0**, because `listing_is_name`
+> cannot see an extensionless top-level file and §16 draws five of them. `adr_files` is built with
+> `find`, which is why a green run reports *57 rows over 57 ADRs* while `git ls-files` answers 56 and
+> `DECISIONS.md` links an **untracked** ADR-057. And `582c9bc5` committed the twenty-three design
+> captures, so five documents that say they are not in this repository are now false. Each is named
+> in `docs/plan/WAVE-15.md` with the command that finds it. `docs/plan/` is therefore not reduced.
+> The wave-9 to -13 boxes this replaces are in the git history.
 
 > **Status after wave 12, measured at its close on 2026-09-12, one command at a time, and not read
 > off a report.** **Four of the five definition-of-done items are met** and were re-run here rather
@@ -671,12 +691,15 @@ ships, and runs both against images built from the tree.
 > 423 files; and `quickstart.sh` and `smoke.sh` both pass over the two deployment shapes.
 > **Item 4 is open, and the reason is one measurement long: the gate wave 12 built cannot see the
 > block wave 12 created.** A false quotation appended inside `TECH_DEBT.md`'s own
-> `<!-- checked: debt-register -->` region leaves `./scripts/feature-matrix-check.sh` at *438 claims
-> checked, all true*, exit 0 — because `quotation_swept_kinds` is a hand-written roster of 8 files
-> and 12 blocks that nothing reconciles against the **fifteen** markers on disk. Five more are named
-> in `docs/plan/WAVE-13.md` with the command that finds each, including three rows in the newcomer's
-> overview publishing **1,145 Scala sources** against a measured **1,152**. `docs/plan/` is therefore
-> not reduced. The wave-9, -10 and -11 boxes this replaces are in the git history.
+> `<!-- checked: debt-register -->` region is refused, and so is the same sentence one kind over —
+> the roster is derived from the tree and reconciled in both directions. **What is open at the
+> wave-13 close is different in kind:** eight false or unsupported statements in the documents item 4
+> names, every one of them a *listing* or a *path* — a fenced directory tree naming `screens/`, which
+> is untracked; a feature-matrix row citing a deleted `.scala` file in the present tense; a process
+> instruction naming a register that does not exist. Each was named in `docs/plan/WAVE-14.md` —
+> deleted at the wave-14 close and readable in the git history — with the command that finds it.
+> `docs/plan/` is therefore not reduced. The wave-9 to -12 boxes this replaces are in the git
+> history.
 
 > **Status after wave 11, measured at its close on 2026-09-12, one command at a time, and not read
 > off a report.** **Four of the five definition-of-done items are met**: the browser suite is
@@ -754,7 +777,7 @@ directions at **56 rows over 56 ADRs**. The a11y sweep is clean over **790 stori
    neither was `pnpm -C frontend e2e`; both were run here instead, and one of the two was red. The
    distributed eleven-container stack is the one deployment shape nobody in wave 8 drove.
 4. **`docs/plan/` is not reduced to `README.md` and this file.** It holds the current wave file
-   (`WAVE-09.md` when this was written; `WAVE-13.md` now) and
+   (`WAVE-09.md` when this was written; `WAVE-15.md` now) and
    `docs/plan/verification/`, and the wave that still needs a plan file cannot be the wave that
    deletes it. This is M10's own last bullet and it is now the last one standing.
 
@@ -2463,3 +2486,399 @@ published proof cannot fail, and a gate whose own census figure does not reprodu
 load-bearing item is one `claim` that reconciles `quotation_swept_kinds` against the markers on disk,
 and its acceptance is the sentence at the top of `docs/plan/WAVE-13.md` going red inside
 `TECH_DEBT.md`.
+
+---
+
+## What wave 13 actually did
+
+Wave 13 was **three building packets and two adversaries**, the smallest wave in this plan, written
+as a reconciliation wave against the one input nobody derived. It ran to the end without an
+interruption and **all five packets landed**. **Four of the five definition-of-done items are met and
+were re-judged at this close one command at a time. Item 4 is not, and what is open is eight
+sentences and one mechanism that has never been built.**
+
+**Judge the tree, not the reports. All five landed; four filed their own verification file.**
+Re-checked file by file at this close against `git status --porcelain`, which is **25 entries** over
+`350593e0` — 18 modified, 7 untracked — and **18 files changed** in the code, configuration and
+documentation it touched:
+
+| Packet | What is on disk | Filed its own verification file? |
+| --- | --- | --- |
+| W13-01 | `feature-matrix-check.sh` +586 lines: `quotation_swept_kinds` replaced by `marked_blocks_on_disk` + `reconcile_swept_roster`, `marked_markdown_files`, `quotation_census` and a `--census` command that publishes no figure; **438 claims over 12 sections → 439** | yes |
+| W13-02 | TD-049/TD-050/TD-052 closed on re-run measurements, TD-032/TD-033/TD-031 amended, the `awk` range in `kui-quickstart-auth.yaml` repaired, `connect-seed.sh`'s `set -euo pipefail` race fixed, `ShippedScriptsSuite` (a script roster derived from the filesystem) | yes |
+| W13-03 | `README.md`, `ARCHITECTURE.md` §12 and §16, `docs/overview/README.md`, `docs/FEATURE_MATRIX.md`, `docs/frontend/README.md`: the 1,145 → 1,152 source count, four phantom directories deleted, four dead `kui.ui.*` identifiers removed, the prose-mood decision written where an author reads it | yes |
+| W13-A1 | 38 mutations over `services/ksql`, `services/gateway` and `feature-ksql` — three surfaces never swept; 8 ungated rules, 8 closing cases, 1 declared production seam (`CircuitFeed.scala`) | **no** — see below |
+| W13-A2 | 11 filed rows closed plus one found by its own closing case: the roster derivation, the fixture seam, four `feature-matrix-check.sh` fixtures, two new `libs/config` suites, `smoke.sh`'s two hidden `grep` stages; **439 → 444 claims** | yes |
+
+**House rule 18 failed for the third time in five waves, and for the second time the cause was the
+harness rather than the packet.** `docs/plan/verification/W13-A1.md` does not exist. The packet ran:
+its eight closing cases, its `KsqlPlanTokenSuite` cluster-prefix case, its `CapabilityFoldSuite`
+precedence rows and its `CircuitFeed` seam are all on disk, compile, and are green in
+`./scripts/run-tests.sh` at 4,412. Wave 9 lost W9-A1 to exactly this — an adversary whose
+instructions forbid writing report `.md` files — and the rule was amended then to name the *owner*.
+The amendment was insufficient, because naming an owner does not give it a pen. Wave 14's amendment
+is about the harness: a packet that cannot write its verification file is not launched.
+
+### The definition of done, judged at this close
+
+Every figure printed by the command beside it, on 2026-09-12, against a quickstart brought up from
+this tree and the eleven-container distributed stack built from the same one. **Nothing here is read
+off a packet report; every line was re-run at the close, including the four the packets agreed on.**
+
+1. **Every screen renders real data — MET, with a caveat about its subject.**
+   `pnpm -C frontend e2e` is **108 passed, 2 skipped, 0 failed** over 110, and `ls screens/` is 23
+   captures of which **23 have a named case that ran green in that run**, matched case by case
+   against `docs/plan/verification/W8-07.md` §1 and `WAVE-13.md`'s re-take. The product was driven in
+   a browser at this close: the landing page's six tiles each carry a sentence and no figure; the
+   cluster dashboard reads `BROKERS ONLINE 1`, `TOPICS 12 · 169 partitions`, `PARTITIONS IN SYNC
+   100.0%`, `PRODUCTION 1.1 kB/s`, `CONSUME 119.3 B/s`, `CONSUMER LAG 10 · 1 group not counted`;
+   gaps in the throughput series are drawn `—` and never `0`; **0** page errors and **0** figures
+   with three or more decimals across **1,159** `<td>` cells. **The caveat is new and nobody had
+   stated it in five closes:** `screens/` is **untracked** — `git ls-files screens` is 0,
+   `git log --all -- 'screens*'` has no commits, `.gitignore:43` ignores it — so the item's own
+   denominator is a fact about a working tree and not about the repository.
+2. **Every backend capability exists — MET.** `ls services/` → **11**; `./mill __.openApiCheck`
+   **2544/2544**; `./mill checkArchitecture` **195 modules, 10 rules, no layering violations**;
+   `./mill __.compile` 8251/8251.
+3. **Tested — MET.** `./scripts/run-tests.sh` **81 modules (81 with tests), 4,412 cases** (wave 12:
+   4,401); `pnpm test` **1,936 over 83 files** (1,935); `pnpm typecheck` exit 0 over both projects;
+   `pnpm a11y` **782 stories × 2 themes, no violations**; `pnpm lint:boundaries` **423 files in 11
+   packages**; `__.checkFormat` 495/495, `__.fix --check` 10672/10672.
+4. **Documented — NOT MET.** See below.
+5. **One command — MET.** `quickstart.sh` exits 0 with *"KUI is running: http://localhost:8090/ui/"*,
+   and `connect-seed` exits 0 on a cold machine printing its own waiting line — W13-02's fix, watched
+   here rather than read; `down` → *"Removed. Nothing from the quickstart is left running or
+   stored."*; `./deployment/compose/smoke.sh` **PASSED** over the eleven-container stack with fault
+   isolation and recovery.
+
+### The wave's prediction held, and for the first time its inverse was closed inside the same wave
+
+`WAVE-13.md` wrote its acceptance as a sentence going red. Reproduced at this close on the shipped
+bytes, `TECH_DEBT.md` restored byte-identical (`md5sum 0e437fa81e4a833218e787ad523c5116`): the false
+masking quotation inside the `debt-register` block is **1 disagreement over 444 compared claims,
+exit 1**, and the refusal names the block, the file it quotes, and the derivation that found it.
+House rule 23, third wave running.
+
+**And the inverse was tested too, which is what house rule 23 is actually for.** W13-01's verifier
+found that the identical sentence in a `quotations` block in any *third* file was still green — the
+wave's own defect surviving one kind over, four lines above the packet's fix, because the list of
+files whose `quotations` blocks are read directly was itself a hand-written two-name roster. W13-A2
+closed it **by derivation and not by adding a third name**, and argued in its report that the filed
+row's own suggested fix — *"assert the pairs on disk are exactly {README.md, $matrix}"* — was another
+hand-written list and therefore the wrong close. Re-run here on a scratch file: **two** independent
+refusals, the quotation by name and the undeclared block in the roster reconciliation. **No previous
+wave has found the inverse of its own prediction and closed it before the close.**
+
+### Why item 4 is still open, and the class is one nobody had named
+
+**Eight false or unsupported statements, all of one shape: a listing or a path.** Every one sits
+outside every checked region; every one is mechanically checkable against `git ls-files`; and
+**nothing in this repository has ever compared a documented listing against the repository.**
+
+1. **`ARCHITECTURE.md:1162` lists `screens/` as a top-level repository directory** — in the section
+   **wave 13 rewrote**, whose entire subject is directories that are not on disk. The rewrite was
+   done *"from `ls`"*, and `ls` on a working tree cannot tell a tracked directory from an ignored
+   one. `.gitignore:43` ignores it, and the comment three lines above says this repository keeps the
+   captures **outside itself**. **The method that deleted four phantoms introduced a fifth.**
+2. **`ARCHITECTURE.md` §16 omits `.github/`**, which is tracked and holds the `ci.yml` the same
+   document cites repeatedly — the same omission direction §16 says it fixed.
+3. **`docs/FEATURE_MATRIX.md:355` (AU-005) says the account menu *"now exists"* and names
+   `layout/UserMenu.scala`**, which `git ls-files` does not have. Present tense, in the document item
+   4 names by name as *accurate*, four rows from KU-033 — the identical defect wave 13 **did** repair.
+4. **`docs/FEATURE_MATRIX.md:351` (AU-001) still cites `frontend/ui-shell/.../page/LoginPage.scala`**
+   as its evidence, in a row that discloses the deletion one sentence earlier.
+5. **`docs/frontend/README.md` instructs the reader four times to record design disagreements in
+   `research/design/gaps.md`**, which does not exist. A process naming a register nobody can open.
+6. **`docs/frontend/README.md` names six `kui.ui.*` Scala.js identifiers ADR-048 deleted** and
+   carries three ` ```scala ` fences in a document about a TypeScript workspace — under a banner that
+   honestly discloses the port and then claims *"sections marked with their real paths and commands
+   have been reconciled"*, which these are not.
+7. **`research/design/SCREENS-V4.md:3` and `:34` say the captures are *"held in `screens/` in this
+   repository"* and *"committed"***, contradicted by `research/design/SCREENS.md:17` in the same
+   directory. `research/**` was listed in `WAVE-13.md` under *"unowned and correct as they stand"*.
+8. **`docs/plan/README.md:3` links `[screens/](../../screens)`** — from the document that explains
+   how this directory works.
+
+**And nine filed ungated rules that nobody closed, for one reason: they are one missing mechanism.**
+W13-03 filed V-01…V-09 and W13-A2 declined all nine with the right argument — closing them needs a
+claim kind that reduces a documented listing or figure to the command that prints it, **plus markers
+in documents that packet did not own.** Measured at this close on the shipped bytes,
+`docs/overview/README.md` restored byte-identical: `**Eleven containers.**` → `**Fourteen
+containers.**` leaves the run at **444 claims checked, all true**, exit 0. Two further rows
+(`connect-seed.sh`'s announce block and its task-`RUNNING` threshold) were declined because they need
+a scripted Connect worker — a harness, not an assertion.
+
+### Did the mechanism work? Six numbers, then the answer.
+
+**The hunter's rate went back up, to 19.4%, and every finding was the shape the plan predicted.**
+W13-A1 ran **38 mutations, 2 argued equivalent with the algebra written out, 7 of 36 non-equivalent
+ungated**, against wave 12's 12.5% — plus one rule found by reading a scaladoc sentence against the
+code it describes and writing the case **first**, red on unmutated production. `WAVE-13.md` told it
+to *"mutate strictness, not presence"*, and all seven are exactly that: a `==` weakened to
+`startsWith`, an ordering never driven with both inputs failing, a `>=` where a doubling was meant, a
+percentile whose every fixture divides evenly, a floor whose case drives the one value needing no
+floor, a state machine asserted only in `ready`. **The prediction was right and the instruction was
+the reason the rate moved.**
+
+**The eighth finding is the one worth keeping.** `CircuitFeed.report` published a scaladoc sentence —
+*"an event for a name that is not a service id is dropped rather than guessed at"* — that described
+nothing: `ServiceId.unsafe` validates nothing and `CapabilitySignals.update` creates whatever key it
+is handed, so a breaker configured against an OAuth token endpoint would have published itself to the
+browser as a capability of its own. Found by comparing a comment with its code, not by mutation.
+
+**The closer converted 11 of 22 filed rows — 50%, against wave 12's 13 of 13.** The drop is a
+partition result, not a capacity one: of the eleven it left, nine are one mechanism in a tree it did
+not own and two need a harness. Inside what it owned it closed everything, and it found a twelfth
+rule of its own — two unguarded `grep` stages in `smoke.sh`, shipped, surviving W13-02's own new
+suite — on its closing case's first run.
+
+**Thirty ungated rules found, nineteen closed.** Twenty-two filed by the verifiers, eight by the
+hunter; eleven closed by the closer, eight by the hunter itself. Eleven left open and every one
+carries the command that finds it.
+
+**Owned rules: 2 of 2, and 57 of 57 across thirteen waves — with the denominator broken for the first
+time.** W13-01 and W13-02 each named an ungated rule of their own and closed it. **W13-03 shipped
+none**, correctly: it added no mechanism, only substitutions, so it had no rule to own. Its verifier
+recorded `ownedRuleGenuinelyClosed: false` *"by construction, not by failure"* and then mutated the
+one gated thing the packet touched four ways to prove the gate was live rather than assumed. That is
+the right reading, and it is the first wave in which the streak's denominator moved rather than the
+streak.
+
+**The disclosure rate did not move, eleventh wave running.** Three building packets, two disclosures
+— each exactly the one its brief demanded — and **twenty** more found by the verifiers. This remains
+the most stable measurement in the project, and the only one that has never once been improved by
+being measured.
+
+### What surprised us
+
+**A repair done "from `ls`" cannot tell a repository from a working tree.** `ARCHITECTURE.md` §16 was
+rewritten by walking the directory the packet was standing in, and the directory it was standing in
+holds six megabytes of ignored PNG that no clone has. The section whose subject is *"four
+directories it named and does not have"* now names a fifth, and the contradiction is three lines
+above the ignore rule in `.gitignore` itself. **Every phantom and every omission this project has
+repaired in five waves came from a reading of a working tree.** That is house rule 27.
+
+**A gate whose roster is derived can still be blind one kind over, and the blindness sits in the
+line above the fix.** `quotation_handled_kind` struck `quotations` blocks out of the derivation so
+that the direct reader could handle them — and the direct reader's own list of files was two names
+long and reconciled against nothing. Deleting a name from it was red; *adding a file* was not, and
+growing is the direction the wave existed for. **An exclusion and the thing it excludes for must
+live in the same place, or the exclusion becomes a second roster.**
+
+**The fixture seam a packet ships for the next packet can fail silently and still be reported as
+working.** W13-01 built a fixture-root seam for W13-A2 and documented two cases against it. Both
+inverted: the derivation stripped the root prefix and then read the bare path from a process rooted
+elsewhere, so `sed` wrote to stderr, the function returned 0 with an empty answer, and the case the
+packet designated as closing its own disclosed rule produced no refusal at all. **A seam is
+unmeasured until the packet that ships it drives the fixture itself, and "the function returned 0" is
+not that measurement.**
+
+**A published figure can be wrong by two in the paragraph whose subject is figures nobody re-derives.**
+The shipped census comment says *"three invocations answered three different pairs"*; the packet's own
+report lists four and two later readings took a fifth and a sixth. House rule 17 was obeyed where it
+mattered — the packet shipped a `--census` command and **no** total, which three independent readings
+have since vindicated — and violated in the sentence arguing for it.
+
+**And the thing that keeps being true, in its eighth form.** Everything item 4 is open on is a
+**listing** — a fenced directory tree, a package list, a container count, a row citing a file — and
+a listing is the one kind of documented fact that is checkable with a single `git ls-files` and has
+never once been checked. A repository that prints *444 claims checked, all true* carries a phantom
+directory in its architecture document, a deleted Scala file cited in the present tense in its
+feature matrix, a process instruction pointing at a register that does not exist, and a design
+document that says its own subject is committed when it is ignored.
+
+**Wave 14 is written.** It is **three building packets and one closer** at 3:1 — no hunter, because
+what is left is a mechanism and eight sentences and a hunter's rows would have no owner. Its
+load-bearing item is one claim kind that compares a documented listing against `git ls-files` in both
+directions, and its acceptance is the five substitutions in
+`docs/plan/verification/W13-03.md` going red. It also carries the one decision five closes have
+stepped around: **`screens/` is not in this repository, and definition-of-done item 1 names it.**
+
+## What wave 14 actually did
+
+Wave 14 was **three building packets and one closer**, at 3:1, written against the one class of
+documented fact nothing in this repository had ever read: a listing. It ran to the end without an
+interruption and **all four packets landed.** **Four of the five definition-of-done items are met and
+were re-judged at this close one command at a time. Item 4 is not, and what is open has changed
+shape: three of the five reasons are defects in the readers themselves.**
+
+**Judge the tree, not the reports. All four landed and all four filed a verification file — but one
+of the four was written by its verifier and not by the packet.** `git status --porcelain` at this
+close is **22 entries** over `582c9bc5` — 14 modified, 1 deleted, 7 untracked.
+
+| Packet | What is on disk | Filed its own verification file? |
+| --- | --- | --- |
+| W14-01 | `feature-matrix-check.sh` +1,119 lines: a `listings` section of 12 claims, `check_repository_layout_region`, `check_package_listing_region`, `listing_name_resolves` anchored on a whole path component, `listing_count_claim`, `listing_cited_paths` and a second independent reader, `listing_absent_paths`; **444 claims over 12 sections → 458** | yes |
+| W14-02 | `ARCHITECTURE.md` §16 rewritten to derive from `git ls-files`; `.github/` in; AU-005 rewritten against `AccountMenu.tsx`; AU-001's dead path disclosed rather than cited; the `gaps.md` instructions replaced by the disclosure that the file never existed; `docs/frontend/README.md`'s Scala fences gone; **ADR-057** written and its `DECISIONS.md` row added | yes |
+| W14-03 | `connect-seed.sh` unchanged and now driven; `ShippedImageManifestSuite`; three workspace manifests added to `deployment/storybook/Dockerfile`; TD-055 through TD-058 filed; the register's attribution paragraph amended | **no** — the file at that path is the verifier's |
+| W14-A1 | fixtures 30–37 (8 new `guard-fixtures` cases), `ConnectSeedSuite` 3 cases → 6, `ShippedImageManifestSuite` 1 → 2, `listing_is_name`'s dotfile arm, the roster's `path::fragment` exemption, three count claims; **458 → 472 claims, 13 sections** | yes |
+
+**House rule 18 failed for the fourth time in six waves, and the harness amendment did not hold.**
+Wave 13 amended the rule to be about the harness rather than the owner — *"a packet that cannot write
+its verification file is not launched"* — and W14-03 was launched anyway. Its report survives in a
+JSON field that the integrator folded in by hand. Wave 15's amendment is the only one left: **prove
+the pen before the packet starts, by requiring a zero-byte file on disk.**
+
+### The definition of done, judged at this close
+
+Every figure printed by the command beside it, on 2026-09-12, against a quickstart brought up from
+this tree and the eleven-container distributed stack built from the same one. **Nothing here is read
+off a packet report; every line was re-run at the close, and two of the numbers came back different
+from the ones the reports published.**
+
+1. **Every screen renders real data — MET, and for the first time reproducible from a clone.**
+   `pnpm -C frontend e2e --reporter=list` is **108 passed, 2 skipped, 0 failed** over 110 against a
+   live quickstart; `ls screens/` is 23 and — new at this close — **`git ls-files screens` is also
+   23**, so the item's own denominator is finally a fact about the repository. Per-spec green counts:
+   `alerts` 5, `brokers` 11, `connect` 4, `consumers` 6, `dashboard` 9, `features` 16, `ksql` 4,
+   `messages` 7, `search` 8, `shell` 9, `topics` 20, `traffic` 11. **23 of 23** captures have a named
+   case that ran green, including the three `W8-07.md` §1 still scores as uncovered or partial
+   (`M08` at `shell.spec.ts:301`, `M14` at `topics.spec.ts:482`, `M20` at `ksql.spec.ts:111`). The
+   stack answered real broker data: `kafkaClusterId kui-quickstart-0000000001`, 169 online
+   partitions, `totalDiskUsageBytes 281160`. **The honest qualification nobody has made in five
+   closes: nothing reconciles the `M01`…`M23` index against the case list.** It is a hand roster,
+   it is definition-of-done item 1's denominator, and a human matches titles to screen ids by eye
+   once per close.
+2. **Every backend capability exists — MET.** `ls services/` → **11**; `./mill __.openApiCheck`
+   **2544/2544**; `./mill checkArchitecture` **195 modules, 10 rules, no layering violations**.
+3. **Tested — MET.** `./scripts/run-tests.sh` **81 modules (81 with tests), 4,420 cases** (wave 13:
+   4,412); `pnpm test` **1,936 over 83 files**; `pnpm typecheck` exit 0; `pnpm a11y` **782 stories ×
+   2 themes, no violations** (budget line recorded: load 27.3 over 16 cores); `pnpm lint:boundaries`
+   **423 files in 11 packages**; `__.checkFormat` 495/495, `__.fix --check` 10672/10672;
+   `./mill build-tests.test` 139/139, 115 cases.
+4. **Documented — NOT MET.** Five defects, three of them in the gate. See below.
+5. **One command — MET.** `quickstart.sh` exit 0 with *"KUI is running: http://localhost:8090/ui/"*
+   and `connect-seed` exit 0; `down` → *"Removed. Nothing from the quickstart is left running or
+   stored."*; `./deployment/compose/smoke.sh` **PASSED** over the eleven-container stack.
+
+### The wave's prediction held, and its inverse is the wave-15 headline
+
+`WAVE-14.md` wrote its acceptance as a listing going red. Reproduced at this close on the shipped
+bytes, `ARCHITECTURE.md` restored byte-identical (`md5sum 63f0a2654d1b7900efdab3629f304404`):
+
+```
+$ # ├── benchmarks/  nothing      added to ARCHITECTURE.md §16's fenced tree
+feature-matrix-check: ARCHITECTURE.md (checked: listings #1) asserts [benchmarks/] as a name in
+  the repository layout and `git ls-files` carries no such name. …
+feature-matrix-check: 1 disagreement(s) over 472 compared claims.        # exit 1
+```
+
+Wave 13's prediction reproduces on the same tree too — a false quotation in `TECH_DEBT.md`'s
+`debt-register` block is one disagreement over 472. **House rule 23, fourth wave running, and both
+of the last two waves' acceptance sentences are still red.**
+
+**And the inverse, which is the same document and the same section and one line:**
+
+```
+$ # ├── NOTICE  CODEOWNERS  Makefile      added to the same fenced tree
+feature-matrix-check: 472 claims checked, all true.                      # exit 0
+```
+
+`listing_is_name` accepts a trailing `/`, a known extension, or a leading `.` — so an extensionless
+top-level **file** is invisible to the phantom direction, and `├── screens` **without** its slash,
+the wave's own defect one character short, is accepted. §16 already draws five real names of that
+shape. The packet's report calls the depth limit its honest limit and does not name this one.
+
+### Why item 4 is still open, and three of the five are the readers
+
+1. **The listing claim is blind to a shape the document uses** — measured above, no code mutation
+   needed. W14-01's verifier found it; W14-A1 closed the dotfile quarter (`.npmrc`, `.gitignore`)
+   and filed the rest against a real obstacle: §16 separates its two columns with eight spaces on one
+   line and one space on another, so no lexical rule can tell `NOTICE` from `the`. **The close is
+   the document's shape and the rule together.**
+2. **`adr_files` is built with `find docs/adr`, and it is hiding an untracked ADR from a green run.**
+   `ls docs/adr/ADR-*.md | wc -l` → 57; `git ls-files 'docs/adr/ADR-*.md' | wc -l` → **56**;
+   `DECISIONS.md` → 57 rows; the gate prints *57 rows over 57 ADRs* and exits 0. **ADR-057 — the ADR
+   this wave wrote — is untracked, and `DECISIONS.md:64` links it, so a clone taken today carries a
+   row pointing at nothing.** House rule 27's exact shape in section 5 of the script that enforces
+   house rule 27, disclosed in a comment at `:4715` and filed rather than fixed.
+3. **Five places say the design captures are not in this repository, and they are.** `582c9bc5`
+   ("Add screens", 11:52, the repository owner, after all three verification passes had filed)
+   force-added the 23 PNGs past `.gitignore:43`. `git ls-files screens` → **23**.
+   `research/design/SCREENS-V4.md:37` and `docs/plan/README.md:7` each publish *"`git ls-files
+   screens` answers `0`"*; ADR-057 (**Status: Accepted**, same day) says it at length; `.gitignore
+   :40-42`'s comment says it a fifth time. `ARCHITECTURE.md` §16 was repaired at integration and is
+   the only one that now agrees with the index. Filed as **TD-059**, with both exits named, because
+   an integrator may not reverse a human's own commit and a gate cannot choose.
+4. **`docs/frontend/README.md`'s "names the file that draws it" table names three files that do not
+   exist** — `Sidebar`, `CapabilityBanner`, `FeatureFallbackPanel`, each `git ls-files | grep -ic`
+   → 0 — under a sentence promising a wrong pixel can be traced to a line without a search. And
+   *Rendering a `Section`* publishes Scala constructor syntax for the TypeScript union at
+   `section.ts:44`, omitting its sixth member. **Neither section is in the banner's
+   section-by-section "not reconciled" list**, which names four others.
+5. **The same banner publishes a property it does not have.** *"Every path this page names is
+   resolved against `git ls-files`"* — changing `shell/src/health.ts` to `healthz.ts` leaves the run
+   at 472 claims, all true. It is a one-time manual sweep. And its proof that one `kui.ui.*`
+   identifier remains uses `grep -c`, which counts **lines**; line 897 carries two.
+
+### Did the mechanism work? Six numbers, then the answer.
+
+**The closer converted 15 of 27 outright, plus 2 in half — and eight of the ten declines were blocked
+on a document it did not own.** That is the second consecutive wave in which the **partition**, not
+the capacity, set the rate: wave 13 reported 11 of 22 for the same reason. W14-A1 closed all three of
+W14-01's own disclosures, eight of its verifier's eleven rows, three of W14-02's twelve and all four
+of W14-03's, and it found and closed a rule it had shipped itself.
+
+**The verifiers out-produced the packets nine to one, twelfth wave running.** Three building packets
+filed **three** disclosures — each exactly the one its brief demanded, none more — and the three
+verifiers plus the closer found **twenty-seven**. **The disclosure rate has not moved in twelve waves
+and has never once been improved by being measured.** It is time to stop treating that as a defect in
+the packets and start treating it as the reason the verifier exists.
+
+**The listing claim is real and it earned its keep inside the wave.** It is derived from
+`git ls-files` in every reader, gated in both directions by eight fixtures, and it caught a change to
+the repository that arrived from **outside** the wave within minutes of the commit — in the omission
+direction, which is the half it was built for and the half that is easy to leave out.
+
+**And no sixth class appeared.** What `582c9bc5` exposed is the **fifth** class arriving from an
+ungated direction: the tree moved, five statements went false, and the one listing that had a gate
+went red. Those five sentences are wave 11's class, and they are silent not because the mechanism is
+missing but because `research/`, `docs/plan/` and `.gitignore` carry no marked region at all. **That
+is a scope result, not a mechanism one — the first time in seven waves that the answer to "what is
+left" is "point the readers we have at more of the tree" rather than "build another reader."**
+
+### What surprised us
+
+**A gate can be built for exactly one spelling of the defect it was built for.** The wave existed to
+refuse `├── screens/`. It refuses `├── screens/`. It accepts `├── screens`. The rule that decides
+whether a token in a fenced tree is a *name* was never driven over a name the document actually
+draws — §16 has five extensionless entries in column one and not one of them reaches the phantom
+half. **A claim kind is only as wide as the inputs somebody drove it over, and the inputs nobody
+drove it over are in the same document.**
+
+**The repository can move under a wave, and the newest gate is the thing that notices.** The owner
+committed six megabytes of PNG past an ignore rule, hours after every verification pass had filed and
+minutes after the wave's first green run. The gate went red within minutes, correctly, in the
+direction nobody expects a gate to fire in. **A tracked path overrides an ignore rule silently** —
+`git check-ignore --no-index -v` still reports `.gitignore:43` against every one of those files — so
+the repository is now in a state where a deleted capture will not be re-added by a `git add` and
+nothing will say why.
+
+**A packet can ship a false justification beside a correct gate.** `deployment/storybook/Dockerfile`
+and `ShippedImageManifestSuite` both state that the eight-manifest image could not install and could
+not serve `alerts`, `connect` and `ksql` stories. W14-03's verifier **built both trees**: exit 0 both
+times, pnpm printing *"Lockfile is up to date"*, and the identical **77** story bundles including all
+three. The repair is right; the sentence explaining it is wrong, and it was committed by the wave
+whose entire subject is documented statements a command in this repository contradicts.
+
+**A published figure was wrong three ways in the packet whose subject is figures nobody re-derives.**
+W14-01's report says *"45 backticked tokens"* (47), *"42 of 42 resolve"* (41 of 42), and the shipped
+code comment says *"40 of them resolve"* — three figures, one subject. House rule 17 has now been
+violated in the argument for house rule 17 twice in two waves.
+
+**And the thing that keeps being true, in its ninth form.** Item 4 is open on five things and **three
+of them are the readers**. Every previous wave was open on a kind of documented fact nothing read.
+That sequence has ended: a figure, a sentence, a quotation, a roster and a listing all have readers,
+all five are driven by fixtures, and both of the last two waves' acceptance predictions are still red
+on the shipped bytes. What is left is that the readers themselves have never been read — a `find`
+where the house rule says `git ls-files`, a shape rule nobody drove over the shapes in front of it,
+and a banner asserting a property of a page that is one person's afternoon.
+
+**Wave 15 is written.** It is **three building packets and one closer** at 3:1 — the same shape as
+wave 14, deliberately, because wave 14's shape is not what failed. What failed was that two packets
+shared five documents and the ordering rule they were given (*"W14-01 goes first"*) was not honoured,
+which cost one verifier its attribution and another two runs to a script being rewritten under it.
+Wave 15's load-bearing items are the two hard couplings written down as contracts on day one:
+`ARCHITECTURE.md` §16's first column becoming decidable, and ADR-057 becoming either tracked or
+superseded. It also carries the decision six closes have now stepped around, in its inverted form:
+**`screens/` is in this repository, and five documents say it is not.**

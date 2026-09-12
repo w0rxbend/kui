@@ -1,7 +1,9 @@
 # The v4 screens, as read from the screenshots
 
-**What this is.** A reading of twenty-three screenshots captured 2026-09-06, held in
-`screens/` in this repository. They are a later render of the same design system
+**What this is.** A reading of twenty-three screenshots captured 2026-09-06, held in a `screens/`
+directory that is **not part of this repository** (see *Where the images are* below, and
+[ADR-057](../../docs/adr/ADR-057-design-captures-stay-outside-the-repository.md)). They are a later
+render of the same design system
 `REFERENCE.md` and `SCREENS.md` describe, and they cover more of the product than either: the
 dashboard now has four tabbed bodies, the topics list has a statistics region and bulk selection,
 the message browser has a filter grammar, and Kafka Connect and ksqlDB are drawn as working
@@ -29,8 +31,22 @@ it is silent, `SCREENS.md` still owns the answer.
 `SCREENS.md` is **not deleted** in this wave. It still holds the only reading of several
 components, and its §6 open findings are still open unless §7 below closes one by name.
 
-**Where the images are.** `screens/`, committed, twenty-three PNGs named by capture time. They are
-quoted below by the index in §1, so every measurement is re-runnable.
+**Where the images are, and they are not here.** Twenty-three PNGs named by capture time, in a
+`screens/` directory at the root of a working tree — **ignored and never committed**, for the same
+reason `SCREENS.md:17` gives for the v3 captures and the artboard: design source does not enter this
+repository, and a reading of it is what is kept. `git ls-files screens` answers `0`,
+`git log --all -- 'screens*'` is empty, and `.gitignore:43` is the line that ignores them.
+[ADR-057](../../docs/adr/ADR-057-design-captures-stay-outside-the-repository.md) is the decision and
+names what it costs.
+
+This document said *"`screens/`, committed"* until 2026-09-12, and `:3` said the captures were
+*"held in `screens/` in this repository"*. Both were false and both were contradicted by
+`SCREENS.md:17` in this directory. **What follows from the correction, and it is not small.**
+Every measurement below is re-runnable only by somebody holding the images, exactly as
+`SCREENS.md`'s are; the file names are quoted throughout and indexed in §1 so that a reader who
+has them can re-take any figure, and a
+reader who does not can still read every derived number, because each one is written out beside the
+coordinates it came from rather than left as "see the capture".
 
 **Method.** Unchanged from `SCREENS.md`. Colours are sampled with ImageMagick, never named by eye;
 distances come from scanning one row or one column for the transition between two fills. Both are
@@ -156,7 +172,7 @@ two adjustments exist because the raw values failed contrast. Recorded so nobody
 
 Screens are referenced as `M01`…`M23`, in capture order.
 
-| # | File (`screens/`) | Screen | Theme |
+| # | File (in the uncommitted `screens/` directory) | Screen | Theme |
 | --- | --- | --- | --- |
 | M01 | `screenshot_2026-09-06_10-27-52.png` | Dashboard · Overview tab | dark |
 | M02 | `…10-28-12.png` | Dashboard · Overview tab | light |
@@ -182,8 +198,9 @@ Screens are referenced as `M01`…`M23`, in capture order.
 | M22 | `…10-29-52.png` | ksqlDB, Appearance popover | dark |
 | M23 | `…10-29-57.png` | Dashboard · Alerts, Create-topic dialog | dark |
 
-Three captures (`M05`, `M09`, `M19`, `M20`) carry a screenshot-tool toast in the top-right corner
-that is **not part of the design**. Ignore anything above y≈90 on the right of those four.
+**Four** captures — `M05`, `M09`, `M19` and `M20` — carry a screenshot-tool toast in the top-right
+corner that is **not part of the design**. Ignore anything above y≈90 on the right of those four.
+(This sentence said *three* and then listed four, and the sentence after it said *those four*.)
 
 ---
 

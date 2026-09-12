@@ -189,8 +189,10 @@ holds the plan for the rest.
 
 Three regions of this section are marked `<!-- checked: … -->` and read by
 `./scripts/feature-matrix-check.sh`. Two rules govern what may be written inside them, and both cost
-somebody an afternoon to find, so they are written here rather than left in a comment inside a
-3,700-line shell script.
+somebody an afternoon to find, so they are written here rather than left in a comment inside the
+checker. Its length is what `wc -l scripts/feature-matrix-check.sh` prints, and is deliberately not
+copied here: this sentence published **3,700 lines** against a script that had grown to 4,446, and a
+number that moves every time a claim kind is added is a number nobody re-takes.
 
 **State goes in the three labelled lists; prose about a service goes outside the markers.** Inside
 `capability-claims` a service's state is stated in *Built and routed*, *Built, not routed* and *Not

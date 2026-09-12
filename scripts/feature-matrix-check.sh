@@ -57,6 +57,14 @@
 #                     `grep -rn 'DECISIONS.md'` over every `.sh`, `.yml`, `.mill` and `.scala` in
 #                     the tree returned nothing, so no script, workflow, build target or suite read
 #                     the index. ADR-053 was written next and would have walked into the same hole.
+#   listings          the **listings** four documents draw -- `ARCHITECTURE.md` §16's repository
+#                     tree, `docs/frontend/README.md`'s `packages/` roster, the container count in
+#                     `docs/overview/README.md`, and every repository path a row of
+#                     `docs/FEATURE_MATRIX.md` cites -- against `git ls-files`, in both directions. The index and never
+#                     `ls` or `find` (house rule 27): the layout tree carried `screens/` as a
+#                     top-level directory of this repository for a wave, having been rewritten from
+#                     `ls` on a working tree in the section whose whole subject is directories that
+#                     are not on disk, while `.gitignore` ignores it and it has never been committed
 #
 # The name is the one the CI step uses (`.github/workflows/ci.yml`, the `generated` job). It was
 # also the name the wave plan that commissioned this script used; that plan has since been deleted,
@@ -329,6 +337,10 @@ decisions="DECISIONS.md"
 # that describes it, in the wave whose subject that gate was, and why a figure this script derives
 # itself is now read back out of the page that publishes it.
 overview="docs/overview/README.md"
+# Section 12's one package roster. `docs/frontend/README.md` is the page `README.md` sends a
+# newcomer to for "the whole workspace", and its `packages/` listing had been three packages short
+# for four waves -- a copy of a directory listing nobody re-read against the directory.
+frontdoc="docs/frontend/README.md"
 # Section 6's three. Each publishes totals about a document the build generates, and until
 # 2026-09-11 `grep -c 'checked:'` over all three answered 0.
 adr052="docs/adr/ADR-052-metrics-endpoints.md"
@@ -398,7 +410,11 @@ declare -A registry=(
  count-assertion debt-duplicate-refused dependency-audit-coverage dependency-audit-refuses\
  dependency-reader-independence\
  dependency-row-compared empty-block-refused fact-independence figure-published\
- header-kind-inverse marked-markdown-pruned marker-list-refused openapi-fact-independence\
+ header-kind-inverse listing-absence-roster-driven listing-cited-paths-read listing-count-word\
+ listing-preference-keys\
+ listing-layout-reconciled listing-marker-refused listing-name-anchored\
+ listing-packages-reconciled\
+ marked-markdown-pruned marker-list-refused openapi-fact-independence\
  quotation-census-driven quotation-empty-marker\
  quotation-path-claim-site quotation-sweep-reports residue-reports-unclaimed\
  swept-roster-reconciled sweep-block-count\
@@ -415,6 +431,8 @@ declare -A registry=(
   [quotations]="quotation quotation-audit quotation-claim-site quotation-drive quotation-path\
  quotation-roster quotation-sweep residue"
   [debt-register]="debt-ids-unique debt-next-id residue"
+  [listings]="listing-absence-roster listing-count listing-omission listing-path\
+ listing-path-count listing-phantom residue"
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -1737,7 +1755,7 @@ for id in "${!adr_row_link[@]}"; do
  file in this repository."
 done
 
-close_section adr-index 112
+close_section adr-index 114
 
 # ---------------------------------------------------------------------------------------------
 # 6. The OpenAPI totals three ADRs publish about documents the build generates.
@@ -3606,13 +3624,15 @@ check_quotation_region() {
 declare -A quotation_marked_roster=(
   [README.md]="capability-claims rows quotations"
   [$matrix]="capability-claims rows milestones quotations"
-  [$overview]="gate-table"
+  [$overview]="gate-table listings"
   [$apireadme]="merged-document"
   [$adr048]="merged-document"
   [$adr052]="openapi-totals"
   [$adr053]="openapi-totals"
   [$adr054]="openapi-totals"
   [TECH_DEBT.md]="debt-register"
+  [ARCHITECTURE.md]="listings"
+  [$frontdoc]="listings"
 )
 
 # The set the sweep actually reads, derived from the tree at the moment the sweep runs. Held in the
@@ -4302,6 +4322,1026 @@ verify_quotation_census_driven() {
  uncounted loop."
 }
 
+
+# ---------------------------------------------------------------------------------------------
+# 12. The listing: a roster of repository names a document draws, against `git ls-files`.
+# ---------------------------------------------------------------------------------------------
+#
+# Numbered after section 11 and placed before it, because section 11 publishes the length of this
+# script's whole ledger and therefore has to be the last section that adds to it.
+#
+# Sections 0 to 7 compare a **figure**. Section 8 compares a **sentence** against the tree, section
+# 9 a **quotation** against the file it names, and section 9's roster reconciliation compares the
+# list of places this script looks against the tree. This one compares a **listing**: a fenced
+# directory tree, a package roster, a container count, a row citing a file -- the one class of
+# documented fact that is decidable against the index, and that nothing in this repository had ever
+# compared.
+#
+# WHY THE INDEX AND NOT THE WORKING TREE, WHICH IS THE WHOLE OF HOUSE RULE 27
+# ---------------------------------------------------------------------------
+# `ARCHITECTURE.md` §16 listed `screens/` as a top-level directory of this repository. It has never
+# been committed -- `git log --all -- 'screens*'` is empty and `git ls-files screens` answers
+# nothing -- and `.gitignore:43` ignores it deliberately, because the captures are kept outside the
+# repository. The listing that named it was written by the wave before this one, in the section
+# whose entire subject is *directories that are not on disk*, by reading `ls` over a working tree.
+#
+# That is the defect and it is not a slip. **`ls` and `find` cannot tell a tracked directory from
+# an ignored one.** A working tree carries build output, a vendored dependency, another session's
+# scratch file and six megabytes of ignored PNG, and every one of them answers `ls`. `git ls-files`
+# is the only reading of this repository that a clone reproduces, and a document is written for
+# people who clone. So every derivation in this section is the index, and the two places this file
+# still walks a working tree for a repository fact are named in the packet report rather than left
+# for the next reader to find.
+#
+# BOTH DIRECTIONS, BECAUSE THE OMISSION HALF IS THE HALF NOBODY CHECKS
+# --------------------------------------------------------------------
+# A name the document asserts that the index does not carry is a phantom -- `screens/`. A name the
+# index carries that the document's listing omits is an omission -- `.github/`, which is tracked,
+# which holds the `ci.yml` that same document cites repeatedly, and which sat outside §16 while the
+# listing carried `.scalafmt.conf` and `.tool-versions`. Both are one comparison here, for
+# `reconcile_manifests`' reason: each direction is the other's gate. A reader that stops reading the
+# document turns every tracked name into an omission and prints all of them; a derivation that
+# stops deriving turns every documented name into a phantom and prints all of those. Neither can go
+# quiet without the other going loud, which is why neither side needs a count of its own.
+#
+# WHAT IS AND IS NOT A NAME, STATED HERE RATHER THAN NARROWED LATER
+# -----------------------------------------------------------------
+# The failure mode of every claim kind this project has shipped is that it refuses something honest
+# and gets narrowed until it refuses nothing. So the shape rules are written out, and the tokens
+# this section deliberately does not read are written out with them:
+#
+#   * a token ending in `/` is a directory the listing asserts;
+#   * a token whose final extension is in `listing_file_extensions` is a file it asserts;
+#   * everything else in a tree's description column -- `the`, `suites`, `Dockerfiles`,
+#     `pnpm/TypeScript/Vite`, `domain application infrastructure contract api app` -- is prose and
+#     is invisible here. No exception list is needed for it, the way section 9's eight-word floor
+#     needs no exception list for JSON payloads.
+#
+# A name resolves if the index carries it as a **whole path component**: `libs/` resolves because
+# `libs/kernel/...` is tracked, `e2e/` resolves because `frontend/e2e/...` is, and `screens/`
+# resolves nowhere even though `frontend/.../51-topic-screens.css` contains the letters. That is the
+# limit and it is deliberate: this section refuses a name the repository does not carry anywhere,
+# not a name drawn at the wrong depth. `benchmarks/` -- the phantom §16 carried for four waves --
+# has no commit in this repository's history at all, so the limit costs nothing against the case the
+# section was built for.
+
+# The index, read once, and the seam every reader below consults. Held in a variable rather than
+# called as a command at each site so that a `guard-fixtures` case can shadow it with a `local` and
+# drive the shipped readers over an index written for the occasion -- `marked_markdown_root`'s
+# shape, for `marked_markdown_root`'s reason.
+listing_index=$(git ls-files)
+
+# A derivation that answers nothing would turn every documented name into a phantom, which is loud,
+# and every tracked name into an omission, which is louder -- but it would do it from outside a
+# repository as well as from inside a broken one, and a gate that fails with two hundred refusals
+# when it is simply being run in the wrong place teaches the next reader to stop reading its output.
+if [[ -z $listing_index ]]; then
+  echo "feature-matrix-check: \`git ls-files\` answered nothing from $root, so no listing in any" \
+       "document can be compared against the repository. This is not a documentation failure." >&2
+  exit 2
+fi
+
+# The extensions a backticked or drawn token has to end in before this section treats it as naming
+# a file. Wider than section 9's `quotation_extensions`, because that list exists to decide what a
+# quotation may be attributed to and this one exists to decide what a citation may be followed to.
+listing_file_extensions='mill|md|conf|sh|yml|yaml|ts|tsx|scala|json|txt|css|mjs|html'
+
+# `sed`-safe quoting of a name that is about to become half of a regular expression. A file name
+# carries `.` and a package name carries `-`, and an unescaped `.` in `build.mill` matches the `q`
+# in `buildqmill`, which is a resolution that would pass for a file nobody has.
+listing_quote() {
+  printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g'
+}
+
+# Does the index carry this name as a whole path component? The anchoring is the comparison: with a
+# bare `grep -F` on the name, `screens/` resolves against
+# `frontend/packages/feature-topics/styles/51-topic-screens.css` and the defect this section was
+# written for passes. Measured on 2026-09-12: `git ls-files | grep -c screens` answers 5 and
+# `git ls-files | grep -cE '(^|/)screens(/|$)'` answers 0.
+#
+# A here-string and not a pipe. `printf '%s\n' "$listing_index" | grep -q` is a pipeline whose
+# `grep` exits as soon as it matches, `printf` then dies of SIGPIPE, and under `pipefail` the
+# pipeline's status is 141 -- so a name that resolves reads as a name that does not, and every
+# listing in the repository becomes a phantom. That cost this section an hour on 2026-09-12.
+listing_name_resolves() {
+  local name=${1%/}
+  [[ -n $name ]] || return 1
+  grep -qE "(^|/)$(listing_quote "$name")(/|\$)" <<< "$listing_index"
+}
+
+# Every whitespace-separated token of a drawn tree, with the box-drawing characters turned into
+# spaces and the punctuation a description column ends a clause with taken off. `build.mill,` in
+# `the suites that read build.mill, ci.yml and the Dockerfiles themselves` is the same name as
+# `build.mill`, and a listing that named it with a comma would otherwise be a phantom.
+listing_tokens() {
+  printf '%s' "$1" | sed 's/[│├└─·]/ /g' | tr -s ' \t' '\n' \
+    | sed 's/[.,;:)]*$//; s/^[("]*//' | sed '/^$/d'
+}
+
+# Is this token a name the listing asserts, rather than a word in the column that describes one?
+#
+# THE THIRD ARM IS THE DOTFILE, AND WHAT IT DOES NOT REACH IS WRITTEN OUT BELOW IT.
+# `.gitignore`, `.tool-versions` and `.mill-version` are top-level entries of this repository that
+# §16 draws and that the first two arms cannot see: no trailing slash, and `gitignore` is not an
+# extension anybody would put in `listing_file_extensions`. They were checked in the omission
+# direction only -- `$flat` is every drawn token and does not go through this function -- so a
+# phantom `.npmrc` drawn beside them resolved against nothing and was refused by nothing. A leading
+# dot is the one shape a description column never produces: `listing_tokens` strips the punctuation
+# a clause ends with, so no English word in this tree begins with one.
+#
+# AND THE EXTENSIONLESS TOP-LEVEL FILE IS STILL OUT OF REACH, WHICH IS A DOCUMENT PROBLEM.
+# `NOTICE`, `CODEOWNERS`, `Makefile` -- and `screens` drawn without its slash, which is this wave's
+# own defect written one character shorter -- are indistinguishable here from `suites`, `Dockerfiles`
+# and `Playwright`, which §16's description column really does contain. The information that
+# separates them is positional and this tree does not carry it: `├── libs/        kernel/ …`
+# separates its two columns with eight spaces and `├── build-tests/ the suites that read …`
+# separates them with one, so there is no column to read. The closing shape is in the document --
+# one top-level entry per line, or every column-one name in backticks -- and it is filed as a row
+# rather than guessed at here, because a lexical rule that called `NOTICE` a name would call
+# `Playwright` one too and this claim would be silenced within a wave.
+listing_is_name() {
+  [[ $1 =~ ^[A-Za-z0-9_.@/-]+/$ ]] && return 0
+  [[ $1 =~ ^\.[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] && return 0
+  [[ $1 =~ ^[A-Za-z0-9_.@/-]+\.($listing_file_extensions)$ ]]
+}
+
+# The comparison, both directions, and the two directions are two claims because `claim` records
+# one kind per call. They are made from one function and from one pair of computed lists so that a
+# caller cannot make the phantom half without making the omission half: half a reconciliation is
+# how `.github/` sat outside a listing that was otherwise true.
+reconcile_listing() {
+  local where=$1 subject=$2 derivation=$3 phantom=$4 omitted=$5
+  claim listing-phantom "" \
+    "every name resolves" "${phantom:-every name resolves}" \
+    "$where asserts [$phantom] as $subject and \`$derivation\` carries no such name. A listing is\
+ a claim about the repository, and \`ls\` on a working tree cannot tell a tracked directory from an\
+ ignored one -- which is how \`screens/\` entered this document's own layout tree, in the section\
+ whose subject is directories that are not on disk."
+  claim listing-omission "" \
+    "every name is listed" "${omitted:-every name is listed}" \
+    "\`$derivation\` carries [$omitted] and $where's listing does not name it. The omission\
+ direction is the half nobody runs by hand: it is what let \`.github/\` sit outside the repository\
+ layout while the same document cited the \`ci.yml\` inside it, and it is the direction a listing\
+ goes wrong in every time a directory is added rather than removed."
+}
+
+# --- 12.1 `ARCHITECTURE.md` §16, the repository layout ------------------------------------------
+#
+# The lines that draw a branch, and only those: the fence itself and the tree's root label `kui/`
+# draw none, so neither has to be excluded by name. A listing whose drawing characters are replaced
+# by something else stops yielding names entirely, and the omission direction then prints every
+# top-level name in the index -- which is the loud failure the two directions exist to guarantee.
+# One block per document is the shape this reader assumes, and it is the shape `check_marked_file`
+# would otherwise hide: a second `checked: listings` block in the same file would be handed to the
+# handler twice while this reader concatenated both, so the two blocks would be compared as one and
+# the section would close at the wrong count. `close_section listings` is the gate on that, and it
+# names the section rather than the block -- which is why it is written here as well.
+#
+# The document is a variable and not a literal at the two call sites, for `marked_markdown_root`'s
+# reason and no other: a `guard-fixtures` case shadows it with a `local` and drives the shipped
+# reader over a tree drawn for the occasion. `check_marked_file listings ARCHITECTURE.md` below is
+# unchanged, so which document is checked on a real run does not move with it.
+listing_layout_document=ARCHITECTURE.md
+
+listing_layout_lines() {
+  region_lines listings "$listing_layout_document" | { grep -E '^[│├└]' || true; }
+}
+
+check_repository_layout_region() {
+  local where=$1 text=$2 token phantom="" omitted="" flat residue_text=$text names
+  names=$(listing_tokens "$(listing_layout_lines)" | sort -u)
+
+  while IFS= read -r token; do
+    [[ -n $token ]] || continue
+    listing_is_name "$token" || continue
+    listing_name_resolves "$token" || phantom+="$token "
+  done <<< "$names"
+
+  # The token test and not a substring test. `grep -qF mill` -- which is what §16's own published
+  # command does -- is satisfied by `mill-build/`, so the day `mill` stopped being tracked the
+  # omission direction would have gone on passing on the strength of a different name.
+  flat=" $(listing_tokens "$(listing_layout_lines)" | tr '\n' ' ') "
+  while IFS= read -r token; do
+    [[ -n $token ]] || continue
+    [[ $flat == *" $token "* || $flat == *" $token/ "* ]] || omitted+="$token "
+  done < <(cut -d/ -f1 <<< "$listing_index" | sort -u)
+
+  reconcile_listing "$where" "a name in the repository layout" \
+    "git ls-files" "${phantom% }" "${omitted% }"
+
+  # The names are struck out before the residue reads the block, for the reason section 9 strikes
+  # paths out of a quotations block: they are the claimed side of the two comparisons above, and a
+  # name is the one kind of published token that carries digits belonging to nothing -- `e2e/`
+  # publishes the figure 2 to a reader that counts characters, and a residue that reports it
+  # teaches the next author to draw the tree outside the markers.
+  while IFS= read -r token; do
+    [[ -n $token ]] || continue
+    listing_is_name "$token" && residue_text=${residue_text//"$token"/}
+  done <<< "$names"
+  report_unclaimed_figures "$where" "$residue_text"
+}
+
+# --- 12.2 `docs/frontend/README.md`, the `packages/` roster --------------------------------------
+#
+# A set comparison rather than a resolution, because this listing draws one level of one directory
+# and the index answers exactly that level: `git ls-files 'frontend/packages/*/package.json'` is the
+# roster of packages, one manifest each, and a package without a manifest is not a package pnpm
+# would build. Section 8 compares the same roster against `find frontend/packages -maxdepth 1`; the
+# two would disagree over an untracked package directory, which is the point -- one of them reads a
+# working tree, and the packet report names it as a row rather than repairing section 8 here.
+listing_package_names() {
+  region_lines listings "$frontdoc" \
+    | { sed -nE 's|^    ([A-Za-z0-9_.@-]+)/.*|\1|p' || true; } | sort -u
+}
+
+listing_package_directories() {
+  { grep -E '^frontend/packages/[^/]+/package\.json$' <<< "$listing_index" || true; } \
+    | cut -d/ -f3 | sort -u
+}
+
+check_package_listing_region() {
+  local where=$1 text=$2 phantom omitted claimed fact
+  claimed=$(listing_package_names)
+  fact=$(listing_package_directories)
+  phantom=$(comm -23 <(printf '%s\n' "$claimed" | sed '/^$/d') \
+                     <(printf '%s\n' "$fact" | sed '/^$/d') | tr '\n' ' ')
+  omitted=$(comm -13 <(printf '%s\n' "$claimed" | sed '/^$/d') \
+                     <(printf '%s\n' "$fact" | sed '/^$/d') | tr '\n' ' ')
+  reconcile_listing "$where" "a package under \`frontend/packages/\`" \
+    "git ls-files 'frontend/packages/*/package.json'" "${phantom% }" "${omitted% }"
+  # Not anchored to the words beside it. `regions` flattens a block line by line and this listing
+  # draws two columns, so the sentence that names the figure is interleaved with the package names
+  # in the left column -- `which answers` and `**11**` are eight characters apart in the document
+  # and thirty apart in the string this handler is given. The block carries one bold span and it is
+  # the count; a second one would take this comparison's place and be refused by it.
+  listing_count_claim "$where" '\*\*([A-Za-z0-9]+)\*\*' \
+    "$(printf '%s\n' "$fact" | sed '/^$/d' | wc -l)" "the number of packages" \
+    "git ls-files 'frontend/packages/*/package.json'"
+  report_unclaimed_figures "$where" "$text"
+}
+
+# --- 12.2b `docs/frontend/README.md`'s preference count, against the file it names ----------------
+#
+# `**Three preferences, all of them browser-local**` is a count of a listing with its names left
+# out, and until this claim nothing read it: the same wave that repaired it -- it had said *Four*
+# over a table of five rows -- could put it back to *Four* for free with the run green, which a
+# verifier measured on 2026-09-12.
+#
+# The fact is the file the sentence itself names as the declaration site, and not the table below
+# it. A count compared against the rows beside it is a document agreeing with itself: it would go
+# on passing the day a fourth preference is added to `appearance.ts` and written into neither, which
+# is the direction this page has already gone wrong in twice.
+appearance_module="frontend/packages/kernel/src/theme/appearance.ts"
+
+listing_preference_keys() {
+  { grep -oE '"kui\.[a-z]+"' "$appearance_module" || true; } | sort -u | wc -l | tr -d ' '
+}
+
+check_preference_listing_region() {
+  local where=$1 text=$2
+  listing_count_claim "$where" '\*\*([A-Za-z0-9]+) preferences' "$(listing_preference_keys)" \
+    "the number of browser-local preferences" \
+    "grep -o '\"kui.<name>\"' $appearance_module | sort -u | wc -l"
+  report_unclaimed_figures "$where" "$text"
+}
+
+# --- 12.3 `docs/overview/README.md` §4, the container count --------------------------------------
+#
+# The count of a listing is a listing claim: the newcomer's overview says how many containers the
+# distributed shape runs and names the command that counts them, and until 2026-09-12 nothing ran
+# it -- `**Eleven containers.**` -> `**Fourteen containers.**` left this script at 444 claims, all
+# true, exit 0.
+#
+# THE FIGURE IS PUBLISHED AS A WORD, AND IT IS COMPARED AS A NUMBER
+# -----------------------------------------------------------------
+# `report_unclaimed_figures` already refuses a number word in **bold** and asks for a digit, but its
+# shape is `**Eleven**` and this page writes `**Eleven containers.**`, so the residue cannot see it
+# and never could. Rather than asking the page to write `**11 containers.**` -- which reads worse in
+# the one document written for somebody who has never seen this repository -- the word is expanded
+# to its digit on *both* sides of the comparison: the claimed side becomes `11`, and the fragment
+# `claim`'s claimed-side refusal reads is the matched text with the word rewritten as the digit, so
+# that refusal still holds. The raw fragment is struck out of the residue first, because the residue
+# is handed the text the document actually wrote.
+#
+# The tens are a second table and not seven more entries in `number_words`, because that table is
+# the residue's: a word added to it is a word `report_unclaimed_figures` starts refusing in bold in
+# every marked block in this repository, and `**Fifty**` has never been a figure any of them
+# publishes. `fifty-seven` is, in the one sentence of the newcomer's overview that says how many
+# ADRs there are -- a figure the same document publishes again two hundred lines lower, inside a
+# marked block, where it is read back and refused.
+listing_tens_words='twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety'
+
+listing_word_value() {
+  local want word position=0 tens_word unit_word units at=1
+  want=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+  if [[ $want =~ ^($listing_tens_words)-([a-z]+)$ ]]; then
+    # Captured before anything else matches: the recursive call below runs this same test and
+    # `BASH_REMATCH` is one global array, so reading it twice reads the second match.
+    tens_word=${BASH_REMATCH[1]}
+    unit_word=${BASH_REMATCH[2]}
+    for word in ${listing_tens_words//|/ }; do
+      if [[ $word == "$tens_word" ]]; then
+        units=$(listing_word_value "$unit_word")
+        [[ -n $units ]] && { printf '%s' $(( (at + 1) * 10 + units )); return 0; }
+      fi
+      at=$(( at + 1 ))
+    done
+  fi
+  for word in ${number_words//|/ }; do
+    position=$(( position + 1 ))
+    [[ $word == "$want" ]] && { printf '%s' "$position"; return 0; }
+  done
+  # Nothing, and `return 0` explicitly: a digit is not a number word, the caller keeps the digit,
+  # and a function whose last statement is a failed `[[ ]]` ends a `set -e` run inside a command
+  # substitution with no output at all -- which is how this one spent its first run printing
+  # nothing and exiting 1.
+  return 0
+}
+
+# The figure a listing publishes about its own size, compared against the command that prints it.
+# `text` is read and struck out through the caller's own local, the way `claim` and `consume`
+# already reach it, so that a count claim and a name claim inside one block share one residue.
+listing_count_claim() {
+  local where=$1 pattern=$2 fact=$3 subject=$4 derivation=$5
+  local raw claimed value expanded
+  if [[ ! $text =~ $pattern ]]; then
+    fail "$where: the block publishes no figure for $subject, so the size of the listing it draws" \
+         "is read by nothing. A count is a listing with its names left out, and it is the" \
+         "figure a reader is most likely to repeat somewhere this script does not look."
+    return
+  fi
+  raw=${BASH_REMATCH[0]}
+  claimed=${BASH_REMATCH[1]}
+  value=$(listing_word_value "$claimed")
+  [[ -n $value ]] || value=$claimed
+  expanded=${raw/"$claimed"/"$value"}
+  consume text "$raw"
+  claim listing-count "$expanded" \
+    "$value" "$fact" \
+    "$where says $subject is $claimed; \`$derivation\` answers $fact. The page names that command\
+ in the sentence beside the figure and until 2026-09-12 nothing ran it, which is the state every\
+ marked block in this repository exists to end."
+}
+
+compose_file="deployment/compose/docker-compose.yml"
+
+check_container_listing_region() {
+  local where=$1 text=$2 fact
+  fact=$({ grep -c 'image: kui-' "$compose_file" || true; })
+  listing_count_claim "$where" '\*\*([A-Za-z0-9]+)\ containers' "$fact" \
+    "the number of containers the distributed shape runs" \
+    "grep -c 'image: kui-' $compose_file"
+  report_unclaimed_figures "$where" "$text"
+}
+
+# --- 12.3b The same document's two counts that are written as ordinary prose ----------------------
+#
+# A figure a document publishes in **bold** is refused by the residue when nothing compares it. A
+# figure the same document writes in a sentence -- *"it lists all fifty-seven"*, *"gives eleven
+# packages"* -- is invisible to every reader in this file, deliberately: a number word in prose is
+# explanation, and `report_unclaimed_figures` says so beside the rule. That limit is honest for
+# *the three health probes*; it is not honest for a count of the repository written one clause away
+# from the command that prints it, which is what both of these are.
+#
+# Both were measured going wrong for free on 2026-09-12, with the run green: `all fifty-seven` ->
+# `all fifty-five`, and `gives eleven packages` -> `gives nine packages`. The second is the sharper
+# of the two -- the wave that wrote it had just converted its derivation from `ls` to `git ls-files`,
+# so the reader is handed a correct command and a number that command contradicts.
+#
+# The pattern is the sentence and not the word, for `claim`'s reason: the claimed side has to be
+# read out of the text the block published, and a pattern matching a bare number word anywhere in
+# the block would take its value from whichever clause used one first.
+# The fact is section 5's own roster and not a second derivation, for one measured reason:
+# `git ls-files 'docs/adr/ADR-*.md' | wc -l` answers 56 on this tree and `docs/adr` holds 57,
+# because the ADR this wave wrote is not committed yet. A gate that refuses a document for being
+# right about a file that exists is a gate the next integrator turns off, so the comparison is
+# against the roster section 5 already reads and reconciles against `DECISIONS.md` in both
+# directions. That roster is built with `find`, which is house rule 27's own shape and is section
+# 5's row to repair, not this one's -- it is filed rather than fixed here.
+check_adr_count_region() {
+  local where=$1 text=$2
+  listing_count_claim "$where" 'lists all ([a-z]+(-[a-z]+)?)' "${#adr_files[@]}" \
+    "the number of ADRs \`$decisions\` indexes" \
+    "ls docs/adr/ADR-*.md | wc -l, as section 5 reads it"
+  report_unclaimed_figures "$where" "$text"
+}
+
+check_package_count_region() {
+  local where=$1 text=$2 fact
+  fact=$(printf '%s\n' "$(listing_package_directories)" | sed '/^$/d' | wc -l | tr -d ' ')
+  listing_count_claim "$where" 'gives ([a-z]+(-[a-z]+)?) packages' "$fact" \
+    "the number of packages the browser build is made of" \
+    "git ls-files 'frontend/packages/*/package.json'"
+  report_unclaimed_figures "$where" "$text"
+}
+
+# --- 12.4 `docs/FEATURE_MATRIX.md`'s rows, and the paths they cite --------------------------------
+#
+# No marker, and that is the point: the rows are the document, four hundred of them, and wrapping
+# them in a checked region would hand the residue every figure in the matrix. The scope is the row
+# shape instead -- `^| `, the same anchor `debt_row_ids` uses -- and the claim is narrow: a
+# backticked token a row offers as a file in this repository has to be a file in this repository.
+#
+# THE FOUR SHAPES THAT ARE NOT A CITATION, AND THE MEASUREMENT BEHIND EACH
+# ------------------------------------------------------------------------
+# Measured over the 189 rows on 2026-09-12: 42 tokens survive these rules and 40 of them resolve.
+# Widen any one of them and the claim starts refusing honest prose, after which somebody narrows it
+# until it refuses nothing -- which is the failure mode of every claim kind this project has built.
+#
+#   * **a token with whitespace in it is a command**, not a path:
+#     `grep -c 'test(' frontend/e2e/search.spec.ts`, `pnpm exec playwright test traffic.spec.ts`.
+#     Four of the forty-five tokens with a known extension are this shape;
+#   * **a token with no known extension is not a claim about a file**: `/api/v1/search`,
+#     `q=ordrs&mode=fts`, `Rbac.grants`, `__consumer_offsets` and the three explicitly-declared
+#     absences §16 and this matrix name in prose -- `docs/benchmarks/`, `services/config`,
+#     `deployment/helm/`. A claim that refuses a URL path is a claim that gets silenced;
+#   * **a token under a build-output directory is generated and nothing tracks it**:
+#     `dist/.vite/manifest.json`. The prefixes are `marked_markdown_prunes`, which section 9 already
+#     maintains and fixture 27 already drives, rather than a second list saying the same thing;
+#   * **a token carrying `...` is an elided path** and resolves as one: the matrix writes
+#     `libs/contracts-core/.../BrokerDtos.scala` for a file whose middle is not worth four segments
+#     of a table cell, and `frontend/ui-shell/.../page/LoginPage.scala` for a tree ADR-048 deleted.
+#     The first resolves against the index and the second did not, which is exactly the difference
+#     the elision must not hide.
+
+# The paths the matrix's rows cite, one per line, deduplicated.
+listing_cited_paths() {
+  local file=${1-$matrix} token directory pruned
+  { grep '^| ' "$file" || true; } | { grep -oE '`[^`]*`' || true; } | sed 's/^`//; s/`$//' \
+    | sort -u | while IFS= read -r token; do
+        case $token in *[[:space:]]*) continue ;; esac
+        [[ $token =~ \.($listing_file_extensions)$ ]] || continue
+        token=${token#./}
+        pruned=no
+        for directory in "${marked_markdown_prunes[@]}"; do
+          [[ ${token%%/*} == "$directory" ]] && pruned=yes
+        done
+        [[ $pruned == yes ]] && continue
+        printf '%s\n' "$token"
+      done
+}
+
+# The same quantity, counted by a different expression, for `audit_quotations_in_every_block`'s
+# reason: the comparison above answers "no unresolved path" for every document at once if the
+# reader has stopped reading, and on an honest matrix that is also the honest answer.
+listing_cited_path_count() {
+  local file=${1-$matrix} prunes
+  prunes=$(printf '%s|' "${marked_markdown_prunes[@]}")
+  awk -v ext="\\\\.(${listing_file_extensions})\$" -v prunes="^(${prunes%|})/" '
+    /^\| / {
+      line = $0
+      while (match(line, /`[^`]*`/)) {
+        token = substr(line, RSTART + 1, RLENGTH - 2)
+        line = substr(line, RSTART + RLENGTH)
+        if (token ~ /[ \t]/) continue
+        if (token !~ ext) continue
+        sub(/^\.\//, "", token)
+        if (token ~ prunes) continue
+        seen[token] = 1
+      }
+    }
+    END { print length(seen) }
+  ' "$file"
+}
+
+# Does the index carry this cited path? An elision stands for any run of segments, so it becomes
+# `.*` between two anchors rather than being stripped -- stripping it would make
+# `frontend/ui-shell/.../page/LoginPage.scala` resolve against `.../shell/src/pages/SignIn.tsx`'s
+# directory and the deleted tree would read as a repaired citation. The sentinel is a control
+# character so that quoting cannot turn the elision into three escaped dots that then match the
+# three literal dots the document wrote.
+listing_path_resolves() {
+  local raw=${1#./} pattern
+  raw=${raw//.../$'\001'}
+  pattern=$(listing_quote "$raw")
+  pattern=${pattern//$'\001'/.*}
+  grep -qE "(^|/)$pattern\$" <<< "$listing_index"
+}
+
+# THE ONE PATH THE MATRIX NAMES AND THIS REPOSITORY DOES NOT CARRY, AND WHY IT IS A ROSTER
+# ----------------------------------------------------------------------------------------
+# `docs/FEATURE_MATRIX.md`'s AU-005 row names `layout/UserMenu.scala` -- and names it in order to
+# say, in the same sentence, that ADR-048 deleted it and that `git ls-files | grep -i usermenu`
+# answers nothing. That is the honest form of a row correcting itself, and a gate that refuses it
+# teaches the next writer to correct a row by deleting the evidence instead of publishing it.
+#
+# It is a roster and not a vocabulary rule, deliberately. A rule that exempted any path in a
+# sentence carrying the words "deleted" or "does not exist" would silence ten phantoms for one
+# sentence, in a document nobody diffs line by line. A roster entry is a line in **this** file,
+# which is diffed every time it changes and which the next reader is already reading to find out
+# what the gate believes -- and it is reconciled in both directions like every other roster here
+# (house rule 26), so an entry whose path has come back, or whose row has stopped citing it, is a
+# refusal naming it rather than a line quietly rotting.
+#
+# AND THE EXEMPTION IS PER SENTENCE, WHICH IS THE HALF THE FIRST VERSION OF THIS ROSTER LEFT OPEN.
+# An entry naming a path exempted it wherever the matrix mentioned it, so the roster added to let
+# AU-005 name a deleted file IN ORDER TO say ADR-048 deleted it equally licensed naming it in the
+# present tense as a file that exists -- which is the exact wave-13 defect this wave was written to
+# repair, restorable for free with the gate green. It was found by a verifier within an hour of the
+# roster shipping.
+#
+# So an entry is `path::fragment`, and the exemption holds only while EVERY sentence that cites the
+# path also carries the fragment. Per sentence and not per row, because the row is what made the
+# hole: AU-005 corrects itself four sentences below the citation, so a row-wide test passes a row
+# that asserts the path as live and then explains, further down, that it is not. A sentence ends at
+# `. `, which is the one boundary a table cell of prose reliably carries.
+declare -a listing_absent_paths=("layout/UserMenu.scala::ADR-048 deleted")
+
+# Does every sentence in the matrix that cites this path still carry the correction the roster
+# declares for it? The scan is the text after each occurrence up to the end of its sentence, so a
+# fragment that has moved out of the citing sentence lapses the exemption rather than being found
+# somewhere else in the same cell.
+listing_absence_still_corrects() {
+  local path=$1 fragment=$2 row tail
+  while IFS= read -r row; do
+    tail=$row
+    while [[ $tail == *"$path"* ]]; do
+      tail=${tail#*"$path"}
+      [[ ${tail%%. *} == *"$fragment"* ]] || return 1
+    done
+  done < <({ grep -F -- "$path" "$matrix" || true; } | { grep '^| ' || true; })
+  return 0
+}
+
+audit_cited_paths() {
+  local path unresolved="" stale="" read_count=0 second_count rostered rostered_path entry
+  scope listings "$matrix's rows"
+
+  while IFS= read -r path; do
+    [[ -n $path ]] || continue
+    read_count=$(( read_count + 1 ))
+    listing_path_resolves "$path" && continue
+    rostered=no
+    for entry in ${listing_absent_paths+"${listing_absent_paths[@]}"}; do
+      [[ ${entry%%::*} == "$path" ]] || continue
+      listing_absence_still_corrects "$path" "${entry#*::}" && rostered=yes
+    done
+    [[ $rostered == yes ]] && continue
+    unresolved+="$path "
+  done < <(listing_cited_paths)
+
+  claim listing-path "" \
+    "every cited path is in the index" "${unresolved:-every cited path is in the index}" \
+    "$matrix cites [$unresolved] as files in this repository and \`git ls-files\` does not carry\
+ them. A row that cites a path is inviting a reader to open it, and the two rows that kept item 4\
+ of the definition of done open were both this shape: a present-tense sentence naming a file\
+ ADR-048 had deleted, in the document item 4 names by name as accurate."
+
+  second_count=$(listing_cited_path_count)
+  claim listing-path-count "" \
+    "$read_count" "$second_count" \
+    "the cited-path reader took $read_count tokens out of $matrix's rows and a second reader\
+ counting the same tokens with one \`awk\` expression took $second_count. A reader that has stopped\
+ reading answers \`every cited path is in the index\` for every row at once, and on an honest\
+ matrix that is also the answer the working reader gives -- so the size of what it read is claimed\
+ beside the answer it gave."
+
+  # The roster's other direction. An entry that resolves again is a repair nobody told this file
+  # about; an entry no row cites any more is a line describing a document that has moved on.
+  for entry in ${listing_absent_paths+"${listing_absent_paths[@]}"}; do
+    rostered_path=${entry%%::*}
+    if listing_path_resolves "$rostered_path"; then
+      stale+="$rostered_path (now in the index) "
+    elif ! grep -qxF -- "$rostered_path" <<< "$(listing_cited_paths)"; then
+      stale+="$rostered_path (no row cites it) "
+    fi
+  done
+  claim listing-absence-roster "" \
+    "every declared absence still holds" "${stale:-every declared absence still holds}" \
+    "\`listing_absent_paths\` names [$stale]. This roster is the one place a cited path that the\
+ index does not carry is allowed to stand, so an entry that has stopped describing the matrix is a\
+ hole left open for a reason that no longer exists -- which is the shape of every hand-written list\
+ this file has had to abolish."
+}
+
+# One marker kind and one handler, dispatched on the document. `check_marked_file` takes the
+# marker kind as the ledger section, so a kind per listing would be a section per listing -- three
+# `close_section` literals and three registry lines for one mechanism, which is the shape that makes
+# a registry unreadable. The `*)` arm is a real refusal and not a default: a document that opens a
+# `checked: listings` block this script holds no derivation for is a marker over nothing.
+check_listing_region() {
+  local where=$1 text=$2 file=${1%% (checked:*}
+  case $file in
+    ARCHITECTURE.md) check_repository_layout_region "$where" "$text" ;;
+    # Two blocks in this document, dispatched on what each says -- see the three-armed case below
+    # for why a block index is not a name.
+    "$frontdoc")
+      if [[ $text == *preferences* ]]; then
+        check_preference_listing_region "$where" "$text"
+      else
+        check_package_listing_region "$where" "$text"
+      fi
+      ;;
+    # Three blocks in one document, so the dispatch is on what the block SAYS and not on which
+    # number it is. `check_marked_file` numbers blocks by position, and a block added above another
+    # renumbers it -- a dispatch keyed on the index would then compare one paragraph's figure
+    # against another paragraph's command and stay green while doing it. Each arm keys on a phrase
+    # its own sentence carries, and a block matching none falls through to the refusal below rather
+    # than to a default, which is the same rule the `*)` arm is written for one level out.
+    "$overview")
+      if [[ $text == *containers* ]]; then
+        check_container_listing_region "$where" "$text"
+      elif [[ $text == *"lists all"* ]]; then
+        check_adr_count_region "$where" "$text"
+      elif [[ $text == *packages* ]]; then
+        check_package_count_region "$where" "$text"
+      else
+        fail "$where: this block carries no sentence any of \`$overview\`'s three listing readers" \
+             "recognises, so its figure is compared against nothing."
+      fi
+      ;;
+    *)
+      fail "$where: this script holds no listing derivation for \`$file\`, so the block's names" \
+           "are compared against nothing. A \`checked: listings\` marker says the block draws a" \
+           "roster of repository names; adding the marker is half the work and the derivation is" \
+           "the other half."
+      ;;
+  esac
+}
+
+check_marked_file listings ARCHITECTURE.md check_listing_region
+check_marked_file listings "$frontdoc" check_listing_region
+check_marked_file listings "$overview" check_listing_region
+audit_cited_paths
+close_section listings 18
+
+# ---------------------------------------------------------------------------------------------
+# Section 7's last seven fixtures, at the foot of the section they drive.
+# ---------------------------------------------------------------------------------------------
+#
+# THIS IS THE THIRD TIME `close_section guard-fixtures` HAS MOVED, AND IT IS THE SAME REASON.
+# Every fixture below drives a function section 12 declares above this line, and bash defines a
+# function when the parser reaches its line: written in section 7 they are `command not found`. So
+# they sit here, under a banner that says whose they are, and the close runs where the last of them
+# has been counted. A fixture's claims are recorded against `guard-fixtures` by `scope` and counted
+# by `count_of` out of the ledger, so a section is a name and not a line range.
+
+# Fixture 30: the repository-layout reconciliation, in BOTH directions, over a tree drawn for the
+# occasion and an index written for it.
+#
+# MUTATIONS CLOSED, each one line, each measured on 2026-09-12 against the bytes that shipped
+# section 12 and each leaving the run at its full claim count with no disagreement of its own:
+#
+#   [[ $flat == *" $token "* || ... ]] || omitted+="$token "  ->  [[ -n $token ]] || omitted+=...
+#   listing_name_resolves "$token" || phantom+="$token "      ->  ... || phantom+=""
+#
+# The first is section 12's own disclosure (D-1) and the second is its exact mirror, which was not
+# disclosed. Both are the shape this file has now met four times: a two-direction comparison whose
+# halves are computed in one function and asserted in one claim, where emptying either accumulator
+# leaves the other one loud and the run green. Neither half is driven by any document, because a
+# document that made either of them fire would have been repaired rather than left as a fixture.
+#
+# `listing_layout_document` and `listing_index` are both shadowed with `local`, so the reader, the
+# comparison and the refusal text are the shipped ones and only the tree and the index are written
+# here.
+# `text` is held as a local here and handed over, which is what `check_marked_file` does and is not
+# decoration: `check_repository_layout_region` opens with `local where=$1 text=$2 … residue_text=$text`,
+# and bash applies the assignments of one `local` after evaluating all of them -- so `residue_text`
+# is read out of the CALLER's `text` and not out of the parameter beside it. On the shipped path the
+# two are the same string and nothing notices; a driver without a `text` in scope gets
+# `text: unbound variable` under `set -u` and the whole drive answers nothing. Filed as a row.
+drive_layout_region() {
+  local listing_layout_document=$1 listing_index=$2 text
+  text=$(regions listings "$listing_layout_document")
+  check_repository_layout_region "$listing_layout_document (checked: listings #1)" "$text"
+}
+
+verify_listing_layout_reconciled() {
+  local complete=$fixtures/layout-complete.md drawn=$fixtures/layout-phantom.md
+  local carries_scripts=$'libs/kernel/Kernel.scala\napps/allinone/App.scala\nscripts/run-tests.sh'
+  local two=$'libs/kernel/Kernel.scala\napps/allinone/App.scala'
+  local said_omitted said_listed said_phantom said_resolving
+  {
+    printf '%s\n' '<!-- checked: listings -- claims: listing-phantom, listing-omission, residue -->'
+    printf '%s\n' '```' 'kui/' '├── libs/   the modules' '├── apps/   the assemblies' '```'
+    printf '%s\n' '<!-- /checked -->'
+  } > "$complete"
+  {
+    printf '%s\n' '<!-- checked: listings -- claims: listing-phantom, listing-omission, residue -->'
+    printf '%s\n' '```' 'kui/' '├── libs/       the modules' '├── apps/       the assemblies' \
+                   '├── nosuchdir/  drawn by this page and carried by nothing' '```'
+    printf '%s\n' '<!-- /checked -->'
+  } > "$drawn"
+  said_omitted=$(drive_says 'carries [scripts]' drive_layout_region "$complete" "$carries_scripts")
+  said_listed=$(drive_says 'carries [scripts]' drive_layout_region "$complete" "$two")
+  said_phantom=$(drive_says 'asserts [nosuchdir/]' drive_layout_region "$drawn" "$two")
+  said_resolving=$(drive_says 'asserts [' drive_layout_region "$complete" "$two")
+  scope guard-fixtures "check_repository_layout_region, both directions"
+  claim listing-layout-reconciled "" \
+    "$said_omitted" "reported" \
+    "\`check_repository_layout_region\` $said_omitted an index carrying a top-level \`scripts\`\
+ that the drawn tree does not name. This is the direction §16 went wrong in over \`.github/\`, and\
+ it is the one no reader runs by hand: a listing is edited when something is removed and forgotten\
+ when something is added." \
+    "$said_listed" "not reported" \
+    "\`check_repository_layout_region\` $said_listed that refusal over a tree naming every\
+ top-level name in the index. A comparison that fires on the agreeing case is an assertion that it\
+ ran and nothing more." \
+    "$said_phantom" "reported" \
+    "\`check_repository_layout_region\` $said_phantom a tree drawing \`nosuchdir/\` against an\
+ index that carries no such name. This is \`screens/\`: the defect the whole of section 12 exists\
+ for, and the half of it that emptying one accumulator silences without touching the other." \
+    "$said_resolving" "not reported" \
+    "\`check_repository_layout_region\` $said_resolving a phantom over a tree every one of whose\
+ names resolves. Both halves have to be quiet together or neither of them is a comparison."
+}
+
+# Fixture 31: what resolves, what is a name, and the two one-line rewrites that make both answers
+# meaningless.
+#
+# MUTATIONS CLOSED, all three green at the full count on 2026-09-12:
+#
+#   grep -qE "(^|/)$(listing_quote "$name")(/|$)"  ->  grep -qF "$name"
+#   listing_is_name's extension arm                ->  return 1
+#   listing_quote's sed                            ->  printf '%s' "$1"
+#
+# The first is the one that matters and it is the section's own subject: `git ls-files | grep -c
+# screens` answers 5 on this repository -- three `*-screens.css` stylesheets and two screenshots --
+# so a substring test resolves `screens/` and the defect wave 14 was written for walks through its
+# own gate. The measurement is in the comment beside `listing_name_resolves`; this is the case.
+#
+# The third is invisible on every input this repository has, which is why it is driven with an index
+# written to make it visible: an unescaped `.` matches the character that happens to be there, so it
+# only stops being green the day a document names `build.mill` and the tree carries `buildxmill`.
+drive_name_resolution() {
+  local listing_index=$1
+  if listing_name_resolves "$2"; then printf 'resolves'; else printf 'does not resolve'; fi
+}
+
+drive_drawn_names() {
+  local token names=""
+  while IFS= read -r token; do
+    [[ -n $token ]] || continue
+    listing_is_name "$token" && names+="$token "
+  done < <(listing_tokens "$1")
+  printf '%s' "${names% }"
+}
+
+verify_listing_name_anchored() {
+  local stylesheet='frontend/packages/feature-topics/styles/51-topic-screens.css'
+  local drawn='├── build.mill,  mill  ci.yml  .npmrc  the suites (pnpm/TypeScript/Vite) themselves'
+  local said_screens said_frontend said_unescaped said_escaped named
+  said_screens=$(drive_name_resolution "$stylesheet" 'screens/')
+  said_frontend=$(drive_name_resolution "$stylesheet" 'frontend/')
+  said_unescaped=$(drive_name_resolution 'buildxmill' 'build.mill')
+  said_escaped=$(drive_name_resolution 'build.mill' 'build.mill')
+  named=$(drive_drawn_names "$drawn")
+  scope guard-fixtures "listing_name_resolves and listing_is_name"
+  claim listing-name-anchored "" \
+    "$said_screens" "does not resolve" \
+    "\`listing_name_resolves screens/\` says the name $said_screens against an index whose only\
+ entry is \`$stylesheet\`. A whole path component is the comparison: with a substring test that\
+ stylesheet resolves \`screens/\`, and the phantom this section was built to refuse -- in the\
+ document section whose subject is directories that are not on disk -- passes." \
+    "$said_frontend" "resolves" \
+    "\`listing_name_resolves frontend/\` says the name $said_frontend against the same one-entry\
+ index. An anchoring tightened until it refuses a name that is genuinely there is a claim somebody\
+ removes within the wave, so the resolving case is asserted beside the refusing one." \
+    "$said_unescaped" "does not resolve" \
+    "\`listing_name_resolves build.mill\` says the name $said_unescaped against an index carrying\
+ \`buildxmill\` and nothing else. The \`.\` is a regular-expression metacharacter and every name in\
+ a listing carries one; unescaped, this is a resolution that reads as a file nobody has." \
+    "$said_escaped" "resolves" \
+    "\`listing_name_resolves build.mill\` says the name $said_escaped against an index carrying\
+ exactly \`build.mill\`. The escaping has to leave the honest case alone." \
+    "$named" "build.mill ci.yml .npmrc" \
+    "\`listing_is_name\` called [$named] the names of \`$drawn\`. Both directions of one rule: a\
+ shape test that stops recognising files leaves only directory tokens compared, and one widened\
+ until it accepts \`themselves\` and \`pnpm/TypeScript/Vite\` turns a description column into a\
+ page of phantoms and gets the claim deleted. \`mill\` is absent on purpose -- an extensionless\
+ top-level file is not decidable from this tree's drawing, which is written out beside the rule."
+}
+
+# Fixture 32: the count a listing publishes about itself, in all three of its states.
+#
+# MUTATIONS CLOSED, all green at the full count on 2026-09-12:
+#
+#   claim listing-count "$expanded" "$value" "$fact"  ->  ... "$value" "$value"
+#   `return` inserted before the missing-figure `fail`
+#   value=$(listing_word_value "$claimed")            ->  value=$claimed
+#
+# The first is this file's oldest attack and the one `claim`'s own comment is written about: a
+# comparison of a figure with itself is a true statement about nothing, and it passes every reader
+# that looks at the kind, the marker, the count and the residue. The third is the word expansion,
+# which is the whole reason the newcomer's overview may write `**Eleven containers.**` rather than
+# `**11 containers.**`; collapsed onto the claimed side it compares `Eleven` with `Eleven`.
+drive_listing_count() {
+  local text=$1 fact=$2
+  listing_count_claim "a fixture block" '\*\*([A-Za-z0-9]+)\ containers' "$fact" \
+    "the number of containers" "a command written for this fixture"
+}
+
+verify_listing_count_word() {
+  local word='**Eleven containers.** The distributed shape runs them.'
+  local digits='**11 containers.** The distributed shape runs them.'
+  local none='The distributed shape runs several containers and names none of them.'
+  local said_wrong said_right said_digits said_missing said_present
+  said_wrong=$(drive_says 'the number of containers is Eleven' drive_listing_count "$word" 14)
+  said_right=$(drive_says 'the number of containers is Eleven' drive_listing_count "$word" 11)
+  said_digits=$(drive_says 'the number of containers is 11' drive_listing_count "$digits" 14)
+  said_missing=$(drive_says 'publishes no figure' drive_listing_count "$none" 11)
+  said_present=$(drive_says 'publishes no figure' drive_listing_count "$word" 11)
+  scope guard-fixtures "listing_count_claim"
+  claim listing-count-word "" \
+    "$said_wrong" "reported" \
+    "\`listing_count_claim\` $said_wrong a block publishing \`Eleven\` against a command answering\
+ 14. The comparison is the only thing in this claim that cannot be faked by the marker, the kind or\
+ the residue, and pointing it at its own claimed side leaves all four of those agreeing." \
+    "$said_right" "not reported" \
+    "\`listing_count_claim\` $said_right that refusal over a block publishing \`Eleven\` against a\
+ command answering 11. The word is expanded on BOTH sides: a comparison that fires here is the\
+ expansion collapsed onto the claimed side, and the page would have to be rewritten to say\
+ \`**11 containers**\` in the one document written for somebody who has never seen this tree." \
+    "$said_digits" "reported" \
+    "\`listing_count_claim\` $said_digits a block publishing \`**11 containers**\` as a digit\
+ against a command answering 14. A figure already written as a digit takes the same path, and the\
+ expansion must not eat it." \
+    "$said_missing" "reported" \
+    "\`listing_count_claim\` $said_missing a block that publishes no figure at all for the listing\
+ it draws. That branch is unreachable from every document in this repository -- each of them\
+ carries its figure -- so it is the branch a \`return\` silences without moving any number." \
+    "$said_present" "not reported" \
+    "\`listing_count_claim\` $said_present the missing-figure refusal over a block that does\
+ publish one. A refusal that fires on the case it exists to allow is a gate nobody keeps."
+}
+
+# Fixture 33: the second `reconcile_listing` call site, which is a set comparison rather than a
+# resolution and has its own pair of accumulators to empty.
+#
+# MUTATION CLOSED, green at the full count on 2026-09-12:
+#
+#   reconcile_listing "$where" ... "${phantom% }" "${omitted% }"  ->  ... "" ""
+#
+# One call away from fixture 30's mutation and not covered by it: `check_package_listing_region`
+# computes its two sides with `comm` and hands them over, so silencing this one needs no edit inside
+# the function that makes the claim. Both call sites are now driven, which is what the two fixtures
+# are for -- a mechanism shared by two callers is gated once per caller or it is gated for one.
+drive_package_region() {
+  local frontdoc=$1 listing_index=$2 text
+  text=$(regions listings "$frontdoc")
+  check_package_listing_region "$frontdoc (checked: listings #1)" "$text"
+}
+
+verify_listing_packages_reconciled() {
+  local three=$fixtures/packages-three.md two=$fixtures/packages-two.md
+  local carries_shell=$'frontend/packages/api/package.json\nfrontend/packages/kernel/package.json\nfrontend/packages/shell/package.json'
+  local carries_two=$'frontend/packages/api/package.json\nfrontend/packages/kernel/package.json'
+  local said_phantom said_omitted said_agreeing
+  {
+    printf '%s\n' '<!-- checked: listings -- claims: listing-phantom, listing-omission, listing-count, residue -->'
+    printf '%s\n' '```' '    api/       the contract seam' '    kernel/    the state' \
+                   '    nowhere/   a package no manifest describes, which answers **3**' '```'
+    printf '%s\n' '<!-- /checked -->'
+  } > "$three"
+  {
+    printf '%s\n' '<!-- checked: listings -- claims: listing-phantom, listing-omission, listing-count, residue -->'
+    printf '%s\n' '```' '    api/       the contract seam' \
+                   '    kernel/    the state, and the roster answers **2**' '```'
+    printf '%s\n' '<!-- /checked -->'
+  } > "$two"
+  said_phantom=$(drive_says 'asserts [nowhere]' drive_package_region "$three" "$carries_two")
+  said_omitted=$(drive_says 'carries [shell]' drive_package_region "$two" "$carries_shell")
+  said_agreeing=$(drive_says 'as a package under' drive_package_region "$two" "$carries_two")
+  scope guard-fixtures "check_package_listing_region"
+  claim listing-packages-reconciled "" \
+    "$said_phantom" "reported" \
+    "\`check_package_listing_region\` $said_phantom a listing drawing \`nowhere/\` against an index\
+ carrying two manifests. A package in this listing is a claim that \`pnpm\` would build it, and a\
+ package directory with no committed manifest is not one." \
+    "$said_omitted" "reported" \
+    "\`check_package_listing_region\` $said_omitted an index carrying \`shell\` that the listing\
+ does not draw. This is the direction that document went wrong in: three feature packages were\
+ missing from it for four waves while every one of them shipped stories the image serves." \
+    "$said_agreeing" "not reported" \
+    "\`check_package_listing_region\` $said_agreeing either refusal over a listing and an index\
+ that agree. Two accumulators computed here and asserted one function away are silenced from either\
+ end, so both ends are driven."
+}
+
+# Fixture 34: the cited-path reader, and the second reader whose count is claimed beside its answer.
+#
+# MUTATIONS CLOSED, both green at the full count on 2026-09-12:
+#
+#   END { print length(seen) }  ->  END { print 42 }
+#   listing_cited_path_count's awk body reading `$file`  ->  a body reading `$matrix` regardless
+#
+# 42 is today's honest answer for `docs/FEATURE_MATRIX.md`, which is exactly why a fixture matrix
+# whose count is not 42 is the only input that can tell the two apart -- and it is also the input
+# that catches the second reader quietly reading the document the first one reads by default.
+#
+# THE ONE MUTATION THIS FIXTURE DOES NOT CLOSE, WRITTEN DOWN RATHER THAN LEFT TO BE FOUND.
+# Replacing the `awk` body with `listing_cited_paths | wc -l` answers the same number over every
+# input either reader accepts, so no fixture can distinguish it: the two readers would agree by
+# construction and the claim would compare the first reader with itself. That is a property of the
+# source and not of any answer, and it is filed as a row for a reader of the shipped text --
+# `ShippedScriptGuardPositionSuite`'s shape -- rather than pretended to here.
+verify_listing_cited_paths_read() {
+  local page=$fixtures/cited-matrix.md read_paths counted
+  {
+    printf '%s\n' '| id | evidence |' '| --- | --- |'
+    printf '%s\n' '| A-1 | `libs/kernel/Kernel.scala` and `docs/api/openapi.json`, both read. |'
+    printf '%s\n' '| A-2 | `libs/kernel/Kernel.scala` again, and `dist/.vite/manifest.json`. |'
+    printf '%s\n' '| A-3 | `grep -c test frontend/e2e/search.spec.ts` is a command; `/api/v1/search` is not a file. |'
+    printf '%s\n' 'And a paragraph outside the rows citing `services/gateway/Gateway.scala`.'
+  } > "$page"
+  read_paths=$(listing_cited_paths "$page" | tr '\n' ' ')
+  counted=$(listing_cited_path_count "$page")
+  scope guard-fixtures "the cited-path readers"
+  claim listing-cited-paths-read "" \
+    "$read_paths" "docs/api/openapi.json libs/kernel/Kernel.scala " \
+    "the cited-path reader took [$read_paths] out of a page carrying one path twice, one build\
+ artefact, one command, one URL and one citation outside the rows. Each of those four exclusions is\
+ a rule this claim would otherwise be narrowed by hand until it refused nothing, so each is written\
+ into the fixture rather than into a sentence about the fixture." \
+    "$counted" "2" \
+    "the second reader counted $counted cited paths in the same page. It exists because the first\
+ reader answers \`every cited path is in the index\` for a document it has stopped reading, which\
+ is the answer an honest document gives too -- and a second reader that answers a constant, or that\
+ reads \`docs/FEATURE_MATRIX.md\` whatever it is handed, is a second reader in name only."
+}
+
+# Fixture 35: the absence roster, in all three of the directions it is reconciled in.
+#
+# MUTATIONS CLOSED, all green at the full count on 2026-09-12:
+#
+#   stale+="$rostered_path (now in the index) "   ->  : "..."
+#   stale+="$rostered_path (no row cites it) "    ->  : "..."
+#
+# The roster is the one place a cited path the index does not carry may stand, and it is therefore
+# the one place this section can be silenced by adding a line rather than by changing one. House
+# rule 26 says a roster is reconciled in both directions; both directions were inert, because the
+# single entry it carries is in neither state and no document can put it in one.
+#
+# The third arm is this wave's own finding and not a mutation of mine: a roster entry exempts the
+# path wherever the matrix cites it, so the row that was allowed to name a deleted file IN ORDER TO
+# say it was deleted was equally allowed to name it in the present tense as live. The entry now
+# carries the fragment its citation has to keep, and the exemption lapses sentence by sentence.
+drive_absence_roster() {
+  local -a listing_absent_paths=("$@")
+  audit_cited_paths
+}
+
+verify_listing_absence_roster_driven() {
+  local said_returned said_uncited said_holds said_uncorrected
+  said_returned=$(drive_says 'README.md (now in the index)' drive_absence_roster \
+    'README.md::a fragment that is not read here')
+  said_uncited=$(drive_says 'docs/nothing.md (no row cites it)' drive_absence_roster \
+    'docs/nothing.md::a fragment that is not read here')
+  said_holds=$(drive_says '`listing_absent_paths` names [' drive_absence_roster \
+    "${listing_absent_paths[0]}")
+  # The path alone and not the bracket beside it: the unresolved list is space separated, so a
+  # pattern anchored on `[` reads as "not reported" the moment another row cites a path this
+  # repository has stopped carrying -- which is a fixture that goes quiet exactly when the document
+  # it is about goes wrong.
+  said_uncorrected=$(drive_says 'layout/UserMenu.scala' drive_absence_roster \
+    'layout/UserMenu.scala::a correction this row does not carry')
+  scope guard-fixtures "listing_absent_paths, reconciled"
+  claim listing-absence-roster-driven "" \
+    "$said_returned" "reported" \
+    "the roster reconciliation $said_returned an entry naming \`README.md\`, which the index\
+ carries. An exemption for a path that has come back is a hole held open for a reason that expired,\
+ and nothing in this repository can put the shipped entry into that state." \
+    "$said_uncited" "reported" \
+    "the roster reconciliation $said_uncited an entry naming \`docs/nothing.md\`, which no row\
+ cites. That is the other direction, and it is the one that notices the roster outliving the\
+ sentence it was written for." \
+    "$said_holds" "not reported" \
+    "the roster reconciliation $said_holds either refusal over the entry this file actually ships.\
+ Both directions have to be quiet over the honest roster or neither of them is a comparison." \
+    "$said_uncorrected" "reported" \
+    "the cited-path claim $said_uncorrected under an entry whose declared correction no citing\
+ sentence carries. This is the finding the exemption itself opened: the roster was added so that a\
+ row could name a deleted file in the sentence saying it was deleted, and until the fragment was\
+ part of the entry it equally licensed naming it in the present tense as live."
+}
+
+# Fixture 36: the marker over a document this script holds no derivation for.
+#
+# MUTATION CLOSED: `fail "..."` -> `: "..."` in `check_listing_region`'s `*)` arm, green at the full
+# count. No document reaches that arm and none ever will on a green tree, which is the definition of
+# a refusal nothing drives: adding the marker is half the work and the derivation is the other half,
+# and the half that is missing is the half that fails silently.
+drive_listing_dispatch() {
+  check_listing_region "$1 (checked: listings #1)" 'a block of names this script cannot compare'
+}
+
+verify_listing_marker_without_derivation() {
+  local said_unknown said_known
+  said_unknown=$(drive_says 'holds no listing derivation' drive_listing_dispatch \
+    "$fixtures/nobody-derives-this.md")
+  said_known=$(drive_says 'holds no listing derivation' drive_listing_dispatch "$overview")
+  scope guard-fixtures "check_listing_region's dispatch"
+  claim listing-marker-refused "" \
+    "$said_unknown" "reported" \
+    "\`check_listing_region\` $said_unknown a \`checked: listings\` marker on a document it holds\
+ no derivation for. A marker is a promise that something reads the block; the arm that refuses an\
+ unkept one is reachable from no document in this repository and is therefore reachable only from\
+ here." \
+    "$said_known" "not reported" \
+    "\`check_listing_region\` $said_known that refusal over a document it does hold a derivation\
+ for. A default arm that fires for every document is the same silence from the other side."
+}
+
 verify_quotation_sweep_reports
 verify_quotation_path_claim_site
 verify_quotation_empty_marker
@@ -4310,7 +5350,80 @@ verify_swept_roster_reconciled
 verify_marked_markdown_pruned
 verify_sweep_block_count
 verify_quotation_census_driven
-close_section guard-fixtures 29
+verify_listing_layout_reconciled
+verify_listing_name_anchored
+verify_listing_count_word
+verify_listing_packages_reconciled
+verify_listing_cited_paths_read
+verify_listing_absence_roster_driven
+# Fixture 37: the preference count's FACT side, which is the half a fixture is the only driver of.
+#
+# MUTATION CLOSED: `"$(listing_preference_keys)"` -> `"3"`, green at 471 on 2026-09-12 -- this
+# packet's own, found by mutating what it had just added. A count claim has two sides and only the
+# claimed one is driven by the document: replacing the derivation with today's answer leaves the
+# page compared against a literal that stops moving the day a fourth preference is declared, which
+# is the exact failure the claim was added to end, one side over.
+drive_preference_keys() {
+  local appearance_module=$1
+  listing_preference_keys
+}
+
+# The claim site as well as the reader, because they fail separately: a derivation that has stopped
+# deriving is one mutation and a call site handed today's answer as a literal is another, and the
+# arms below put the module and the page into disagreement to catch the second.
+drive_preference_region() {
+  local appearance_module=$1 frontdoc=$2 text
+  text=$(regions listings "$frontdoc")
+  check_preference_listing_region "$frontdoc (checked: listings #1)" "$text"
+}
+
+verify_listing_preference_keys() {
+  local module=$fixtures/appearance.ts three=$fixtures/appearance-three.ts
+  local page=$fixtures/preferences.md counted said_drifted said_agreeing
+  {
+    printf '%s\n' 'export const themeKey = "kui.theme";'
+    printf '%s\n' 'export const accentKey = "kui.accent";'
+    printf '%s\n' 'const restoreTheme = () => read("kui.theme");   // the same key twice'
+    printf '%s\n' 'export const densityKey = "kui.density";'
+    printf '%s\n' 'export const zoomKey = "kui.zoom";'
+    printf '%s\n' 'const unrelated = "ui.theme";                   // not a kui preference'
+  } > "$module"
+  {
+    printf '%s\n' 'export const themeKey = "kui.theme";'
+    printf '%s\n' 'export const accentKey = "kui.accent";'
+    printf '%s\n' 'export const densityKey = "kui.density";'
+  } > "$three"
+  {
+    printf '%s\n' '<!-- checked: listings -- claims: listing-count, residue -->'
+    printf '%s\n' '**Three preferences, all of them browser-local**, declared in a module.'
+    printf '%s\n' '<!-- /checked -->'
+  } > "$page"
+  counted=$(drive_preference_keys "$module")
+  said_drifted=$(drive_says 'the number of browser-local preferences is Three' \
+    drive_preference_region "$module" "$page")
+  said_agreeing=$(drive_says 'the number of browser-local preferences is Three' \
+    drive_preference_region "$three" "$page")
+  scope guard-fixtures "listing_preference_keys"
+  claim listing-preference-keys "" \
+    "$said_drifted" "reported" \
+    "\`check_preference_listing_region\` $said_drifted a page saying \`Three\` against a module\
+ declaring four preferences. The fact side of a count claim is the half no document drives: handed\
+ the answer it gives today as a literal, the comparison goes on passing until somebody declares a\
+ fourth preference, which is the one event it exists to notice." \
+    "$said_agreeing" "not reported" \
+    "\`check_preference_listing_region\` $said_agreeing that refusal over a page and a module that\
+ agree at three." \
+    "$counted" "4" \
+    "\`listing_preference_keys\` counted $counted declared preferences in a module declaring four\
+ distinct \`kui.\` keys, one of them twice, beside a key that is not one. The document's word is\
+ compared against this number and against nothing else, so a derivation replaced by the answer it\
+ gives today leaves the page agreeing with a literal -- which is the state the claim was added to\
+ end, from the side the document cannot drive."
+}
+
+verify_listing_marker_without_derivation
+verify_listing_preference_keys
+close_section guard-fixtures 37
 
 # ---------------------------------------------------------------------------------------------
 # 11. The newcomer's overview, against the figures this script derives itself.
@@ -4431,9 +5544,9 @@ printf '  self-check: %d, rows: %d, merged-document: %d, milestones: %d, adr-ind
 printf ' openapi-totals: %d, guard-fixtures: %d, capability-claims: %d,' \
   "${section_counts[openapi-totals]}" "${section_counts[guard-fixtures]}" \
   "${section_counts[capability-claims]}"
-printf ' quotations: %d, debt-register: %d, gate-table: %d,' \
+printf ' quotations: %d, debt-register: %d, listings: %d, gate-table: %d,' \
   "${section_counts[quotations]}" "${section_counts[debt-register]}" \
-  "${section_counts[gate-table]}"
+  "${section_counts[listings]}" "${section_counts[gate-table]}"
 printf ' dependencies: %d over %d named manifests.\n' \
   "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \

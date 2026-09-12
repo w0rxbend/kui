@@ -4,7 +4,9 @@ This is the document to read if you have never seen this repository before. It d
 is, the eleven services it is made of, the eight feature packages the browser is made of, the two
 shapes it deploys in, and the gates that decide whether a change is allowed to land. It is not a
 README — `README.md` at the root tells you how to run it — and it is not an ADR index:
-`DECISIONS.md` is that, and it lists all fifty-six.
+<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-count, residue -->
+`DECISIONS.md` is that, and it lists all fifty-seven.
+<!-- /checked -->
 
 Every figure below is one of two things, and there is no third: a figure a gate re-reads out of this
 page on every run — section 5 marks those, inside an HTML comment naming the claims the checker
@@ -49,7 +51,7 @@ than inferred (ADR-039), and why a destructive action is a plan, then a token, t
 ## 2. The back end: eleven services
 
 The Scala side is built with Mill (`build.mill`), on Scala 3, with cats-effect, http4s and Tapir.
-`ls services` gives eleven directories:
+`git ls-files services | cut -d/ -f2 | sort -u` gives eleven directories:
 
 | Service | What it owns |
 | --- | --- |
@@ -73,7 +75,8 @@ were both a literal somebody forgot to extend.
 
 ### The six layers, and the rule that is enforced by the build
 
-Every service that owns a domain is these six Mill modules, and `ls services/ksql` shows all six:
+Every service that owns a domain is these six Mill modules, and
+`git ls-files services/ksql | cut -d/ -f3 | sort -u` shows all six:
 
 ```
 domain           the rules. No Tapir, no Circe, no http4s, no cats-effect IO at the edges of it.
@@ -84,7 +87,8 @@ api              the routes, and the mapping between application types and DTOs 
 app              the wiring and the main class.
 ```
 
-Six is the floor rather than the shape of every service: `ls services/cluster` shows a seventh
+Six is the floor rather than the shape of every service:
+`git ls-files services/cluster | cut -d/ -f3 | sort -u` shows a seventh
 module, `client`, the typed reader the other Kafka-facing services use to turn a cluster id into a
 live connection. ADR-041 rule A11 admits `contract` and `client` across a service boundary and
 nothing else, and it names `client` so that a second module of this kind has to be argued in the
@@ -123,7 +127,9 @@ next run of the same command against the same tree.
 ## 3. The front end: a shell, a kernel and eight features
 
 The browser build is TypeScript, SolidJS 2 and Vite, under `frontend/`, with pnpm rather than Mill
-(ADR-048). `ls frontend/packages` gives eleven packages:
+<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-count, residue -->
+(ADR-048). `git ls-files 'frontend/packages/*/package.json'` gives eleven packages:
+<!-- /checked -->
 
 * **`shell`** — the application frame: navigation, routing, the cluster picker, the top-bar search,
   the notification bus, the dashboard, and the feature registry that lazily loads everything else.
@@ -158,9 +164,11 @@ The same modules compose two ways, with no code change between them.
 **One process.** `./mill dev` builds the all-in-one JVM and serves the whole product on one port.
 This is the local loop, and it is the shape most development happens in.
 
+<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-count, residue -->
 **Eleven containers.** `deployment/compose/docker-compose.yml` runs the gateway, the nine routed
 services and the frontend as separate containers — `grep -c 'image: kui-'` over that file counts
 them — against Kafka, a Schema Registry, a Connect worker, a ksqlDB server and a metrics exporter.
+<!-- /checked -->
 `./mill resolve 'deployment.docker.__.build'` also answers **eleven**, and **they are not the same
 eleven**: Mill builds the gateway, the nine routed services and the all-in-one, while the frontend
 image is built from `deployment/frontend/` by Docker, because Mill does not build the browser half
@@ -201,9 +209,9 @@ the wave that owned it. Four of that table's ten rows were stale against the tre
 <!-- checked: gate-table -- verified by ./scripts/feature-matrix-check.sh -- claims: gate-claim-total, gate-section-count, gate-openapi-document, gate-decisions-rows, residue -->
 | What this page publishes | Read back by | Size |
 | --- | --- | --- |
-| the checker's own size | its own ledger, as the run finishes | **444 claims** over **12 sections** |
+| the checker's own size | its own ledger, as the run finishes | **472 claims** over **13 sections** |
 | `docs/api/openapi.json`, the merged contract | the checker's `merged-document` section | **65 paths**, **76 operations** and **160 component schemas** |
-| `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **56 rows**, one per ADR on disk |
+| `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **57 rows**, one per ADR on disk |
 <!-- /checked -->
 
 A figure in that block that stops being true fails `./scripts/feature-matrix-check.sh` and names the
