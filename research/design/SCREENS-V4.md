@@ -31,13 +31,18 @@ it is silent, `SCREENS.md` still owns the answer.
 `SCREENS.md` is **not deleted** in this wave. It still holds the only reading of several
 components, and its §6 open findings are still open unless §7 below closes one by name.
 
-**Where the images are, and they are not here.** Twenty-three PNGs named by capture time, in a
-`screens/` directory at the root of a working tree — **ignored and never committed**, for the same
-reason `SCREENS.md:17` gives for the v3 captures and the artboard: design source does not enter this
-repository, and a reading of it is what is kept. `git ls-files screens` answers `0`,
-`git log --all -- 'screens*'` is empty, and `.gitignore:43` is the line that ignores them.
-[ADR-057](../../docs/adr/ADR-057-design-captures-stay-outside-the-repository.md) is the decision and
-names what it costs.
+**Where the images are, and they are here.** Twenty-three PNGs named by capture time, in a
+`screens/` directory at the root of the repository — **tracked**, so that `ls screens | wc -l` and
+`git ls-files screens | wc -l` agree at twenty-three on any clone.
+[ADR-058](../../docs/adr/ADR-058-design-captures-are-tracked.md) is the decision and names what it
+costs: six megabytes per design revision, in history, forever. It supersedes
+[ADR-057](../../docs/adr/ADR-057-design-captures-stay-outside-the-repository.md), which decided the
+other way hours earlier and whose own Context section makes the case this one acted on — the
+captures are the denominator of definition-of-done item 1, and an exit criterion whose subject
+exists on one machine cannot be re-run by anyone who clones.
+
+This document remains the specification of record. The captures are evidence for it, not a
+replacement: nothing should read a pixel where the reading states a measurement.
 
 This document said *"`screens/`, committed"* until 2026-09-12, and `:3` said the captures were
 *"held in `screens/` in this repository"*. Both were false and both were contradicted by

@@ -1755,7 +1755,7 @@ for id in "${!adr_row_link[@]}"; do
  file in this repository."
 done
 
-close_section adr-index 114
+close_section adr-index 116
 
 # ---------------------------------------------------------------------------------------------
 # 6. The OpenAPI totals three ADRs publish about documents the build generates.

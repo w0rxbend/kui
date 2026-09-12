@@ -1,12 +1,11 @@
 # `docs/plan/`
 
 The working plan for turning this repository into the product read in
-[`research/design/SCREENS-V4.md`](../../research/design/SCREENS-V4.md) from twenty-three screenshots
-that are **not in this repository**. Until 2026-09-12 this line linked `screens/`, and that link
-went nowhere in a clone: the captures live in a working-tree directory `.gitignore:43` ignores and
-that has never been committed — `git ls-files screens` answers `0` and `git log --all -- 'screens*'`
-is empty. [ADR-057](../adr/ADR-057-design-captures-stay-outside-the-repository.md) is the decision
-that keeps them out and says what it costs.
+[`research/design/SCREENS-V4.md`](../../research/design/SCREENS-V4.md) from the twenty-three
+screenshots in [`screens/`](../../screens), which are **tracked**: `git ls-files screens` answers
+`23`, so the link resolves in a clone and the coverage claim every wave close publishes can be
+re-taken by anyone. [ADR-058](../adr/ADR-058-design-captures-are-tracked.md) is the decision and
+says what it costs; it supersedes ADR-057, which decided the other way.
 
 ## What lives here
 
@@ -20,7 +19,7 @@ that keeps them out and says what it costs.
 There is at most **one** `WAVE-NN.md` at a time. If you are looking at two, the older one was not
 pruned and its exit criteria should be checked before anything in it is believed.
 
-**One deliberate exception, live right now.** `verification/` holds **thirty-four** files and **they
+**One deliberate exception, live right now.** `verification/` holds **thirty-eight** files and **they
 were carried past `WAVE-13.md`'s deletion rather than deleted with it.** The four `W13-*` files are
 wave 14's input — and there are four rather than five, because `W13-A1.md` was never written: that
 packet's harness forbade it writing a report file, and its findings survive only in `ROADMAP.md`'s

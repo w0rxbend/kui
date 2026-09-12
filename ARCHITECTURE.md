@@ -1143,9 +1143,8 @@ whose own subject was directories that are not on disk — read `screens/` off a
 added it here as a fifth phantom, at a moment when the index did not carry it. That is no longer
 the state of the tree: `582c9bc5` ("Add screens", 2026-09-12) committed the twenty-three captures,
 so `git ls-files screens` answers `23` and this listing names `screens/` because the index does.
-`.gitignore:43` still reads `screens/` and still matches — a tracked path overrides an ignore rule,
-which is why the two can disagree — and ADR-057 records the decision the commit went against; both
-are noted below and neither is this section's to settle. The same working-tree reading is why `.github/` was
+`.gitignore` no longer ignores `screens/`: ADR-058 removed the rule so that the ignore file and the
+index agree, and superseded ADR-057, which had decided the other way hours before the commit. The same working-tree reading is why `.github/` was
 missing: it is tracked, it holds the `ci.yml` this document cites repeatedly, and a listing that
 carries `.scalafmt.conf` and `.tool-versions` and not `.github/` is short in the direction §16 says
 it fixed.

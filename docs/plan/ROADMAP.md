@@ -678,9 +678,15 @@ ships, and runs both against images built from the tree.
 > cannot see an extensionless top-level file and §16 draws five of them. `adr_files` is built with
 > `find`, which is why a green run reports *57 rows over 57 ADRs* while `git ls-files` answers 56 and
 > `DECISIONS.md` links an **untracked** ADR-057. And `582c9bc5` committed the twenty-three design
-> captures, so five documents that say they are not in this repository are now false. Each is named
-> in `docs/plan/WAVE-15.md` with the command that finds it. `docs/plan/` is therefore not reduced.
-> The wave-9 to -13 boxes this replaces are in the git history.
+> captures, so five documents that say they are not in this repository are now false.
+>
+> **Resolved after this box was written, and the wave loop stopped here.** The owner's decision was
+> to keep the captures tracked: `ADR-058` supersedes `ADR-057`, `.gitignore` no longer names
+> `screens/`, and the five documents now say what `git ls-files` answers. `TD-059` is closed on that
+> exit condition. `WAVE-15.md` was written and then deleted unrun — its subject was one predicate in
+> the checker, not a defect in the product — and `docs/plan/` is reduced to `README.md`, this file,
+> `CLOSING-REPORT.md` and `verification/`. The wave-9 to -13 boxes this replaces are in the git
+> history.
 
 > **Status after wave 12, measured at its close on 2026-09-12, one command at a time, and not read
 > off a report.** **Four of the five definition-of-done items are met** and were re-run here rather
@@ -776,10 +782,11 @@ directions at **56 rows over 56 ADRs**. The a11y sweep is clean over **790 stori
    container landed.** Wave 8's integration ran thirteen gates and that was not one of them, and
    neither was `pnpm -C frontend e2e`; both were run here instead, and one of the two was red. The
    distributed eleven-container stack is the one deployment shape nobody in wave 8 drove.
-4. **`docs/plan/` is not reduced to `README.md` and this file.** It holds the current wave file
-   (`WAVE-09.md` when this was written; `WAVE-15.md` now) and
-   `docs/plan/verification/`, and the wave that still needs a plan file cannot be the wave that
-   deletes it. This is M10's own last bullet and it is now the last one standing.
+4. ~~**`docs/plan/` is not reduced to `README.md` and this file.**~~ **Closed.** It held the current
+   wave file (`WAVE-09.md` when this was written) for as long as a wave still needed one. The loop
+   was stopped deliberately after wave 14: `WAVE-15.md` was written and deleted unrun, because its
+   subject was an edge case in the checker rather than a defect in the product. `docs/plan/` now
+   holds `README.md`, this file, `CLOSING-REPORT.md` and `verification/`.
 
 * `docs/FEATURE_MATRIX.md` accurate against the code, re-counted with the command it publishes.
 * README, ARCHITECTURE and a newcomer's overview describing what is now true.

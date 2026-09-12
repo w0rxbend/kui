@@ -36,8 +36,3 @@ frontend/.tsbuild/
 # check, so without this every run leaves 11 MB of untracked output in `git status` — and the agents
 # and people who read that status to see what a change touched lose the signal in the noise.
 frontend/storybook-static/
-
-# Design captures. `research/design/SCREENS.md` records that this repository keeps screenshots
-# outside itself; the reading of them is what is committed (`SCREENS-V4.md`), not the pixels. Six
-# megabytes of PNG per design revision is not history anybody will thank us for keeping.
-screens/

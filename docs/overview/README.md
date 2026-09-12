@@ -5,7 +5,7 @@ is, the eleven services it is made of, the eight feature packages the browser is
 shapes it deploys in, and the gates that decide whether a change is allowed to land. It is not a
 README — `README.md` at the root tells you how to run it — and it is not an ADR index:
 <!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-count, residue -->
-`DECISIONS.md` is that, and it lists all fifty-seven.
+`DECISIONS.md` is that, and it lists all fifty-eight.
 <!-- /checked -->
 
 Every figure below is one of two things, and there is no third: a figure a gate re-reads out of this
@@ -209,9 +209,9 @@ the wave that owned it. Four of that table's ten rows were stale against the tre
 <!-- checked: gate-table -- verified by ./scripts/feature-matrix-check.sh -- claims: gate-claim-total, gate-section-count, gate-openapi-document, gate-decisions-rows, residue -->
 | What this page publishes | Read back by | Size |
 | --- | --- | --- |
-| the checker's own size | its own ledger, as the run finishes | **472 claims** over **13 sections** |
+| the checker's own size | its own ledger, as the run finishes | **474 claims** over **13 sections** |
 | `docs/api/openapi.json`, the merged contract | the checker's `merged-document` section | **65 paths**, **76 operations** and **160 component schemas** |
-| `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **57 rows**, one per ADR on disk |
+| `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **58 rows**, one per ADR on disk |
 <!-- /checked -->
 
 A figure in that block that stops being true fails `./scripts/feature-matrix-check.sh` and names the

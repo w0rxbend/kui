@@ -1,6 +1,6 @@
 # ADR-057 — The design captures stay outside the repository, and every document that said otherwise is corrected
 
-- Status: Accepted
+- Status: Superseded by [ADR-058](ADR-058-design-captures-are-tracked.md)
 - Date: 2026-09-12
 
 ## Context
