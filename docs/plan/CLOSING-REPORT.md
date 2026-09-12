@@ -333,12 +333,20 @@ mislead somebody tomorrow.
 
 **In the build and the deployment.**
 
-5. **`./mill deployment.docker.__.build` reports SUCCESS from cache and will not notice that you
-   deleted the image.** Recorded at the wave-14 integration after it cost an hour; not re-measured
-   here, because measuring it means building images. A run that trusts that SUCCESS drives whatever the
-   daemon happens to hold — which is exactly how the eleventh service's screens were rendered by a
-   fourteen-hour-old bundle with every gate green. **`./mill clean deployment.docker` first, every time
-   you are about to record a figure from a container.**
+5. ~~**`./mill deployment.docker.__.build` reports SUCCESS from cache and will not notice that you
+   deleted the image.**~~ **Reproduced and fixed after this report was first written.** Deleting
+   `kui-gateway:0.1.0-SNAPSHOT` and asking for it again printed `1180/1180, SUCCESS` against an image
+   that did not exist: `build` is a cached task whose real output lives in the Docker daemon, where
+   Mill cannot see it. A run that trusted that SUCCESS drove whatever the daemon happened to hold —
+   which is how the eleventh service's screens came to be rendered by a fourteen-hour-old bundle with
+   every gate green.
+
+   `KuiImage` now carries an `imageId` `Task.Input` that reads `docker images --quiet <imageName>` on
+   every invocation, so the image's absence participates in the cache key. Verified in both
+   directions: with the image present the build is cached and prints no `built` line; with it deleted
+   the build runs and restores the same digest, `341b64d99fbc`, which also re-confirms the
+   reproducibility the flags above it exist for. `./mill clean deployment.docker` is no longer needed
+   before recording a figure from a container.
 6. **`deployment/quickstart/seed/connect-seed.sh` had a silent `set -euo pipefail` exit**, and the
    class it belongs to is worth more than the instance. `grep` exits 1 when it matches nothing, which
    was the *normal* first poll; `pipefail` carried that out of a command substitution and `set -e`

@@ -3808,9 +3808,47 @@ object deployment extends Module {
           * The jar being copied in is normalised separately — see `assembly` above — because none of
           * these flags can help with an input whose own bytes differ.
           */
+        /** The id the daemon currently holds for this image, or the empty string if it holds none.
+          *
+          * `build` below is a cached task: with unchanged sources Mill returns the tags it recorded
+          * last time and does not run `docker buildx` at all. That is the right default for a task
+          * whose output is a file under `out/`, and the wrong one here, because this task's real
+          * output lives in the Docker daemon where Mill cannot see it. Deleting the image and
+          * asking for it again therefore printed
+          *
+          *   1180/1180, SUCCESS] ./mill deployment.docker.gateway.docker.build
+          *
+          * against an image that did not exist, and anything trusting that exit code then ran
+          * against whatever the daemon happened to hold. Wave 8 lost four gates to an image that
+          * was merely stale; this is the same failure with the image absent, and it is worse
+          * because the build it came from reported success.
+          *
+          * `Task.Input` is re-read on every invocation and participates in the cache key, so the
+          * image disappearing invalidates the build that produced it and the next call rebuilds.
+          * `check = false` because a missing image is the ordinary answer here, not an error.
+          */
+        def imageId: T[String] = Task.Input {
+          // `imageName` is a plain `String` and not a task, which is what makes this readable from
+          // an `Input` at all -- `Task.Input` may not call other tasks. Querying by repository
+          // rather than by `tags()` costs nothing here: every tag this module writes shares the one
+          // repository, so "the daemon holds none of them" is the condition worth invalidating on.
+          try
+            os.proc("docker", "images", "--quiet", imageName)
+              .call(check = false, stderr = os.Pipe, stdout = os.Pipe)
+              .out.text().trim
+          catch
+            // No daemon, or no `docker` on PATH. Returning a constant leaves the cache key stable,
+            // so a machine that cannot answer the question is no worse off than before this input
+            // existed; it is not made to rebuild on every invocation.
+            case _: Throwable => "unknown"
+        }
+
         override def build: T[Seq[String]] = Task {
           val context = Task.dest
           val jar = assembly().path
+
+          // Read so that the image's absence is part of this task's cache key; see `imageId`.
+          val _ = imageId()
 
           os.copy.over(jar, context / jar.last)
           os.write.over(context / "Dockerfile", dockerfile())
