@@ -76,6 +76,32 @@ final class GroupListViewSuite extends KuiIOSuite {
     }
   }
 
+  test("theNotesOnTheViewSayWhatTheRequestWasClampedTo") {
+    // W12-A1: the other half of TD-032, and it was still open after the `stateCounts` half was closed.
+    // `notes = notes.take(0)` in `GroupListUseCase.list` — the whole list silently emptied — left all
+    // **1,390** tasks of `./mill services.consumer.__.test` SUCCESS, `GroupQuery.normalise`'s own cases
+    // included, because those assert the *function* and nothing asserted that what it returns ever leaves
+    // the use case. A client that asked for five thousand rows and received two hundred would then be told
+    // nothing about it, which is exactly the silence `normalise` was written to avoid: it bounds rather
+    // than rejects **and says what it changed**, and half of that sentence had no reader.
+    //
+    // Driven through `list` rather than through `normalise`, because the seam that was cut is the one
+    // between them.
+    viewOf(GroupQuery.Default.copy(pageSize = 5000, page = 0)).map { view =>
+      assertEquals(
+        view.notes,
+        List(s"pageSize 5000 was clamped to ${GroupQuery.MaxPageSize}", "page 0 was clamped to 1"),
+        "the use case answered a clamped request without saying what it clamped"
+      )
+      // And the other direction, so a mutation that always says something fails here too.
+      assertEquals(view.page.items.size, 4)
+    }
+  }
+
+  test("aRequestThatWasNotClampedCarriesNoNotes") {
+    viewOf(GroupQuery.Default).map(view => assertEquals(view.notes, Nil))
+  }
+
   test("aDescendingSortByIdReversesTheList") {
     val ascending =
       GroupListUseCase.applyQuery(rows, GroupQuery.Default, index).items.map(_.groupId.value)

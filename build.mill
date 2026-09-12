@@ -4278,7 +4278,49 @@ object depsSmoke extends KuiModule {
   * below runs exactly the code these tests cover.
   */
 object `build-tests` extends KuiPureModule {
-  object test extends ScalaTests with KuiTests
+  object test extends ScalaTests with KuiTests {
+
+    /** The three files `BuildWiringSuite` opens at RUNTIME, declared so that Mill knows they are
+      * inputs to this module's tests.
+      *
+      * `BuildWiringSuite` is the one suite here that reads the repository rather than a value: it
+      * asserts that `build.mill` still routes every document generator through `runDocumentMain`,
+      * that `frontend/package.json`'s `typecheck` script still names `e2e/tsconfig.json`, and that
+      * `.github/workflows/ci.yml` still passes `--check` to the two hand-invoked generators. None
+      * of the three is a source of this module, so Mill's input set for the cached test task did
+      * not mention them.
+      *
+      * MEASURED AT THE WAVE-12 OPEN, BOTH WAYS, BECAUSE THE HOUSE RULE THIS REPAIRS WAS HALF RIGHT.
+      * `./mill --no-daemon build-tests.test` is a *command*: it re-runs unconditionally, and with
+      * `--check` deleted from `ci.yml`'s `docs.errorCodes` step it is RED with no `clean` in front
+      * of it. `./mill --no-daemon build-tests.test.testCached` is the cached task, and over exactly
+      * that mutation it printed `137/137, SUCCESS` in two seconds with no suite output at all —
+      * the previous tree's answer, over a workflow that had stopped checking. So the hole is real
+      * and it is in the cached task; the wave-11 note that named the command was measuring
+      * something else.
+      *
+      * THE HASH HAS TO REACH A VALUE, WHICH IS WHY THIS IS NOT SIMPLY A `Task.Sources` BESIDE THE
+      * MODULE. Mill invalidates a task when the VALUE its upstream produced changes, so depending
+      * on these `PathRef`s from a task whose own result does not move re-runs nothing. `forkEnv`
+      * carries the hashes into the environment the test JVM is started with: change one of the
+      * three files and the map changes, and every task downstream of it — `testCached` included —
+      * is out of date. The suite reads the same variable back and fails if it is missing, so
+      * deleting this declaration is a red test rather than a silent return to caching.
+      */
+    def buildWiringInputs: T[Seq[PathRef]] = Task.Sources(
+      mill.api.BuildCtx.workspaceRoot / "build.mill",
+      mill.api.BuildCtx.workspaceRoot / ".github/workflows/ci.yml",
+      mill.api.BuildCtx.workspaceRoot / "frontend/package.json",
+      mill.api.BuildCtx.workspaceRoot / "deployment/frontend/Dockerfile"
+    )
+
+    override def forkEnv: T[Map[String, String]] = Task {
+      val stamped = buildWiringInputs()
+        .map(ref => s"${ref.path.relativeTo(mill.api.BuildCtx.workspaceRoot)}@${ref.sig}")
+        .mkString(" ")
+      super.forkEnv() + ("KUI_BUILD_WIRING_INPUTS" -> stamped)
+    }
+  }
 }
 
 /** Everything in this build that could have a dependency edge, as plain data.

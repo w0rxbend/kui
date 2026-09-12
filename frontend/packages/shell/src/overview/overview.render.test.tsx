@@ -988,7 +988,8 @@ describe("the address that names no cluster, with nothing selected", () => {
   });
 
   /**
-   * The rule this block was one control short of keeping.
+   * The rule this block was one control short of keeping — over the two controls `Overview` itself
+   * draws, which is what this case holds and, until wave 12, not what its name said.
    *
    * `/ui` with no cluster shipped an **enabled** primary *"Create topic"*. Measured on the running
    * product at the wave-10 close with no mutation applied: `count 1, enabled true`; the click left
@@ -997,20 +998,31 @@ describe("the address that names no cluster, with nothing selected", () => {
    * asked shipped, on the same screen, a control claiming an action it cannot perform — the same
    * lie as a fabricated figure, one control over, and nothing gated it.
    *
-   * ## Why this sweeps the DOM instead of naming the button
+   * ## What this case reads, measured rather than implied
    *
-   * `expect(createTopic).toHaveAttribute("aria-disabled")` would pin today's defect and nothing
-   * else: the next enabled-and-inert control added to this address would be invisible to it, and
-   * the whole reason this one survived a wave is that no case was looking. So the case reads every
-   * control the address actually drew and asks each one the design's question — a link has to lead
-   * somewhere, and a button has to navigate or to open something. `AddressProbe` is what makes the
-   * first half observable: `memoryHistory` does not touch `window.location`.
+   * It was called *"offers no enabled action this address cannot perform"*, and **the address** is
+   * the frame, not this component. Instrumented on the green tree, the inventory this mount sweeps
+   * is exactly two entries — `[["BUTTON","Create topic",null,"true"],["A","Manage clusters",
+   * "/ui/clusters/manage",null]]` — while `/ui` through `App` draws **thirteen**, the other eleven
+   * being `TopBar`'s glyphs, the rail, the brand block, the drawer's rows and the cluster status
+   * card. Worse, the distinguishing half — `control.click(); expect(navigated || opened)` —
+   * executes **zero** times here: the button hits `continue` on `aria-disabled` and the link hits
+   * `continue` on the `A` branch, and `AddressProbe` is mounted and never read. The old vacuity
+   * guard `length > 1` was satisfied by exactly those two and could not have said so.
+   *
+   * So the name now says *of its own*, and the sweep over the address lives where the address is:
+   * `app.render.test.tsx`'s *"presses every enabled control `/ui` draws"*, which
+   * mounts the composition root, presses every enabled button and asks the weaker question a frame
+   * needs — that a press changes the address or the document. **This case is still the one that
+   * would catch a new enabled-and-inert control added to `Overview`**, which is why the press
+   * branch stays rather than being replaced by `expect(createTopic).toHaveAttribute(...)`: pinning
+   * today's defect by name is exactly how this one survived a wave.
    *
    * `onCreateTopic` is deliberately **not** passed. `App.tsx`'s handler returns without navigating
    * when no cluster is selected, which is exactly this address, so a handler that did anything here
    * would be a wiring the product does not have and the case would pass for the wrong reason.
    */
-  it("offers no enabled action this address cannot perform", () => {
+  it("offers no enabled action of its own this address cannot perform", () => {
     const { container } = keep(
       mount(
         dashboardHost("/ui", () => (
@@ -1027,8 +1039,15 @@ describe("the address that names no cluster, with nothing selected", () => {
 
     const controls = [...container.querySelectorAll<HTMLElement>("a, button")];
     // A sweep over nothing passes every assertion inside it, which is the vacuous shape this whole
-    // file exists to refuse. The address draws at least the header action and the empty state's.
-    expect(controls.length).toBeGreaterThan(1);
+    // file exists to refuse. `Overview` draws exactly two here — the header action and the empty
+    // state's link — so this is an equality rather than a lower bound: `> 1` was true of those two
+    // for a whole wave while the name promised a frame, and a bound that cannot tell two from
+    // thirteen is the reason nobody noticed. A third control added to this component fails here
+    // and is then swept by the loop below.
+    expect(controls.map((control) => (control.textContent ?? "").trim())).toEqual([
+      "Create topic",
+      "Manage clusters",
+    ]);
 
     for (const control of controls) {
       const name = (control.textContent ?? "").trim() || "(no label)";

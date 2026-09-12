@@ -16,15 +16,16 @@ The working plan for turning this repository into the product drawn in
 There is at most **one** `WAVE-NN.md` at a time. If you are looking at two, the older one was not
 pruned and its exit criteria should be checked before anything in it is believed.
 
-**One deliberate exception, live right now.** `verification/` holds **twenty-four** files and
-**they were carried past `WAVE-11.md`'s deletion rather than deleted with it.** The seven `W11-*`
-files are wave 12's input. Of the seventeen older ones, three cannot be deleted without creating a
-dangling reference — `W8-04.md` and `W8-07.md` are cited from `docs/FEATURE_MATRIX.md`, and
-`W9-03.md` from `frontend/e2e/topics.spec.ts` and `brokers.spec.ts` — and `W8-07.md` §1 is in any
-case the only published screen-to-spec-to-case mapping in this repository. W12-01 either moves those
-citations or records that the files stay, and W12-01's own quotation gate is the first mechanism in
-this repository that would notice a dangling one. The remaining fourteen are discharged and cited by
-nothing but the wave files that are already gone.
+**One deliberate exception, live right now.** `verification/` holds **thirty** files and **they were
+carried past `WAVE-12.md`'s deletion rather than deleted with it.** The six `W12-*` files are wave
+13's input. Of the twenty-four older ones, three cannot be deleted without creating a dangling
+reference — `W8-04.md` and `W8-07.md` are cited from `docs/FEATURE_MATRIX.md`, and `W9-03.md` from
+`frontend/e2e/topics.spec.ts` and `brokers.spec.ts` — and `W8-07.md` §1 is in any case the only
+published screen-to-spec-to-case mapping in this repository, used again at the wave-12 close to count
+23 of 23 captures against a green browser run. The rest are discharged and cited by nothing but wave
+files that are already gone. After W13-01's roster reconciliation, a dangling citation inside a
+checked region is a gate failure rather than a broken link, which is the first time that decision has
+had a mechanism behind it.
 
 **House rule 18 is repaired, and the repair held.** Wave 9 lost one verification file to a partition
 argument and wave 10 lost three — each packet reasoned that this directory belonged to the

@@ -155,42 +155,67 @@ beside it and not to the seed: `connect-configs`, `connect-offsets`, `connect-st
 `__transaction_state` from Kafka itself.
 
 The seed creates three consumer groups, in the three states an operator actually has to tell apart.
-Measured on this stack on 2026-09-11 with
-`curl -s localhost:8080/api/v1/clusters/quickstart/consumer-groups`, which is where each figure
-below comes from:
+Re-measured on this stack on 2026-09-12 with
+`curl -s localhost:8080/api/v1/clusters/quickstart/consumer-groups`, which is where every state and
+every zero below comes from — and the one figure that is **not** below comes from there too:
 
-- `order-fulfilment` is **stopped and behind** on `orders.v1`: `EMPTY`, no members, and **behind by
-  single digits with uneven lag across its six partitions** — see the note below before quoting a
-  number;
+- `order-fulfilment` is **stopped and behind** on `orders.v1`: `EMPTY`, no members, and a non-zero
+  lag spread unevenly across its six partitions. **How far behind is not published here**, in any
+  form, and the note below says why — four waves wrote a bound on this one figure and every one of
+  them was wrong by the time the next reader ran the command;
 - `payments-ledger-sync` is **stopped and caught up**: `EMPTY`, no members, `totalLag` 0 — so zero
   lag is not the same as no group;
 - `analytics-indexer` is **live**: a real consumer process in the `kui-quickstart-consumer`
   container, holding the group open — `STABLE`, one member, `totalLag` 0.
 
-**Why `order-fulfilment`'s lag is described rather than published, and what it depends on.** This
-line has carried a number three times and been wrong three times: 8, then 10, and 10 again after
-wave 10 replaced it. Measured by W10-05's verifier on 2026-09-12, on a stack `quickstart.sh` had
-just built and that nothing but read-only cases had touched: `totalLag` **9**, per-partition
-`0,0,0,1,2,6`. On an older stack in the same pass, **11**. Both are correct reports about the stack
-they were taken on, and that is the problem with writing either one down.
+**Why `order-fulfilment`'s lag is not published here, and what it depends on.** This line has now
+carried a bound **four** times, been wrong every time, and been read as wrong in five consecutive
+waves — which is the whole argument for the shape it is in today. It said 8; then 10; then 10 again
+after wave 10 replaced it; then *"behind by single digits"*, which is a bound and not a description
+and is how wave 11 thought it had stopped writing numbers.
 
-The figure is a subtraction and the subtrahend is fixed while the minuend is not:
+Each was a correct report of the stack it was taken on: W10-05's verifier read `totalLag` **9**
+with per-partition `0,0,0,1,2,6` on a stack `quickstart.sh` had just built, and **11** on an older
+one in the same pass; wave 11's verifier read **14**; the wave-11 closer read **10** on a stack
+brought up fresh. Five numbers, one broker, and no two of them taken on the same history.
+
+The figure is a subtraction, and the subtrahend is fixed while the minuend is not:
 
 - `seed.sh` commits `order-fulfilment` at **offset 2 in every one of `orders.v1`'s six partitions**
   (`--to-offset 2`), and clamps to the log end on a partition holding fewer than two records, so the
-  committed side is at most 12 and in practice 7;
-- `seed/data/orders.v1` holds **16** records, which is the whole of the other side **on a stack
-  nobody has produced to**;
+  committed side is **at most 12** and is smaller by one for every partition holding a single record
+  and by two for every partition holding none — which is a property of how the records hash, not of
+  this file;
+- `seed/data/orders.v1` holds **16** records — `grep -vc '^#\|^$' seed/data/orders.v1` — which is
+  the whole of the other side **on a stack nobody has produced to**;
 - and every record produced into `orders.v1` afterwards adds exactly one to the lag: the message
   browser's produce form, a browser case that produces, a second seed run against a broker whose
   volume survived.
 
-So: **the lag is `orders.v1`'s length minus seven**, it is 9 on a cold stack, and it only ever goes
-up. A reader comparing the screen against a number here would be reading a fact about how much the
-stack has been used, which is not what this paragraph is about. What is stable, and is the whole
-point of the row, is `EMPTY` with no members and a non-zero lag spread unevenly across six
-partitions. Nothing in this repository compares this file to a running stack; that is why it drifted
-three times, and it is filed for the `deployment-claims` claim kind W10-05 asked for.
+So: **the lag is `orders.v1`'s length minus whatever the clamp committed**, and it only ever goes up
+from there. Both ends of that subtraction are facts about a *running broker*, so the only honest
+form for the figure is the command that reads it —
+
+```
+curl -s localhost:8080/api/v1/clusters/quickstart/consumer-groups |
+  jq -c '.groups.data.items[] | {groupId, state, members, totalLag}'
+```
+
+— and a reader comparing the screen against a number written here would be reading a fact about how
+much that particular stack has been used.
+
+**A cold stack is not the hard part, and that is the trap this line kept falling into.** The keys
+hash the same way every run, so on a stack `quickstart.sh` has just built the subtraction is fully
+determined, and the two packets that measured one in two different waves got the same per-partition
+spread. Every figure that differed was taken on a stack something had produced to — and **the
+browser suite produces into `orders.v1` on every run**, so a stack that has been used at all is the
+normal case and a cold one is the exception. A number that is stable only in the exception is not a
+number this file can publish.
+
+What is stable, and is the whole point of the row, is `EMPTY` with no members and a non-zero lag
+spread unevenly across six partitions. Nothing in this repository compares this file to a running
+stack; that is why it drifted four times, and it is filed for the `deployment-claims` claim kind
+W10-05 asked for.
 
 **A fourth group is on the broker and the seed does not make it.** `kui-quickstart-connect` is the
 Kafka Connect worker's own group, and KUI reports it as `STABLE` with no members and an

@@ -156,11 +156,22 @@ object KeyStoreMaterializer {
         Async[F].delay(Path(System.getProperty("java.io.tmpdir", "/tmp")))
       )(_.pure[F])
       directory = base / directoryName(id, random)
-      _ <- Files[F].createDirectories(directory, Some(DirectoryPermissions))
-      // `createDirectories` on a path whose parent already exists with other permissions can leave
-      // the leaf with the umask applied, so the permissions are set again explicitly.
-      _ <- Files[F].setPosixPermissions(directory, DirectoryPermissions)
+      _ <- secureDirectory(directory)
     } yield directory
+
+  /** Creates the directory and leaves it at `rwx------`, whether or not it was this call that created it.
+    *
+    * The second call is not redundant and was ungated until wave 12. `createDirectories` hands its
+    * permissions to `mkdir(2)`, which applies the process umask, so a leaf whose parent already exists with
+    * other permissions can land wider than asked for; and on a path that **already exists**
+    * `createDirectories` is a no-op that applies no permissions at all, which is the case a test can drive
+    * and the case an operator meets when a base directory is reused. Named rather than inlined so that the
+    * second call is a rule something can assert, rather than a line whose deletion changes nothing anybody
+    * measures.
+    */
+  private[auth] def secureDirectory[F[_]: {Async, Files}](directory: Path): F[Unit] =
+    Files[F].createDirectories(directory, Some(DirectoryPermissions)) >>
+      Files[F].setPosixPermissions(directory, DirectoryPermissions)
 
   private def writeStore[F[_]: {Async, Files}](path: Path, bytes: Array[Byte]): F[Unit] =
     Files[F].createFile(path, Some(FilePermissions)) >>

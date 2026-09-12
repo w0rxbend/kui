@@ -71,6 +71,22 @@ WORKDIR /build
 #
 # and `frontend/packages: 11 packages, 11 manifests copied, every name matched`, exit 0, restored.
 #
+# AND IT COMPARED NAMES AND NOT FILES UNTIL WAVE 12, WHICH IS THE THIRD TIME THIS ROSTER HAS BEEN
+# BROKEN UNDER A GREEN STEP. Both derivations reduced a line to the package name, so changing the
+# FILE on the `packages/api` line below from `package.json` to `tsconfig.json` left eleven names on
+# every side and every name equal: the step printed the sentence above and exited 0 — with
+# `packages/api` shipping no manifest, which is the workspace pnpm resolves for a deleted line.
+# Measured at the wave-12 open by making exactly that edit, and red on it now:
+#
+#   1c1 < api --- > COPY frontend/packages/api/tsconfig.json ./packages/api/   exit 1
+#
+# The source derivation is now anchored on `package\.json`, so a COPY line naming any
+# other file does not reduce at all and appears WHOLE on the `>` side of the diff; the destination
+# derivation cannot carry that anchor, because a destination names a directory and no file, and the
+# step's fixture now holds `COPY frontend/packages/decoy/tsconfig.json ./packages/decoy/` as a line
+# that must never reduce to a package name. Each line of the roster is three facts — the package,
+# the file, and the directory pnpm will look in — and until wave 12 this was checked on two of them.
+#
 # The gate exists because the drift is otherwise invisible. What it costs when it is not benign: the
 # install layer resolves a *different* workspace from the one the lockfile describes, so
 # `--frozen-lockfile` is being asked a question about a tree that is not the tree, and the

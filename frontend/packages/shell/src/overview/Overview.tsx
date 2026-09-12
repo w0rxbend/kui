@@ -452,7 +452,7 @@ export function Overview(props: OverviewProps): JSX.Element {
         {/* Tab-invariant, and drawn once above the switch rather than inside each arm. §4.2 proves
             the rule the design only implies: the stat cards are identical on every tab, so a reader
             who switches tabs is not made to re-read them. */}
-        <StatRow model={props.model} throughput={throughput.state()} range={range()} />
+        <StatRow model={props.model} throughput={throughput.state()} />
 
         {/* `Dynamic` rather than a call, and this is not a style choice. The JSX compiler treats an
             expression container holding a call as dynamic and wraps it in a tracked computation, so
@@ -503,10 +503,13 @@ export function Overview(props: OverviewProps): JSX.Element {
  * Removed is worse: SPEC §4.13's rule, which `Button` enforces in its own type, is that an action
  * the operator cannot take right now is *disabled with a reason*, never hidden — a hidden control
  * makes somebody believe the product cannot do the thing at all. Rewired to open a chooser is worse
- * too, and for the reason {@link NoClusterChosen} gives at length: the environment rail is already
- * the product's cluster chooser, `ClusterSelector` is already a second one with zero production
- * callers, and a third would be a third thing to keep in step with the roster. So it refuses, and
- * the refusal names the rail — the same place the empty state below it names.
+ * too, and for the reason {@link NoClusterChosen} gives at length: the environment rail is the
+ * product's cluster chooser, and a second one here would be a second thing to keep in step with the
+ * roster. The shell shipped such a second one for three waves — a `ClusterSelector` dropdown with
+ * stories, cases, an export and zero production callers — and it was deleted in wave 12 rather than
+ * wired, because the rail's own header says why a dropdown is the wrong shape: it hides the one
+ * fact an operator needs in peripheral vision, which is the cluster they are about to break. So
+ * this refuses, and the refusal names the rail — the same place the empty state below it names.
  *
  * ## Why one button whose disablement flips, rather than a `<Show>` over two
  *
@@ -547,10 +550,11 @@ function CreateTopicAction(props: {
  *
  * The frame already has one: the environment rail lists every registered cluster, names each in its
  * tooltip and accessible name, and selects on click. A second list here would be a second control
- * to keep in step with the roster, and `ClusterSelector` — the shell's other cluster chooser — is
- * already a component with zero production callers. So this names the choice, says where it is, and
- * offers the one action the rail does not: the page that registers a cluster in the first place,
- * which is the honest destination when the rail is empty because nothing is registered at all.
+ * to keep in step with the roster — and the shell already carried one such second control, a
+ * `ClusterSelector` dropdown with zero production callers, which wave 12 deleted rather than wire.
+ * So this names the choice, says where it is, and offers the one action the rail does not: the page
+ * that registers a cluster in the first place, which is the honest destination when the rail is
+ * empty because nothing is registered at all.
  */
 function NoClusterChosen(props: { readonly manageHref: string }): JSX.Element {
   return (
@@ -684,11 +688,19 @@ interface BodyProps {
 
 type BodyComponent = (props: BodyProps) => JSX.Element;
 
-/** What every one of the six tiles is handed, whether or not it reads all of it. */
+/**
+ * What every one of the six tiles is handed, whether or not it reads all of it.
+ *
+ * It used to carry `range` as well, and no entry of {@link STAT_TILES} ever read it — not one of
+ * the six, which is a stronger statement than the sentence above makes and is why the prop is now
+ * gone. The two rate cards take the whole `throughput` document and the `range` that produced it is
+ * already in the address; a prop that is threaded through `Dynamic` into six components and read by
+ * none of them is a claim that some tile depends on the selected window, and that claim was false.
+ * The range still reaches the tab bodies below, which do draw it — see {@link BodyProps}.
+ */
 interface StatRowProps {
   readonly model: OverviewModel;
   readonly throughput: Fetched<ThroughputSeries>;
-  readonly range: ThroughputRange;
 }
 
 /**
@@ -796,12 +808,7 @@ function StatRow(props: StatRowProps): JSX.Element {
           whole on every model change instead of the tiles updating in place. */}
       <For each={STAT_ORDER}>
         {(id) => (
-          <Dynamic
-            component={STAT_TILES[id]}
-            model={props.model}
-            throughput={props.throughput}
-            range={props.range}
-          />
+          <Dynamic component={STAT_TILES[id]} model={props.model} throughput={props.throughput} />
         )}
       </For>
     </div>

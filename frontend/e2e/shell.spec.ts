@@ -278,16 +278,15 @@ test.describe("the shell", () => {
    *
    * ## The control is the rail, and it is not a menu
    *
-   * `WAVE-09.md` describes this case as opening *"the cluster selector's menu"*, and there is a
-   * `ClusterSelector` in `shell/src/chrome/` that has exactly such a menu — a listbox, 214 lines,
-   * eight stories, eight cases in `chrome.test.tsx`'s own `describe` for it, and an export from
-   * `shell/src/index.ts`. **Nothing in the product renders it**, which a browser measures in one
-   * line: `[data-testid="cluster-selector-trigger"]` resolves to zero elements on every screen of
-   * a running stack. The shipped switch is `EnvRail`: one always-visible tile per environment in
-   * the 48px column, because a dropdown hides the one fact an operator needs in peripheral vision,
-   * which is which cluster they are about to break (`EnvRail`'s own header says so). So this case
-   * presses a tile. Reported as a finding rather than repaired here: the component is not this
-   * packet's, and deleting it is a decision rather than a chore.
+   * `WAVE-09.md` describes this case as opening *"the cluster selector's menu"*, and the shell did
+   * hold such a menu: a `ClusterSelector` listbox in `shell/src/chrome/`, 214 lines, eight stories,
+   * seven cases and an export from `shell/src/index.ts`, which **nothing in the product rendered**.
+   * A browser measured that in one line — `[data-testid="cluster-selector-trigger"]` resolved to
+   * zero elements on every screen of a running stack — and wave 12 deleted the component rather
+   * than wire it, because the shipped switch is `EnvRail` by design: one always-visible tile per
+   * environment in the 48px column, since a dropdown hides the one fact an operator needs in
+   * peripheral vision, which is which cluster they are about to break (`EnvRail`'s own header says
+   * so). So this case presses a tile, and there is no longer a second chooser to press instead.
    *
    * **This fails rather than skips on a one-cluster deployment**, which is house rule 6 and is the
    * same choice `connect.spec.ts` made about a Connect worker: a suite that quietly skips its only

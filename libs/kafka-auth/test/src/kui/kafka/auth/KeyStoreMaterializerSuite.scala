@@ -2,7 +2,7 @@ package kui.kafka.auth
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
-import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
 import java.nio.file.{Files as JFiles, Path as JPath}
 import java.security.KeyStore
 import java.util.Base64
@@ -140,6 +140,52 @@ final class KeyStoreMaterializerSuite extends KuiIOSuite {
             )
           }
       }
+  }
+
+  test("a directory that already exists is narrowed to the owner rather than left as it was found") {
+    /*
+     * Ungated until wave 12, and filed in wave 11 as "not portably closable": deleting the second
+     * `setPosixPermissions(directory, DirectoryPermissions)` from `createDirectory` left all 395 cases of
+     * `libs.kafkaAuth.test` green, `filesAreOwnerOnly` included. The reason is arithmetic rather than
+     * coverage — `createDirectories` reaches `mkdir(2)` with mode 0700, and a umask can only *clear* bits,
+     * so on any ordinary umask the leaf is 0700 before the second call runs and `filesAreOwnerOnly` cannot
+     * tell the two versions apart.
+     *
+     * It is closable, and portably, once the second call is asked about the case where it is the only thing
+     * that acts: a directory that ALREADY EXISTS. `createDirectories` is then a no-op which applies no
+     * permissions at all, and whatever the directory was found at is what a private key would be written
+     * into. So the case pre-creates the directory at 0777 — the widest thing a reused tmpfs mount or a
+     * careless `mkdir -p` in an entrypoint leaves behind — and requires the materializer to narrow it.
+     *
+     * This asserts the production helper `createDirectory` itself calls, not a copy of it.
+     */
+    val wideOpen = java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx")
+
+    IO(JFiles.createTempDirectory("kui-keystore-perms")).flatMap { base =>
+      val directory = base.resolve(KeyStoreMaterializer.directoryName(id, "abcd1234"))
+
+      for {
+        _ <- IO(JFiles.createDirectory(directory, PosixFilePermissions.asFileAttribute(wideOpen)))
+        // Whatever the umask did to the line above, the starting state is stated rather than assumed.
+        _ <- IO(JFiles.setPosixFilePermissions(directory, wideOpen))
+        found <- IO(JFiles.getPosixFilePermissions(directory).asScala.toSet)
+        _ <- KeyStoreMaterializer.secureDirectory[IO](Path.fromNioPath(directory))
+        after <- IO(JFiles.getPosixFilePermissions(directory).asScala.toSet)
+        _ <- IO(JFiles.deleteIfExists(directory)) >> IO(JFiles.deleteIfExists(base))
+      } yield {
+        assertEquals(found.size, 9, "the fixture did not start wide open, so the case proves nothing")
+        assertEquals(
+          after,
+          Set(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.OWNER_EXECUTE
+          ),
+          "a pre-existing directory kept the permissions it was found with, so a keystore would be " +
+            "written into a directory every user on the host can read"
+        )
+      }
+    }
   }
 
   test("a materialized store is overwritten before it is unlinked, not merely deleted") {

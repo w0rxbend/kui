@@ -384,18 +384,23 @@ declare -A registry=(
   [adr-index]="adr-file adr-row"
   [guard-fixtures]="alias-roster-refused capability-prose-claim-site capability-prose-forms\
  claim-reads-whole-figure claim-refuses-noncomparison claimed-side-read\
- count-assertion dependency-audit-coverage dependency-audit-refuses dependency-reader-independence\
+ count-assertion debt-duplicate-refused dependency-audit-coverage dependency-audit-refuses\
+ dependency-reader-independence\
  dependency-row-compared empty-block-refused fact-independence figure-published\
- header-kind-inverse marker-list-refused openapi-fact-independence residue-reports-unclaimed\
+ header-kind-inverse marker-list-refused openapi-fact-independence quotation-empty-marker\
+ quotation-path-claim-site quotation-sweep-reports residue-reports-unclaimed\
  total-split-compared"
   [openapi-totals]="merged-path-prefix openapi-document openapi-roster openapi-totals residue"
   [capability-claims]="capability-prose capability-prose-audit capability-prose-refusal\
- package-count package-roster\
+ capability-prose-states package-count package-roster\
  residue service-alias-roster service-audit service-audit-coverage service-count\
  service-fact-independence service-fact-roster-independence service-roster service-routed-count\
  service-state"
   [gate-table]="gate-claim-total gate-decisions-rows gate-openapi-document gate-section-count\
  residue"
+  [quotations]="quotation quotation-audit quotation-claim-site quotation-drive quotation-path\
+ quotation-sweep residue"
+  [debt-register]="debt-ids-unique debt-next-id residue"
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -693,9 +698,12 @@ number_words+='|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty'
 
 report_unclaimed_figures() {
   local where=$1 rest=$2 leftovers="" words
-  # A date, an `ADR-nnn` reference and a `wave-n` are not figures about the thing being counted.
+  # A date, an `ADR-nnn` reference, a `wave-n` and a `W<wave>-<packet>` report id are identifiers
+  # rather than figures about the thing being counted. The last of the four is new on 2026-09-12,
+  # because section 9's block in `docs/FEATURE_MATRIX.md` names three verification reports by path
+  # and `W8-07.md` is not a document publishing the figures 8 and 7.
   rest=$(printf '%s' "$rest" | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}//g; s/ADR-[0-9]+//g;
-                                       s/wave-[0-9]+//g')
+                                       s/wave-[0-9]+//g; s/\bW[0-9]+-A?[0-9]+//g')
   if [[ $rest =~ [0-9] ]]; then
     leftovers=$(printf '%s' "$rest" | grep -oE '[0-9][0-9.%]*' | sort -u | tr '\n' ' ')
     leftovers=${leftovers% }
@@ -2545,6 +2553,49 @@ declare -A service_aliases=(
 # claim this gate exists for whichever word it uses.
 negation_tokens='no|not|neither|nor|without|never'
 
+# THE POSITIVE-VOICE HALF, AND THE FALSE-POSITIVE DECISION IT FORCED
+# -----------------------------------------------------------------
+# `negation_tokens` alone reads one grammatical mood. Measured on 2026-09-12 against the shipped
+# script, each sentence appended on its own inside `README.md`'s `capability-claims` block and
+# nothing else changed:
+#
+#   Neither Kafka Connect nor ksqlDB is built: KUI has no Connect screen and no ksqlDB screen.
+#                                                                    exit 1, 1 disagreement
+#   KUI ships without a Kafka Connect screen and never built ksqlDB.  exit 1, 1 disagreement
+#   Kafka Connect remains unimplemented, and ksqlDB is a stub.        exit 0, all true
+#   The Connect screen is a placeholder and the ksqlDB page is empty. exit 0, all true
+#   KUI has no topic detail page and no consumer lag chart.           exit 0, all true
+#
+# Rows 3 and 4 are restatements of row 1 in the positive voice, and they escaped for want of a
+# negation word. The vocabulary below is the other half: a service named beside a word that puts it
+# in a state is making the same claim about the tree as a service named beside a negation, and the
+# gate has to read both or an author who is told "do not say it that way" writes it the other way
+# in one line.
+#
+# **The false-positive decision, said out loud, because this is the rule that could make the README
+# unwritable.** *"The Connect screen is the placeholder for a worker that is not configured"* is
+# honest prose about a **configured** state and this rule refuses it. That is deliberate, and it is
+# the same rule the negation half already carries rather than a new one: inside a checked block a
+# service's state is stated in the three labelled lists, where it is compared against `services/`
+# and `ServiceContracts.byService`, or it is not stated inside the markers at all. The refusal is
+# not *"that sentence is false"* -- it is *"nothing here can check that sentence, so do not make it
+# where the markers promise everything is checked"*. The escape is four lines long and costs
+# nothing: the sentence goes below the `<!-- /checked -->`, which is where `README.md` already keeps
+# every paragraph of that shape. The alternative considered and rejected was qualifying the rule --
+# refusing `placeholder` only when no `configured` appears nearby -- which is a heuristic about
+# meaning, is defeated by the next synonym, and buys an author the right to make an unchecked claim
+# inside the markers. The markers here are small on purpose.
+#
+# `not implemented` is listed even though `not` already catches it, because a reader looking for the
+# vocabulary should find the phrase they were about to write rather than have to know that the first
+# word of it is in the other list.
+state_tokens='placeholder|placeholders|stub|stubs|stubbed|unimplemented|not implemented'
+state_tokens+='|coming soon|empty|todo'
+
+# The two lists are read as one alternation and held separately so that a reader can see both and so
+# that a mutation deleting either is visible as a deleted list rather than as a shortened regex.
+capability_claim_tokens="$negation_tokens|$state_tokens"
+
 # The block, split into sentences. The block arrives flattened to one line -- `regions` joins its
 # lines with spaces -- so a paragraph break is invisible here and a sentence terminator is the only
 # boundary left. A colon is deliberately not one: `**Not built:**` ends with one, and the sentence
@@ -2573,7 +2624,7 @@ capability_prose_offences() {
       stripped=$(printf '%s' "$stripped" | sed -E "s/${tick}[^${tick}]*${tick}//g")
     done
     printf '%s' "$stripped" \
-      | grep -qiE "(^|[^A-Za-z])($negation_tokens)([^A-Za-z]|\$)" || continue
+      | grep -qiE "(^|[^A-Za-z])($capability_claim_tokens)([^A-Za-z]|\$)" || continue
     for id in "${!service_aliases[@]}"; do
       found=""
       [[ $stripped == *"$tick$id$tick"* ]] && found=$id
@@ -2722,7 +2773,8 @@ check_capability_region() {
     "no capability sentence outside the lists" \
     "${offences:-no capability sentence outside the lists}" \
     "$where publishes a sentence outside the three labelled lists that names [$offences] together\
- with a negation. A service's state is stated in the lists, where it is compared against\
+ with a negation or with a word that puts the service in a state. A service's state is stated in\
+ the lists, where it is compared against\
  \`services/\` and \`ServiceContracts.byService\`, or it is not stated inside the markers at all --\
  because free prose here is the exact shape of *\"Neither Kafka Connect nor ksqlDB is built\"*,\
  which stood in this repository for four milestones with every gate green."
@@ -2882,8 +2934,57 @@ verify_capability_prose_refusal() {
  block whose lists are true. It has to name \`connect\` and \`ksql\`."
 }
 
+# One pair per word in `state_tokens`, and the honest control that says where the line is.
+#
+# W11-01's verifier found that half of `negation_tokens` -- `without` and `never` -- was asserted by
+# nothing until a fixture was written for it, and a vocabulary a synonym defeats is this gate's
+# named failure mode. So every word in the positive-voice list is driven here, one sentence each,
+# each naming both `connect` and `ksql` so that a word that has stopped being read shows up as its
+# own line rather than as a count that moved.
+#
+# The last pair is the control and it is the important one. `Kafka Connect is configured per cluster
+# and ksqlDB is reached through the gateway.` names both services, is honest, and carries none of
+# the words -- a rule widened until it refuses that is a rule the next writer deletes, and the
+# claim fails on it in the same call it fails the seven attacks in.
+verify_capability_prose_state_tokens() {
+  local placeholder stub unimplemented notimpl soon empty todo honest
+  placeholder='The Connect screen is a placeholder and the ksqlDB page is empty.'
+  stub='Kafka Connect is a stub here and ksqlDB is stubbed out.'
+  unimplemented='Kafka Connect remains unimplemented, and ksqlDB is unimplemented too.'
+  notimpl='Kafka Connect is not implemented and ksqlDB is not implemented either.'
+  soon='Kafka Connect is coming soon, and ksqlDB is coming soon as well.'
+  empty='The Kafka Connect screen is empty and the ksqlDB screen is empty.'
+  todo='Kafka Connect is a TODO, and ksqlDB is a TODO.'
+  honest='Kafka Connect is configured per cluster and ksqlDB is reached through the gateway.'
+  scope capability-claims "capability_prose_offences, the positive voice"
+  claim capability-prose-states "" \
+    "$(capability_prose_offences "$placeholder")" "connect ksql" \
+    "the sentence the wave-12 plan names as green on the shipped script -- *\"$placeholder\"* --\
+ answered [$(capability_prose_offences "$placeholder")]. It is a direct restatement of the sentence\
+ that kept item 4 open for four milestones, in the positive voice." \
+    "$(capability_prose_offences "$stub")" "connect ksql" \
+    "*\"$stub\"* answered [$(capability_prose_offences "$stub")]." \
+    "$(capability_prose_offences "$unimplemented")" "connect ksql" \
+    "*\"$unimplemented\"* answered [$(capability_prose_offences "$unimplemented")]." \
+    "$(capability_prose_offences "$notimpl")" "connect ksql" \
+    "*\"$notimpl\"* answered [$(capability_prose_offences "$notimpl")]. This one is caught by\
+ \`not\` as well, and is listed in \`state_tokens\` so that a reader looking for the phrase finds\
+ it rather than having to know the first word of it is in the other list." \
+    "$(capability_prose_offences "$soon")" "connect ksql" \
+    "*\"$soon\"* answered [$(capability_prose_offences "$soon")]." \
+    "$(capability_prose_offences "$empty")" "connect ksql" \
+    "*\"$empty\"* answered [$(capability_prose_offences "$empty")]." \
+    "$(capability_prose_offences "$todo")" "connect ksql" \
+    "*\"$todo\"* answered [$(capability_prose_offences "$todo")]." \
+    "$(capability_prose_offences "$honest")" "" \
+    "*\"$honest\"* answered [$(capability_prose_offences "$honest")]. It names both services,\
+ states nothing about whether they are built, and carries none of the vocabulary. A scan that\
+ refuses it refuses honest prose about every service in the roster."
+}
+
 verify_service_fact_independence
 verify_capability_prose_refusal
+verify_capability_prose_state_tokens
 
 for file in README.md "$matrix"; do
   check_marked_file capability-claims "$file" check_capability_region
@@ -2892,7 +2993,7 @@ done
 audit_capability_prose
 audit_service_states
 verify_service_fact_roster_independence
-close_section capability-claims 42
+close_section capability-claims 43
 
 # ---------------------------------------------------------------------------------------------
 # 6, CONTINUED. The fixtures over the sentence gate.
@@ -3070,10 +3171,631 @@ verify_service_alias_roster_refusal() {
 verify_capability_prose_forms
 audit_capability_prose_claim_site
 verify_service_alias_roster_refusal
-close_section guard-fixtures 21
+
+# `close_section guard-fixtures` is NOT here, and this is the second time it has moved for the same
+# reason. Four more fixtures drive `check_quotation_region`, `audit_quotations_in_every_block` and
+# `check_debt_register_region`, which sections 9 and 10 declare below this line; bash defines a
+# function when the parser reaches its line, so a fixture written here is `command not found`. The
+# section is a *name* and not a line range -- `scope` decides which section a claim belongs to and
+# `count_of` reads the ledger -- so those four are section 6's where they sit, and the close runs
+# at the foot of section 10 where the last of them has been counted.
 
 # ---------------------------------------------------------------------------------------------
-# 9. The newcomer's overview, against the figures this script derives itself.
+# 9. The quotation: a sentence one file attributes to another, against the file it names.
+# ---------------------------------------------------------------------------------------------
+#
+# Sections 0 to 7 compare a **figure**. Section 8 compares a **sentence** against the tree. This one
+# compares a **quotation**, and it is the narrowest of the three: a string a document attributes to
+# a named file either occurs in that file or it does not, which is decidable by `grep -F` and needs
+# no parser, no vocabulary and no heuristic about what the sentence means.
+#
+# It exists because wave 11 repaired `docs/operations/masking.md` -- correctly, in the open, with a
+# scope -- and two documents went on quoting, in the present tense, a sentence that page no longer
+# contained. `README.md` and `docs/FEATURE_MATRIX.md` both published the page's old, unscoped
+# statement of the length bound as an invariant an operator was invited to rely on; the repaired
+# page states that bound of the `mask` kind alone. Measured on 2026-09-12, on the tree wave 11 left
+# green: two hits for the old sentence outside `docs/plan/`, and `grep -c` for it over the page it
+# was attributed to answered **0**. The sentence is not written out here, because this file is
+# inside the `grep` that has to answer nothing once the repair lands, and a gate that has to be
+# excluded from its own acceptance command is a gate with a hole cut in it for its own convenience.
+#
+# Both sentences were true when they were written. Both were made false inside the wave whose whole
+# subject was documents going stale, by that wave's own repair, and every gate in this repository
+# was green over both -- because a figure is compared against the thing that produces it and a
+# sentence against the tree, and **nothing here had ever compared a quotation of one file against
+# that file**. That is house rule 25, and this section is it.
+#
+# THE SCOPE, IN ONE SENTENCE, AND WHY IT IS THE CHECKED BLOCK AND NOT THE DOCUMENT
+# -------------------------------------------------------------------------------
+# *Inside a checked region, a backticked or italicised span of **eight words or more** is a
+# quotation of the nearest backticked repository path that precedes it, and it has to occur in that
+# file.*
+#
+# The scope is the marked region, not the file, and that is a measurement rather than a preference.
+# Run this reader over every line of the 113 markdown files this repository tracks outside
+# `docs/plan/` and it answers **1,154 attributions, 1,148 of them absent** -- because a fenced code
+# block is full of `*`-delimited spans, an ASCII architecture diagram is one span eight hundred
+# words long, and a path named in a table's first row sticks to every cell below it. Run it over the
+# twelve marked regions this repository carries and it answers **12 blocks, 0 attributions, 0
+# absent**: a marked region is short, hand-written and opted into, and a sentence inside one is a
+# claim its author asked to have checked. The document-wide reader is not a stricter version of this
+# one, it is a different and useless tool, and the number above is why this file does not ship it.
+#
+# **So on the tree this section landed on it measured nothing**, and that is stated here rather than
+# discovered later: the gate is only as wide as the regions documents put around their quotations,
+# and the two sentences that kept item 4 open had to be moved inside a region before it could see
+# them. A packet that wants to say what another file says puts the quotation inside a region, or
+# names the file without quoting it. Both are honest; only the first is checked.
+#
+# The eight-word floor is what keeps code out without a rule about code. `\`mask\``, `\`replace\``
+# and `\`{"name":"<redacted>"}\`` are one whitespace-separated word each, so a JSON payload, an
+# identifier and a shell fragment never reach the comparison, and no exception list is needed for
+# them.
+
+# The six extensions a backticked token has to end in before this section will treat it as naming a
+# file. Held as a variable because three expressions below read it and a fourth prints it.
+quotation_extensions='md|scala|ts|tsx|yaml|sh'
+
+# The repository path a backticked token names, or nothing when the token is not shaped like one.
+# `:124` and `:124-133` are stripped: a document citing a line range is citing the file, and a
+# citation that carries the range is the one most likely to be quoting something out of it.
+quotation_path_shape() {
+  local token=$1
+  [[ $token =~ ^[A-Za-z0-9_./@-]+\.($quotation_extensions)(:[0-9]+(-[0-9]+)?)?$ ]] || return 0
+  printf '%s' "${token%%:*}"
+}
+
+# The `path<TAB>quotation` attributions one block makes, in the order it makes them.
+#
+# `**bold**` is struck out first. A document in bold is emphasising its own words rather than
+# quoting somebody else's, and `*` is the same character in both, so `**Not built:**` would
+# otherwise be read as an italic span. That is the only normalisation: a quotation is taken exactly
+# as the document wrote it, minus one pair of straight quotes when the author wrapped the italics
+# around them -- `*"..."*` is the shape `docs/FEATURE_MATRIX.md` used and the quotes are the
+# document's punctuation, not the quoted file's.
+quotation_attributions() {
+  local text=$1 span content path="" candidate words
+  text=$(printf '%s' "$text" | sed -E 's/\*\*[^*]*\*\*//g')
+  while IFS= read -r span; do
+    case $span in
+      '`'*) content=${span#\`}; content=${content%\`} ;;
+      '*'*) content=${span#\*}; content=${content%\*} ;;
+      *) continue ;;
+    esac
+    candidate=$(quotation_path_shape "$content")
+    if [[ -n $candidate ]]; then path=$candidate; continue; fi
+    content=${content#\"}; content=${content%\"}
+    words=$(printf '%s' "$content" | wc -w)
+    (( words >= 8 )) || continue
+    # A span with no path before it in this block is not an attribution. It is somebody's italics,
+    # and refusing it would make the markers unwritable for the sake of a claim nobody made.
+    [[ -n $path ]] || continue
+    printf '%s\t%s\n' "$path" "$content"
+  done < <(printf '%s' "$text" | { grep -oE '`[^`]*`|\*[^*]+\*' || true; })
+}
+
+# The comparison, and it is one `grep -F`.
+#
+# The whitespace on both sides is collapsed before the match, because a line break is not a
+# difference of wording: the quoting document wraps at a hundred columns and the quoted file wraps
+# somewhere else, and a quotation that spans two lines in either of them is the ordinary case rather
+# than the exception. Nothing else is normalised. A changed word, a changed article and a changed
+# tense are all changed quotations, which is the whole point -- the sentence this section was
+# written for differs from the page's own by four words.
+quotation_is_present() {
+  local path=$1 quote=$2 haystack needle
+  [[ -f $path ]] || { printf 'no such file'; return 0; }
+  haystack=$(tr '\n' ' ' < "$path" | tr -s ' ')
+  needle=$(printf '%s' "$quote" | tr -s ' ')
+  if printf '%s' "$haystack" | grep -qF -- "$needle"
+  then printf 'present'
+  else printf 'absent'
+  fi
+}
+
+# The dangling half, and it is the class the plan's integrator named without a mechanism for it.
+# `docs/FEATURE_MATRIX.md` cites three files under `docs/plan/verification/` that `docs/plan/\
+# README.md` says are deleted when the plan closes. A citation whose file has gone is not caught by
+# the reader above at all -- a token that does not resolve is simply not treated as a path, so the
+# quotation after it attaches to whatever path came before, or to nothing. So the shape is refused
+# on its own: inside a checked region, a backticked token that looks like a repository path and is
+# not one is reported with the token printed.
+quotation_dangling_paths() {
+  local text=$1 span content candidate missing=""
+  text=$(printf '%s' "$text" | sed -E 's/\*\*[^*]*\*\*//g')
+  while IFS= read -r span; do
+    [[ $span == '`'* ]] || continue
+    content=${span#\`}
+    content=${content%\`}
+    candidate=$(quotation_path_shape "$content")
+    [[ -n $candidate && ! -f $candidate ]] && missing+="$candidate "
+  done < <(printf '%s' "$text" | { grep -oE '`[^`]*`' || true; })
+  printf '%s' "$missing" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//; s/ *$//'
+}
+
+check_quotation_region() {
+  local where=$1 text=$2 path quote fact found=0 dangling span content
+  while IFS=$'\t' read -r path quote; do
+    [[ -z $path ]] && continue
+    found=$(( found + 1 ))
+    fact=$(quotation_is_present "$path" "$quote")
+    claim quotation "" \
+      "present" "$fact" \
+      "$where quotes *\"$quote\"* and attributes it to \`$path\`. \`grep -F\` over that file,\
+ with the line breaks on both sides collapsed to spaces, answers \`$fact\`. A quotation is a\
+ dependency on the file it names: either the sentence is repaired to what that file says, or it\
+ stops being a quotation and names the file instead."
+  done < <(quotation_attributions "$text")
+
+  dangling=$(quotation_dangling_paths "$text")
+  claim quotation-path "" \
+    "every path resolves" "${dangling:-every path resolves}" \
+    "$where names [$dangling] as files in this repository and they are not there. A citation whose\
+ file has gone is invisible to the quotation reader above -- an unresolved token is not treated as\
+ a path at all -- so it is refused here, where it is still a sentence a reader would follow."
+
+  (( found > 0 )) ||
+    fail "$where carries no quotation at all. A \`checked: quotations\` marker says the passage" \
+         "inside it attributes a string to a file in this repository; a block that attributes" \
+         "none is a marker over nothing, which is the state this whole file exists to refuse."
+
+  # The paths are struck out before the residue reads the block, for the reason a labelled list's
+  # names are struck out in section 8: they are the claimed side of the two comparisons above. A
+  # path is also the one kind of published token that carries digits belonging to nothing --
+  # `frontend/e2e/brokers.spec.ts` publishes the figure `2` to a reader that counts characters, and
+  # a residue that reports it teaches the next author to write the path outside the markers.
+  local residue_text=$text
+  while IFS= read -r span; do
+    content=${span#\`}
+    content=${content%\`}
+    [[ -n $(quotation_path_shape "$content") ]] && residue_text=${residue_text//"$span"/}
+  done < <(printf '%s' "$text" | { grep -oE '`[^`]*`' || true; })
+
+  report_unclaimed_figures "$where" "$residue_text"
+}
+
+# The sweep: house rule 25 says *a checked region*, not *a region of this one kind*, so every marked
+# block in this repository is read for attributions and not only the blocks written for them.
+#
+# On the tree this landed on the sweep found **zero** attributions over twelve blocks, so the number
+# of blocks it read is claimed as well as the attributions it found. Without that, a reader that
+# stopped reading -- a renamed marker, a file dropped from the roster, an `awk` that matches
+# nothing -- would answer "no broken quotation anywhere" and be believed, which is the exact failure
+# this file catalogues under `verify_dependency_reader_independence` and refuses to repeat.
+#
+# The roster is written out rather than globbed, for the reason every input in this file is written
+# out: a glob that matches nothing checks nothing and says so to nobody.
+declare -A quotation_swept_kinds=(
+  [README.md]="capability-claims rows"
+  [$matrix]="capability-claims rows milestones"
+  [$overview]="gate-table"
+  [$apireadme]="merged-document"
+  [$adr048]="merged-document"
+  [$adr052]="openapi-totals"
+  [$adr053]="openapi-totals"
+  [$adr054]="openapi-totals"
+)
+
+audit_quotations_in_every_block() {
+  local file kind text index path quote fact blocks=0 broken=""
+  for file in "${!quotation_swept_kinds[@]}"; do
+    for kind in ${quotation_swept_kinds[$file]}; do
+      index=0
+      while IFS= read -r text; do
+        index=$(( index + 1 ))
+        blocks=$(( blocks + 1 ))
+        while IFS=$'\t' read -r path quote; do
+          [[ -z $path ]] && continue
+          fact=$(quotation_is_present "$path" "$quote")
+          [[ $fact == present ]] && continue
+          broken+="$file (checked: $kind #$index) -> $path: \"$quote\" is $fact. "
+        done < <(quotation_attributions "$text")
+      done < <(regions "$kind" "$file")
+    done
+  done
+  scope quotations "every marked block that is not a quotations block"
+  claim quotation-sweep "" \
+    "no broken attribution" "${broken:-no broken attribution}" \
+    "a marked block of another kind attributes a quotation to a file that does not contain it:\
+ $broken House rule 25 is about a checked region and not about one kind of region, so every block\
+ in this repository is read for attributions." \
+    "$blocks" "12" \
+    "the sweep read $blocks marked blocks and this script was last edited over 12. A reader that\
+ has stopped reading answers \`no broken attribution\` for every document at once, and on the tree\
+ this section landed on that is exactly the answer the honest reader gives -- so the count it read\
+ is claimed beside the answer it gave."
+}
+
+# The second reading, for `capability-prose`'s reason and with `capability-prose`'s shape. The claim
+# site above hands `claim` no matched fragment, so its claimed side is this file's own literal
+# `present` rather than anything read out of a document, and `claim`'s claimed-side refusal cannot
+# see a call site rewritten to `claim quotation "" "$fact" "$fact"`. So each block that made a
+# `quotation` claim is re-read here from disk by a loop that is not the claim site, and the answers
+# the ledger recorded for it have to be the answers a fresh read gives.
+#
+# One claim per block rather than per attribution, and joined in the order the reader yields them:
+# a block quoting two files records two ledger lines, and comparing a line at a time would compare
+# the first attribution's answer with the whole block's.
+audit_quotations() {
+  local line a b c pairs blocks="" at file index text path quote fresh ledgered
+  scope quotations "the quotation ledger"
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c pairs <<< "$line"
+    [[ $a == quotations && $c == quotation ]] || continue
+    [[ $'\n'$blocks == *$'\n'"$b"$'\n'* ]] || blocks+="$b"$'\n'
+  done
+  while IFS= read -r at; do
+    [[ -z $at ]] && continue
+    file=${at%#*}
+    index=${at##*#}
+    text=$(regions quotations "$file" | sed -n "${index}p")
+    fresh=""
+    while IFS=$'\t' read -r path quote; do
+      [[ -z $path ]] && continue
+      fresh+="$(quotation_is_present "$path" "$quote") "
+    done < <(quotation_attributions "$text")
+    ledgered=""
+    for line in ${ledger+"${ledger[@]}"}; do
+      IFS=$'\t' read -r a b c pairs <<< "$line"
+      [[ $a == quotations && $c == quotation && $b == "$at" ]] || continue
+      ledgered+="${pairs#*>} "
+    done
+    claim quotation-audit "" \
+      "${ledgered% }" "${fresh% }" \
+      "the ledger says the \`quotation\` claims for \`$at\` were measured against\
+ [${ledgered% }], and re-reading that block out of \`$file\` answers [${fresh% }]. The comparison\
+ inside the block and this reading are two statements, so a claim site rewritten to compare its own\
+ answer with itself is caught here rather than believed."
+  done <<< "$blocks"
+}
+
+# Section 7's shape, inside the section that owns the functions, because section 7 is the closer's
+# on this packet's freeze and a gate that ships undriven is a gate nothing distinguishes from
+# `true`. All three of the pieces above are driven over a page written for the occasion: the
+# comparison in both directions and over a file that is not there, the reader that finds the
+# attribution, the floor that keeps a short span from becoming one, and the dangling-path refusal in
+# both directions.
+verify_quotation_reader() {
+  local page=$fixtures/quoted-page.md present absent missing wrapped short attributed dangling ok
+  printf '%s\n' 'The engine writes the replacement literal' \
+                'verbatim and with no length bound at all.' > "$page"
+  # Written on one line here and wrapped in the fixture page, which is the ordinary case and the
+  # one reason this comparison normalises anything.
+  wrapped='the replacement literal verbatim and with no length bound'
+  present=$(quotation_is_present "$page" "$wrapped")
+  absent=$(quotation_is_present "$page" "the replacement literal verbatim and with a length bound")
+  missing=$(quotation_is_present "$fixtures/no-such-page.md" "$wrapped")
+  attributed=$(quotation_attributions "see \`$page\` and *$wrapped* for the bound")
+  short=$(quotation_attributions "see \`$page\` and *no length bound* for the bound")
+  dangling=$(quotation_dangling_paths "\`$fixtures/no-such-page.md\` and \`$page\`")
+  ok=$(quotation_dangling_paths "\`$page\` and \`services/gateway\` and \`replace\`")
+  scope quotations "quotation_is_present, quotation_attributions, quotation_dangling_paths"
+  claim quotation-drive "" \
+    "$present" "present" \
+    "\`quotation_is_present\` answered \`$present\` for a sentence the fixture page carries across\
+ two lines. A comparison that a line break defeats would refuse every honest quotation in this\
+ repository, because every document here wraps at a hundred columns." \
+    "$absent" "absent" \
+    "\`quotation_is_present\` answered \`$absent\` for a sentence the fixture page does not carry,\
+ one word different from one it does. A comparison that accepts an approximation is not a\
+ comparison." \
+    "$missing" "no such file" \
+    "\`quotation_is_present\` answered \`$missing\` for a page that is not on disk. An absent file\
+ has to be a distinct answer from an absent sentence, or a citation that has been deleted reads as\
+ a quotation that has been repaired." \
+    "$attributed" "$(printf '%s\t%s' "$page" "$wrapped")" \
+    "\`quotation_attributions\` read [$attributed] out of a passage naming one path and quoting\
+ eight words or more after it. This is the reader the whole section is, and until this fixture\
+ nothing in this repository drove it over input it was guaranteed to have to refuse." \
+    "$short" "" \
+    "\`quotation_attributions\` read [$short] out of a passage whose italics are three words long.\
+ The eight-word floor is what keeps a backticked identifier and a JSON payload out of the\
+ comparison without a rule about either, and a floor that has stopped applying makes every\
+ emphasised word in a marked block a quotation." \
+    "$dangling" "$fixtures/no-such-page.md" \
+    "\`quotation_dangling_paths\` named [$dangling] for a passage citing one file that exists and\
+ one that does not." \
+    "$ok" "" \
+    "\`quotation_dangling_paths\` named [$ok] for a passage citing a file that exists, a directory\
+ and a backticked word. A refusal that fires on a directory or on an ordinary identifier is a\
+ refusal the next writer turns off."
+}
+
+# The claim site itself, driven, and it is here because the audit above cannot see the cheapest
+# attack on this section. Measured on 2026-09-12 against this file with `audit_quotations` in place:
+#
+#   claim quotation "" "present" "$fact" ...   ->   claim quotation "" "$fact" "$fact" ...
+#     433 claims checked, all true, exit 0
+#
+# The audit re-derives the *fact* and compares it with the fact the ledger recorded, and the
+# mutation changes only the claimed side, so both readings still answer `present` -- and on a tree
+# whose documents are honest the claimed side IS `present`, so reading the literal back off the
+# ledger cannot see it either. The one thing the mutation cannot survive is a block that really does
+# quote a sentence its file does not carry: there the two sides are `absent` and `absent`, the
+# comparison agrees with itself, and the refusal never fires. So the shipped
+# `check_quotation_region` is driven over a fixture block in both directions and required to report
+# on one and stay quiet on the other. This is W11-A2's lesson about `capability-prose` applied
+# before it had to be learned again: drive the function, do not read the ledger.
+verify_quotation_claim_site() {
+  local page=$fixtures/claim-site.md pattern honest broken said_broken said_honest
+  printf '%s\n' 'the replacement literal verbatim and with no length bound' > "$page"
+  pattern='and attributes it to'
+  honest="see \`$page\`, which says *the replacement literal verbatim and with no length bound*."
+  broken="see \`$page\`, which says *the replacement literal verbatim and with a length bound*."
+  said_broken=$(drive_says "$pattern" check_quotation_region "a fixture block" "$broken")
+  said_honest=$(drive_says "$pattern" check_quotation_region "a fixture block" "$honest")
+  scope quotations "the quotation claim site"
+  claim quotation-claim-site "" \
+    "$said_broken" "reported" \
+    "\`check_quotation_region\` $said_broken a block quoting eight words its own named file does\
+ not contain. Driving the claim site rather than \`quotation_is_present\` is what catches the site\
+ rewritten to compare its own answer with itself -- on a tree whose documents are honest both sides\
+ of that comparison are \`present\`, and every reading of the ledger agrees with every other." \
+    "$said_honest" "not reported" \
+    "\`check_quotation_region\` $said_honest a block quoting eight words its named file does\
+ contain. A gate that refuses an honest quotation is a gate that teaches the next writer to stop\
+ quoting, which is the opposite of what this section is for."
+}
+
+verify_quotation_reader
+verify_quotation_claim_site
+for file in README.md "$matrix"; do
+  check_marked_file quotations "$file" check_quotation_region
+done
+audit_quotations_in_every_block
+audit_quotations
+close_section quotations 11
+
+# ---------------------------------------------------------------------------------------------
+# 10. The debt register's own ids, against the table that holds them.
+# ---------------------------------------------------------------------------------------------
+#
+# `TECH_DEBT.md` had never been opened by this script. It carries a sentence telling the next writer
+# which id to use -- *"the next free id after this pass is TD-049"* -- and that sentence was read by
+# nobody, which is how the register grew two rows numbered `TD-035` for two different defects and
+# closed neither. The preamble's own account of it is worth keeping: a register that accepts a
+# draft's id without reading its own table produces two rows for one defect.
+#
+# Two comparisons, and both are arithmetic over the first column rather than a judgement about the
+# rows: the id the page publishes as free has to be one past the highest id the table holds, and no
+# two rows may carry the same id. Neither can be satisfied by editing a roster in this file, because
+# this file keeps none -- the fact is `TECH_DEBT.md`'s own table, read row by row.
+
+debt="TECH_DEBT.md"
+
+if [[ ! -f $debt ]]; then
+  echo "feature-matrix-check: $debt is missing; the debt register cannot be checked." >&2
+  exit 2
+fi
+
+# The id of every row of the register's table, in the order the table holds them. Anchored on the
+# line start and on the two pipes, so an id named in a row's prose -- and nearly every row names one
+# -- is not counted as a row of its own.
+debt_row_ids() {
+  sed -nE 's/^\| (TD-[0-9]+) \|.*/\1/p' "${1-$debt}"
+}
+
+check_debt_register_region() {
+  local where=$1 text=$2 highest next duplicates
+  local -a ids=()
+  mapfile -t ids < <(debt_row_ids)
+
+  if (( ${#ids[@]} == 0 )); then
+    fail "$where: \`$debt\` holds no row this reader can see, so both comparisons below are true" \
+         "of nothing. The reader anchors on \`| TD-nnn |\` at the start of a line; a table" \
+         "rewritten out of that shape has to be noticed here rather than passed over."
+    return
+  fi
+
+  highest=$(printf '%s\n' "${ids[@]}" | sed 's/TD-//' | sort -n | tail -1)
+  next=$(printf 'TD-%03d' "$(( 10#$highest + 1 ))")
+  duplicates=$(printf '%s\n' "${ids[@]}" | sort | uniq -d | tr '\n' ' ')
+  duplicates=${duplicates% }
+
+  if [[ $text =~ (TD-[0-9]+) ]]; then
+    claim debt-next-id "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$next" \
+      "$where publishes ${BASH_REMATCH[1]} as the next free id and the highest id in the table is\
+ TD-$highest, so the next free one is $next. A writer told to use an id that is already taken\
+ files a second row for a defect that already has one, which is how this register came to hold two\
+ \`TD-035\`s and close neither."
+  else
+    fail "$where: the block publishes no \`TD-nnn\` figure, so the id the next writer is told to" \
+         "use is read by nothing -- which is the state this section was added to end."
+  fi
+
+  claim debt-ids-unique "" \
+    "no repeated id" "${duplicates:-no repeated id}" \
+    "\`$debt\` carries [$duplicates] on more than one row. Two rows with one id are two defects\
+ with one exit condition, and the row a reader searches for is the one they then fail to find."
+
+  report_unclaimed_figures "$where" "$text"
+}
+
+check_marked_file debt-register "$debt" check_debt_register_region
+close_section debt-register 3
+
+# ---------------------------------------------------------------------------------------------
+# 6, continued. The four guards sections 9 and 10 shipped without a failing case.
+# ---------------------------------------------------------------------------------------------
+#
+# Every fixture below drives the **shipped** function over input written for the occasion and
+# asserts what it *said*, not how many times it said something, for `drive_says`'s reason: two
+# different refusals in one handler answer the same count for the same fixture.
+#
+# Each closes a one-line mutation that was applied to the shipped script on 2026-09-12, run through
+# `./scripts/feature-matrix-check.sh`, and measured **green at 434 claims, exit 0** -- and each was
+# re-applied after the fixture was written and measured red. The mutation is named above the
+# fixture that closes it, so the next reader can re-apply it rather than believe this paragraph.
+
+# Fixture 22: the sweep reports what it found, and not only how many blocks it read.
+#
+# MUTATION CLOSED: in `audit_quotations_in_every_block`, the two lines
+#   `[[ $fact == present ]] && continue` and `broken+="$file (checked: $kind #$index) -> ..."`
+# replaced by a bare `continue`. The sweep makes two statements -- *how many marked blocks it read*
+# and *what it found in them* -- and only the first was driven. On a tree where every swept block is
+# honest the mutant's answer and the reader's answer are the same string, `no broken attribution`,
+# for every document at once; that is the `verify_dependency_reader_independence` failure class in
+# the section whose own comment cites it, with the *stopped reading* half guarded and the *stopped
+# reporting* half open.
+#
+# The roster is a `local -A`, which shadows the file-scope one for the duration of the call: the
+# comparison is the shipped comparison and only its input is written here.
+sweep_one_marked_file() {
+  local file=$1 kind=$2
+  local -A quotation_swept_kinds=(["$file"]="$kind")
+  audit_quotations_in_every_block
+}
+
+verify_quotation_sweep_reports() {
+  local source=$fixtures/swept-source.md page=$fixtures/swept-page.md
+  local pattern said_broken said_honest
+  printf '%s\n' 'The engine writes the replacement literal verbatim' \
+                'and with no length bound at all.' > "$source"
+  pattern='attributes a quotation to a file that does not contain it'
+  # A `rows` block and not a `quotations` block, because the sweep exists for exactly the blocks
+  # that were not written to be read for attributions.
+  {
+    printf '%s\n' '<!-- checked: rows -- claims: residue -->'
+    printf 'See `%s`, which says *a masked value is never longer than the value it replaced*.\n' \
+      "$source"
+    printf '%s\n' '<!-- /checked -->'
+  } > "$page"
+  said_broken=$(drive_says "$pattern" sweep_one_marked_file "$page" rows)
+  {
+    printf '%s\n' '<!-- checked: rows -- claims: residue -->'
+    printf 'See `%s`, which says *the replacement literal verbatim and with no length bound*.\n' \
+      "$source"
+    printf '%s\n' '<!-- /checked -->'
+  } > "$page"
+  said_honest=$(drive_says "$pattern" sweep_one_marked_file "$page" rows)
+  scope guard-fixtures "audit_quotations_in_every_block"
+  claim quotation-sweep-reports "" \
+    "$said_broken" "reported" \
+    "the sweep $said_broken a \`checked: rows\` block that attributes ten words to a file which\
+ does not carry them. Its block count was right in both directions and its answer was \`no broken\
+ attribution\` in both, which is what a reader that has stopped reporting says about a whole\
+ repository." \
+    "$said_honest" "not reported" \
+    "the sweep $said_honest a \`checked: rows\` block whose attribution its named file does carry.\
+ A sweep that refuses an honest attribution refuses every document that quotes anything, which is\
+ the state the eight-word floor and the path-before-the-quote rule exist to avoid."
+}
+
+# Fixture 23: the `quotation-path` claim site, driven, for the reason the `quotation` claim site is.
+#
+# MUTATION CLOSED: `claim quotation-path "" "every path resolves" "${dangling:-every path resolves}"`
+# -> `claim quotation-path "" "${dangling:-...}" "${dangling:-...}"`. This is the identical
+# one-line self-comparison the section closed for the `quotation` claim and did not extend to the
+# claim beside it: `verify_quotation_claim_site` drives the handler with
+# `pattern='and attributes it to'`, which can only ever match the other message. `quotation-path` is
+# the half of this section that refuses a citation whose file has been deleted, so it is the half
+# that decides whether `docs/plan/verification/` can be emptied silently.
+verify_quotation_path_claim_site() {
+  local page=$fixtures/path-claim-site.md pattern dangling resolved said_dangling said_resolved
+  printf '%s\n' 'the replacement literal verbatim and with no length bound' > "$page"
+  pattern='as files in this repository and they are not there'
+  # Both blocks carry an honest quotation as well, so the only difference between them is the
+  # citation -- a fixture that changed two things at once would not say which one was read.
+  dangling="cited in \`$fixtures/no-such-cited-page.md\` and \`$page\`, which says *the\
+ replacement literal verbatim and with no length bound*."
+  resolved="cited in \`$page\`, which says *the replacement literal verbatim and with no length\
+ bound*."
+  said_dangling=$(drive_says "$pattern" check_quotation_region "a fixture block" "$dangling")
+  said_resolved=$(drive_says "$pattern" check_quotation_region "a fixture block" "$resolved")
+  scope guard-fixtures "the quotation-path claim site"
+  claim quotation-path-claim-site "" \
+    "$said_dangling" "reported" \
+    "\`check_quotation_region\` $said_dangling a block citing a repository path that is not on\
+ disk. A citation whose file has gone is invisible to the quotation reader itself -- an unresolved\
+ token is not treated as a path at all -- so this is the only place it is refused, and a claim site\
+ comparing its own answer with itself refuses nothing while reporting a claim." \
+    "$said_resolved" "not reported" \
+    "\`check_quotation_region\` $said_resolved a block whose every backticked path resolves. The\
+ refusal has to be quiet over the ordinary case or the next writer stops citing files by name."
+}
+
+# Fixture 24: the marker over nothing.
+#
+# MUTATION CLOSED: `(( found > 0 )) ||` -> `(( found >= 0 )) ||`. A `checked: quotations` marker
+# says the passage inside it attributes a string to a file in this repository; a block that
+# attributes none is a marker over nothing. No real block can drive this -- both blocks in the tree
+# quote something -- which is why it shipped asserted by nobody. Disclosed by W12-01 as handoff
+# item (3) and confirmed by mutation rather than taken on trust.
+verify_quotation_empty_marker() {
+  local page=$fixtures/empty-quotation.md pattern said_empty said_quoting
+  printf '%s\n' 'the replacement literal verbatim and with no length bound' > "$page"
+  pattern='carries no quotation at all'
+  # Three words of italics, which is under the eight-word floor: the block names a file and
+  # emphasises something, and attributes nothing.
+  said_empty=$(drive_says "$pattern" check_quotation_region "a fixture block" \
+    "see \`$page\` and *no length bound* for the bound.")
+  said_quoting=$(drive_says "$pattern" check_quotation_region "a fixture block" \
+    "see \`$page\`, which says *the replacement literal verbatim and with no length bound*.")
+  scope guard-fixtures "the empty quotations marker"
+  claim quotation-empty-marker "" \
+    "$said_empty" "reported" \
+    "\`check_quotation_region\` $said_empty a \`checked: quotations\` block whose only emphasised\
+ span is under the eight-word floor. A marked region that yields no comparison is the state this\
+ whole file exists to refuse, and the floor is what makes an emphasised phrase not a quotation --\
+ so the two together can make a marker mean nothing without the marker moving." \
+    "$said_quoting" "not reported" \
+    "\`check_quotation_region\` $said_quoting that refusal over a block that does attribute eight\
+ words or more. A refusal that fires on every block reports nothing about any of them."
+}
+
+# Fixture 25: the register's duplicate-id rule, which is the reason section 10 exists.
+#
+# MUTATION CLOSED: `duplicates=$(printf '%s\n' "${ids[@]}" | sort | uniq -d | tr '\n' ' ')` ->
+# `duplicates=`. Deleting the `debt-ids-unique` claim outright is caught by `close_section
+# debt-register 3`; emptying its **fact** is not, and the emptied fact equals the literal on the
+# claimed side on every honest register, which is every register that has not yet grown the second
+# `TD-035` this section was written for.
+#
+# `debt` is shadowed rather than the reader being re-implemented: `debt_row_ids` defaults its
+# argument to `$debt` and `check_debt_register_region` calls it with none, so the shipped handler
+# reads a fixture table through its own reader.
+drive_debt_register() {
+  local debt=$1
+  shift
+  check_debt_register_region "$@"
+}
+
+verify_debt_duplicate_refused() {
+  local dup=$fixtures/debt-duplicate.md sound=$fixtures/debt-unique.md
+  local pattern text said_duplicate said_unique
+  printf '%s\n' '| TD-001 | a row | open |' \
+                '| TD-002 | another row | open |' \
+                '| TD-002 | a third row filed under an id already taken | open |' > "$dup"
+  printf '%s\n' '| TD-001 | a row | open |' \
+                '| TD-002 | another row | open |' > "$sound"
+  # The same prose over both, so the `debt-next-id` half agrees in both directions and the only
+  # thing that differs between the two drives is the table.
+  text='the next free id after this pass is TD-003.'
+  pattern='on more than one row'
+  said_duplicate=$(drive_says "$pattern" drive_debt_register "$dup" "a fixture register" "$text")
+  said_unique=$(drive_says "$pattern" drive_debt_register "$sound" "a fixture register" "$text")
+  scope guard-fixtures "check_debt_register_region"
+  claim debt-duplicate-refused "" \
+    "$said_duplicate" "reported" \
+    "\`check_debt_register_region\` $said_duplicate a register carrying \`TD-002\` on two rows.\
+ Two rows with one id are two defects with one exit condition, and the row a reader searches for is\
+ the one they then fail to find -- which is what this register did with \`TD-035\` and why section\
+ 10 was written." \
+    "$said_unique" "not reported" \
+    "\`check_debt_register_region\` $said_unique that refusal over a register whose ids are all\
+ distinct. The mutant that empties the duplicate expression passes this fixture's second half and\
+ fails its first, which is the difference between a comparison and an assertion that it ran."
+}
+
+verify_quotation_sweep_reports
+verify_quotation_path_claim_site
+verify_quotation_empty_marker
+verify_debt_duplicate_refused
+close_section guard-fixtures 25
+
+# ---------------------------------------------------------------------------------------------
+# 11. The newcomer's overview, against the figures this script derives itself.
 # ---------------------------------------------------------------------------------------------
 #
 # `docs/overview/README.md` is the document definition-of-done item 4 names by function -- *"an
@@ -3191,7 +3913,9 @@ printf '  self-check: %d, rows: %d, merged-document: %d, milestones: %d, adr-ind
 printf ' openapi-totals: %d, guard-fixtures: %d, capability-claims: %d,' \
   "${section_counts[openapi-totals]}" "${section_counts[guard-fixtures]}" \
   "${section_counts[capability-claims]}"
-printf ' gate-table: %d,' "${section_counts[gate-table]}"
+printf ' quotations: %d, debt-register: %d, gate-table: %d,' \
+  "${section_counts[quotations]}" "${section_counts[debt-register]}" \
+  "${section_counts[gate-table]}"
 printf ' dependencies: %d over %d named manifests.\n' \
   "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \

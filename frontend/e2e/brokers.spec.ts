@@ -383,7 +383,7 @@ test.describe("the brokers screen", () => {
 
     /* Start on the first cluster's brokers screen, so the change is a change and not an arrival.
        The environment rail's tile is the shipped switch — see `shell.spec.ts`'s `M08` case for why
-       it is not the `ClusterSelector` menu the plan describes. */
+       it is a tile and not the dropdown the plan describes. */
     await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
     await expect(page.locator(".kui-brkcard").first()).toBeVisible();
 

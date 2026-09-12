@@ -12,9 +12,35 @@
 #   * `kui.auth` and `kui.rbac`, which is what this file is for.
 #   * NO `ksql` BLOCK on the cluster below. `--with-auth` starts the same containers as the default
 #     quickstart, ksqlDB included, but this file does not point at it, so the ksqlDB screens are
-#     hidden here by ADR-032's rule. That was not a decision anybody wrote down; it is drift, and it
-#     is left as it stands rather than repaired blind — pointing at a server this file has never
-#     been run against is how a demonstration breaks in front of somebody.
+#     hidden here by ADR-032's rule. Wave 11 recorded that as drift and left it rather than repair
+#     it blind; WAVE 12 DECIDED IT AGAINST A RUNNING STACK, AND THE DECISION IS TO LEAVE THE BLOCK
+#     OUT AND STOP CALLING IT AN ACCIDENT.
+#
+#     The reason is one nobody had measured. `ksql.objects` declares
+#     `ResourceRequirement.unnamed(Resource.Ksql, Action.KsqlView)` and NEITHER ROLE BELOW CARRIES A
+#     `KSQL` PERMISSION, so the fold refuses it before the capability is ever consulted. Measured
+#     here on 2026-09-12, signed in as `admin` through the form, against a stack
+#     `quickstart.sh --with-auth` had just built:
+#
+#       GET /api/v1/clusters/quickstart/ksql/objects   ->  403 KUI-FORBIDDEN
+#
+#     — and that is with NO ksqlDB configured at all, where an unconfigured feature is supposed to
+#     answer 200 `not_configured`. Adding the block would therefore buy a configured feature whose
+#     first screen is a 403 for BOTH accounts, which is worse than the row being hidden.
+#
+#     Making it work is two edits and not one — the block, and a `KSQL` permission on `operators` —
+#     and that is a change to what this deployment demonstrates, which is authorization. The
+#     `connect` block that IS here is the instructive contrast, and it was measured in the same
+#     pass: the connector LIST answers 200 with `quickstart-file-source RUNNING`, because ADR-021
+#     keeps Kafbat's rule that a list filters rather than refuses and `connect.list` is
+#     cluster-scoped; the same signed-in `admin` gets 403 on `.../connectors/quickstart-file-source
+#     /pause`, which requires `Resource.Connect` with `OPERATE`. So this deployment already ships
+#     one feature that can be read and not operated, and that is a truth about the role rather than
+#     about the block. Filed for the next wave through W12-01: `operators` either grows the
+#     permissions that make its own comment true — `CONNECT`, `CONNECTOR`, `KSQL`, `METRICS`,
+#     `ALERTS` — and the `ksql` block lands with it and somebody signs in and looks, or the roles
+#     stay as they are and both features are described the way they now are below. **It is one
+#     decision about what this file demonstrates, and it is not a repair-wave decision.**
 #   * NO SECOND REGISTERED CLUSTER. The default file registers `staging-eu-01` over the same broker
 #     so that the cluster selector has something to switch to; this one registers `quickstart`
 #     alone, so the roles below name one cluster and the selector has one row.
@@ -31,12 +57,21 @@
 #
 # Then sign in as either of:
 #
-#     admin  / quickstart-admin     may do everything on this cluster
+#     admin  / quickstart-admin     may do everything to this cluster's topics, groups, schemas
+#                                   and connection settings
 #     viewer / quickstart-viewer    may look at topics and read records, and nothing else
 #
 # Signed in as `viewer`, the create-topic button, the topic-configuration editor, "Add partitions",
-# "Empty topic" and "Delete topic" are not on the screen. They are not disabled — they are absent,
-# because the browser is told the same permission set the gateway refuses with.
+# "Empty topic" and "Delete topic" are ON the screen and DISABLED, each carrying the sentence that
+# says why — *"You do not have permission to create a topic on this cluster."* THIS PARAGRAPH SAID
+# THE OPPOSITE UNTIL WAVE 12 — "they are not disabled, they are absent" — and `quickstart.sh`, which
+# prints its own description of the same screen four lines after starting this file, said the true
+# one all along. Two files in one directory describing one screen in two contradictory ways, and
+# nothing anywhere compared them. The interface's own answer settles it: `writeBlockedReason` in
+# `frontend/packages/kernel/src/data/mutation.ts` returns that sentence and `TopicListPage` passes
+# it as `disabledReason` on a `disabled` button. The browser is still told the same permission set
+# the gateway refuses with; what it does with it is grey the control out and say why, which is the
+# more useful of the two behaviours and is why it was chosen.
 #
 # THIS IS A DEMONSTRATION CONFIGURATION AND ITS PASSWORDS ARE PUBLIC. There is no TLS, the session
 # cookie is served without `Secure` so that plain HTTP on localhost works, and the two password
@@ -292,11 +327,23 @@ kui:
 
       # WHICH FIELDS NEVER LEAVE THE SERVICE IN FULL (DM-001, ADR-023).
       #
-      # Byte for byte the block ./kui-quickstart.yaml carries, and it is here because THIS is the
-      # deployment where it matters. Until wave 11 the default quickstart masked two fields and this
-      # file masked none, so `--with-auth` — the one deployment in this repository that has a role
-      # called `viewer`, a person who may read records and may do nothing else — was the one
-      # deployment that handed that person every customer's name and email address in full. Nobody
+      # THE SAME RULES ./kui-quickstart.yaml CARRIES, and it is here because THIS is the deployment
+      # where it matters. This sentence said "byte for byte" from wave 11 until wave 12 and was
+      # false by three lines of comment — the default file explains `keep` where it first appears
+      # and this one does not, because the reasons are documented once, over there. A claim of
+      # byte-equality about a file this one does not contain is checked by nothing here, so what it
+      # actually says is now the thing a reader can run:
+      #
+      #   diff <(awk '/^      masking:/,/^$/' kui-quickstart.yaml       | grep -v '^ *#') \
+      #        <(awk '/^      masking:/,/^$/' kui-quickstart-auth.yaml  | grep -v '^ *#')
+      #
+      # is empty — the rules are identical — and the same diff without `grep -v` is `2,4c2`, which
+      # is the comment and nothing else.
+      #
+      # Until wave 11 the default quickstart masked two fields and this file masked none, so
+      # `--with-auth` — the one deployment in this repository that has a role called `viewer`, a
+      # person who may read records and may do nothing else — was the one deployment that handed
+      # that person every customer's name and email address in full. Nobody
       # decided that; the file was written before the masking block existed and its own header said
       # it was the default file "with nothing else changed", which is how the gap went unread for a
       # wave. `grep -c masking` was 0 here against 6 there.
@@ -329,12 +376,21 @@ kui:
   # ---------------------------------------------------------------------------------------------
   # Two roles, so that the difference authorization makes is visible rather than described.
   #
-  # `operators` may do everything on this cluster. `readers` may look at topics and read their
-  # records, and may do nothing else — no creating a topic, no editing a configuration, no adding
-  # partitions, no emptying and no deleting. Signed in as `viewer`, those controls are not present
-  # on the screen at all: the same policy value that the gateway refuses with is what `/auth/me`
-  # returns to the browser, so the interface hides exactly what the server would refuse rather than
-  # offering a button that fails.
+  # `operators` may do everything to the four resources it names below — topics, consumer groups,
+  # the cluster's connection settings and Schema Registry subjects. IT IS NOT "EVERYTHING ON THIS
+  # CLUSTER", WHICH IS WHAT THIS LINE SAID UNTIL WAVE 12, and the difference is measurable: signed
+  # in as `admin` on 2026-09-12, `GET .../connect/connectors` answered **200** with the worker's one
+  # connector — a list filters rather than refuses (ADR-021) — while `POST .../pause` on that same
+  # connector answered **403**, because no role here grants `CONNECT`. `KSQL`, `METRICS` and
+  # `ALERTS` are three more resources in ADR-021's vocabulary that no role here names. The header at
+  # the top of this file carries the decision and what it would take to change it.
+  #
+  # `readers` may look at topics and read their records, and may do nothing else — no creating a
+  # topic, no editing a configuration, no adding partitions, no emptying and no deleting. Signed in
+  # as `viewer`, those controls are on the screen and disabled, each saying which of the two reasons
+  # applies: the same policy value the gateway refuses with is what `/auth/me` returns to the
+  # browser, so the interface greys out exactly what the server would refuse rather than offering a
+  # button that fails — and says so, rather than leaving a reader to guess why a control is missing.
   #
   # `provider: FORM` because these people signed in with the form above. `kind: group` matches the
   # `groups:` list on the account. `value` on a permission is a regular expression matched against

@@ -72,7 +72,7 @@ frontend/
         index.tsx       the entry point
         App.tsx
         routing/        paths.ts and routes.tsx — the single route table
-        chrome/         AppFrame, TopBar, NavDrawer, EnvRail, ClusterSelector, …
+        chrome/         AppFrame, TopBar, NavDrawer, EnvRail, Breadcrumb, …
         features/       registry.ts, FeatureGate, FallbackPanel
         nav/            navigation.ts
         pages/          SignIn, SettingsPage, the error pages

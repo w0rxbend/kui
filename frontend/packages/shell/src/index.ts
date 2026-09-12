@@ -11,7 +11,6 @@ export { App } from "./App.jsx";
 
 export { BrandBlock, type BrandBlockProps } from "./chrome/BrandBlock.jsx";
 export { Breadcrumb, type BreadcrumbProps } from "./chrome/Breadcrumb.jsx";
-export { ClusterSelector, type ClusterSelectorProps } from "./chrome/ClusterSelector.jsx";
 export { ClusterStatusCard, type ClusterStatusCardProps } from "./chrome/ClusterStatusCard.jsx";
 export { NavDrawer, type NavDrawerProps } from "./chrome/NavDrawer.jsx";
 export { NavItem, type NavItemProps } from "./chrome/NavItem.jsx";

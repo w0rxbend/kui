@@ -2,11 +2,13 @@ package kui.gateway.api.auth
 
 import java.time.Instant
 
+import scala.concurrent.duration.DurationInt
+
 import cats.effect.IO
 import io.circe.parser.decode
 
 import kui.gateway.api.{GatewayApi, GatewayTestServer}
-import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionId}
+import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionId, SessionRef}
 import kui.gateway.contract.GatewayEndpoints
 import kui.gateway.contract.dto.AuthMeResponse
 import kui.security.rbac.{ClusterScope, Resource}
@@ -110,6 +112,54 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
       } yield {
         assertEquals(response.code.code, 403, response.body)
         assert(response.body.contains("KUI-FORBIDDEN"), response.body)
+      }
+    }
+  }
+
+  test("aCsrfRejectionIsLoggedAtWarnAndNamesTheSessionByItsRefRatherThanItsId") {
+    // Two rules on one log line, and W12-03 measured both ungated over the *whole* gateway module on
+    // 2026-09-12 — `./mill --no-daemon services.gateway.api.test` printed `1270/1270, SUCCESS` under each:
+    //
+    //   `SessionRef.of(active.id).value` -> `active.id.value`    — the rejection line carries the cookie
+    //   `logger.warn(...)`               -> `logger.debug(...)`  — the rejection stops being a signal
+    //
+    // The first is the serious one, and this is the only place in the gateway that logs anything about a
+    // session at all. `Session.scala` states the rule the `SessionRef` type exists for — a rejected request
+    // is logged with `session.ref`, never the id, "so that a log file is not itself a way to hijack the
+    // session it describes" — and a CSRF rejection is precisely what an attack produces, so the attacker's
+    // own noise is what fills the file with live session ids. Anyone who can read a log could then replay
+    // them: the id is the whole credential, and `Secret` protects the CSRF token but the cookie value is a
+    // plain `String`.
+    //
+    // The second is what `SessionMiddleware`'s own scaladoc argues for in its own words — a CSRF rejection
+    // is "a signal worth alerting on, not a client error to note and move past". At `debug` it sits below
+    // every deployment's default level, and the alert nobody is watching is the alert that does not exist.
+    GatewayTestServer.resource().use { server =>
+      for {
+        first <- server.get(meUri)
+        cookie = cookieOf(first)
+        id = cookie.split('=').last
+        refused <- server.post(logoutUri, Map("Cookie" -> cookie))
+        logged <- server.logger.entriesWith("session.ref")
+      } yield {
+        assertEquals(refused.code.code, 403, refused.body)
+        // The vacuity guard: with nothing logged at all, every assertion below holds over an empty list.
+        val entry = logged.headOption.getOrElse(fail(s"the CSRF rejection logged no session at all: $logged"))
+
+        assertEquals(entry.level, "warn", s"a CSRF rejection was logged at ${entry.level}: $entry")
+        assertEquals(entry.context.get("path"), Some(logoutUri), entry.context.toString)
+        assertEquals(
+          entry.context.get("session.ref"),
+          Some(SessionRef.of(SessionId.unsafe(id)).value),
+          "the rejection did not name the session by its one-way ref"
+        )
+        // The direction that matters, asserted over the whole line rather than over the one field, so that
+        // a key added later cannot reintroduce the leak past this case.
+        assert(!entry.message.contains(id), s"the session id reached the log message: ${entry.message}")
+        assert(
+          entry.context.values.forall(!_.contains(id)),
+          s"the session id reached the log context: ${entry.context}"
+        )
       }
     }
   }
@@ -281,6 +331,68 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
               "it can reach the CSRF check with no session — and the Anonymous default is what refuses it"
           )
         }
+      }
+    }
+  }
+
+  test("aSessionPastItsIdleTimeoutIsRefusedOnTheRequestPathAndReplaced") {
+    // FILED AS V2 BY THIS WAVE'S VERIFICATION PASS OVER W12-03, and it is the serious one.
+    //
+    // `store.get(id, now)` inside `SessionMiddleware.ensureSession` is the ONLY expiry check a browser
+    // request ever meets, and `attachInterceptor` is its only caller for one: it both refuses a session
+    // past `SessionConfig`'s idleTimeout and absoluteTimeout, and slides `lastSeenAt` for one that is
+    // still alive. Measured on 2026-09-12 with `now <- Clock[F].realTimeInstant` in `attachInterceptor`
+    // replaced by `now <- Sync[F].pure(Instant.EPOCH)` — one line —
+    // `./mill --no-daemon services.gateway.api.test` printed `1270/1270, SUCCESS` in 108s over all 303
+    // cases. With the clock frozen, `Session.isExpired(now, idleTimeout)` is
+    // `now.isAfter(absoluteExpiry) || now.isAfter(lastSeenAt.plus(idleTimeout))`, which is false for ever:
+    // no session in the deployment expires, and a captured cookie is valid for the life of the process.
+    //
+    // `InMemorySessionStoreSuite` asserts the STORE's arithmetic against an `Instant` it chooses itself,
+    // which is a different statement: it says the rule is computable, not that anything applies it to a
+    // real request with a real clock. Nothing could say the second, because every gateway this tree builds
+    // ran on `SessionConfig.Default` — thirty minutes idle, twelve hours absolute. So the seam is a
+    // `sessionConfig` parameter on `GatewayTestServer.resource` and the timeout is shorter than the test.
+    //
+    // The assertion is on the ID, not on a status code: `/auth/me` answers 200 either way, because a
+    // request whose session has expired is given a NEW one rather than refused. A different id in the
+    // second response's `Set-Cookie` is exactly what "the cookie the browser presented no longer resolves"
+    // looks like from outside, and it is the only externally visible difference there is.
+    val brief = SessionConfig.Default.copy(idleTimeout = 1.second, absoluteTimeout = 1.hour)
+    GatewayTestServer.resource(sessionConfig = brief).use { server =>
+      for {
+        first <- server.get(meUri)
+        cookie = cookieOf(first)
+        // Well inside the idle timeout: the same cookie must come back resolving to the same session, or
+        // the case below would pass on a gateway that simply minted a new session on every request.
+        stillAlive <- server.get(meUri, Map("Cookie" -> cookie))
+        _ <- IO.sleep(1600.millis)
+        afterIdle <- server.get(meUri, Map("Cookie" -> cookie))
+      } yield {
+        val presented = cookie.stripPrefix(s"${SessionMiddleware.CookieName}=")
+        assert(presented.nonEmpty, cookie)
+
+        // The anchor, and it is the half that makes the rule below mean anything. The stamp interceptor
+        // re-stamps the cookie on every response that has a session behind it, so a live request answers
+        // with the SAME id; a gateway that recognised no cookie at all would answer with a different one
+        // here too, and the rule below would pass while measuring nothing.
+        assertEquals(
+          cookieOf(stillAlive).stripPrefix(s"${SessionMiddleware.CookieName}="),
+          presented,
+          "a request presenting a live session cookie came back carrying a different session id, so the " +
+            "gateway did not recognise the session it was given and the expiry rule below is being " +
+            "asserted over a gateway that mints a new session on every request"
+        )
+
+        val replaced = cookieOf(afterIdle).stripPrefix(s"${SessionMiddleware.CookieName}=")
+        assertNotEquals(
+          replaced,
+          presented,
+          "a session presented after its idle timeout had passed was accepted and stamped back " +
+            "unchanged, so nothing on the request path applies SessionConfig.idleTimeout. ADR-019's " +
+            "session lifetime is then configuration that no request ever reads, and a captured cookie " +
+            "stays valid for the life of the process."
+        )
       }
     }
   }

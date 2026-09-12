@@ -123,14 +123,19 @@ object StreamProxy {
     *
     * ==Visible to this package's tests, and why it has to be==
     *
-    * `private[api]` rather than `private`, and the one word is load-bearing. The carry is unreachable from
-    * [[withTerminalEvent]]: everything above goes through [[relay]], whose bounded queue re-chunks the body
-    * before [[observe]] ever sees it, so a split a caller made upstream need not survive to here. W9-A1 found
-    * the consequence and W10-06 measured it: with the carry deleted — `(Vector.empty, pieces.init)` — the
-    * whole suite stayed green, including the case named
-    * `aTerminalEventSplitAcrossChunkBoundariesIsStillSeen`, which feeds `chunkLimit(1)`. It splits the bytes
-    * a layer above the one that reassembles them. The two cases that hold the carry's rules therefore drive
-    * `observe` at this level, which is the only level the split is still there at.
+    * `private[api]` rather than `private`, and the one word is load-bearing. The carry is *usually*
+    * unreachable from [[withTerminalEvent]]: everything above goes through [[relay]], whose bounded queue
+    * re-chunks the body before [[observe]] ever sees it, so a split a caller made upstream usually does not
+    * survive to here. *Usually* is the corrected word — this paragraph said "cannot", and published as a
+    * measurement that with the carry deleted (`(Vector.empty, pieces.init)`) the whole suite stayed green
+    * including `aTerminalEventSplitAcrossChunkBoundariesIsStillSeen`, which feeds `chunkLimit(1)`. That is
+    * not what the mutation does. W11-A2 ran it four consecutive times on 2026-09-12: the case was **red on
+    * run 2** and green on runs 1, 3 and 4. [[relay]] drains its `Queue.bounded` from a second fibre, so how
+    * many source chunks are coalesced into one dequeued chunk is a scheduling outcome rather than a property
+    * of this code, and a gate that fires one run in four reads as a flake. So that case holds the end-to-end
+    * property only — one terminal event out, none appended — and is not a gate on the carry;
+    * `StreamProxySuite` carries the four-run table beside it and says so. The two cases that do hold the
+    * carry's rules drive [[observe]] directly, which is the only level the split is always still there at.
     */
   final private[api] class TerminalWatch[F[_]: Async](carry: Ref[F, Vector[Byte]], seen: Ref[F, Boolean]) {
 

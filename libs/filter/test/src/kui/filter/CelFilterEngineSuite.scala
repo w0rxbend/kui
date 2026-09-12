@@ -255,6 +255,78 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     }
   }
 
+  test("cancelling a browse cancels the evaluation in flight rather than waiting it out") {
+    // The rule is one word in `CelFilterEngine.program`: `Sync[F].interruptible`, not `Sync[F].blocking`.
+    // The comment beside it argues the case — twenty thousand records queued at ten milliseconds each is
+    // more than three minutes of work nobody is waiting for any more — and until this case existed,
+    // rewriting that word to `blocking` left all 548 of `libs.filter.test` green (W11-A1, wave 11).
+    //
+    // The difference is only observable when the evaluation is *in* an interruptible region and the work
+    // it is doing answers `Thread.interrupt`. So the record carries a header map whose iteration parks,
+    // which puts the stall exactly where a real CEL evaluation spends its time: inside `eval`, inside the
+    // region the rule is about. `blocking` is uncancelable, so the cancel would have to wait out the whole
+    // stall; `interruptible` interrupts the thread and the cancel completes at once.
+    val stall = 20.seconds
+    val cancelBudget = 5.seconds
+    val started = new java.util.concurrent.CountDownLatch(1)
+    val interrupted = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val stalling = record.copy(headers = new StallingHeaders(started, stall, interrupted))
+
+    engine().use { port =>
+      for {
+        id <- orFail(port.register("size(record.headers) > 0"))
+        predicate <- orFail(port.predicate(id, None))
+        fiber <- predicate.test(stalling).start
+        // Not a sleep: the latch is counted down by the stalling map itself, so the cancel below is
+        // guaranteed to arrive while the evaluation is running rather than before it starts.
+        _ <- IO.interruptible(started.await())
+        before <- IO.monotonic
+        _ <- fiber.cancel
+        after <- IO.monotonic
+      } yield {
+        val took = after - before
+        assert(
+          took < cancelBudget,
+          s"cancelling took $took while the evaluation had ${stall} left to run, so the evaluation is " +
+            "not running in an interruptible region"
+        )
+        assert(
+          interrupted.get(),
+          "the evaluation was never interrupted, so cancelling a browse does not reach the CEL program"
+        )
+      }
+    }
+  }
+
+  /** A header map whose every read parks until it is interrupted, announcing that it has started.
+    *
+    * `FilterableRecord.headers` is a `Map[String, String]`, which is a trait, and `CelEnvironment.activation`
+    * is built *inside* the interruptible region — so a map that stalls on iteration stalls the CEL evaluation
+    * itself and nothing else. That is what makes the case above a statement about the product's region and
+    * not about the test's own arrangement.
+    */
+  final private class StallingHeaders(
+      started: java.util.concurrent.CountDownLatch,
+      held: FiniteDuration,
+      interrupted: java.util.concurrent.atomic.AtomicBoolean
+  ) extends Map[String, String] {
+
+    private def stall(): Unit = {
+      started.countDown()
+      try Thread.sleep(held.toMillis)
+      catch {
+        case _: InterruptedException =>
+          interrupted.set(true)
+          Thread.currentThread().interrupt()
+      }
+    }
+
+    def get(key: String): Option[String] = { stall(); None }
+    def iterator: Iterator[(String, String)] = { stall(); Iterator.empty }
+    def removed(key: String): Map[String, String] = this
+    def updated[V1 >: String](key: String, value: V1): Map[String, V1] = Map(key -> value)
+  }
+
   // ------------------------------------------------------------------ identity and caching
 
   test("ids are a pure function of the source, so two engines agree") {

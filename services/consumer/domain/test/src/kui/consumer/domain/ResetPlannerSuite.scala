@@ -129,6 +129,31 @@ final class ResetPlannerSuite extends ScalaCheckSuite {
     }
   }
 
+  test("the planned partitions come out in partition order, whatever order the scope iterated in") {
+    // W12-A1: `partitions.toList.sorted` in `ResetPlanner.plan` with the `.sorted` deleted left all
+    // **1,390** tasks of `./mill services.consumer.__.test` SUCCESS. Every existing case reads the plan
+    // through `planned`, which folds the list into a `Map[Int, Long]` and throws the order away, and the
+    // suites that do care about byte-stability read it through `PlanToken`, which sorts again on its own
+    // account — so the planner's own ordering had no reader at all.
+    //
+    // It is not only about the token. `ResetPlan.partitions` is the confirmation table an operator reads
+    // before pressing apply, and a table whose rows arrive in `Set` iteration order puts partition 7 above
+    // partition 2 on one plan and below it on the next, for the same reset.
+    val outOfOrder = scala.collection.immutable.ListSet(partition(1), partition(0))
+    val reversed = ResetScope(GroupFixtures.Orders, outOfOrder)
+
+    assertEquals(
+      outOfOrder.toList.map(_.partition.value),
+      List(1, 0),
+      "the fixture's set did not iterate out of order, so this case proves nothing"
+    )
+
+    ResetPlanner.plan(group, reversed, ResetSpec.ToEarliest, window, now) match {
+      case Right(plan) => assertEquals(plan.partitions.map(_.partition.partition.value), List(0, 1))
+      case Left(refusal) => fail(s"expected a plan, got a refusal: ${refusal.message}")
+    }
+  }
+
   test("resetting to where it already is succeeds, and says nothing will change") {
     val single = ResetScope(GroupFixtures.Orders, Set(partition(0)))
     val plan = ResetPlanner.plan(group, single, ResetSpec.ToOffsets(offsets(0 -> 40L)), window, now)

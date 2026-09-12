@@ -155,10 +155,22 @@ above is the whole of what does exist.
   key-by-key page, and at the wave-10 close a person opened the seeded `customers.profiles` topic
   in a browser and read back `"name":"<redacted>"` with the seed record's real values absent from
   the page. That was the last step this project requires before anything is called done, so the row
-  is `COMPLETE` in the feature matrix, which records the record it was closed on. One sentence on
-  the operator page overstates what the engine guarantees — *a masked value is never longer than
-  the value it replaced* holds for the `mask` kind and not for `replace` — and that page is
-  repaired where it lives rather than here.
+  is `COMPLETE` in the feature matrix, which records the record it was closed on. What the operator
+  page guarantees about the length of a masked value is narrower than it looks at a glance, and the
+  block below quotes that page rather than paraphrasing it.
+
+<!-- checked: quotations -- verified by ./scripts/feature-matrix-check.sh -- claims: quotation, quotation-path, residue -->
+**What the masking page actually guarantees, in its own words.**
+`docs/operations/masking.md` states the length bound as *never returns a value longer than the value
+it replaced*, and states it of the `mask` kind alone: the same paragraph says the bound does not
+hold for `replace` and cannot, because a `replacement` is a literal an operator writes and nothing
+truncates it to fit the field it covers. This paragraph quotes that page instead of summarising it
+on purpose — every quotation of another file inside these markers is compared against that file by
+`./scripts/feature-matrix-check.sh`, so a sentence repaired where it lives turns this page red
+rather than leaving a description here of a defect somebody has already fixed. That is what this
+paragraph used to be: it quoted a sentence that page stopped carrying when the bound was scoped to
+one kind, and nothing in this repository could see the difference.
+<!-- /checked -->
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent, residue -->
 71 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are

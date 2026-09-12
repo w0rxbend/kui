@@ -660,7 +660,23 @@ recorded — **unmet: no connector has ever been deployed on the quickstart's wo
 that would assert it skip. Wave 8 deploys one, rewrites the spec against the golden the service already
 ships, and runs both against images built from the tree.
 
-## M10 — Close the book  ·  no new service  ·  **open on one definition-of-done item after wave 11**
+## M10 — Close the book  ·  no new service  ·  **open on one definition-of-done item after wave 12**
+
+> **Status after wave 12, measured at its close on 2026-09-12, one command at a time, and not read
+> off a report.** **Four of the five definition-of-done items are met** and were re-run here rather
+> than read off a packet: `playwright test` is **108 passed, 2 skipped, 0 failed** with **23 of 23**
+> captures in `screens/` driven by a named case that ran green in that run; `ls services/` is 11 with
+> `__.openApiCheck` 2544/2544 and `checkArchitecture` 195 modules; `run-tests.sh` is **4,401 cases
+> over 81 modules**, `pnpm test` 1,935, a11y clean over **782 stories × 2 themes**, `lint:boundaries`
+> 423 files; and `quickstart.sh` and `smoke.sh` both pass over the two deployment shapes.
+> **Item 4 is open, and the reason is one measurement long: the gate wave 12 built cannot see the
+> block wave 12 created.** A false quotation appended inside `TECH_DEBT.md`'s own
+> `<!-- checked: debt-register -->` region leaves `./scripts/feature-matrix-check.sh` at *438 claims
+> checked, all true*, exit 0 — because `quotation_swept_kinds` is a hand-written roster of 8 files
+> and 12 blocks that nothing reconciles against the **fifteen** markers on disk. Five more are named
+> in `docs/plan/WAVE-13.md` with the command that finds each, including three rows in the newcomer's
+> overview publishing **1,145 Scala sources** against a measured **1,152**. `docs/plan/` is therefore
+> not reduced. The wave-9, -10 and -11 boxes this replaces are in the git history.
 
 > **Status after wave 11, measured at its close on 2026-09-12, one command at a time, and not read
 > off a report.** **Four of the five definition-of-done items are met**: the browser suite is
@@ -676,7 +692,8 @@ ships, and runs both against images built from the tree.
 > is a class nobody had named: **nothing in this repository compares a quotation of one file against
 > that file**, and `README.md:159` and `docs/FEATURE_MATRIX.md:379` both quote a sentence
 > `docs/operations/masking.md` no longer contains, made false by wave 11's own repair. Seven more are
-> named in `docs/plan/WAVE-12.md` with the command that finds each, including three positive-voice
+> named in `docs/plan/WAVE-12.md` — deleted at the wave-12 close and readable in the git history —
+> with the command that finds each, including three positive-voice
 > false capability sentences still green inside the checked block. `docs/plan/` is therefore not
 > reduced. Everything below this box is wave 8's record of the same section and is kept because its
 > measurements are still the ones a reader needs; the wave-9 and wave-10 boxes it replaces are in the
@@ -737,7 +754,7 @@ directions at **56 rows over 56 ADRs**. The a11y sweep is clean over **790 stori
    neither was `pnpm -C frontend e2e`; both were run here instead, and one of the two was red. The
    distributed eleven-container stack is the one deployment shape nobody in wave 8 drove.
 4. **`docs/plan/` is not reduced to `README.md` and this file.** It holds the current wave file
-   (`WAVE-09.md` when this was written; `WAVE-12.md` now) and
+   (`WAVE-09.md` when this was written; `WAVE-13.md` now) and
    `docs/plan/verification/`, and the wave that still needs a plan file cannot be the wave that
    deletes it. This is M10's own last bullet and it is now the last one standing.
 
@@ -2254,3 +2271,195 @@ quoting a sentence a third of them no longer contains.
 wave here has ever been. Its load-bearing item is a `quotation` claim kind that is a `grep`, not a
 parser and not a heuristic, and its acceptance is the two sentences above going red and the `grep`
 returning nothing.
+
+
+## What wave 12 actually did
+
+Wave 12 was **four building packets and two adversaries** — the smallest wave in this plan's history
+— written against the one definition-of-done item wave 11 left open. It ran to the end without an
+interruption and **all six packets landed**. **Four of the five definition-of-done items are met and
+were re-judged at this close one command at a time. Item 4 is not, and this time the thing that is
+open is an input to the gate the wave built rather than a document the gate cannot read.**
+
+**Judge the tree, not the reports. All six landed, and all six filed their own verification file.**
+Re-checked file by file at this close against `git status --porcelain`, which is 48 entries over
+`74935618` — 38 modified, 3 deleted, 7 untracked — and **41 files changed, 2,224 insertions, 1,600
+deletions** in the code and configuration it touched:
+
+| Packet | What is on disk | Filed its own verification file? |
+| --- | --- | --- |
+| W12-01 | `feature-matrix-check.sh` +746 lines: sections 9 and 10, the `quotation` / `quotation-path` / `quotation-sweep` / `debt-next-id` / `debt-ids-unique` claims, `quotations` blocks in `README.md` and `docs/FEATURE_MATRIX.md`, the `debt-register` block in `TECH_DEBT.md`; **419 claims over 10 sections → 434 over 12**; the two false masking quotations gone | yes |
+| W12-02 | the Dockerfile manifest roster anchored on `package.json`, the `@kui/api` name guard in `ci.yml`, `buildWiringInputs` in `build.mill`, `BuildWiringSuite` +336 lines, the auth quickstart's masking rules and its ksqlDB decision | yes |
+| W12-03 | `SessionMiddleware` logging a session by its `SessionRef` rather than its id, `StreamProxy`'s scaladoc corrected to W11-A2's four-run table, `GatewayTestServer`'s config seam, +8 gateway auth cases | yes |
+| W12-04 | `ClusterSelector.tsx`, its stories, its CSS block and its export deleted (−412 lines), the dead `StatRowProps.range`, and the address sweep that presses every enabled control `/ui` draws | yes |
+| W12-A1 | 40 mutations over `libs/filter`, `libs/kafka-auth`, `alerts`, `consumer`, `schema`, `connect`; 5 ungated, 5 closed, 5 new cases, one declared production seam (`KeyStoreMaterializer.secureDirectory`) | yes |
+| W12-A2 | 13 filed rows closed: 4 new gate fixtures (`guard-fixtures` 21 → 25), 3 new `BuildWiringSuite` cases, 2 gateway cases, 4 frontend cases; **434 → 438 claims** | yes |
+
+**House rule 18 held for the second consecutive wave.** Six packets, six verification files, every
+one written by the packet it is about.
+
+### The definition of done, judged at this close
+
+Every figure printed by the command beside it, on 2026-09-12, against a quickstart brought up from
+this tree (`kui-allinone` `2bfe5665f839`, `kui-frontend` `278908972b32`) and the eleven-container
+stack built from the same one. **Nothing here is read off a packet report.**
+
+1. **Every screen renders real data — MET.** `playwright test --reporter=list` is **108 passed, 2
+   skipped, 0 failed** over 110, and `ls screens/` is 23 captures of which **23 have a named case
+   that ran green in that run**, matched case-by-case against `docs/plan/verification/W8-07.md` §1.
+   The landing page was probed in a browser on the shipped image: `Create topic`
+   **`aria-disabled=true`** and swallowing its own press, the address unchanged after it, six tiles
+   each carrying a sentence (*"No cluster is selected, so KUI has not asked how many brokers are
+   online."*), **0** page errors. On the cluster dashboard: 1,159 `<td>` cells and **zero** figures
+   with three or more decimals.
+2. **Every backend capability exists — MET.** `ls services/` → 11; `__.openApiCheck` 2544/2544;
+   `checkArchitecture` 195 modules, 10 rules, no layering violations.
+3. **Tested — MET.** `./scripts/run-tests.sh` **81 modules, 4,401 cases** (wave 11: 4,389);
+   `pnpm test` **83 files, 1,935**; `pnpm typecheck` exit 0 over both projects; a11y **782 stories ×
+   2 themes, no violations**; `lint:boundaries` 423 files in 11 packages; `__.compile` 8251/8251,
+   `__.checkFormat` 495/495, `__.fix --check` 10672/10672.
+4. **Documented — NOT MET.** See below.
+5. **One command — MET.** `quickstart.sh` exits 0 with *"KUI is running: http://localhost:8090/ui/"*
+   and eight healthy containers, `down` removes everything, and `./deployment/compose/smoke.sh`
+   **PASSED** over the distributed stack with fault isolation and recovery.
+
+### The wave's prediction was tested, and it held — and its inverse is why item 4 is still open
+
+`WAVE-12.md` — deleted at this close, readable in the git history — wrote its acceptance as two
+sentences going red and a `grep` returning nothing. Both
+reproduced at this close, on the shipped script, `README.md` restored byte-identical (`md5sum`
+`4d4c7b9a3eb912ef228382afd5a2e336`): the quotation of `docs/operations/masking.md` inside a checked
+region is **1 disagreement, exit 1**, and `grep -rn "masked value is never longer"` outside
+`docs/plan/` returns **one** hit, the gate's own fixture. **Four of the five sentences in the mood
+table are now refused where three were green at the wave-11 close**, including
+*"Kafka Connect remains unimplemented, and ksqlDB is a stub."* and *"The Connect screen is a
+placeholder and the ksqlDB page is empty."* House rule 23 is why that was checked rather than
+believed, second wave running.
+
+**And then the same rule was applied to the gate's own inputs.** The sentence the whole wave exists
+to refuse, appended inside `TECH_DEBT.md`'s `<!-- checked: debt-register -->` block — a block wave 12
+itself created:
+
+```
+$ ./scripts/feature-matrix-check.sh
+feature-matrix-check: 438 claims checked, all true.     # exit 0
+```
+
+`quotation_swept_kinds` is a hand-written roster of eight files and twelve blocks. The repository
+carries **fifteen** `<!-- checked:` markers outside `docs/plan/`, two of them `quotations` blocks the
+handler reads directly and **thirteen** of other kinds. The `blocks == 12` guard beside the claim
+cannot notice, because twelve is the size of the roster and not a count of anything on disk. Two of
+the script's own shipped sentences are false as a result: its refusal text says *"every block in this
+repository is read for attributions"*, and its census comment says *"the twelve marked regions this
+repository carries"*. **Both W12-01's verifier and W12-A2 filed it; neither closed it** — the closing
+claim belongs in section 9, which was W12-01's, and it is the one filed row of eighteen that nobody
+closed.
+
+### The five other things item 4 is open on, each measured at this close
+
+1. **The gate publishes a figure about itself that does not reproduce.** Section 9's comment says the
+   document-wide reader answers *"1,154 attributions, 1,148 of them absent"*. W12-01's verifier
+   lifted the shipped functions out and ran them four ways: 200/193, 1,669/1,664, 1,022/1,019,
+   609/578. **Tenth consecutive wave in which a packet published a figure about its own gate that a
+   second reader could not reproduce**, in the wave whose preamble quotes house rule 17 about exactly
+   that.
+2. **The newcomer's overview publishes 1,145 Scala sources in three rows.** Measured by summing the
+   per-target counts the named command prints: `./mill __.checkFormat` is **1,152 sources over 162
+   reporting targets**, and `git ls-files '*.scala' | wc -l` is 1,152 on this tree and on
+   `74935618`. The other six figures in the same table are correct and were re-run here.
+3. **Three `TECH_DEBT.md` rows marked `open` describe defects wave 12 repaired.** Measured, not read:
+   TD-049's Dockerfile substitution is **139/139, 1 FAILED**; TD-052's own stated exit — mutate
+   `frontend/package.json`'s `typecheck` and watch `build-tests.test` go red **without a clean** — is
+   **139/139, 1 FAILED**; TD-050's *"decide it in the open"* is decided in the auth quickstart's
+   header. The register's new block checks id arithmetic and nothing checks whether an open row still
+   describes the tree.
+4. **A shipped file publishes a runnable command as evidence, and the command cannot fail.**
+   `kui-quickstart-auth.yaml`'s `diff <(awk '/^      masking:/,/^$/' …)` ends its range at the first
+   blank line, which falls between the two masking rules. Mutating the second rule's `replacement`
+   leaves the published command silent and exit 0, while `libs.config.test` goes **395/395, 1
+   FAILED**. The rules are gated; the comment's evidence is not. This is wave 12's own replacement
+   for wave 11's false *"byte for byte"* claim in the same file — the third form of one class.
+5. **The positive-voice rule refuses a sentence `WAVE-12.md` bolded as one it must not refuse.**
+   *"The Connect screen is the placeholder for a worker that is not configured."* → 1 disagreement,
+   `[connect]`. The plan allowed the prose-moves-out answer and W12-01 took it and argued it at
+   length **in the script**; it appears in neither the packet's surprises nor its handoffs, so the
+   constraint on anybody editing `README.md` lives only inside a 3,700-line shell script.
+
+### Did the mechanism work? Six numbers, then the answer.
+
+**The hunter's rate fell again, to 12.5%, and the shape of what it finds has changed.** W12-A1 ran
+**40 mutations, 2 argued down as equivalent with the algebra written out, 5 genuinely ungated** —
+against wave 11's 26%, wave 10's 83% and wave 9's 70%. The headline contradicts `WAVE-12.md`'s own
+prediction #4: the four services that had **never** been swept returned **3 of 36 (8.3%)** and
+`services/alerts` returned **0 of 12**, while the two libs wave 11 had already swept returned 2 of 4.
+*"Never swept"* has stopped predicting *"ungated"*. And all three new findings share one shape:
+**not a missing guard, but a guard tested one notch coarser than it is written** — the most serious
+being `PlanToken`'s cluster binding, where `startsWith(s"${cluster}/")` → `contains(cluster)` turns
+ADR-045's binding into a substring search (a plan minted for `prod`/`orders-consumer` would apply to
+a cluster called `orders`) and left all 1,390 consumer tasks green. The coarse version of the same
+mutation **is** gated. The next sweep mutates strictness, not presence.
+
+**The closer converted 13 of 13 — the first 100% in this plan's history.** 27.5% (wave 9) → 60%
+(wave 10) → 89% (wave 11) → **13 of 13**. It hunted nothing while filed rows remained, and it crossed
+exactly two ownership edges, both declared, both minimal: one integer in `docs/overview/README.md`
+(`434` → `438`) and one array entry in `build.mill`'s `buildWiringInputs` — the latter itself gated in
+both directions, since deleting it turns two cases red.
+
+**Eighteen ungated rules found, eighteen closed.** Five by the hunter in its own sweep, thirteen by
+the closer out of the four verifiers' filings. No wave has closed all of them before.
+
+**Owned rules: 4 of 4, and 55 of 55 across twelve waves.** Naming one ungated rule per building
+packet and making its owner close it has never failed once.
+
+**The disclosure rate did not move, tenth wave running.** Four building packets, four disclosures —
+each exactly the one its brief demanded — and **thirteen** more found by their verifiers. This is
+the most stable measurement in the project.
+
+**And one number that is a mechanism finding rather than a rate.** `./mill __.checkFormat` **does**
+check `test/src`: a wave item was written on the opposite premise, and W12-A2's first run went red on
+`build-tests.test.checkFormat` over its own new file. The premise had been in the brief for a wave.
+
+### What surprised us
+
+**A gate cannot see the thing its own wave created.** Wave 12 gave `TECH_DEBT.md` its first checked
+region and taught the script to read quotations inside checked regions, and the two features do not
+meet, because the list of regions the reader walks is hand-written. **Every gate in this repository
+that derives its subjects from the filesystem has survived four waves of mutation; every hand-written
+list of subjects has eventually been found missing one.** The roster is the input nobody mutates
+because it does not look like a rule. That is house rule 26.
+
+**Mill's cache hole is genuinely closed, and closing it made the suite honest about itself.**
+`build-tests.test` now invalidates on `build.mill`, `ci.yml`, `frontend/package.json` and
+`deployment/frontend/Dockerfile` — measured at this close without a `clean` — and W12-A2 added the
+case that keeps it closed: the suite reads its **own source** and asserts that `Files.readString`
+occurs exactly once in it, inside `readDeclared`. The previous version of that rule was a convention
+with no enforcement, and W12-02's report had claimed the hole *"cannot be reopened one
+`Files.readString` at a time"*, which its verifier measured false in one paste.
+
+**A CI step that compares two sets is not a step that compares two lists.** The Dockerfile manifest
+roster read sources and destinations as independent sets, so **any permutation of the eleven
+destinations passed** — an image where `packages/api/package.json` declares `@kui/kernel` and vice
+versa printed *"11 packages, 11 manifests copied, every name matched"*. The repair derives pairs with
+one `sed` and diffs them against `ls frontend/packages`; the control is red at this close.
+
+**A session's clock is the only thing standing between a captured cookie and a permanent session.**
+W12-03's verifier found `Clock[F].realTimeInstant` → `Sync[F].pure(Instant.EPOCH)` green over all
+1,270 gateway tasks: with the clock frozen, `Session.isExpired` is false forever and ADR-019's
+session lifetime is configuration nothing measures. Closed by W12-A2 with a sub-second `idleTimeout`
+seam on the test server.
+
+**Two sweeps in one checkout cost a run and nearly cost a measurement.** W12-A1's in-flight
+`ResetPlanner` mutation turned W12-A2's `__.checkFormat` red and sat in the tree during its
+`run-tests.sh`. Both packets reported it rather than reverting each other, which was right, and the
+plan's *"separate checkouts, or serialise the adversaries"* is now a house rule rather than advice.
+
+**And the thing that keeps being true, in its seventh form.** Everything item 4 is open on sits
+**outside every checked region, or inside one the reader was not told to walk**. A repository that
+prints *438 claims checked, all true* has three rows in its newcomer's overview publishing a source
+count seven short, three debt rows saying `open` about work that is done, a deployment comment whose
+published proof cannot fail, and a gate whose own census figure does not reproduce.
+
+**Wave 13 is written.** It is **three building packets and two adversaries** at 1.5:1. Its
+load-bearing item is one `claim` that reconciles `quotation_swept_kinds` against the markers on disk,
+and its acceptance is the sentence at the top of `docs/plan/WAVE-13.md` going red inside
+`TECH_DEBT.md`.

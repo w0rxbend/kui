@@ -292,9 +292,10 @@ final class StreamProxySuite extends CatsEffectSuite {
     //
     // **This case USUALLY does not reach the carry, and "usually" is the corrected word.** It feeds
     // `chunkLimit(1)` into `withTerminalEvent`; `relay`'s bounded queue normally puts the pieces back
-    // together before `observe` runs, and W10-06 wrote here — and `StreamProxy.scala:124-133` still writes,
-    // as a production scaladoc and as fact — that "measured, the watch sees whole frames here however
-    // finely the source is chopped". **That sentence is not true**, and W11-A2 was asked to settle it.
+    // together before `observe` runs, and W10-06 wrote here — and `StreamProxy.scala`'s own scaladoc went on
+    // writing, as production fact — that the carry is unreachable from `withTerminalEvent` and that the
+    // suite stayed green with it deleted. **That was not true**, W11-A2 was asked to settle it, and W12-03
+    // brought the production paragraph into line with the table below rather than leaving the two at odds.
     //
     // Measured on 2026-09-12, four consecutive `./mill --no-daemon services.gateway.api.test` runs with
     // `(pieces.last, pieces.init)` -> `(Vector.empty, pieces.init)` in `TerminalWatch.observe` and nothing

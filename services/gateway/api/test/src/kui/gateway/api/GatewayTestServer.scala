@@ -108,11 +108,23 @@ object GatewayTestServer {
       identity: Option[ServiceClient[IO]] = None,
       // Which kind of sign-in this deployment says it uses, for `/auth/settings` and `/auth/me`.
       auth: AuthConfig = AuthConfig.Default,
-      rbac: RbacPolicy = RbacPolicy.Disabled
+      rbac: RbacPolicy = RbacPolicy.Disabled,
+      // The session store's tunables, so that a case can build a deployment whose sessions expire inside the
+      // lifetime of a test.
+      //
+      // Filed as V2 by this wave's verification pass over W12-03 and the seam it said it could not open:
+      // every suite in this tree built a gateway on `SessionConfig.Default`, whose idle timeout is thirty
+      // minutes and whose absolute timeout is twelve hours, so no case anywhere could watch a session
+      // expire on the REQUEST path. `store.get(id, now)` in `SessionMiddleware.ensureSession` is the only
+      // expiry check a browser request ever meets, and with it neutered — `now <- Clock[F].realTimeInstant`
+      // replaced by `Sync[F].pure(Instant.EPOCH)` — `./mill --no-daemon services.gateway.api.test` was
+      // 1270/1270 SUCCESS over all 303 cases. A captured cookie would then be valid for the life of the
+      // process and ADR-019's session lifetime would be configuration nothing measures.
+      sessionConfig: SessionConfig = SessionConfig.Default
   ): Resource[IO, Running] =
     for {
       logger <- Resource.eval(FakeStructuredLogger[IO])
-      sessions <- InMemorySessionStore.resource[IO](SessionConfig.Default)
+      sessions <- InMemorySessionStore.resource[IO](sessionConfig)
       readiness = List(ReadinessCheck.always[IO]("process"))
       routes =
         GatewayApi.routes[IO](configView(basePath, auth, rbac), readiness, sessions, extraRoutes, identity)

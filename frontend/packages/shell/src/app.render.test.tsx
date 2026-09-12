@@ -1302,6 +1302,250 @@ describe("the frame, given a cluster in the address", () => {
 
     app.dispose();
   });
+
+  /**
+   * Every control `/ui` draws, pressed, through the composition root.
+   *
+   * ## What this replaces, and why the case it replaces was not enough
+   *
+   * `overview/overview.render.test.tsx` has swept this rule since wave 11 under the name *"offers
+   * no enabled action this address cannot perform"*, and the name over-claimed six-fold. It mounts
+   * `Overview` **alone**, so the inventory it sweeps is exactly two entries — the header's
+   * `Create topic` and the empty state's `Manage clusters` link — and its distinguishing half, the
+   * press, executes **zero** times on a green tree: the button hits `continue` on `aria-disabled`
+   * and the link hits `continue` on the `A` branch. Its vacuity guard, `length > 1`, is satisfied
+   * by exactly those two and would not have noticed. Measured here on the same address through
+   * `App`: the frame draws **thirteen** `a, button` controls before a capability frame arrives, of
+   * which four are buttons. The other eleven are `TopBar`'s three unlabelled glyphs, the rail's two
+   * links, the brand block's, the drawer's three rows and the cluster status card's — every one of
+   * them on `/ui` exactly as the header action is, and none of them reachable from a mount of one
+   * screen. That case is now named for the two controls it really holds; this one is the sweep.
+   *
+   * ## The rule, and why it is *the document changed* rather than *it navigated*
+   *
+   * The defect this class exists for is a control that claims an action it cannot perform:
+   * `/ui` shipped an **enabled** primary `Create topic` whose handler read the selection, found
+   * none and returned — no navigation, no dialog, no message, nothing. The Overview-level case
+   * asked *navigated or opened a dialog*, which is the right question for a header action and the
+   * wrong one for a frame: the theme glyph repaints, the appearance glyph opens a popover and the
+   * bell opens a panel, and not one of those three is a navigation or a `role="dialog"`. So the
+   * question this asks is the weakest one that still refuses the defect — **pressing an enabled
+   * control changes the address or changes the document.** A control that does neither did nothing,
+   * whatever it promised, and `document.documentElement` is the comparison because the theme
+   * control writes its answer onto the root element rather than inside the mounted host.
+   *
+   * Links are asserted to have a destination rather than clicked, which is the same branch the
+   * Overview case takes and for a jsdom reason rather than a design one: jsdom refuses a navigation
+   * to another document, so a clicked `<a href>` changes neither side of the question and every
+   * link would pass for the wrong reason.
+   *
+   * ## What the sweep leaves out, and it is one node
+   *
+   * `.kui-notice-stack` — the toast region. A toast is not a control this address draws; it is a
+   * receipt for an action somebody already took, it dismisses itself on a timer, and the store
+   * behind it is module-level and therefore survives a `dispose()`. A sweep that included it read
+   * a leftover *"Switched to staging-eu-01"* from a case ten `it`s further up when the whole file
+   * ran, and then found it gone on the second mount — green under `-t`, red under `pnpm test`,
+   * which is the worst shape a gate can have. Its own dismiss button is swept by
+   * `kernel/src/components/surfaces.test.tsx`.
+   *
+   * ## Why a fresh mount per press
+   *
+   * Pressing the bell opens a panel, and the panel draws controls of its own. A sweep that pressed
+   * its way down one inventory would therefore be pressing a frame that the previous press had
+   * already changed, and the fifth assertion would be about a document the first four made. Each
+   * press gets a frame that nothing has touched, and the control is found again by position with
+   * its identity re-asserted, so a re-order between mounts fails loudly instead of silently
+   * pressing something else.
+   */
+  it("presses every enabled control `/ui` draws, and each one does something", async () => {
+    stubCluster();
+
+    /** Enough of a control to name it in a failure and to recognise it on a second mount. */
+    const identify = (control: Element): string => {
+      const label =
+        (control.textContent ?? "").trim() ||
+        control.getAttribute("aria-label") ||
+        "(no accessible name)";
+      const testid = control.getAttribute("data-testid");
+      return `${control.tagName} "${label}"${testid === null ? "" : ` [${testid}]`}`;
+    };
+
+    /* The selection is persisted and the cases above have been choosing clusters, so a case about
+       the address that names none has to start from a browser that has never chosen. */
+    const openFrame = async () => {
+      window.localStorage.clear();
+      window.history.replaceState({}, "", "/ui");
+      const app = mountApp();
+      await settled();
+      return app;
+    };
+
+    /** Every control the frame draws, minus the transient toast region — see above. */
+    const draws = (app: { readonly host: HTMLElement }): HTMLElement[] =>
+      [...app.host.querySelectorAll<HTMLElement>("a, button")].filter(
+        (control) => control.closest(".kui-notice-stack") === null,
+      );
+
+    const survey = await openFrame();
+    const roster = draws(survey);
+    const named = roster.map(identify);
+
+    /* A sweep over nothing passes every assertion inside it. `> 1` was the old guard and two
+       controls satisfied it; this address draws a rail, a drawer, a top bar and a screen, so the
+       guard is a whole frame's worth. It is deliberately well under the thirteen measured, because
+       a number that has to be edited when a nav row is added is a number somebody edits without
+       reading. */
+    expect(
+      named.length,
+      `/ui drew ${named.length} controls, which is a screen and not a frame: ${named.join(", ")}`,
+    ).toBeGreaterThan(8);
+
+    roster.forEach((control, index) => {
+      if (control.tagName !== "A") return;
+      expect(
+        control.getAttribute("href") ?? "",
+        `the link ${named[index]} goes nowhere`,
+      ).not.toBe("");
+    });
+
+    const pressable = roster
+      .map((control, index) => ({ control, index, name: named[index] ?? "" }))
+      .filter(
+        ({ control }) =>
+          control.tagName === "BUTTON" && control.getAttribute("aria-disabled") !== "true",
+      )
+      .map(({ index, name }) => ({ index, name }));
+    survey.dispose();
+
+    /* And the other half of the same vacuity argument. Both filters above discard rather than
+       assert — a link is checked for a destination, a refusing button is skipped — so a frame whose
+       every button carried `aria-disabled` would press nothing at all while still reporting
+       thirteen controls, which is precisely how the case this replaces stayed green. */
+    expect(
+      pressable.length,
+      "no enabled button on /ui, so the press below asserts nothing",
+    ).toBeGreaterThan(2);
+
+    for (const { index, name } of pressable) {
+      const app = await openFrame();
+      const control = draws(app)[index];
+      expect(
+        control === undefined ? "(gone)" : identify(control),
+        "the frame drew a different roster on a second mount, so this pressed the wrong control",
+      ).toBe(name);
+
+      const addressBefore = `${window.location.pathname}${window.location.search}`;
+      const documentBefore = document.documentElement.outerHTML;
+      control?.click();
+      await settled();
+
+      const moved = `${window.location.pathname}${window.location.search}` !== addressBefore;
+      const drew = document.documentElement.outerHTML !== documentBefore;
+      expect(
+        moved || drew,
+        `pressing the enabled control ${name} changed neither the address nor the document`,
+      ).toBe(true);
+
+      app.dispose();
+    }
+  });
+
+  /**
+   * Every in-page link the frame draws points at an element that is actually in the page.
+   *
+   * Filed by this wave's verification pass over W12-04 as two rows, and both reproduced here before
+   * this case was written. The sweep above checks a link's `href` for `!== ""`, which is the weakest
+   * possible statement about a destination and is satisfied by one character of punctuation:
+   *
+   *   `AppFrame.tsx:46  href="#kui-content"` -> `href="#"`      `pnpm -C frontend test` GREEN
+   *   `AppFrame.tsx:55  id="kui-content"`    -> `id="kui-conten"` `pnpm -C frontend test` GREEN
+   *
+   * Under either one the skip link is still drawn, still has a destination and still passes every
+   * case in this repository — and it now jumps a keyboard user to the top of the page, which is
+   * where they already are. The second was disclosed by W12-04 itself as a green it could not close;
+   * it is confirmed here by mutation rather than taken on trust.
+   *
+   * A fragment is the one kind of destination jsdom can settle, which is why this is a unit case and
+   * not an `e2e` one: `document.getElementById` either finds the target or it does not, and a link
+   * pointing at nothing is not a design question.
+   */
+  it("resolves every fragment link `/ui` draws to an element the frame really carries", async () => {
+    stubCluster();
+    window.localStorage.clear();
+    window.history.replaceState({}, "", "/ui");
+    const app = mountApp();
+    await settled();
+
+    const fragments = [...app.host.querySelectorAll<HTMLAnchorElement>("a[href^='#']")];
+
+    /* The anchor, and it is the whole reason this case is not vacuous: the skip link is the only
+       in-page link the frame draws, so a sweep that found none would pass silently the moment
+       somebody renamed its class or dropped it. */
+    expect(
+      fragments.map((link) => link.getAttribute("href") ?? ""),
+      "/ui drew no in-page link at all, so the rule below holds over nothing — the skip link is the " +
+        "one this frame is required to carry",
+    ).toContain("#kui-content");
+
+    for (const link of fragments) {
+      const href = link.getAttribute("href") ?? "";
+      const name = (link.textContent ?? "").trim() || href;
+      /* `#` on its own is a valid `href` and an invalid selector, so it is refused by name rather
+         than handed to `querySelector`, which would throw instead of failing. */
+      expect(href.length, `the in-page link ${name} points at "${href}", which is the page it is on`)
+        .toBeGreaterThan(1);
+      expect(
+        app.host.querySelector(`[id="${href.slice(1)}"]`),
+        `the in-page link ${name} points at ${href} and no element in the frame carries that id, so ` +
+          "following it moves the reader nowhere",
+      ).not.toBeNull();
+    }
+
+    app.dispose();
+  });
+
+  /**
+   * The bell closes what it opened.
+   *
+   * Filed by this wave's verification pass over W12-04, and it is the direct cost of the sweep
+   * above being a fresh-mount-per-press design: every control is pressed exactly once from a clean
+   * frame, so NO toggle's second press is asserted anywhere in this frontend. Measured on
+   * 2026-09-12 — `onToggleNotifications={() => setNoticesOpen(!noticesOpen())}` in `App.tsx`
+   * replaced by `() => setNoticesOpen(true)` left `pnpm -C frontend test` green over 83 files. The
+   * bell becomes one-way: it opens the panel and can never close it, and the only way back is a
+   * reload. The sweep cannot see it, because opening the panel changes the document, which is
+   * exactly what the sweep asks for.
+   */
+  it("closes the notification panel on the bell's second press", async () => {
+    stubCluster();
+    window.localStorage.clear();
+    window.history.replaceState({}, "", "/ui");
+    const app = mountApp();
+    await settled();
+
+    const bell = app.host.querySelector<HTMLButtonElement>("[data-testid='notifications']");
+    expect(bell, "the frame drew no notifications control, so this case presses nothing").not.toBeNull();
+
+    bell!.click();
+    await settled();
+    /* The anchor: without an open panel the second press would be asserted against a frame that
+       never changed, and a bell wired to nothing at all would pass. */
+    expect(
+      app.host.querySelector("[data-testid='notification-panel']"),
+      "the first press did not open the notification panel, so the close below asserts nothing",
+    ).not.toBeNull();
+
+    bell!.click();
+    await settled();
+    expect(
+      app.host.querySelector("[data-testid='notification-panel']"),
+      "the bell's second press left the notification panel open, so the control is one-way: it " +
+        "opens the panel and the only way to close it is a reload",
+    ).toBeNull();
+
+    app.dispose();
+  });
 });
 
 /**

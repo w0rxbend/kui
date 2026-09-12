@@ -890,6 +890,32 @@ describe("Toast", () => {
     dispose();
   });
 
+  it("dismisses the toast the button belongs to when it is pressed", () => {
+    // Filed by this wave's verification pass over W12-04 and reproduced here before it was closed:
+    // `onClick={() => dismissToast(props.toast.id)}` -> `onClick={() => {}}` left `pnpm -C frontend test`
+    // green over 83 files and 1,932 cases. The dismiss button's LABEL had a case and its BEHAVIOUR had
+    // none — the case above reads `aria-label` off the same element and never presses it, and
+    // `dismissToast` is exercised only by calling it directly, which asserts the function and not the
+    // control. A close button that does nothing is the one defect a toast cannot survive: it is the only
+    // way out of a notification raised with `durationMs: null`.
+    const { container, dispose } = mount(() => <ToastRegion />);
+    notify("Topic created", { durationMs: null });
+    notify("Offsets reset", { durationMs: null });
+    flush();
+    const buttons = container.querySelectorAll(".kui-notice__dismiss");
+    // The anchor: with no button found, every expectation below would hold over nothing.
+    expect(buttons).toHaveLength(2);
+
+    clickOn(buttons[0] as HTMLElement);
+    flush();
+
+    // And it dismisses ITS OWN toast, not merely one of them: a handler closing over the wrong id
+    // empties the stack in the wrong order and is invisible to a length check alone.
+    expect(toasts().map((t) => t.title)).toEqual(["Offsets reset"]);
+    expect(container.querySelectorAll(".kui-notice")).toHaveLength(1);
+    dispose();
+  });
+
   it("keeps both when two are raised in the same tick", () => {
     // Solid 2 batches writes onto a microtask and applies an updater to the last *committed*
     // value, so `setToasts(prev => [...prev, mine])` twice in one tick would have both computed

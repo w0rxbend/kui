@@ -16,7 +16,6 @@ import { AppearancePopover, type AppearancePreferences } from "./AppearancePopov
 import { ACCENT_OPTIONS, DENSITY_OPTIONS, THEME_OPTIONS, appearanceHelp } from "./appearance.js";
 import { BrandBlock } from "./BrandBlock.jsx";
 import { Breadcrumb } from "./Breadcrumb.jsx";
-import { ClusterSelector } from "./ClusterSelector.jsx";
 import { ClusterStatusCard } from "./ClusterStatusCard.jsx";
 import { EnvRail, tileLetter } from "./EnvRail.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
@@ -875,98 +874,6 @@ describe("the notifications panel", () => {
       <NotificationPanel feed={{ kind: "ready", notices }} now={now} onMarkAllRead={() => {}} />
     ));
     expect(describeViolations(await findViolations(container))).toBe("");
-    dispose();
-  });
-});
-
-describe("ClusterSelector", () => {
-  it("opens, walks with the arrow keys and selects with Enter", async () => {
-    const chosen: string[] = [];
-    const { container, dispose } = mount(() => (
-      <ClusterSelector clusters={CLUSTERS} currentId="prod-kyiv-01" onSelect={(id) => chosen.push(id)} />
-    ));
-    const trigger = container.querySelector('[data-testid="cluster-selector-trigger"]') as HTMLButtonElement;
-    await userEvent.click(trigger);
-    flush();
-    const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
-    listbox.focus();
-    await userEvent.keyboard("{ArrowDown}");
-    flush();
-    await userEvent.keyboard("{Enter}");
-    flush();
-    expect(chosen).toEqual(["staging-fra"]);
-    dispose();
-  });
-
-  it("closes on Escape and gives focus back to the trigger", async () => {
-    const { container, dispose } = mount(() => <ClusterSelector clusters={CLUSTERS} currentId="prod-kyiv-01" />);
-    const trigger = container.querySelector('[data-testid="cluster-selector-trigger"]') as HTMLButtonElement;
-    await userEvent.click(trigger);
-    flush();
-    const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
-    listbox.focus();
-    await userEvent.keyboard("{Escape}");
-    flush();
-    expect(container.querySelector('[role="listbox"]')).toBeNull();
-    expect(document.activeElement).toBe(trigger);
-    dispose();
-  });
-
-  it("wraps at both ends rather than stopping, and Home and End jump", async () => {
-    const { container, dispose } = mount(() => <ClusterSelector clusters={CLUSTERS} currentId="prod-kyiv-01" />);
-    await userEvent.click(container.querySelector('[data-testid="cluster-selector-trigger"]')!);
-    flush();
-    const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
-    listbox.focus();
-    await userEvent.keyboard("{ArrowUp}");
-    flush();
-    expect(listbox.getAttribute("aria-activedescendant")).toContain("analytics");
-    await userEvent.keyboard("{Home}");
-    flush();
-    expect(listbox.getAttribute("aria-activedescendant")).toContain("prod-kyiv-01");
-    await userEvent.keyboard("{End}");
-    flush();
-    expect(listbox.getAttribute("aria-activedescendant")).toContain("analytics");
-    dispose();
-  });
-
-  it("still opens with a single cluster, because that is where adding a second lives", async () => {
-    const { container, dispose } = mount(() => (
-      <ClusterSelector clusters={[HEALTHY_CLUSTER]} currentId="prod-kyiv-01" />
-    ));
-    await userEvent.click(container.querySelector('[data-testid="cluster-selector-trigger"]')!);
-    flush();
-    expect(container.textContent).toContain("Add a cluster");
-    dispose();
-  });
-
-  it("reads 'no cluster' when there are none, and is still operable", async () => {
-    const { container, dispose } = mount(() => <ClusterSelector clusters={[]} />);
-    const trigger = container.querySelector('[data-testid="cluster-selector-trigger"]')!;
-    expect(trigger.textContent).toContain("no cluster");
-    await userEvent.click(trigger);
-    flush();
-    expect(container.textContent).toContain("Add a cluster");
-    dispose();
-  });
-
-  it("marks the current cluster to both eyes and screen readers", async () => {
-    const { container, dispose } = mount(() => <ClusterSelector clusters={CLUSTERS} currentId="staging-fra" />);
-    await userEvent.click(container.querySelector('[data-testid="cluster-selector-trigger"]')!);
-    flush();
-    const option = container.querySelector('[data-testid="cluster-option-staging-fra"]')!;
-    expect(option.getAttribute("aria-selected")).toBe("true");
-    // ...and a tick, because aria-selected is not visible.
-    expect(option.querySelector(".kui-cluster-select__check")).not.toBeNull();
-    dispose();
-  });
-
-  it("has no accessibility violations while open", async () => {
-    const { container, dispose } = mount(() => <ClusterSelector clusters={CLUSTERS} currentId="prod-kyiv-01" />);
-    await userEvent.click(container.querySelector('[data-testid="cluster-selector-trigger"]')!);
-    flush();
-    const violations = await findViolations(container);
-    expect(describeViolations(violations)).toBe("");
     dispose();
   });
 });

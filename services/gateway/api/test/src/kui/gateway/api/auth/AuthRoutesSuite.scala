@@ -74,6 +74,23 @@ final class AuthRoutesSuite extends KuiIOSuite {
         responseWith(List(Header("Set-Cookie", "kui_theme=dark")))
       )
     )
+    // And a cookie whose name BEGINS with this one's is not this one either. Filed as V1 by this wave's
+    // verification pass over W12-03 and reproduced here before it was closed: deleting the `=` from
+    // `header.value.startsWith(s"$CookieName=")` left `./mill --no-daemon services.gateway.api.test` at
+    // 1270/1270 SUCCESS. This is G15's exact-name rule on the other side of the same hop — G15 covers the
+    // REQUEST cookie and is closed; the RESPONSE side had no case that could see the `=` go. With it gone,
+    // any route that sets a cookie named `kui_session`-anything makes the middleware stand aside, the real
+    // session cookie is never stamped, and the browser silently keeps the session it arrived with, which
+    // on the sign-in path is the session `replaceSession` above has just thrown away.
+    //
+    // The existing negative cannot see it: `kui_theme=dark` does not begin with `kui_session` at all.
+    assert(
+      !SessionMiddleware.alreadyCarriesSessionCookie(
+        responseWith(List(Header("Set-Cookie", s"${SessionMiddleware.CookieName}_backup=abc")))
+      ),
+      "a cookie whose name merely starts with the session cookie's name was taken for it, so the " +
+        "middleware stands aside and the rotated session is never stamped on the response"
+    )
     assert(!SessionMiddleware.alreadyCarriesSessionCookie(responseWith(Nil)))
   }
 }

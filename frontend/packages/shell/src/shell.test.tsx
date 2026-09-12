@@ -541,8 +541,8 @@ describe("the cluster switcher's rows", () => {
     ...(name === undefined ? {} : { name }),
   });
 
-  /* It shipped as a featureless dot. The row shows the operator's name for the cluster, and the
-   * chevron on the trigger is the chrome's own — see `ClusterSelector`. */
+  /* It shipped as a featureless dot. The row shows the operator's name for the cluster; the chrome
+   * draws the health mark beside it. */
   it("shows the display name the gateway reported, not the identifier", () => {
     const rows = clusterSummaries(
       new Map([["cluster/prod", entry("prod", "available", "Production EU")]]),

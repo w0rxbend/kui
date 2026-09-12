@@ -9,6 +9,40 @@
 # stubbed. A job that always passes is worse than no job: it looks like coverage. That principle is
 # also why the `test` job runs `./scripts/run-tests.sh` rather than a hand-maintained list of
 # modules — a list goes stale the first time somebody adds a suite, and it goes stale silently.
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT READS THIS FILE, AND WHAT THAT LEAVES UNREAD. Asked for by W12-02 and answered plainly rather
+# than reassuringly, because this file has now produced two green-over-nothing defects in two waves.
+#
+# ONE local gate reads this file at all: the case named `everyDocumentGateTheWorkflowRunsAsksIt...`
+# in `build-tests`' `BuildWiringSuite`, which reads `run:` lines, anchors on exactly TWO invocations
+# (`docs.errorCodes`, `frontend.apiConstants`) and requires each to pass `--check`. It is a real
+# gate and it is one gate, over two lines of a file of several hundred. Since wave 12 the three
+# files that suite reads are declared as inputs of `build-tests.test`, so a change here invalidates
+# it; before that, `testCached` answered out of the previous tree.
+#
+# So everything below is checked by GitHub running it, and by nothing else. What that has already
+# cost, twice, both reproduced rather than argued:
+#
+#   * A STEP CAN ASSERT ITS OWN DERIVATION RATHER THAN THE THING. The manifest-roster step reduced
+#     both ends of a `COPY` line to the package name and never read the file being copied, so
+#     `package.json` → `tsconfig.json` printed "every name matched" and exited 0 over an image that
+#     ships without a manifest. Wave 12's repair is one `sed` anchor and a fixture line.
+#   * A FILTER THAT MATCHES NOTHING EXITS 0. `pnpm --filter @kui/nosuchpackage run generate` prints
+#     `No projects matched the filters` and returns 0, so the generated-types step would have
+#     compared the committed file against itself if the package were ever renamed. Anchored in wave
+#     12 with a `grep` on the manifest.
+#
+# And what is STILL unread here, stated so the next reader does not have to rediscover it: a job or
+# a step DELETED from this file fails nothing anywhere — no local gate enumerates the jobs, so the
+# `browser`, `compose` or `frontend` job could vanish and every command in this repository would
+# stay green; a `run:` line that gains `|| true` (one already has, deliberately, on a log dump)
+# reads as a passing step; a `timeout-minutes` raised or a `concurrency` group changed is invisible;
+# and every number these jobs print — the OpenAPI ratio, the case count, the story count — is read
+# by a person, not by an assertion. Adding a gate for any of those is a wave-sized decision and is
+# filed rather than taken; what is NOT acceptable is a step whose own derivation cannot fail, which
+# is the class both defects above belong to.
+# ------------------------------------------------------------------------------------------------
 name: CI
 
 on:
@@ -182,6 +216,16 @@ jobs:
       # and the second one fails with no trace at all. A line whose two halves disagree is caught by
       # the destination list even when the source list is perfect.
       #
+      # AND THE SOURCE END NAMES THE FILE, WHICH IS WAVE 12'S REPAIR AND THE THIRD MUTATION OF THE
+      # SAME SHAPE. Both derivations reduced to the PACKAGE NAME and neither read the file being
+      # copied, so `COPY frontend/packages/api/package.json` -> `COPY frontend/packages/api/
+      # tsconfig.json` left every list eleven names long and every name equal. Measured at the
+      # wave-12 open, by making exactly that substitution in the Dockerfile and running this step
+      # from the repository root: `frontend/packages: 11 packages, 11 manifests copied, every name
+      # matched`, exit 0 -- over an image whose `packages/api` ships with NO manifest, which is the
+      # same workspace pnpm resolves for a deleted line. A roster is three facts per line, the
+      # package, the file and the destination, and until now this step read two of them.
+      #
       # The self-test first, for the reason the compose job's image derivation has one: on every
       # passing run all three lists are equal, so a `sed` that had stopped matching -- an anchor
       # removed, the path changed -- would answer an empty list against an empty list somewhere and
@@ -190,8 +234,16 @@ jobs:
       - name: The interface image copies every workspace manifest
         working-directory: .
         run: |
+          # `package\.json` is the anchor that reads the file. A COPY line under a package directory
+          # that names any other file no longer reduces to a package name: it comes through WHOLE,
+          # so it cannot match a directory in `frontend/packages` and appears whole on the `>` side
+          # of the diff beside the package missing from the `<` side.
           sources() { grep '^COPY frontend/packages/' "$1" |
-                        sed -E 's#^COPY frontend/packages/([^/]+)/.*#\1#' | sort; }
+                        sed -E 's#^COPY frontend/packages/([^/]+)/package\.json[[:space:]].*#\1#' |
+                        sort; }
+          # The destination end CANNOT carry that anchor -- a destination names a directory and no
+          # file -- so it is the source list alone that sees a substituted file name, and the
+          # fixture below holds a line that proves it rather than leaving it to be believed.
           targets() { grep '^COPY frontend/packages/' "$1" |
                         sed -E 's#^.*[[:space:]]\./packages/([^/]+)/[[:space:]]*$#\1#' | sort; }
 
@@ -203,19 +255,41 @@ jobs:
            COPY frontend/packages/indented/package.json ./packages/indented/
           RUN echo 'COPY frontend/packages/quoted/package.json'
           COPY frontend/packages/shell/package.json ./packages/typo/
+          COPY frontend/packages/decoy/tsconfig.json ./packages/decoy/
           FIXTURE
-          probe="$(sources "$fixture" | tr '\n' ' ')"
+          # The reduced names only: the decoy line is not one and the two assertions below are
+          # separate on purpose. `decoy` appearing here would mean the manifest anchor had been
+          # dropped again, and an empty list here would mean the `sed` had stopped matching at all.
+          probe="$(sources "$fixture" | grep -v '^COPY ' | tr '\n' ' ')"
           [ "$probe" = "api kernel shell " ] || {
             echo "the manifest-roster source derivation is broken: a Dockerfile with three anchored" \
-                 "COPY lines, one indented line and one inside a RUN, derived [$probe] and not" \
-                 "[api kernel shell ]."
+                 "COPY lines, one indented line, one inside a RUN and one copying a file that is" \
+                 "not a manifest, derived [$probe] and not [api kernel shell ]. If 'decoy' is in" \
+                 "that list the derivation has stopped reading the file name, which is the" \
+                 "wave-11 hole: a COPY of anything under packages/<name>/ counts as its manifest."
             rm -f "$fixture"; exit 1
           }
+          # And the same line from the other direction: it must survive the derivation UNREDUCED, so
+          # that a real roster carrying it fails the diff instead of agreeing with it. Grepped by
+          # its own text rather than by position, because `sort` orders a sentence against a word
+          # differently under C and under a UTF-8 locale and the runner picks the locale.
+          probe="$(sources "$fixture" | grep -c '^COPY frontend/packages/decoy/tsconfig\.json ')"
+          [ "$probe" = "1" ] || {
+            echo "the manifest-roster source derivation swallowed a COPY line that names no" \
+                 "manifest: [$probe] of them came through whole and exactly 1 should have. A line" \
+                 "that neither reduces to a package name nor survives to be diffed is a line the" \
+                 "assertion below cannot see."
+            rm -f "$fixture"; exit 1
+          }
+          # The destination list reads the fixture's typo AND the decoy's destination, which is
+          # well-formed: `decoy` here is the demonstration that this end cannot tell a manifest from
+          # a tsconfig, and `typo` that it can tell a misspelt directory from a correct one.
           probe="$(targets "$fixture" | tr '\n' ' ')"
-          [ "$probe" = "api kernel typo " ] || {
-            echo "the manifest-roster destination derivation is broken: the fixture's third line" \
-                 "copies packages/shell to ./packages/typo/ and the derivation answered [$probe]" \
-                 "instead of [api kernel typo ]. A destination that is never read is how a" \
+          [ "$probe" = "api decoy kernel typo " ] || {
+            echo "the manifest-roster destination derivation is broken: the fixture copies" \
+                 "packages/shell to ./packages/typo/ and packages/decoy's tsconfig to" \
+                 "./packages/decoy/, and the derivation answered [$probe] instead of" \
+                 "[api decoy kernel typo ]. A destination that is never read is how a" \
                  "correctly-spelled COPY lands where pnpm will not look for it."
             rm -f "$fixture"; exit 1
           }
@@ -231,7 +305,9 @@ jobs:
             echo "deployment/frontend/Dockerfile's manifest roster does not name the packages that" \
                  "exist. '<' is a package in frontend/packages with no COPY line; '>' is a COPY" \
                  "line naming something that is not a package -- which is what a misspelling looks" \
-                 "like, on either end of the line."
+                 "like, on either end of the line. A WHOLE COPY LINE on the '>' side is the third" \
+                 "shape: that line copies something other than package.json out of a package" \
+                 "directory, so the package it names ships with no manifest."
             echo "Each line reads exactly:" \
                  "COPY frontend/packages/<name>/package.json ./packages/<name>/"
             echo "Neither mistake fails the image build: pnpm resolves the smaller workspace and" \
@@ -308,8 +384,22 @@ jobs:
       # the backend build. `--check` fails when the committed copy has drifted from the OpenAPI
       # document it is generated from, which is the only way a contract change that nobody
       # regenerated gets noticed.
+      #
+      # AND THE FILTER IS ANCHORED, FOR THE REASON THE MANIFEST ROSTER ABOVE IS. A `pnpm --filter`
+      # that matches NOTHING prints a line and EXITS 0 — measured on this tree at the wave-12 open:
+      # `pnpm --filter @kui/nosuchpackage run generate` → `No projects matched the filters`, exit 0.
+      # So renaming the package leaves the generator un-run and `git diff --exit-code` comparing the
+      # committed file against itself: a step that reports the types are up to date without having
+      # generated any. The `grep` below is the assertion that the name this step filters on is
+      # a package name still, and it is one line rather than a mechanism on purpose.
       - name: The generated types are up to date
         run: |
+          grep -q '"name": "@kui/api"' packages/api/package.json || {
+            echo "this step filters on @kui/api and packages/api/package.json no longer declares" \
+                 "that name, so 'pnpm --filter @kui/api' matches nothing, exits 0, and leaves the" \
+                 "git diff below comparing the committed types against themselves."
+            exit 1
+          }
           pnpm --filter @kui/api run generate
           git diff --exit-code packages/api/src/schema.d.ts
 

@@ -6,9 +6,13 @@ shapes it deploys in, and the gates that decide whether a change is allowed to l
 README — `README.md` at the root tells you how to run it — and it is not an ADR index:
 `DECISIONS.md` is that, and it lists all fifty-six.
 
-Every figure below was measured on 2026-09-11 against this tree, with the command that measured it
-named beside it. Where a figure could not be measured here it says so in a sentence rather than
-being rounded to something convenient.
+Every figure below is one of three things, and section 5 says which for each of them: a figure a
+gate re-reads out of this page on every run; a snapshot of the build's **shape**, carrying the date
+it was taken on and the command that printed it; or no figure at all, only the command that prints
+it, for the sizes that move on almost every commit. The dates differ because the measurements do,
+and a figure whose date is older than the one beside it is a figure that has not needed re-taking,
+not a page that has forgotten to. Where something could not be measured here it says so in a
+sentence rather than being rounded to something convenient.
 
 ---
 
@@ -118,8 +122,8 @@ A feature package owns its screens and its own wire module and nothing else. It 
 through the shell's registry (`frontend/packages/shell/src/features/registry.ts`, eight
 registrations), which loads it by dynamic import, so a feature cannot be imported by another
 feature and a screen cannot be reached by an address the shell does not publish. The gate on that
-is `pnpm lint:boundaries`, which printed `425 files in 11 packages: no boundary violations` on
-2026-09-11.
+is `pnpm lint:boundaries`, which printed `423 files in 11 packages: no boundary violations` on
+2026-09-12.
 
 Two conventions are worth knowing before you write any of it. **Storybook first**: a component gets
 a story before it gets a screen, because the story is where its states are visible without a
@@ -170,7 +174,7 @@ the wave that owned it. Four of that table's ten rows were stale against the tre
 <!-- checked: gate-table -- verified by ./scripts/feature-matrix-check.sh -- claims: gate-claim-total, gate-section-count, gate-openapi-document, gate-decisions-rows, residue -->
 | What this page publishes | Read back by | Size |
 | --- | --- | --- |
-| the checker's own size | its own ledger, as the run finishes | **419 claims** over **10 sections** |
+| the checker's own size | its own ledger, as the run finishes | **438 claims** over **12 sections** |
 | `docs/api/openapi.json`, the merged contract | the checker's `merged-document` section | **65 paths**, **76 operations** and **160 component schemas** |
 | `DECISIONS.md` against `docs/adr/` | the checker's `adr-index` section | **56 rows**, one per ADR on disk |
 <!-- /checked -->
@@ -182,22 +186,33 @@ had since 2026-09-10, and what this one did not.
 
 ### The gates, and the sizes that need another process to measure
 
-Every figure in the right-hand column was printed by the command beside it on **2026-09-12**, at the
-close of wave 10, one gate at a time, against this tree. Two of them — the Scala and browser case
-counts — move on almost every commit, which is why the column is dated rather than maintained; the
-rest move only when the shape of the build does.
+**Three of the rows below carry a command where a figure used to be, and that is the repair rather
+than an omission.** The Scala case count, the component case count and the browser suite's tally
+move on almost every commit; all three were wrong on this page within hours of being written down,
+twice, by the waves that wrote them. A date on a figure is not a check, and a figure somebody has
+to remember to re-take is a figure that is wrong between the commit that moves it and the person
+who notices. So they are written as the command that prints them, which cannot go stale, and the
+reader who wants the number runs it — the same shape `docs/FEATURE_MATRIX.md` now uses wherever it
+cites a size out of another tree.
 
-| Gate | What it checks | Size, measured 2026-09-12 |
+The rest of the right-hand column is a snapshot of the **shape** of the build — how many modules,
+how many sources, how many targets — which moves only when a module, a source tree or a task is
+added. Every one of those was printed by the command beside it on **2026-09-12**, at the close of
+wave 11, one gate at a time, against this tree, and none of them was re-measured by the wave-12
+documentation pass that rewrote this section: that pass changed no Scala, no TypeScript and no
+build file, and it says so here rather than republishing a figure it did not take.
+
+| Gate | What it checks | Size, or the command that prints it |
 | --- | --- | --- |
 | `./mill __.compile` | Scala compilation under `-Werror` | 8251/8251 build tasks over 1,145 Scala sources |
-| `./scripts/run-tests.sh` | every Scala suite | **4,350 cases over 81 modules**, all 81 carrying tests |
+| `./scripts/run-tests.sh` | every Scala suite | no figure here: the script prints the case count and the module count as its last line, and both move on almost every commit |
 | `./mill checkArchitecture` | the ADR-041 module dependency direction | **195 modules**, 10 rules |
 | `./mill __.checkFormat` | Scalafmt | **495/495 over 1,145 sources across 162 reporting targets** |
 | `./mill __.fix --check` | Scalafix, including the stricter no-`var` rule set for `libs` and every `domain` | **10672/10672 over the same 1,145 sources — every test tree included**, with `.scalafix-tests.conf` relaxing four sub-rules for `test/src` only |
 | `./mill __.openApiCheck` | the committed OpenAPI documents against a fresh render | 2544/2544 tasks over eleven committed documents and ten `openApiCheck` targets; the merged document's own size is in the checked block above |
-| `pnpm test` | the component and unit suites | **1,933 cases over 83 files** |
-| `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | 425 files over 11 packages; 790 stories × 2 themes |
-| `pnpm e2e` | Playwright against a quickstart built from the tree | 106 passed, 3 skipped, 0 failed |
+| `pnpm test` | the component and unit suites | no figure here: vitest prints the case and file counts, and both move on almost every commit |
+| `pnpm typecheck`, `pnpm lint:boundaries`, `pnpm a11y` | types, package boundaries, accessibility | 423 files over 11 packages; 782 stories × 2 themes |
+| `pnpm e2e` | Playwright against a quickstart built from the tree | no figure here: Playwright prints passed, skipped and failed, and the skips are deployment-shaped rather than gaps |
 | `./scripts/feature-matrix-check.sh` | every count and every service sentence this repository publishes about itself | in the checked block above, because this is the one gate that can read its own size |
 
 **The `__.fix --check` row carried a clause that was false when it was read again.** It said *5353
@@ -217,7 +232,9 @@ comparator is driven into both of its states before a document is read, and a wh
 each of its refusals over a fixture built for the occasion, because a refusal whose failing case
 never arrives in this repository is a line nothing distinguishes from `true`.
 
-**And it compares two things that are not figures.** Every gate in this list was once green over a
+**And it compares two things that are not figures.** One is a sentence and the other is a
+quotation, and each of them was added after a false one had stood in this repository with every
+gate green. Every gate in this list was once green over a
 `README.md` whose *What is not built* section said *"No Kafka Connect, no ksqlDB"* — against a tree
 that ships both services and routes both through the gateway — because the false sentence sat
 outside every marker and nothing here read prose. The `capability-claims` section compares the
@@ -229,8 +246,28 @@ labelled lists, where it is compared, or it is not stated there at all, and a se
 `connect` or `ksql` — or any service by its backticked id — beside a negation is refused with the
 identity printed. That rule exists because the original sentence was appended, unchanged, inside
 the very block built to refuse it on 2026-09-12 and the run printed `404 claims checked, all true`.
-Its limit is stated where it is implemented: prose that names a service only by an ordinary noun
-this documentation uses for Kafka's own concepts is deliberately invisible to it.
+Since 2026-09-12 it reads the positive voice as well as the negative one: *"the Connect screen is a
+placeholder"* and *"ksqlDB is a stub"* are refused for the same reason *"neither is built"* is,
+because a service named beside a word that puts it in a state is making the same unheld claim about
+the tree as a service named beside a negation. Its limit is stated where it is implemented: prose
+that names a service only by an ordinary noun this documentation uses for Kafka's own concepts is
+deliberately invisible to it, and a sentence of the refused shape is written four lines below the
+`<!-- /checked -->` rather than inside it.
+
+**The second is a quotation, and it is newer than the sentence.** Wave 11 repaired
+`docs/operations/masking.md` and this repository went on quoting, in the present tense, a sentence
+that page no longer carried — in `README.md` and in `docs/FEATURE_MATRIX.md`, both of which the
+definition of done names, both green under every gate here, because a figure is compared against
+the thing that produces it and a sentence against the tree, and nothing compared a quotation of one
+file against that file. Inside a checked block a backticked or italicised span of eight words or
+more is now a quotation of the nearest backticked repository path before it, and it has to occur in
+that file; a backticked token that looks like a path in this repository and is not one is refused
+with the token printed, which is the same check applied to a citation whose file has been deleted.
+The scope is the marked block and not the document, and that is a measurement: run the same reader
+over every markdown file here and it answers a thousand attributions and almost as many failures,
+because a fenced code block, an ASCII diagram and a table column all look like quotations. A
+document that wants to say what another file says either puts the quotation inside a block, where
+it is compared, or names the file without quoting it. Both are honest and only one is checked.
 
 ---
 

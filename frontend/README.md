@@ -54,10 +54,18 @@ Two rules about those edges:
 pnpm install          # once, and after a dependency change
 pnpm build            # vite build, into frontend/dist
 pnpm watch            # the same build, rebuilding on save
-pnpm typecheck        # tsc --build, strict — `vite build` transpiles without checking types
+pnpm typecheck        # two strict `tsc` runs — `vite build` transpiles without checking types
 pnpm test             # vitest, under jsdom
 pnpm storybook        # every component's stories, from fixtures, with no backend
 ```
+
+`pnpm typecheck` is `tsc --build && tsc --noEmit -p e2e/tsconfig.json`, and it is two invocations
+rather than one because `e2e/` sets `composite: false`: the solution file's `tsc --build` refuses a
+referenced project that does not emit declarations, so the browser suite cannot be a reference and
+has to be checked on its own. Until wave 11 it was neither referenced nor invoked, and the largest
+body of TypeScript outside `packages/` sat outside the type gate entirely. `e2e/tsconfig.json`'s own
+comment carries the full reasoning, and what that second gate does and does not read — it checks the
+types and not the strings, so a misspelled `getByTestId` is still exit 0.
 
 The one thing the backend build still does for this one is `./mill frontend.apiConstants`, which
 writes `packages/api/src/constants.generated.ts` from the Scala constants — the CSRF header's name

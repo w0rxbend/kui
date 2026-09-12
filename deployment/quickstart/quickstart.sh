@@ -247,7 +247,11 @@ up() {
     say ""
     say "  It asks you to sign in. Two accounts, both spelled out in kui-quickstart-auth.yaml:"
     say ""
-    say "    admin  / quickstart-admin    may do everything on this cluster"
+    # "everything on this cluster" until wave 12, which was false and measurable: this role grants
+    # TOPIC, CONSUMER, CLUSTERCONFIG and SCHEMA, and signed in as admin a connector `pause` answers
+    # 403 and ksqlDB answers 403. kui-quickstart-auth.yaml carries the measurement and the decision.
+    say "    admin  / quickstart-admin    may do everything to this cluster's topics, groups,"
+    say "                                 schemas and connection settings"
     say "    viewer / quickstart-viewer   may look at topics and read records, and nothing else"
     say ""
     say "  Sign in as viewer to see the difference: the create, edit, add-partitions, empty and"

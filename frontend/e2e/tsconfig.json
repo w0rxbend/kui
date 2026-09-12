@@ -8,12 +8,16 @@
     //
     // `composite: false` is why this project cannot be a reference from `../tsconfig.json`: the
     // solution file's `tsc --build` refuses a referenced project that does not emit declarations,
-    // and making it emit them would mean writing `.d.ts` files for a directory nothing imports
-    // (`wc -l frontend/e2e/*.ts`, **5,169** on 2026-09-12 — the command is written here beside the
-    // figure because the one it replaced said 4,961 and had drifted by two hundred lines inside the
-    // wave that wrote it). So `pnpm typecheck` runs this project as a **second** `tsc` invocation
-    // instead — see `package.json`'s `typecheck` script, which is two commands for this reason and
-    // is the only place the arrangement is visible.
+    // and making it emit them would mean writing `.d.ts` files for a directory nothing imports —
+    // `wc -l frontend/e2e/*.ts` says how much of it there is, and the figure that used to stand
+    // here is deliberately gone. It has been written twice and been wrong twice within the wave
+    // that wrote it: 4,961 drifted to 5,169, and 5,169 was 5,229 before the same pass ended,
+    // because the packet that took the measurement then edited a file in this directory. A comment
+    // that carries the command carries everything the reader needs and cannot go stale; a comment
+    // that carries the answer is a snapshot of a directory that changes on almost every commit.
+    // So `pnpm typecheck` runs this project as a **second** `tsc` invocation instead — see
+    // `package.json`'s `typecheck` script, which is two commands for this reason, and
+    // `../README.md`, which is the only prose that says so.
     //
     // Until wave 11 it was neither referenced nor invoked: `tsc --build` at the root checked ten
     // packages and not this directory, `npx tsc --noEmit -p e2e/tsconfig.json` exited 0 and was
