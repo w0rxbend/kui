@@ -359,7 +359,7 @@ mislead somebody tomorrow.
    the frontend package roster with `ls` on the runner's working tree (TD-057) — house rule 27 broken
    in CI itself.
 
-**From `TECH_DEBT.md`, which has 36 open rows.** The ones a reader should actually know about:
+**From `TECH_DEBT.md`, which has 35 open rows.** The ones a reader should actually know about:
 
 | Row | Why it matters to somebody running this |
 | --- | --- |
