@@ -3,6 +3,7 @@ package kui.consumer.infrastructure
 import java.time.Instant
 
 import cats.effect.kernel.Async
+import cats.effect.kernel.implicits.parallelForGenSpawn
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
@@ -77,20 +78,24 @@ object KafkaGroupAdminPort {
       * group but not read its topics, both are the permanent steady state.
       */
     def describe(ids: List[GroupId]): F[Either[KuiError, Map[GroupId, ConsumerGroup]]] =
-      admin.describeGroups(connection, ids, includeAuthorizedOperations = false).flatMap {
-        case Left(error) => error.asLeft[Map[GroupId, ConsumerGroup]].pure[F]
-        case Right(described) =>
+      (
+        admin.describeGroups(connection, ids, includeAuthorizedOperations = false),
+        admin.committedOffsets(connection, ids, partitions = None, requireStable = false)
+      ).parTupled.flatMap {
+        case (Left(error), _) => error.asLeft[Map[GroupId, ConsumerGroup]].pure[F]
+        case (Right(described), committed) =>
+          val commitsByGroup = committed.toOption.map(_.values).getOrElse(Map.empty)
           for {
-            committed <- admin.committedOffsets(connection, ids, partitions = None, requireStable = false)
-            commitsByGroup = committed.toOption.map(_.values).getOrElse(Map.empty)
             _ <- committed.left.toOption.traverse_(error =>
               logger.debug(context ++ Map("error.code" -> error.code.wire))(
                 s"committed offsets are not available: ${error.message}"
               )
             )
             wanted = partitionsOf(described, commitsByGroup)
-            ends <- if wanted.isEmpty then noEnds.pure[F] else offsets.endOffsets(connection, wanted)
-            begins <- if wanted.isEmpty then noEnds.pure[F] else offsets.beginningOffsets(connection, wanted)
+            endsAndBegins <-
+              if wanted.isEmpty then (noEnds, noEnds).pure[F]
+              else (offsets.endOffsets(connection, wanted), offsets.beginningOffsets(connection, wanted)).parTupled
+            (ends, begins) = endsAndBegins
             _ <- ends.left.toOption.traverse_(error =>
               logger.debug(context ++ Map("error.code" -> error.code.wire))(
                 s"log end offsets are not available: ${error.message}"

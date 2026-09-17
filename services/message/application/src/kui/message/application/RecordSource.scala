@@ -68,4 +68,16 @@ trait RecordSource[F[_]] {
     *   second without the first changing meaning.
     */
   def browse(request: BrowseRequest, budget: PollBudget): Stream[F, Either[KuiError, RawRecord]]
+
+  /** The offset every partition assigned to this request actually starts reading from — the same value
+    * [[browse]] itself would seek each one to, whatever the seek mode resolves to and whether `partitions`
+    * names them or the source has to ask the broker which partitions exist.
+    *
+    * A browse only needs this once, to seed a starting boundary for a partition that never yields a record
+    * before a page's `limit` is reached (otherwise such a partition is silently dropped from every
+    * subsequent page's cursor). Kept separate from [[browse]]'s own stream rather than threaded through it,
+    * because it is asked for at most once per page — when a continuation cursor is actually being minted —
+    * and not once per record.
+    */
+  def assignedStarts(request: BrowseRequest): F[Either[KuiError, Map[PartitionId, Offset]]]
 }

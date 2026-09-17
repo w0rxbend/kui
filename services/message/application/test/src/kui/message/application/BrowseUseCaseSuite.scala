@@ -87,7 +87,13 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   }
 
   private def source(records: List[Either[KuiError, RawRecord]]): RecordSource[IO] =
-    (_, _) => Stream.emits(records)
+    new RecordSource[IO] {
+      def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
+        Stream.emits(records)
+
+      def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+        IO.pure(Right(Map.empty))
+    }
 
   private def raw(offset: Long, value: String): RawRecord =
     RawRecord(
@@ -427,6 +433,57 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
     }
   }
 
+  test(
+    "a partition assigned but never seen before the limit still appears in the minted cursor, even on a " +
+      "first page"
+  ) {
+    // The bug this guards: `request.partitions` is `None` on an ordinary first page, so before this fix
+    // nothing here knew a second partition had been assigned at all, and a partition that never yielded a
+    // record before `limit` was reached silently dropped out of `perPartitionNext` -- and then out of every
+    // page after this one.
+    val records = List(raw(0, "one"), raw(1, "two"), raw(2, "three")).map(_.asRight[KuiError])
+    val starved = PartitionId.unsafe(1)
+
+    val twoPartitionSource: RecordSource[IO] = new RecordSource[IO] {
+      def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
+        Stream.emits(records)
+
+      // What a real `RecordSource` reports once it has asked the broker which partitions exist: both are
+      // assigned, and both start at offset zero, but only partition 0 ever produces a record before the
+      // page's limit is reached.
+      def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+        IO.pure(Right(Map(PartitionId.unsafe(0) -> Offset.unsafe(0L), starved -> Offset.unsafe(0L))))
+    }
+
+    val browse = BrowseUseCase.make[IO](
+      clusters,
+      serdes("<nothing fails>"),
+      twoPartitionSource,
+      CursorCodec.hmacSha256[IO](key),
+      FilterSource.unsupported[IO],
+      RecordMasking.none[IO]
+    )
+    val codec = CursorCodec.hmacSha256[IO](key)
+
+    for {
+      produced <- events(browse, request(2))
+      token = produced.last match {
+        case BrowseEvent.Finished(_, Some(cursor)) => cursor
+        case other => fail(s"expected a cursor, got $other")
+      }
+      decoded <- codec.decode(token, (cluster, topic), Instant.EPOCH)
+    } yield decoded match {
+      case Right(cursor) =>
+        // Partition 0 resumes after the last record actually delivered from it; the starved partition
+        // resumes from the same offset it was never read past, rather than disappearing from the cursor.
+        assertEquals(
+          cursor.perPartitionNext,
+          Map(PartitionId.unsafe(0) -> Offset.unsafe(2L), starved -> Offset.unsafe(0L))
+        )
+      case Left(error) => fail(s"the cursor this build minted could not be read back: ${error.message}")
+    }
+  }
+
   // --------------------------------------------------------------------------------- the filtering
 
   test("the string filter matches decoded text, and the accounting shows what it rejected") {
@@ -447,10 +504,18 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   // ---------------------------------------------------------------------------- an unknown cluster
 
   test("a cluster nobody configured fails before the record source is touched") {
+    val untouchable: RecordSource[IO] = new RecordSource[IO] {
+      def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
+        Stream.raiseError[IO](new IllegalStateException("the record source must not be reached"))
+
+      def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+        IO.raiseError(new IllegalStateException("the record source must not be reached"))
+    }
+
     val browse = BrowseUseCase.make[IO](
       clusters,
       serdes("<nothing fails>"),
-      (_, _) => Stream.raiseError[IO](new IllegalStateException("the record source must not be reached")),
+      untouchable,
       CursorCodec.hmacSha256[IO](key),
       FilterSource.unsupported[IO],
       RecordMasking.none[IO]

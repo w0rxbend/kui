@@ -63,9 +63,9 @@ object DeleteGroupUseCase {
 
         GroupPreconditions.existsAndEmpty(port, group).flatMap {
           case Left(error) => error.asLeft[Unit].pure[F]
-          case Right(_) =>
+          case Right(found) =>
+            val before = GroupPreconditions.committedOf(found)
             for {
-              before <- GroupPreconditions.committedOf(port, group)
               _ <- logger.info(
                 Map("cluster.id" -> cluster.value, "group.id" -> group.value, "operation" -> Operation)
               )(s"deleting consumer group ${group.value}")
@@ -104,29 +104,28 @@ object DeleteOffsetsUseCase {
 
         GroupPreconditions.existsAndEmpty(port, group).flatMap {
           case Left(error) => error.asLeft[DeletedOffsets].pure[F]
-          case Right(_) =>
-            GroupPreconditions.committedOf(port, group).flatMap { committed =>
-              val partitions = committed.keySet.filter(_.topic == topic)
+          case Right(found) =>
+            val committed = GroupPreconditions.committedOf(found)
+            val partitions = committed.keySet.filter(_.topic == topic)
 
-              if partitions.isEmpty then
-                // Nothing to delete is not a failure and not a lie: the group holds no committed
-                // offsets for this topic, which is the state the caller asked for.
-                DeletedOffsets(topic, Set.empty).asRight[KuiError].pure[F]
-              else
-                logger.info(
-                  Map("cluster.id" -> cluster.value, "group.id" -> group.value, "operation" -> Operation)
-                )(s"deleting ${partitions.size} committed offset(s) of ${group.value} for ${topic.value}") >>
-                  guard
-                    .guard(
-                      principal,
-                      cluster,
-                      MutationKind.DeleteOffsets,
-                      s"${group.value}/${topic.value}",
-                      AuditOffsets.of(committed.view.filterKeys(partitions.contains).toMap),
-                      Map.empty
-                    )(port.deleteOffsets(group, partitions))
-                    .map(_.map(_ => DeletedOffsets(topic, partitions)))
-            }
+            if partitions.isEmpty then
+              // Nothing to delete is not a failure and not a lie: the group holds no committed
+              // offsets for this topic, which is the state the caller asked for.
+              DeletedOffsets(topic, Set.empty).asRight[KuiError].pure[F]
+            else
+              logger.info(
+                Map("cluster.id" -> cluster.value, "group.id" -> group.value, "operation" -> Operation)
+              )(s"deleting ${partitions.size} committed offset(s) of ${group.value} for ${topic.value}") >>
+                guard
+                  .guard(
+                    principal,
+                    cluster,
+                    MutationKind.DeleteOffsets,
+                    s"${group.value}/${topic.value}",
+                    AuditOffsets.of(committed.view.filterKeys(partitions.contains).toMap),
+                    Map.empty
+                  )(port.deleteOffsets(group, partitions))
+                  .map(_.map(_ => DeletedOffsets(topic, partitions)))
         }
       }
     }
@@ -171,26 +170,13 @@ private object GroupPreconditions {
         }
     }
 
-  /** Where the group's offsets are, for the audit record. Best effort by design: refusing to delete a group
-    * because KUI could not write down what it was deleting would put bookkeeping above the operator.
+  /** Where the group's offsets are, for the audit record, read from a `ConsumerGroup` already fetched by
+    * `existsAndEmpty` rather than describing the group again.
     */
-  def committedOf[F[_]: Temporal](
-      port: GroupAdminPort[F],
-      group: GroupId
-  ): F[Map[TopicPartition, Offset]] =
-    port.describe(List(group)).map {
-      case Left(_) => Map.empty[TopicPartition, Offset]
-      case Right(described) =>
-        described
-          .get(group)
-          .toList
-          .flatMap(found =>
-            found.subscriptions.flatMap(subscription =>
-              subscription.partitions.flatMap(state =>
-                state.committed.map(offset => TopicPartition(subscription.topic, state.partition) -> offset)
-              )
-            )
-          )
-          .toMap
-    }
+  def committedOf(found: ConsumerGroup): Map[TopicPartition, Offset] =
+    found.subscriptions.flatMap { subscription =>
+      subscription.partitions.flatMap { state =>
+        state.committed.map(offset => TopicPartition(subscription.topic, state.partition) -> offset)
+      }
+    }.toMap
 }

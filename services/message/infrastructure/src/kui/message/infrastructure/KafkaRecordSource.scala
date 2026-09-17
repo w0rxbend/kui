@@ -88,7 +88,32 @@ final class KafkaRecordSource[F[_]: Temporal](
       // the consumer through the same `Resource` this deadline would have.
       .through(stream => if request.live then stream else stream.interruptAfter(budget.deadline))
 
+  /** The offset every assigned partition actually starts reading from, per [[RecordSource.assignedStarts]] —
+    * the same arithmetic [[plan]] uses to build a window's low bound, without needing a poll loop to answer
+    * it.
+    */
+  def assignedStarts(request: BrowseRequest): F[Either[KuiError, Map[PartitionId, Offset]]] =
+    open(request.cluster, request.isolation).use {
+      case Left(error) => error.asLeft[Map[PartitionId, Offset]].pure[F]
+      case Right(consumer) =>
+        resolveStarts(consumer, request).value
+          .map(_.map(starts => starts.map((partition, offset) => partition -> Offset.unsafe(offset))))
+    }
+
   // ------------------------------------------------------------------------------------ planning
+
+  /** Every partition this request is assigned, with the low and high broker offsets and the offset the seek
+    * resolves to for each — the three numbers both [[plan]]'s windows and [[assignedStarts]]'s boundaries are
+    * built from, fetched once so neither has to ask the broker twice for the same answer.
+    */
+  private def resolvePlan(consumer: BrowseConsumer[F], request: BrowseRequest): EitherT[F, KuiError, Plan] =
+    for {
+      all <- selected(consumer, request)
+      chosen = named(request, all)
+      beginning <- EitherT(consumer.beginningOffsets(request.topic, chosen))
+      end <- EitherT(consumer.endOffsets(request.topic, chosen))
+      starts <- startOffsets(consumer, request, chosen, end)
+    } yield Plan(chosen, beginning, end, starts)
 
   /** Turns a seek into a concrete half-open offset range per partition.
     *
@@ -99,33 +124,44 @@ final class KafkaRecordSource[F[_]: Temporal](
     * arithmetic has to wonder.
     */
   private def plan(consumer: BrowseConsumer[F], request: BrowseRequest): EitherT[F, KuiError, List[Window]] =
-    for {
-      all <- selected(consumer, request)
-      chosen = named(request, all)
-      beginning <- EitherT(consumer.beginningOffsets(request.topic, chosen))
-      end <- EitherT(consumer.endOffsets(request.topic, chosen))
-      starts <- startOffsets(consumer, request, chosen, end)
-    } yield chosen.flatMap { partition =>
-      val low = beginning.getOrElse(partition, 0L)
-      val high = end.getOrElse(partition, low)
-      val start = clamp(starts.getOrElse(partition, low), low, high)
+    resolvePlan(consumer, request).map { resolved =>
+      resolved.chosen.flatMap { partition =>
+        val (low, high, start) = bounds(resolved, partition)
 
-      request.direction match {
-        // A tail has no upper bound, and that is the difference between it and every other read. An
-        // ordinary forward browse stops at `high`, the end of the log as it stood when the browse was
-        // planned. A tail wants precisely the records written *after* that moment, so its window runs to
-        // infinity — and it is emitted even when `start == high`, which is the normal case for a tail
-        // started from `Latest` on a quiet topic. Dropping that window is what made the Follow control
-        // deliver an immediately-empty stream.
-        case _ if request.live => Some(Window(partition, start, Long.MaxValue))
-        // Forwards: from where the seek landed, up to the end of the log.
-        case Direction.Forward => Option.when(start < high)(Window(partition, start, high))
-        // Backwards: from the oldest record still held, up to — but not including — where the seek
-        // landed. Half-open in the same direction as the forward case, which is what makes a cursor
-        // minted by one readable by the other without an off-by-one.
-        case Direction.Backward => Option.when(low < start)(Window(partition, low, start))
+        request.direction match {
+          // A tail has no upper bound, and that is the difference between it and every other read. An
+          // ordinary forward browse stops at `high`, the end of the log as it stood when the browse was
+          // planned. A tail wants precisely the records written *after* that moment, so its window runs to
+          // infinity — and it is emitted even when `start == high`, which is the normal case for a tail
+          // started from `Latest` on a quiet topic. Dropping that window is what made the Follow control
+          // deliver an immediately-empty stream.
+          case _ if request.live => Some(Window(partition, start, Long.MaxValue))
+          // Forwards: from where the seek landed, up to the end of the log.
+          case Direction.Forward => Option.when(start < high)(Window(partition, start, high))
+          // Backwards: from the oldest record still held, up to — but not including — where the seek
+          // landed. Half-open in the same direction as the forward case, which is what makes a cursor
+          // minted by one readable by the other without an off-by-one.
+          case Direction.Backward => Option.when(low < start)(Window(partition, low, start))
+        }
       }
     }
+
+  /** Every assigned partition's clamped starting offset — the boundary `plan` would seek it to, whichever
+    * side of the read that partition ends up on.
+    */
+  private def resolveStarts(
+      consumer: BrowseConsumer[F],
+      request: BrowseRequest
+  ): EitherT[F, KuiError, Map[PartitionId, Long]] =
+    resolvePlan(consumer, request).map(resolved =>
+      resolved.chosen.map(partition => partition -> bounds(resolved, partition)._3).toMap
+    )
+
+  private def bounds(resolved: Plan, partition: PartitionId): (Long, Long, Long) = {
+    val low = resolved.beginning.getOrElse(partition, 0L)
+    val high = resolved.end.getOrElse(partition, low)
+    (low, high, clamp(resolved.starts.getOrElse(partition, low), low, high))
+  }
 
   /** A per-partition seek names its partitions by naming their offsets.
     *
@@ -320,6 +356,16 @@ final class KafkaRecordSource[F[_]: Temporal](
 }
 
 object KafkaRecordSource {
+
+  /** The raw broker answers `resolvePlan` gathers once, before either `plan` or `resolveStarts` turns them
+    * into the numbers each one actually needs.
+    */
+  final private case class Plan(
+      chosen: List[PartitionId],
+      beginning: Map[PartitionId, Long],
+      end: Map[PartitionId, Long],
+      starts: Map[PartitionId, Long]
+  )
 
   /** One partition's half-open offset range, `[low, high)`. */
   final case class Window(partition: PartitionId, low: Long, high: Long) {

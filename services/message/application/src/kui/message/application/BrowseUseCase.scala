@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 
 import scala.concurrent.duration.FiniteDuration
 
+import cats.data.NonEmptySet
 import cats.effect.kernel.{Clock, Concurrent, Ref}
 import cats.syntax.all.*
 import fs2.{Chunk, Stream}
@@ -118,7 +119,8 @@ trait BrowseUseCase[F[_]] {
       topic: TopicName,
       cursor: String,
       stringFilter: Option[String],
-      limits: BrowseLimits
+      limits: BrowseLimits,
+      filterSource: Option[String] = None
   ): F[Either[KuiError, BrowseRequest]]
 }
 
@@ -149,11 +151,12 @@ object BrowseUseCase {
           topic: TopicName,
           cursor: String,
           stringFilter: Option[String],
-          limits: BrowseLimits
+          limits: BrowseLimits,
+          filterSource: Option[String]
       ): F[Either[KuiError, BrowseRequest]] =
         Clock[F].realTimeInstant
           .flatMap(now => cursors.decode(cursor, (cluster, topic), now))
-          .map(_.flatMap(decoded => requestOf(decoded, stringFilter, limits)))
+          .map(_.flatMap(decoded => requestOf(decoded, stringFilter, filterSource, limits)))
 
       /** The cursor, as the browse it describes.
         *
@@ -168,6 +171,7 @@ object BrowseUseCase {
       private def requestOf(
           cursor: BrowseCursor,
           stringFilter: Option[String],
+          filterSource: Option[String],
           limits: BrowseLimits
       ): Either[KuiError, BrowseRequest] =
         BrowseRequest.of(
@@ -181,7 +185,7 @@ object BrowseUseCase {
           keySerde = cursor.keySerde,
           valueSerde = cursor.valueSerde,
           stringFilter = stringFilter,
-          filter = cursor.filterId.flatMap(id => FilterRef.of(id, None).toOption),
+          filter = cursor.filterId.flatMap(id => FilterRef.of(id, filterSource).toOption),
           // A continuation is never a tail: `live` and a start position are mutually exclusive, and a cursor
           // is nothing but a start position.
           live = false,
@@ -279,7 +283,7 @@ object BrowseUseCase {
           next <- state.updateAndGet(_.saw(raw, matched, failed(verdict)))
         } yield {
           val progress =
-            if matched && next.delivered % ProgressEvery.toLong == 0L then
+            if next.read % ProgressEvery.toLong == 0L then
               Chunk.singleton(
                 BrowseEvent
                   .Consumed(next.bytes, next.read, next.delivered, next.filterErrors, elapsed, budget)
@@ -288,7 +292,7 @@ object BrowseUseCase {
 
           Step(
             events =
-              if matched then Chunk.singleton(BrowseEvent.Record(record)) ++ progress else Chunk.empty,
+              (if matched then Chunk.singleton(BrowseEvent.Record(record)) else Chunk.empty) ++ progress,
             // A tail has no total. `limit` is a page size, and a page is a thing a bounded browse has; a
             // browse that is still open after an hour has delivered whatever was written in that hour and
             // is not finished. The bound on a tail is on the *screen* — `BrowseSession.MaxRows` keeps the
@@ -343,13 +347,68 @@ object BrowseUseCase {
         if reason != BrowseEnd.Limit || state.delivered == 0L then Option.empty[String].pure[F]
         else
           Clock[F].realTimeInstant.flatMap { now =>
-            val cursor = request.direction match {
-              case Direction.Forward => BrowseCursor.afterForward(request, state.last, now, CursorTtl)
-              case Direction.Backward => BrowseCursor.beforeBackward(request, state.first, now, CursorTtl)
+            request.direction match {
+              case Direction.Forward =>
+                withUnseenPartitions(request, state.last, start => Offset.unsafe(start.value - 1L))
+                  .flatMap(last => cursors.encode(BrowseCursor.afterForward(request, last, now, CursorTtl)))
+                  .map(_.toOption)
+              case Direction.Backward =>
+                withUnseenPartitions(request, state.first, identity)
+                  .flatMap(first => cursors.encode(BrowseCursor.beforeBackward(request, first, now, CursorTtl)))
+                  .map(_.toOption)
             }
-
-            cursors.encode(cursor).map(_.toOption)
           }
+
+      /** `seen`, with an entry added for every assigned partition that never yielded a raw record.
+        *
+        * A partition can be starved by an uneven poll before the global `limit` is reached; without this it
+        * is silently missing from `seen` and then from every `perPartitionNext` built from it, which drops it
+        * from every subsequent page (`partitions = Some(cursor.perPartitionNext.keySet)` in `requestOf`).
+        * Only the gap is filled — a partition already in `seen` keeps the boundary it actually observed.
+        */
+      private def withUnseenPartitions(
+          request: BrowseRequest,
+          seen: Map[PartitionId, Offset],
+          fallback: Offset => Offset
+      ): F[Map[PartitionId, Offset]] =
+        resolvedStarts(request).map {
+          case None => seen
+          case Some(starts) =>
+            starts.foldLeft(seen) { case (acc, (partition, start)) =>
+              if acc.contains(partition) then acc else acc.updated(partition, fallback(start))
+            }
+        }
+
+      /** The offset every assigned partition actually starts from.
+        *
+        * `AtOffsets`/`AtOffset` name one for every partition already, so the answer is resolved right here
+        * with no I/O. `Beginning`, `Latest` and `AtTimestamp` resolve to a per-partition offset only once a
+        * broker is asked — and so does a request that names its own `partitions` under one of those modes,
+        * since which offset each of them starts at is still unknown above [[RecordSource]] — so both fall
+        * back to [[RecordSource.assignedStarts]], the same resolution `browse` itself would seek to. A
+        * failure there is treated the same as "unknown": the page already shown is correct, and the honest
+        * consequence of not being able to ask is a starved partition staying omitted, not a guessed offset.
+        */
+      private def resolvedStarts(request: BrowseRequest): F[Option[Map[PartitionId, Offset]]] =
+        request.partitions.flatMap(startOffsets(request.seek, _)) match {
+          case resolved @ Some(_) => resolved.pure[F]
+          case None => source.assignedStarts(request).map(_.toOption)
+        }
+
+      /** The offset each named partition actually starts from, without asking anything — only possible when
+        * the seek already names one per partition.
+        */
+      private def startOffsets(
+          seek: SeekMode,
+          assigned: NonEmptySet[PartitionId]
+      ): Option[Map[PartitionId, Offset]] =
+        seek match {
+          case SeekMode.AtOffsets(perPartition) =>
+            Some(assigned.toSortedSet.toList.flatMap(p => perPartition.get(p).map(p -> _)).toMap)
+          case SeekMode.AtOffset(offset) =>
+            Some(assigned.toSortedSet.toList.map(_ -> offset).toMap)
+          case SeekMode.Beginning | SeekMode.Latest | SeekMode.AtTimestamp(_) => None
+        }
 
       /** The smart filter's answer about one record, or `Matched` when there is no smart filter.
         *

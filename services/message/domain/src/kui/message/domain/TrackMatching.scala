@@ -52,12 +52,50 @@ final class PreparedMatch private (matcher: TrackMatch, compiled: Option[Pattern
     }
   }
 
+  /** Runs the match under a wall-clock budget rather than trusting the pattern to terminate.
+    *
+    * `java.util.regex` has no built-in deadline, and a user-supplied pattern is free to be one that
+    * catastrophically backtracks (`(a+)+$` and its relatives) — which turns one record into an exponential-time
+    * hang and a 7-day, multi-topic scan into a stuck fiber. Wrapping the input in a `CharSequence` that checks
+    * the clock on every character access catches that blow-up almost immediately, because a pathological match
+    * reads the same characters an astronomical number of times, while a well-behaved pattern never notices the
+    * check.
+    */
   private def find(pattern: Pattern, text: String): Boolean =
-    try pattern.matcher(text).find()
+    try pattern.matcher(new PreparedMatch.DeadlineGuardedInput(text)).find()
     catch { case NonFatal(_) => false }
 }
 
 object PreparedMatch {
+
+  /** How long one record's regex match may run before it is abandoned as a hit-less record.
+    *
+    * Short enough that a scan of a million records paying it on every one of them stays a matter of seconds,
+    * long enough that no pattern anyone would write on purpose ever brushes it — this exists for the pattern
+    * nobody would write on purpose.
+    */
+  private val MatchBudget: java.time.Duration = java.time.Duration.ofMillis(50)
+
+  /** A `CharSequence` view of `text` that raises once `deadline` has passed.
+    *
+    * `Matcher.find()` re-reads the sequence character by character with no hook of its own to interrupt, so the
+    * deadline is enforced the only place available: every `charAt`. A pattern that backtracks catastrophically
+    * calls this far more times than there are characters in `text`, so the check fires long before the match
+    * itself ever would.
+    */
+  private final class DeadlineGuardedInput(text: String, deadline: Long) extends CharSequence {
+    def this(text: String) = this(text, System.nanoTime() + MatchBudget.toNanos)
+
+    private def guarded[A](value: => A): A =
+      if System.nanoTime() > deadline then
+        throw new RuntimeException(s"regex match exceeded its ${MatchBudget.toMillis}ms budget")
+      else value
+
+    def length(): Int = text.length
+    def charAt(index: Int): Char = guarded(text.charAt(index))
+    def subSequence(start: Int, end: Int): CharSequence =
+      guarded(new DeadlineGuardedInput(text.subSequence(start, end).toString, deadline))
+  }
 
   /** Compiles the matcher once, for the whole scan.
     *

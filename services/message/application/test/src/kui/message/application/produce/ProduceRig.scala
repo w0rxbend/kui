@@ -159,6 +159,9 @@ object ProduceRig {
   final class FakeRecords(records: List[RawRecord]) extends RecordSource[IO] {
     def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
       Stream.emits(records.map(_.asRight[KuiError]))
+
+    def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+      IO.pure(Right(Map.empty))
   }
 
   def guardFor(profiles: ClusterProfileSource[IO], audit: AuditSink[IO]): IO[MutationGuard[IO]] =

@@ -229,7 +229,7 @@ object GroupSnapshots {
         case Some(cell) =>
           logger.debug(Map("cluster.id" -> cluster.value))(
             s"dropping the consumer-group snapshot for ${cluster.value}: $reason"
-          ) >> supervisor.supervise(cell.invalidate).void
+          ) >> cell.invalidate.void
       }
 
     /** Starts cells for clusters that appeared and cancels cells for clusters that went away. */

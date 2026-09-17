@@ -66,7 +66,8 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
         topic: TopicName,
         cursor: String,
         stringFilter: Option[String],
-        limits: BrowseLimits
+        limits: BrowseLimits,
+        filterSource: Option[String] = None
     ): IO[Either[KuiError, BrowseRequest]] =
       IO.pure(
         Left(

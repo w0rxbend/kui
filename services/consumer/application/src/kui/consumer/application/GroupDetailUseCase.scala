@@ -4,7 +4,7 @@ import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
-import cats.effect.kernel.{Async, Resource}
+import cats.effect.kernel.{Async, Deferred, Outcome, Ref, Resource}
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
@@ -107,6 +107,13 @@ object GroupDetailUseCase {
   ): GroupDetailUseCase[F] =
     new GroupDetailUseCase[F] {
 
+      /** In-flight describes, keyed by (cluster, group), so several operators on the same detail page — or one
+        * polling it — join the live coordinator round trip already running instead of each starting their own.
+        */
+      private val inFlight
+          : Ref[F, Map[(ClusterId, GroupId), Deferred[F, Either[KuiError, Map[GroupId, ConsumerGroup]]]]] =
+        Ref.unsafe(Map.empty)
+
       def detail(cluster: ClusterId, group: GroupId): F[Either[KuiError, GroupDetailView]] =
         snapshots.of(cluster).flatMap {
           case None =>
@@ -116,7 +123,7 @@ object GroupDetailUseCase {
               .pure[F]
 
           case Some(cell) =>
-            admin(cluster).describe(List(group)).flatMap {
+            describeCoalesced(cluster, group).flatMap {
               case Left(error) => error.asLeft[GroupDetailView].pure[F]
               case Right(described) =>
                 for {
@@ -142,6 +149,42 @@ object GroupDetailUseCase {
                   }
                 } yield view.asRight[KuiError]
             }
+        }
+
+      /** One live describe per (cluster, group) at a time; a caller arriving while one is in flight joins it
+        * rather than issuing its own describeGroups/committedOffsets/endOffsets/beginningOffsets round trip —
+        * the same coalescing `SnapshotCell.refresh` gives the list page, mirrored here per group.
+        */
+      private def describeCoalesced(
+          cluster: ClusterId,
+          group: GroupId
+      ): F[Either[KuiError, Map[GroupId, ConsumerGroup]]] =
+        Async[F].uncancelable { poll =>
+          Deferred[F, Either[KuiError, Map[GroupId, ConsumerGroup]]].flatMap { gate =>
+            val key = (cluster, group)
+            inFlight
+              .modify { running =>
+                running.get(key) match {
+                  case Some(existing) => (running, Left(existing))
+                  case None => (running.updated(key, gate), Right(gate))
+                }
+              }
+              .flatMap {
+                // Somebody else is already describing this group: wait for *their* result. `poll` keeps
+                // the wait itself cancellable, so a caller that gives up does not pin its fiber.
+                case Left(existing) => poll(existing.get)
+                case Right(mine) =>
+                  Async[F].guaranteeCase(poll(admin(cluster).describe(List(group)))) { outcome =>
+                    // The slot is released and the waiters are woken on every path, cancellation
+                    // included, so a cancelled describe never leaves a joiner blocked forever.
+                    inFlight.update(_ - key) >> (outcome match {
+                      case Outcome.Succeeded(result) => result.flatMap(mine.complete).void
+                      case Outcome.Errored(_) | Outcome.Canceled() =>
+                        mine.complete(kui.kernel.error.InfrastructureError.Upstream("kafka", 502).asLeft).void
+                    })
+                  }
+              }
+          }
         }
 
       /** The rebalance rule (DC-H10).

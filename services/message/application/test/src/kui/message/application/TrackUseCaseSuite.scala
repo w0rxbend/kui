@@ -13,7 +13,15 @@ import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.serde.{PayloadKind, SerdeName, SerdeUse, Target}
 import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import kui.message.domain.ports.{BrowseCluster, ClusterProfileSource, SerdeChoice, SerdeSource}
-import kui.message.domain.{Decoded, MatchOperator, MatchSource, TimestampType, TrackMatch, TrackQuery}
+import kui.message.domain.{
+  BrowseRequest,
+  Decoded,
+  MatchOperator,
+  MatchSource,
+  TimestampType,
+  TrackMatch,
+  TrackQuery
+}
 import kui.testkit.KuiIOSuite
 
 /** What a track promises: it reads the topics it was told to, it stops where it was told to, and it says how
@@ -90,7 +98,13 @@ final class TrackUseCaseSuite extends KuiIOSuite {
     * apart from a track that read one of them twice.
     */
   private def sourceOf(logs: Map[TopicName, List[RawRecord]]): RecordSource[IO] =
-    (request, _) => Stream.emits(logs.getOrElse(request.topic, Nil).map(_.asRight[KuiError]))
+    new RecordSource[IO] {
+      def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
+        Stream.emits(logs.getOrElse(request.topic, Nil).map(_.asRight[KuiError]))
+
+      def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+        IO.pure(Right(Map.empty))
+    }
 
   private def queryOver(
       topics: List[TopicName],

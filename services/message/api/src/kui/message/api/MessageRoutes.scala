@@ -138,7 +138,7 @@ object MessageRoutes {
           .asLeft[BrowseRequest]
           .pure[F]
       case Some(cursor) =>
-        browse.resume(params.cluster, params.topic, cursor, params.stringFilter, limits)
+        browse.resume(params.cluster, params.topic, cursor, params.stringFilter, limits, params.filterSource)
     }
 
   private def requestOf(
