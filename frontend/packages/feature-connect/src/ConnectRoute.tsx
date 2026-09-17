@@ -127,37 +127,83 @@ export function ConnectScreen(props: ConnectScreenProps): JSX.Element {
       action: operateAction(connector),
     });
 
-  const [pending, setPending] = createSignal<
-    { readonly subject: string; readonly command: ConnectorCommand } | undefined
-  >(undefined);
-  const [failure, setFailure] = createSignal<
-    { readonly subject: string; readonly message: string } | undefined
-  >(undefined);
+  /*
+   * Maps, keyed by `connectorLabel`, and not a single slot: commands against different connectors
+   * run concurrently (see `mutationFor` below), so a single `{subject, ...}` pair let a command
+   * against connector B clear connector A's still-genuinely-in-flight busy indicator the instant B
+   * started, and let B's failure banner wipe A's the instant B's own command was issued — neither
+   * of which is a fact about A. Keying by subject makes each connector's indicator and banner
+   * exactly as independent as its mutation already is.
+   */
+  const [pending, setPending] = createSignal<ReadonlyMap<string, ConnectorCommand>>(new Map());
+  const [failure, setFailure] = createSignal<ReadonlyMap<string, string>>(new Map());
 
-  const run = createMutation(
-    (request: { readonly connector: Connector; readonly which: ConnectorCommand }) =>
-      command(
-        kui.api,
-        props.clusterId,
-        { connect: request.connector.connect, name: request.connector.name },
-        request.which,
-      ),
-  );
+  /**
+   * One mutation per connector, keyed by its label.
+   *
+   * A single shared mutation's re-entrancy guard is per-*call*, not per-connector, so a command
+   * against connector B while connector A's was still outstanding would be reported as `running`
+   * and dropped — a collision entirely inside KUI, not a refusal from Connect. Keying the guard by
+   * `connectorLabel` lets concurrent commands against different connectors proceed independently;
+   * the guard still catches a second click on the *same* connector's own button.
+   */
+  const mutations = new Map<
+    string,
+    ReturnType<
+      typeof createMutation<
+        [{ readonly connector: Connector; readonly which: ConnectorCommand }],
+        void
+      >
+    >
+  >();
+
+  const mutationFor = (
+    subject: string,
+  ): ReturnType<
+    typeof createMutation<[{ readonly connector: Connector; readonly which: ConnectorCommand }], void>
+  > => {
+    const existing = mutations.get(subject);
+    if (existing !== undefined) return existing;
+    const created = createMutation(
+      (request: { readonly connector: Connector; readonly which: ConnectorCommand }) =>
+        command(
+          kui.api,
+          props.clusterId,
+          { connect: request.connector.connect, name: request.connector.name },
+          request.which,
+        ),
+    );
+    mutations.set(subject, created);
+    return created;
+  };
 
   const onCommand = (connector: Connector, which: ConnectorCommand): void => {
     const subject = connectorLabel(connector);
-    setPending({ subject, command: which });
-    setFailure(undefined);
-    void run.run({ connector, which }).then((outcome) => {
-      setPending(undefined);
-      if (outcome.kind === "done") {
-        connectors.reload();
-        return;
-      }
-      /* The server's own sentence, beside the connector it refused. Never "something
-         went wrong". */
-      setFailure({ subject, message: sentenceOf(outcome) });
+    setPending((current) => new Map(current).set(subject, which));
+    // Only this connector's own prior failure is cleared by a fresh attempt — another
+    // connector's banner describes an outcome nobody just retried.
+    setFailure((current) => {
+      if (!current.has(subject)) return current;
+      const next = new Map(current);
+      next.delete(subject);
+      return next;
     });
+    void mutationFor(subject)
+      .run({ connector, which })
+      .then((outcome) => {
+        setPending((current) => {
+          const next = new Map(current);
+          next.delete(subject);
+          return next;
+        });
+        if (outcome.kind === "done") {
+          connectors.reload();
+          return;
+        }
+        /* The server's own sentence, beside the connector it refused. Never "something
+           went wrong". */
+        setFailure((current) => new Map(current).set(subject, sentenceOf(outcome)));
+      });
   };
 
   return (
@@ -185,12 +231,18 @@ export function ConnectScreen(props: ConnectScreenProps): JSX.Element {
 /**
  * The failure sentence for a command that did not happen, in the words whoever refused it used.
  *
- * `forbidden` and `failed` both carry one and neither is paraphrased. The remaining arms cannot be
- * reached from a settled `run()` and answer a sentence rather than an empty string, because an
- * empty one renders as a blank red block that says the product knows and will not tell.
+ * `forbidden` and `failed` both carry one and neither is paraphrased. `running` *can* reach here —
+ * a second click on the same connector's own button, still guarded by its own mutation — and gets
+ * its own sentence rather than being told the Connect cluster refused it, which it never saw. The
+ * remaining arm (`idle`) cannot be reached from a settled `run()` and answers a sentence rather
+ * than an empty string, because an empty one renders as a blank red block that says the product
+ * knows and will not tell.
  */
 function sentenceOf(outcome: Mutation<void>): string {
   if (outcome.kind === "failed" || outcome.kind === "forbidden") return outcome.message;
+  if (outcome.kind === "running") {
+    return "KUI is still waiting on this connector's last command to finish.";
+  }
   return "The Connect cluster did not accept that, and did not say why.";
 }
 

@@ -59,7 +59,7 @@
  * vanished with the data would remove the only way out of an empty window.
  */
 
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
 import {
@@ -126,12 +126,15 @@ export interface ThroughputCardProps {
 }
 
 export function ThroughputCard(props: ThroughputCardProps): JSX.Element {
-  const chart = (): ThroughputChart | undefined => {
+  /* A memo, not a bare accessor: the fold labels every bucket through `Intl`, the card reads it
+     from the legend, the caption and the plot, and 288 buckets recomputed three times is the whole
+     cost of this card paid three times over. */
+  const chart = createMemo<ThroughputChart | undefined>(() => {
     const state = props.state;
     return state.kind === "ready" || state.kind === "stale"
       ? throughputChart(state.value, props.range)
       : undefined;
-  };
+  });
 
   return (
     <Card

@@ -214,6 +214,16 @@ export function KsqlScreen(props: KsqlScreenProps): JSX.Element {
     runStatement(kui.api, props.clusterId, confirmed),
   );
 
+  /* Which `plan.run()`/`apply.run()` invocation is still allowed to touch the signals when it
+     settles. `onCancel`, `onClear` and a fresh `onRun` all bump this, so a promise from a
+     statement the reader already cancelled or cleared finds itself superseded and leaves the
+     region alone — the same guard `useQuery` already applies to a stale fetch. */
+  let generation = 0;
+  const nextGeneration = (): number => {
+    generation += 1;
+    return generation;
+  };
+
   const failWith = (outcome: {
     readonly kind: string;
     readonly message?: string;
@@ -226,7 +236,9 @@ export function KsqlScreen(props: KsqlScreenProps): JSX.Element {
     stopStream();
     setConfirming(undefined);
     setRegion({ kind: "running" });
+    const gen = nextGeneration();
     void plan.run(sql()).then((outcome) => {
+      if (gen !== generation) return;
       if (outcome.kind !== "done") {
         failWith(outcome);
         return;
@@ -246,13 +258,14 @@ export function KsqlScreen(props: KsqlScreenProps): JSX.Element {
         setConfirming(planned);
         return;
       }
-      applyNow(planned);
+      applyNow(planned, gen);
     });
   };
 
-  const applyNow = (planned: StatementPlan): void => {
+  const applyNow = (planned: StatementPlan, gen: number = nextGeneration()): void => {
     setRegion({ kind: "running" });
     void apply.run(planned).then((outcome) => {
+      if (gen !== generation) return;
       setConfirming(undefined);
       if (outcome.kind !== "done") {
         failWith(outcome);
@@ -279,11 +292,15 @@ export function KsqlScreen(props: KsqlScreenProps): JSX.Element {
   };
 
   const onCancel = (): void => {
+    nextGeneration();
     stopStream();
-    setRegion((held) => endLive(held, "you stopped it."));
+    // `endLive` only knows what to do with a live stream's rows; a plan or apply still in flight
+    // has produced nothing to keep, so cancelling it is a return to idle rather than a fake "ended".
+    setRegion((held) => (held.kind === "streaming" ? endLive(held, "you stopped it.") : IDLE));
   };
 
   const onClear = (): void => {
+    nextGeneration();
     stopStream();
     setConfirming(undefined);
     setSql("");
@@ -398,6 +415,7 @@ export function KsqlScreen(props: KsqlScreenProps): JSX.Element {
           if (planned !== undefined) applyNow(planned);
         }}
         onCancel={() => {
+          nextGeneration();
           setConfirming(undefined);
           setRegion(IDLE);
         }}

@@ -138,9 +138,15 @@ export function SearchField(props: SearchFieldProps) {
   const id = createUniqueId();
   const listboxId = `kui-global-search-results-${id}`;
   const [focused, setFocused] = createSignal(false);
+  /* Escape closes the overlay without moving real DOM focus off the input — the standard
+     combobox convention of "close suggestions, keep typing available". Tracking the dismissal
+     here, separately from `focused`, is what lets the next keystroke reopen the panel; blurring
+     the input instead would match `focused` to reality but would also hand keyboard focus away,
+     so there would be nothing left listening for that next keystroke. */
+  const [dismissedByEscape, setDismissedByEscape] = createSignal(false);
 
   const platform = () => props.platform ?? detectPlatform();
-  const open = () => focused() && props.value.length > 0;
+  const open = () => focused() && props.value.length > 0 && !dismissedByEscape();
   const status = () => props.status ?? "idle";
 
   return (
@@ -172,14 +178,20 @@ export function SearchField(props: SearchFieldProps) {
           aria-expanded={open() ? "true" : "false"}
           aria-controls={listboxId}
           aria-autocomplete="list"
-          onInput={(event) => props.onInput(event.currentTarget.value)}
-          onFocus={() => setFocused(true)}
+          onInput={(event) => {
+            setDismissedByEscape(false);
+            props.onInput(event.currentTarget.value);
+          }}
+          onFocus={() => {
+            setFocused(true);
+            setDismissedByEscape(false);
+          }}
           /* Deferred, and by {@link RESULT_CLICK_GRACE_MS} rather than by a frame: the click on a
              result has to be processed before the overlay is removed from under it. Closing on the
              blur is the classic version of this bug. */
           onBlur={() => window.setTimeout(() => setFocused(false), RESULT_CLICK_GRACE_MS)}
           onKeyDown={(event) => {
-            if (event.key === "Escape") setFocused(false);
+            if (event.key === "Escape") setDismissedByEscape(true);
           }}
           data-testid="search-input"
         />

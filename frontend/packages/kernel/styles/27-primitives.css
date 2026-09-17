@@ -434,11 +434,12 @@
   height: var(--kui-control-height-md);
 }
 
-.kui-select__trigger:hover:not(:disabled) {
+.kui-select__trigger:hover:not(:disabled):not([aria-disabled="true"]) {
   background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
 }
 
-.kui-select__trigger:disabled {
+.kui-select__trigger:disabled,
+.kui-select__trigger[aria-disabled="true"] {
   opacity: var(--kui-opacity-disabled);
   cursor: not-allowed;
 }

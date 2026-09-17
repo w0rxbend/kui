@@ -7,7 +7,7 @@
  * dash. A mapping can therefore be wrong in every field and look exactly like a coordinator that
  * did not answer. The clusters feature shipped that bug; these documents are what stop it recurring.
  */
-import { decodeSection, type KuiApiClient } from "@kui/api";
+import { decodeSection, ReasonCodes, ReasonSentences, type KuiApiClient } from "@kui/api";
 import { apiFailure, fromSection, type Fetched } from "@kui/kernel";
 import type { GroupState, GroupSummary } from "./model.js";
 import type { GroupDetail, Member, PartitionOffset } from "./detail.js";
@@ -253,6 +253,21 @@ interface GroupDetailPayload {
   readonly totalLag?: number | null;
   readonly excludedPartitions?: number | null;
   readonly observedAt?: string | null;
+  /**
+   * Present when `observedAt` is older than the snapshot's refresh interval and a refresh has
+   * failed — the picture below is the coordinator's last good answer, not a current one.
+   */
+  readonly stale?: {
+    readonly fetchedAt?: string | null;
+    readonly reason?: string | null;
+  } | null;
+}
+
+/** The wire's `stale.reason` — a `ReasonCode`'s wire spelling — as the sentence shown on screen. */
+function staleSentence(reason: string | null | undefined): string {
+  const known = ReasonSentences as Readonly<Record<string, string | undefined>>;
+  const sentence = typeof reason === "string" ? known[reason] : undefined;
+  return sentence ?? known[ReasonCodes.Unknown] ?? "KUI could not refresh this.";
 }
 
 function toMember(payload: MemberPayload): Member {
@@ -302,26 +317,32 @@ export async function fetchGroup(
       ? new Date()
       : new Date(payload.observedAt);
 
-  return {
-    kind: "ready",
-    value: {
-      groupId: payload.groupId,
-      state: stateOf(payload.state),
-      coordinator: coordinatorAddress(payload.coordinatorHost, payload.coordinatorPort),
-      partitionAssignor: payload.partitionAssignor ?? "",
-      protocol: payload.protocol ?? "UNKNOWN",
-      isSimple: payload.isSimple === true,
-      totalLag: typeof payload.totalLag === "number" ? payload.totalLag : null,
-      /*
-       * Not on this endpoint. `null` says "not measured", which is what the figure means — the
-       * alternative, computing it from two observations the browser happens to hold, would produce a
-       * rate that changes with how often somebody reloaded the page.
-       */
-      pace: null,
-      members: (payload.members ?? []).map(toMember),
-      offsets: toOffsets(payload.topics ?? []),
-      excludedPartitions: payload.excludedPartitions ?? 0,
-      observedAt,
-    },
+  const value: GroupDetail = {
+    groupId: payload.groupId,
+    state: stateOf(payload.state),
+    coordinator: coordinatorAddress(payload.coordinatorHost, payload.coordinatorPort),
+    partitionAssignor: payload.partitionAssignor ?? "",
+    protocol: payload.protocol ?? "UNKNOWN",
+    isSimple: payload.isSimple === true,
+    totalLag: typeof payload.totalLag === "number" ? payload.totalLag : null,
+    /*
+     * Not on this endpoint. `null` says "not measured", which is what the figure means — the
+     * alternative, computing it from two observations the browser happens to hold, would produce a
+     * rate that changes with how often somebody reloaded the page.
+     */
+    pace: null,
+    members: (payload.members ?? []).map(toMember),
+    offsets: toOffsets(payload.topics ?? []),
+    excludedPartitions: payload.excludedPartitions ?? 0,
+    observedAt,
   };
+
+  // `stale` beside the data, not a status on it (this endpoint is not a Section): present when the
+  // coordinator did not answer in time and this snapshot is the last good one KUI has. Reported
+  // through `Fetched`'s own `stale` kind — the vocabulary `fromSection` already gives the list — so
+  // the reason travels with the value instead of being read onto `GroupDetail` and then forgotten.
+  if (payload.stale === null || payload.stale === undefined) {
+    return { kind: "ready", value };
+  }
+  return { kind: "stale", value, reason: staleSentence(payload.stale.reason) };
 }

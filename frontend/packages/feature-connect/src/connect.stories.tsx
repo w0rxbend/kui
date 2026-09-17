@@ -198,7 +198,7 @@ export const CommandInFlight: Story = {
       state={ready(responseDocument)}
       refusalFor={permitted}
       onCommand={noop}
-      pending={{ subject: "payments/orders-source", command: "restart" }}
+      pending={new Map([["payments/orders-source", "restart"]])}
     />
   ),
 };
@@ -210,10 +210,11 @@ export const CommandRefused: Story = {
       state={ready(responseDocument)}
       refusalFor={permitted}
       onCommand={noop}
-      failure={{
-        subject: "payments/orders-source",
-        message: "The Kafka Connect cluster is rebalancing and cannot answer yet.",
-      }}
+      failure={
+        new Map([
+          ["payments/orders-source", "The Kafka Connect cluster is rebalancing and cannot answer yet."],
+        ])
+      }
     />
   ),
 };

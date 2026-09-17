@@ -77,8 +77,8 @@ export default function Messages(): JSX.Element {
     <Show when={params.clusterId} fallback={<NoSubject what="cluster" />}>
       {(clusterId) => (
         <Show when={!tracking()} fallback={<TrackScreen clusterId={clusterId()} />}>
-          <Show when={params.topicName} fallback={<NoSubject what="topic" />}>
-            {(topicName) => <BrowserScreen clusterId={clusterId()} topicName={topicName()} />}
+          <Show when={params.topicName} fallback={<NoSubject what="topic" />} keyed>
+            {(topicName) => <BrowserScreen clusterId={clusterId()} topicName={topicName} />}
           </Show>
         </Show>
       )}
@@ -131,9 +131,11 @@ function BrowserScreen(props: {
     transport: createBrowseTransport(),
   });
 
+  let disposed = false;
   onCleanup(() => {
     // Closes the stream, which aborts the request, which releases the consumer. The single most
     // important line in this file.
+    disposed = true;
     session.stop();
   });
 
@@ -302,8 +304,13 @@ function BrowserScreen(props: {
       return;
     }
     void prepare.run(source).then((state) => {
+      if (disposed) return;
       if (state.kind === "done") {
-        session.start({ ...asked, filterId: state.value.id, filterSource: state.value.source });
+        session.start({
+          ...currentQuery(),
+          filterId: state.value.id,
+          filterSource: state.value.source,
+        });
         return;
       }
       /* `running` is the re-entry guard answering a second press while the first is still out, and
@@ -471,6 +478,7 @@ function BrowserScreen(props: {
         applyState={compile.state()}
         onApply={(source) => {
           void compile.run(source).then((state) => {
+            if (disposed) return;
             /* Only a filter the server compiled reaches the browse — and the id travels with the
                source it was minted from, because a replica that has never seen this id compiles the
                source rather than refusing a filter registered a second ago on its neighbour. */

@@ -25,6 +25,7 @@
 import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import {
+  Banner,
   Button,
   Card,
   DataTable,
@@ -62,6 +63,12 @@ export interface GroupDetailProps {
   readonly onForgetOffsets?: ((topic: string) => void) | undefined;
   /** Why forgetting is not offered, when it is not. */
   readonly forgetRefusal?: string | undefined;
+  /**
+   * The coordinator didn't answer in time, and what's on screen is the last snapshot KUI held.
+   * Absent means the figures below are fresh. The reason is the same sentence a stale `Section`
+   * carries elsewhere in the product — see `@kui/kernel`'s `Fetched` and `fromSection`.
+   */
+  readonly stale?: string | undefined;
 }
 
 export function GroupDetail(props: GroupDetailProps): JSX.Element {
@@ -109,6 +116,10 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
         }
         testId="consumer-group-head"
       />
+
+      <Show when={props.stale}>
+        {(reason) => <Banner tone="warning" message={reason()} testId="group-detail-stale" />}
+      </Show>
 
       <Facts group={props.group} />
 

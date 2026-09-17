@@ -287,6 +287,21 @@
 
 /* --- Notifications ------------------------------------------------------------------------------ */
 
+.kui-topbar__bell-anchor {
+  position: relative;
+  display: flex;
+}
+
+/* Below the glyph and hard against the right edge of the band, same placement contract as
+ * `.kui-topbar__appearance-panel` in 34-chrome-topbar.css: scrim-less, so `--kui-z-dropdown` and
+ * not `--kui-z-dialog`, and anchored rather than portalled so it stays under the bell on resize. */
+.kui-topbar__bell-panel {
+  position: absolute;
+  top: calc(100% + var(--kui-space-2));
+  right: 0;
+  z-index: var(--kui-z-dropdown);
+}
+
 .kui-bell {
   display: inline-flex;
   align-items: center;

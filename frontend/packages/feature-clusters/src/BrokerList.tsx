@@ -38,6 +38,7 @@ import {
   type TileFigure,
 } from "@kui/kernel";
 import { BrokerCard, type BrokerConfig } from "./BrokerCard.js";
+import { BrokerTopology } from "./BrokerTopology.js";
 import { clusterVoice, partitionSkew, summariseDisk, voiceOf, type Broker, type ClusterDisk } from "./model.js";
 
 /** A tile's qualifying chip. Named above the component because each tile chooses one per figure. */
@@ -278,6 +279,8 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
             </Show>
           }
         >
+          <BrokerTopology brokers={props.brokers} hrefFor={props.hrefFor} />
+
           <div class="kui-brk-cards">
             <For each={props.brokers}>
               {(broker) => (

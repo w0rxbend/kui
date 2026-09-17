@@ -21,7 +21,7 @@
  * connection died. An error panel that replaced them would delete evidence in order to show an
  * error message.
  */
-import { Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Banner, DataTable, EmptyState, type Column } from "@kui/kernel";
 
@@ -39,6 +39,54 @@ interface NumberedRow {
 }
 
 export function KsqlResult(props: KsqlResultProps): JSX.Element {
+  /**
+   * The table's columns, memoized against the region's `columns` list and a running maximum row
+   * width instead of the row array itself.
+   *
+   * A live push query replaces `rows` on every frame it appends (up to 500 times), and `columns`
+   * scanning `rows.map((row) => row.length)` on every one of those turns an O(1) append into an
+   * O(rows) rescan of everything already on screen. The column list the `phase` frame declared is
+   * set once and then reused by reference for the rest of the query (see `withColumns` and
+   * `appendRow` in `model.ts`), and a row that arrives after it never gets *narrower* — so the
+   * width only needs the newest row, which the model always keeps at the end of `rows` regardless
+   * of the 500-row window sliding underneath it. When neither the columns nor that running width
+   * has actually changed, the previous `Column[]` is returned by reference rather than rebuilt, so
+   * `DataTable`'s unkeyed `<For each={props.columns}>` does not tear down and recreate every header
+   * and every cell in the table on a row that changed nothing about its shape.
+   */
+  interface ColumnsCache {
+    readonly columns: readonly string[];
+    readonly rows: readonly KsqlRow[];
+    readonly width: number;
+    readonly built: readonly Column<NumberedRow>[];
+  }
+  let columnsCache: ColumnsCache | undefined;
+
+  const columns = createMemo<readonly Column<NumberedRow>[]>(() => {
+    const held = rowsOf(props.region);
+    if (held === undefined) {
+      columnsCache = undefined;
+      return [];
+    }
+    const cache = columnsCache;
+    if (cache === undefined || cache.columns !== held.columns) {
+      const width = widthOf(held.columns, held.rows);
+      const built = columnsOf(held.columns, width);
+      columnsCache = { columns: held.columns, rows: held.rows, width, built };
+      return built;
+    }
+    if (cache.rows === held.rows) return cache.built;
+    const last = held.rows.length > 0 ? held.rows[held.rows.length - 1] : undefined;
+    const width = Math.max(cache.width, last === undefined ? 0 : last.length);
+    if (width === cache.width) {
+      columnsCache = { ...cache, rows: held.rows };
+      return cache.built;
+    }
+    const built = columnsOf(held.columns, width);
+    columnsCache = { columns: held.columns, rows: held.rows, width, built };
+    return built;
+  });
+
   return (
     <div class="kui-ksql-result" data-testid="ksql-result" data-kind={props.region.kind}>
       <Show when={props.region.kind === "running"}>
@@ -120,7 +168,7 @@ export function KsqlResult(props: KsqlResultProps): JSX.Element {
               <div class="kui-ksql-result__table">
                 <DataTable<NumberedRow>
                   caption="Query result"
-                  columns={columnsOf(held().columns, held().rows)}
+                  columns={columns()}
                   rows={held().rows.map((cells, index) => ({ index, cells }))}
                   rowKey={(row) => String(row.index)}
                   testId="ksql-result-rows"
@@ -149,6 +197,11 @@ function rowsOf(
   }
 }
 
+/** How many columns the table needs: the declared list, or the widest row seen, whichever is more. */
+function widthOf(columns: readonly string[], rows: readonly KsqlRow[]): number {
+  return Math.max(columns.length, ...rows.map((row) => row.length), 0);
+}
+
 /**
  * The table's columns, from the column list the answer declared.
  *
@@ -157,11 +210,7 @@ function rowsOf(
  * with positional headings rather than cut off. Narrowing the table to the heading list would hide
  * a real disagreement by throwing data away, and this screen's whole job is to show what came back.
  */
-function columnsOf(
-  columns: readonly string[],
-  rows: readonly KsqlRow[],
-): readonly Column<NumberedRow>[] {
-  const width = Math.max(columns.length, ...rows.map((row) => row.length), 0);
+function columnsOf(columns: readonly string[], width: number): readonly Column<NumberedRow>[] {
   return Array.from({ length: width }, (_unused, index) => ({
     id: `column-${index}`,
     header: columns[index] ?? `Column ${index + 1}`,

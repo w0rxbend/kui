@@ -259,6 +259,83 @@
   gap: var(--kui-space-3);
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * The topology: one lane per rack, one node per broker. See BrokerTopology.tsx.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-brk-topology {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  margin-bottom: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+.kui-brk-topology__lane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-brk-topology__rack {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brk-topology__nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-3);
+}
+
+.kui-brk-topology__node {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+.kui-brk-topology__node:hover {
+  background-color: var(--kui-color-surface-hover);
+}
+
+.kui-brk-topology__id {
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-brk-topology__health {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brk-topology__health[data-tone="danger"] {
+  color: var(--kui-color-danger);
+}
+
+.kui-brk-topology__health[data-tone="warning"] {
+  color: var(--kui-color-warning);
+}
+
+.kui-brk-topology__health[data-tone="success"] {
+  color: var(--kui-color-success);
+}
+
+.kui-brk-topology__health[data-tone="accent"] {
+  color: var(--kui-color-accent);
+}
+
 .kui-brkcard {
   border: var(--kui-card-border);
   border-radius: var(--kui-radius-lg);

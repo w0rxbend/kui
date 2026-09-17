@@ -17,18 +17,21 @@
  * The message browser hangs off a topic but belongs to `feature-messages`, which is why
  * `/topics/:topicName/messages` is not here.
  */
-import { Show, createEffect, createMemo, createSignal } from "solid-js";
+import { Match, Show, Switch, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Actions, userMessage, type ApiResult } from "@kui/api";
-import { useLocation, useParams } from "@solidjs/router";
+import { useLocation, useNavigate, useParams } from "@solidjs/router";
 import {
   Breadcrumbs,
+  Button,
   ConfirmDialog,
+  EmptyState,
   TabStrip,
   createMutation,
   createQueryRegistry,
   formatCount,
   notify,
+  sharedQueries,
   useKui,
   useQuery,
   valueOf,
@@ -230,6 +233,73 @@ function tabFailure<T>(
 }
 
 /**
+ * What the topic list itself shows in place of the table when the request that fills it did not
+ * come back — never the generic "No topics yet" empty state, which reads a fetch failure as a
+ * cluster with zero topics.
+ */
+function TopicsListFailure(props: {
+  readonly failure: NonNullable<ReturnType<typeof tabFailure>>;
+}): JSX.Element {
+  return (
+    <section class="kui-topic-list" aria-label="Topics">
+      <Switch>
+        <Match when={props.failure.kind === "unavailable" ? props.failure : undefined}>
+          {(reason) => (
+            <EmptyState
+              kind="unavailable"
+              title="The topic list did not come back."
+              description={reason().message}
+              code={(reason() as { readonly code: string }).code}
+              action={
+                <Button
+                  variant="secondary"
+                  icon="refresh"
+                  onClick={() => (reason() as { readonly onRetry: () => void }).onRetry()}
+                >
+                  Try again
+                </Button>
+              }
+            />
+          )}
+        </Match>
+
+        <Match when={props.failure.kind === "forbidden" ? props.failure : undefined}>
+          {(reason) => (
+            <EmptyState
+              kind="forbidden"
+              title="You may not list topics on this cluster."
+              description={reason().message}
+              code={(reason() as { readonly code: string }).code}
+            />
+          )}
+        </Match>
+
+        <Match when={props.failure.kind === "not-configured" ? props.failure : undefined}>
+          {(reason) => (
+            <EmptyState
+              kind="empty"
+              title="Topics are not reported on this deployment."
+              description={reason().message}
+            />
+          )}
+        </Match>
+      </Switch>
+    </section>
+  );
+}
+
+/**
+ * The key `TopicsScreen`'s cluster-wide statistics query is bound under.
+ *
+ * Named apart so `TopicScreen` — the single-topic page, which holds no `useQuery` for this document
+ * itself — can invalidate the same entry on `sharedQueries` after a mutation that changes it, without
+ * the two screens' key strings drifting apart.
+ */
+function topicStatisticsKey(clusterId: string): string {
+  return `topic-statistics|${clusterId}`;
+}
+
+/**
  * The screen's query, as the topics endpoint takes it.
  *
  * `showInternal` comes out of the facet chip rather than out of a checkbox of its own, and that is
@@ -341,6 +411,7 @@ export async function pollUntilListed(reload: () => void, listed: () => boolean)
 
 function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
   const kui = useKui();
+  const navigate = useNavigate();
 
   /*
    * Seeded from the address, not from the default.
@@ -378,7 +449,7 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
    * cannot change because of it.
    */
   const statistics = useQuery<TopicStatistics>({
-    key: () => `topic-statistics|${props.clusterId}`,
+    key: () => topicStatisticsKey(props.clusterId),
     load: () => fetchTopicStatistics(kui.api, props.clusterId),
   });
 
@@ -399,6 +470,13 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
       incomplete: 0,
       page: { page: 1, pageSize: 0, totalItems: undefined },
     });
+
+  /**
+   * Why the list is empty, when the reason is that the request itself failed rather than that the
+   * cluster genuinely has no topics. `undefined` for `loading`, `ready` and `stale` — a stale table
+   * still draws its rows, per `tabFailure`'s own doc.
+   */
+  const listFailure = () => tabFailure(state(), reload);
 
   /** The statistics document, or nothing. `loading`, `failed` and every refusal are all "nothing". */
   const totals = (): TopicStatistics | undefined => {
@@ -542,45 +620,53 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
 
   return (
     <>
-      <TopicListPage
-        topics={result().topics}
-        loading={state().kind === "loading"}
-        incomplete={result().incomplete}
-        query={query()}
-        onQueryChange={changeQuery}
-        totalItems={result().page.totalItems}
-        /* Two documents, one sentence: the match count is the server's answer to the *current*
-           search and the two totals are the cluster's, from a document that does not move when the
-           search box does. Neither component below holds both, which is why the line is composed
-           here — see `topicsVoice`. */
-        voice={topicsVoice(result().page.totalItems, totals()?.topics, totals()?.partitions)}
-        statistics={
-          <TopicStatisticsRegion
-            statistics={totals()}
-            loading={statistics.state().kind === "loading"}
-            {...(statistics.state().kind === "failed"
-              ? {
-                  unavailableReason:
-                    "KUI could not read this cluster's topic totals. The list below is still this cluster's.",
-                }
-              : {})}
+      <Show
+        when={listFailure()}
+        fallback={
+          <TopicListPage
+            topics={result().topics}
+            loading={state().kind === "loading"}
+            incomplete={result().incomplete}
+            query={query()}
+            onQueryChange={changeQuery}
+            totalItems={result().page.totalItems}
+            /* Two documents, one sentence: the match count is the server's answer to the *current*
+               search and the two totals are the cluster's, from a document that does not move when
+               the search box does. Neither component below holds both, which is why the line is
+               composed here — see `topicsVoice`. */
+            voice={topicsVoice(result().page.totalItems, totals()?.topics, totals()?.partitions)}
+            statistics={
+              <TopicStatisticsRegion
+                statistics={totals()}
+                loading={statistics.state().kind === "loading"}
+                {...(statistics.state().kind === "failed"
+                  ? {
+                      unavailableReason:
+                        "KUI could not read this cluster's topic totals. The list below is still this cluster's.",
+                    }
+                  : {})}
+              />
+            }
+            selected={selected()}
+            onSelectionChange={setSelected}
+            bulkActions={bulkActions()}
+            onExport={() => exportRows(result().topics)}
+            onOpen={(topic) => {
+              navigate(kui.paths.topic(props.clusterId, topic.name), { resolve: false });
+            }}
+            onCreate={() => {
+              // Any failure from a previous attempt goes with the dialog that showed it. Reopening
+              // to find last time's error still on screen reads as this attempt having already
+              // failed.
+              create.reset();
+              setCreating(true);
+            }}
+            createDisabledReason={createBlocked()}
           />
         }
-        selected={selected()}
-        onSelectionChange={setSelected}
-        bulkActions={bulkActions()}
-        onExport={() => exportRows(result().topics)}
-        onOpen={(topic) => {
-          window.location.assign(kui.paths.topic(props.clusterId, topic.name));
-        }}
-        onCreate={() => {
-          // Any failure from a previous attempt goes with the dialog that showed it. Reopening to
-          // find last time's error still on screen reads as this attempt having already failed.
-          create.reset();
-          setCreating(true);
-        }}
-        createDisabledReason={createBlocked()}
-      />
+      >
+        {(failure) => <TopicsListFailure failure={failure()} />}
+      </Show>
 
       <ConfirmDialog
         open={bulk() !== undefined}
@@ -616,6 +702,7 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
               tone: outcome.value.failed.length === 0 ? "success" : "warning",
             });
             reload();
+            statistics.reload();
           });
         }}
         testId="topic-bulk-confirm"
@@ -637,6 +724,7 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
               message: "It may take a moment to appear in the list below.",
             });
             void settleAfterCreate(topic.name);
+            statistics.reload();
           });
         }}
       />
@@ -649,6 +737,7 @@ function TopicScreen(props: {
   readonly topicName: string;
 }): JSX.Element {
   const kui = useKui();
+  const navigate = useNavigate();
   const overviewQuery = useQuery<TopicOverview>({
     key: () => `topic-overview|${props.clusterId}|${props.topicName}`,
     load: () => fetchTopicOverview(kui.api, props.clusterId, props.topicName),
@@ -809,7 +898,9 @@ function TopicScreen(props: {
         onProduce={{
           label: "Produce message",
           onClick: () => {
-            window.location.assign(kui.paths.topicMessages(props.clusterId, props.topicName));
+            navigate(kui.paths.topicMessages(props.clusterId, props.topicName), {
+              resolve: false,
+            });
           },
         }}
         onPurge={{
@@ -970,6 +1061,9 @@ function TopicScreen(props: {
             });
             // The record counts and sizes on this page are now wrong by exactly what was deleted.
             reload();
+            // The cluster-wide totals the list screen shows are wrong by the same amount, on a
+            // query this page holds no handle to — see `topicStatisticsKey`.
+            sharedQueries.invalidate(topicStatisticsKey(props.clusterId));
           });
         }}
       />
@@ -1059,7 +1153,7 @@ function TopicScreen(props: {
              listing for a moment — so the list may still show it. That is not a failure and the
              screen says nothing about it; complaining would be this product reporting Kafka's
              ordinary behaviour as a fault. */
-            window.location.assign(kui.paths.topics(props.clusterId));
+            navigate(kui.paths.topics(props.clusterId), { resolve: false });
           });
         }}
       />

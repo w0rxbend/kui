@@ -114,7 +114,11 @@ describe("the route table", () => {
 
     const atRoot = createShellRouter("", views);
     expect(atRoot.paths()).toBe("/ui");
-    expect(landingFor(atRoot, "clusters", undefined)).toBe("/ui/clusters");
+    // `clusters` now lands on the chosen cluster's own brokers rather than the cross-cluster
+    // registry, so it has nowhere to point until a cluster is chosen — same rule as every other
+    // cluster-scoped entry.
+    expect(landingFor(atRoot, "clusters", undefined)).toBeUndefined();
+    expect(landingFor(atRoot, "clusters", "prod")).toBe("/ui/clusters/prod/brokers");
     expect(landingFor(atRoot, "topics", "prod")).toBe("/ui/clusters/prod/topics");
 
     const behindProxy = createShellRouter("/kui", views);

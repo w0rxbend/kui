@@ -102,7 +102,6 @@
  * shell ones: the two sets style different class names (`.kui-brokers-*` and `.kui-brk-*`) and the
  * pre-migration order above is preserved on purpose. */
 @import "../../feature-clusters/styles/42-cluster-screens.css";
-@import "../../feature-consumers/styles/70-consumers.css";
 /* The SolidJS consumer-group screens (ADR-048): the list, the detail and the offset-reset wizard.
  * Its class names are prefixed `.kui-cg-` so that nothing here restyles the Laminar screens above,
  * which keep the appearance they were reviewed with until they are retired. */

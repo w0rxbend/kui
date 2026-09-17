@@ -76,10 +76,16 @@
 
   padding: 0 var(--kui-page-gutter) var(--kui-space-6);
 
-  /* A focus ring on the content region itself would be drawn around the whole page every time a
-   * route change moved focus here, which looks like a rendering fault. The region is focusable for
-   * screen-reader and keyboard navigation, not to be highlighted. */
+  /* A plain `:focus` ring on the content region would be drawn around the whole page every time a
+   * route change moved focus here programmatically, which looks like a rendering fault. `:focus-visible`
+   * is the browser's own judgement of when a person is navigating by keyboard, so a Tab press still
+   * draws the ring while a route change's `.focus()` call does not. */
   outline: none;
+}
+
+.kui-frame__content:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
 }
 
 /* --- Narrow windows (SPEC §7.5) ----------------------------------------------------------------

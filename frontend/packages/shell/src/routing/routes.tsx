@@ -224,7 +224,9 @@ export function landingFor(
   const paths = router.paths;
   switch (feature) {
     case "clusters":
-      return paths.clusters();
+      // The sidebar entry now lands on the chosen cluster's own brokers, not the cross-cluster
+      // registry — see the comment on the "clusters" registration in `features/registry.ts`.
+      return cluster === undefined ? undefined : paths.clusters(cluster).brokers();
     case "topics":
       return cluster === undefined ? undefined : paths.clusters(cluster).topics();
     case "consumers":

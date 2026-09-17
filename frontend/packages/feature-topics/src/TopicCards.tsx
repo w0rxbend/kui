@@ -27,7 +27,7 @@
  * measured. A topic whose size could not be read draws no bar at all rather than an empty one: an
  * empty track and a topic of zero bytes look identical.
  */
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Checkbox, Icon, IconTile, MagnitudeBar, StatusPill, Tag, formatRate } from "@kui/kernel";
 import { healthChip } from "./TopicPage.jsx";
@@ -58,7 +58,7 @@ export function largestSize(topics: readonly TopicRow[]): number | undefined {
 
 export function TopicCards(props: TopicCardsProps): JSX.Element {
   const selected = (): ReadonlySet<string> => props.selected ?? new Set<string>();
-  const largest = () => largestSize(props.topics);
+  const largest = createMemo(() => largestSize(props.topics));
 
   const toggle = (name: string, on: boolean): void => {
     const change = props.onSelectionChange;

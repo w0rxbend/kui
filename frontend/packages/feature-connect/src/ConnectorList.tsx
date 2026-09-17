@@ -47,10 +47,17 @@ export interface ConnectorListProps {
   /** The refusal for this connector's controls, or `undefined` when the principal may use them. */
   readonly refusalFor: (connector: Connector) => string | undefined;
   readonly onCommand?: ((connector: Connector, which: ConnectorCommand) => void) | undefined;
-  /** Which connector has a command in flight, keyed by `connectorLabel`. */
-  readonly pending?: { readonly subject: string; readonly command: ConnectorCommand } | undefined;
-  /** The last command failure, keyed the same way. */
-  readonly failure?: { readonly subject: string; readonly message: string } | undefined;
+  /**
+   * Which connectors have a command in flight, keyed by `connectorLabel`.
+   *
+   * A map and not a single `{subject, command}` pair: commands against different connectors run
+   * concurrently (see `ConnectRoute.tsx`'s `mutationFor`), so more than one can be pending at once,
+   * and a single slot would have one connector's own indicator cleared by another's command
+   * starting or finishing.
+   */
+  readonly pending?: ReadonlyMap<string, ConnectorCommand> | undefined;
+  /** The last command failure per connector, keyed the same way and for the same reason. */
+  readonly failure?: ReadonlyMap<string, string> | undefined;
   readonly onRetry?: (() => void) | undefined;
 }
 
@@ -269,15 +276,9 @@ function codeOf(state: WorkerAnswer): string | undefined {
 }
 
 function pendingFor(props: ConnectorListProps, connector: Connector): ConnectorCommand | undefined {
-  const pending = props.pending;
-  return pending !== undefined && pending.subject === connectorLabel(connector)
-    ? pending.command
-    : undefined;
+  return props.pending?.get(connectorLabel(connector));
 }
 
 function failureFor(props: ConnectorListProps, connector: Connector): string | undefined {
-  const failure = props.failure;
-  return failure !== undefined && failure.subject === connectorLabel(connector)
-    ? failure.message
-    : undefined;
+  return props.failure?.get(connectorLabel(connector));
 }

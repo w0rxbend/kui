@@ -437,41 +437,6 @@ export interface RegisteredSchema {
 }
 
 /**
- * The register call, and the one hand-written wire shape in this package.
- *
- * `POST …/schemas/subjects/{subject}/versions` does not exist in
- * `frontend/packages/api/src/schema.d.ts` yet: it is being added to `services/schema` in this same
- * wave, and the merged document the browser's types are generated from is regenerated afterwards by
- * a different packet. `KuiApiClient.post` is typed by `PathsWithMethod<paths, "post">`, so naming
- * the path directly does not compile until that regeneration lands.
- *
- * So the shape is declared here, at exactly one line, rather than the capability being deferred a
- * wave. **This interface is deleted the moment `schema.d.ts` carries the path** — at which point
- * `api.post("…/versions", …)` type-checks on its own and a field the gateway renames fails `tsc`
- * here again, which is the property the cast is currently suspending. It is deliberately the
- * narrowest thing that works: one path, the two parameters it takes, and the two figures the answer
- * is read for.
- *
- * It is transcribed from `RegisterSchemaRequest` and `RegisteredVersionDto` in
- * `services/schema/contract`, not guessed: the body's `references` defaults to `Nil` on the server
- * and is therefore omitted, `id` is always sent, and `version` genuinely is optional — the
- * registry's own registration response is `{"id": N}` and the version is a second call that can
- * fail after the first has succeeded. Both are read defensively anyway, because a cast is exactly
- * the place where a type stops being evidence.
- */
-interface RegisterWire {
-  readonly post: (
-    path: "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions",
-    init: {
-      readonly params: {
-        readonly path: { readonly clusterId: string; readonly subject: string };
-      };
-      readonly body: { readonly schemaType: string; readonly definition: string };
-    },
-  ) => Promise<ApiResult<{ readonly version?: number | null; readonly id?: number | null }>>;
-}
-
-/**
  * The registry's own words for a refusal, or the failure unchanged.
  *
  * A registry that rejects a schema answers `KUI-VALIDATION` whose envelope message says that the
@@ -509,8 +474,7 @@ export async function registerSchema(
   subject: string,
   proposed: ProposedSchema,
 ): Promise<ApiResult<RegisteredSchema>> {
-  const wire = api as unknown as RegisterWire;
-  const answer = await wire.post(
+  const answer = await api.post(
     "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions",
     {
       params: { path: { clusterId, subject } },

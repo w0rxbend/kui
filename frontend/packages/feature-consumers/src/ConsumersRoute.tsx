@@ -100,6 +100,8 @@ export function GroupsScreen(props: { readonly clusterId: string }): JSX.Element
   const [coordinatorsMissing, setCoordinatorsMissing] = createSignal(0);
   /** The server's account of the page. `null` until an answer has arrived; never a row count. */
   const [total, setTotal] = createSignal<number | null>(null);
+  /** Whether the background lag poll's last attempt reached the cluster. See `pollLag`'s `onHealth`. */
+  const [lagHealthy, setLagHealthy] = createSignal(true);
 
   createEffect(
     () => groups.state(),
@@ -130,15 +132,21 @@ export function GroupsScreen(props: { readonly clusterId: string }): JSX.Element
         // Annotated rather than inferred: `null` and a figure block are the two halves of the
         // contract this callback is holding up, and spelling the type out is what makes the
         // `null` branch below read as a case rather than as a defensive check.
-        (next: readonly GroupSummary[], listing: ListingFigures | null) => {
+        (next: readonly GroupSummary[], listing: ListingFigures | null, removedCount: number) => {
           setRows(() => next);
           // `null` is a merge: the delta named no coordinator count and no total, so the screen
-          // keeps the ones the list request gave it rather than resetting them to zero.
-          if (listing === null) return;
+          // keeps the ones the list request gave it rather than resetting them to zero — except
+          // for the rows the delta itself said were gone, which the server's own total can no
+          // longer be counting either.
+          if (listing === null) {
+            if (removedCount > 0) setTotal((current) => (current === null ? current : current - removedCount));
+            return;
+          }
           setCoordinatorsMissing(listing.coordinatorsMissing);
           setTotal(listing.totalItems);
         },
         current,
+        setLagHealthy,
       );
     },
   );
@@ -195,6 +203,7 @@ export function GroupsScreen(props: { readonly clusterId: string }): JSX.Element
       }}
       loading={groups.state().kind === "loading"}
       failure={failure()}
+      lagUnavailable={!lagHealthy()}
       hrefFor={(groupId) => kui.paths.consumerGroup(props.clusterId, groupId)}
     />
   );

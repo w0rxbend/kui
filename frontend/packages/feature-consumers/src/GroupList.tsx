@@ -44,6 +44,7 @@
 import { Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import {
+  Banner,
   Button,
   Card,
   DataTable,
@@ -106,6 +107,11 @@ export interface GroupListProps {
   /** Where a group's name points. A real URL, so the browser's own gestures work. */
   readonly hrefFor: (groupId: string) => string;
   readonly onOpen?: ((groupId: string) => void) | undefined;
+  /**
+   * The background lag poll has stopped reaching the cluster. The rows on screen are the last
+   * figures it read, not a claim that lag has stopped moving — see `pollLag`'s `onHealth`.
+   */
+  readonly lagUnavailable?: boolean | undefined;
 }
 
 export function GroupList(props: GroupListProps): JSX.Element {
@@ -219,6 +225,14 @@ export function GroupList(props: GroupListProps): JSX.Element {
   return (
     <section class="kui-cg-page" data-testid="consumer-groups">
       <PageHeader title="Consumer groups" voice={voice()} testId="consumer-groups-head" />
+
+      <Show when={props.lagUnavailable === true}>
+        <Banner
+          tone="warning"
+          message="Lag updates are paused — KUI cannot reach the cluster right now. The figures below are the last it read."
+          testId="consumer-groups-lag-paused"
+        />
+      </Show>
 
       {/*
         A failure gets a titled card and the happy path does not, and that asymmetry is deliberate.

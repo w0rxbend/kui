@@ -51,11 +51,15 @@ export const featureRegistry: readonly FeatureRegistration[] = [
     // A cluster is administered through its configuration resource, which is why this is not
     // `Resources.Topic`-style guessable from the service name.
     viewAction: Actions.ClusterConfigView,
-    label: "Clusters",
+    // The sidebar sits inside one chosen cluster's context already (the environment rail and the
+    // brand block above it say which one), so this entry lands on that cluster's own brokers rather
+    // than on the cross-cluster registry list — the registry stays reachable from the "+" in the
+    // brand block and from the cluster-name crumb on the brokers/broker pages.
+    label: "Brokers",
     icon: "brokers",
     group: "Cluster",
     order: 100,
-    requiresCluster: false,
+    requiresCluster: true,
     sidebar: true,
     load: () => import("@kui/feature-clusters").then(featureModule),
   },

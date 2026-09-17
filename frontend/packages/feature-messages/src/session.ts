@@ -172,6 +172,7 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
    * pressing Read. */
   let lastQuery: BrowseQuery | undefined;
   let cursorNow: string | undefined;
+  let arrivedResetQueued = false;
 
   const [rows, setRows] = createSignal<readonly KafkaRecord[]>([], { ownedWrite: true });
   const [progress, setProgress] = createSignal<BrowseProgress>(IDLE, { ownedWrite: true });
@@ -261,8 +262,20 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
              * that had stalled, which is the one thing a pause must not be mistaken for. */
             if (pausedNow) heldList = [event.record, ...heldList].slice(0, MAX_ROWS);
             else rowList = [event.record, ...rowList].slice(0, MAX_ROWS);
-            setProgress((current) => ({ ...current, delivered: current.delivered + 1, phase: undefined }));
+            setProgress((current) => ({
+              ...current,
+              delivered: current.delivered + 1,
+              phase: undefined,
+              failure: current.failure?.kind === "decode" ? undefined : current.failure,
+            }));
             setArrived((current) => new Set(current).add(recordId(event.record)));
+            if (!arrivedResetQueued) {
+              arrivedResetQueued = true;
+              queueMicrotask(() => {
+                arrivedResetQueued = false;
+                setArrived(new Set<string>());
+              });
+            }
             publishRows();
             return;
           }

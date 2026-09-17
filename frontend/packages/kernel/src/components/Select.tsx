@@ -199,8 +199,11 @@ export function Select<T extends string>(props: SelectProps<T>): JSX.Element {
         aria-labelledby={labelId}
         aria-activedescendant={open() && active() >= 0 ? optionId(active()) : undefined}
         aria-describedby={props.disabled === true && props.disabledReason !== undefined ? `${uid}-why` : undefined}
-        disabled={props.disabled === true}
-        onClick={() => (open() ? closeList() : openList())}
+        aria-disabled={props.disabled === true ? "true" : undefined}
+        onClick={() => {
+          if (props.disabled === true) return;
+          open() ? closeList() : openList();
+        }}
         onKeyDown={onKeyDown}
       >
         <Show when={props.prefix}>{(prefix) => <span class="kui-select__prefix">{prefix()}</span>}</Show>

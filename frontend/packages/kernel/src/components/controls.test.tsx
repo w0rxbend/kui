@@ -386,7 +386,7 @@ describe("Select", () => {
       />
     ));
     const trigger = container.querySelector("button")!;
-    expect(trigger.disabled).toBe(true);
+    expect(trigger.getAttribute("aria-disabled")).toBe("true");
     const described = document.getElementById(trigger.getAttribute("aria-describedby")!);
     expect(described?.textContent).toContain("nothing to choose");
   });

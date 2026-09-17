@@ -35,6 +35,7 @@
  * `phase` event.
  */
 import { openFetchStream, type SseConnection, type SseError } from "@kui/kernel";
+import { createEffect, createRoot } from "solid-js";
 import {
   decodeBrowseEvent,
   type BrowseConnection,
@@ -82,13 +83,25 @@ export function createBrowseTransport(options?: {
         },
       );
 
-      // The kernel reports connection state as a signal; the session wants callbacks. Reading it
-      // here rather than exposing the signal keeps the session free of any reactive dependency on
-      // the kernel's streaming module, which is what lets a test replace this whole object.
-      handlers.onConnection(toConnection(handle.connection()));
+      // The kernel reports connection state as a signal; the session wants callbacks on every
+      // transition (connecting -> open -> closed), not a one-off snapshot. `createEffect` re-runs
+      // each time `handle.connection()` changes, and the `createRoot` gives this adapter a `dispose`
+      // it can call from `close()` rather than relying on an ambient owner that may not exist here.
+      const disposeConnectionEffect = createRoot((dispose) => {
+        createEffect(
+          () => handle.connection(),
+          (connection) => {
+            handlers.onConnection(toConnection(connection));
+          },
+        );
+        return dispose;
+      });
 
       return {
-        close: () => handle.close(),
+        close: () => {
+          disposeConnectionEffect();
+          handle.close();
+        },
         endMarker: () => handle.endMarker(),
       };
     },

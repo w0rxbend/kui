@@ -196,8 +196,68 @@ export function MessageFilterBar(props: MessageFilterBarProps): JSX.Element {
   );
 
   let debounce: ReturnType<typeof setTimeout> | undefined;
+
+  /* The upper bounds are typed text too, and committed the same debounced way as the plain filter
+   * box above: `onPredicatesChange` stops a running browse and rewrites the address (see
+   * `FieldPredicateControl` below for the fuller reasoning), so applying it on every digit made
+   * typing a five-digit offset five stops and five address-bar rewrites. */
+  const [untilOffsetText, setUntilOffsetText] = createSignal(
+    untrack(() => props.predicates.untilOffset ?? ""),
+  );
+  let emittedUntilOffset = untrack(() => props.predicates.untilOffset ?? "");
+  let untilOffsetDebounce: ReturnType<typeof setTimeout> | undefined;
+
+  createEffect(
+    () => props.predicates.untilOffset ?? "",
+    (incoming) => {
+      if (incoming !== emittedUntilOffset) {
+        emittedUntilOffset = incoming;
+        setUntilOffsetText(incoming);
+      }
+    },
+  );
+
+  function commitUntilOffset(digits: string): void {
+    if (untilOffsetDebounce !== undefined) {
+      clearTimeout(untilOffsetDebounce);
+      untilOffsetDebounce = undefined;
+    }
+    emittedUntilOffset = digits;
+    props.onPredicatesChange({
+      ...props.predicates,
+      untilOffset: digits === "" ? undefined : digits,
+    });
+  }
+
+  const [untilTimeText, setUntilTimeText] = createSignal(
+    untrack(() => isoLocal(props.predicates.untilTime)),
+  );
+  let emittedUntilTime = untrack(() => isoLocal(props.predicates.untilTime));
+  let untilTimeDebounce: ReturnType<typeof setTimeout> | undefined;
+
+  createEffect(
+    () => isoLocal(props.predicates.untilTime),
+    (incoming) => {
+      if (incoming !== emittedUntilTime) {
+        emittedUntilTime = incoming;
+        setUntilTimeText(incoming);
+      }
+    },
+  );
+
+  function commitUntilTime(raw: string): void {
+    if (untilTimeDebounce !== undefined) {
+      clearTimeout(untilTimeDebounce);
+      untilTimeDebounce = undefined;
+    }
+    emittedUntilTime = raw;
+    props.onPredicatesChange({ ...props.predicates, untilTime: epochOf(raw) });
+  }
+
   onCleanup(() => {
     if (debounce !== undefined) clearTimeout(debounce);
+    if (untilOffsetDebounce !== undefined) clearTimeout(untilOffsetDebounce);
+    if (untilTimeDebounce !== undefined) clearTimeout(untilTimeDebounce);
   });
 
   function changeSeekKind(next: SeekKind): void {
@@ -287,13 +347,15 @@ export function MessageFilterBar(props: MessageFilterBarProps): JSX.Element {
           size="sm"
           mono
           placeholder="to"
-          value={props.predicates.untilOffset ?? ""}
+          value={untilOffsetText()}
           onInput={(value) => {
             const digits = value.replace(/\D/g, "");
-            props.onPredicatesChange({
-              ...props.predicates,
-              untilOffset: digits === "" ? undefined : digits,
-            });
+            setUntilOffsetText(digits);
+            if (untilOffsetDebounce !== undefined) clearTimeout(untilOffsetDebounce);
+            untilOffsetDebounce = setTimeout(() => commitUntilOffset(digits), FILTER_DEBOUNCE_MS);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commitUntilOffset(untilOffsetText());
           }}
         />
       </Show>
@@ -321,10 +383,15 @@ export function MessageFilterBar(props: MessageFilterBarProps): JSX.Element {
           <input
             type="datetime-local"
             class="kui-browse-bar__stamp-input kui-focusable"
-            value={isoLocal(props.predicates.untilTime)}
+            value={untilTimeText()}
             onInput={(event) => {
-              const epoch = epochOf(event.currentTarget.value);
-              props.onPredicatesChange({ ...props.predicates, untilTime: epoch });
+              const raw = event.currentTarget.value;
+              setUntilTimeText(raw);
+              if (untilTimeDebounce !== undefined) clearTimeout(untilTimeDebounce);
+              untilTimeDebounce = setTimeout(() => commitUntilTime(raw), FILTER_DEBOUNCE_MS);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitUntilTime(event.currentTarget.value);
             }}
           />
         </label>
@@ -472,6 +539,10 @@ function FieldPredicateControl(props: {
 }): JSX.Element {
   const [text, setText] = createSignal(untrack(() => props.predicate?.text ?? ""));
   let emitted = untrack(() => props.predicate?.text ?? "");
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => {
+    if (debounce !== undefined) clearTimeout(debounce);
+  });
 
   createEffect(
     () => props.predicate?.text ?? "",
@@ -485,7 +556,15 @@ function FieldPredicateControl(props: {
 
   const mode = (): MatchMode => props.predicate?.mode ?? "contains";
 
-  function emit(nextText: string, nextMode: MatchMode): void {
+  /* Committed on a timer and on blur-equivalents (Enter, or the mode changing), the same way the
+     substring filter box above is debounced — never straight from `onInput`. `onChange` stops a
+     running browse and rewrites the address bar (see `MessagesTab`), so calling it once a keystroke
+     killed a LIVE tail and rewrote the URL for every character typed. */
+  function commit(nextText: string, nextMode: MatchMode): void {
+    if (debounce !== undefined) {
+      clearTimeout(debounce);
+      debounce = undefined;
+    }
     emitted = nextText;
     /* An empty box is not a predicate that matches everything; it is no predicate. Emitting
        `undefined` is what keeps `record.keyAsText.contains("")` out of the compiled expression,
@@ -502,7 +581,7 @@ function FieldPredicateControl(props: {
         size="sm"
         options={MATCH_MODES}
         value={mode()}
-        onChange={(next) => emit(text(), next)}
+        onChange={(next) => commit(text(), next)}
       />
       <TextField
         label={`${props.field === "key" ? "Key" : "Value"} predicate`}
@@ -513,7 +592,11 @@ function FieldPredicateControl(props: {
         value={text()}
         onInput={(next) => {
           setText(next);
-          emit(next, mode());
+          if (debounce !== undefined) clearTimeout(debounce);
+          debounce = setTimeout(() => commit(next, mode()), FILTER_DEBOUNCE_MS);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit(text(), mode());
         }}
       />
     </div>

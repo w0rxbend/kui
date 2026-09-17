@@ -160,19 +160,49 @@ export function withoutNulls<T>(input: T): T {
  * could not read the data — not an exception that takes the screen with it.
  */
 export function readPagedSection<T>(raw: unknown, noun: string): Reading<readonly T[]> {
-  const section = readSection<unknown>(raw, noun);
-  if (section.kind !== "value") return section;
+  return readPagedSectionDetailed<T>(raw, noun).reading;
+}
 
-  const items = (section.value as { items?: unknown } | null)?.items;
+/** A paged section's reading, plus the total the page's own info reports, when it reports one. */
+interface PagedSection<T> {
+  readonly reading: Reading<readonly T[]>;
+  readonly totalItems: number | undefined;
+}
+
+/**
+ * Does what `readPagedSection` does, and also hands back the page's `totalItems`.
+ *
+ * Kept separate from `readPagedSection` rather than changing that function's return type: the
+ * total is only needed by `fetchOverview`'s consumer-groups step, below, and every other caller —
+ * including this file's own tests — reads `readPagedSection` for the array alone.
+ */
+function readPagedSectionDetailed<T>(raw: unknown, noun: string): PagedSection<T> {
+  const section = readSection<unknown>(raw, noun);
+  if (section.kind !== "value") return { reading: section, totalItems: undefined };
+
+  const page = section.value as { items?: unknown; page?: { totalItems?: number } } | null;
+  const items = page?.items;
   if (!Array.isArray(items)) {
-    return unknown(`KUI could not read ${noun}: the server sent something other than a page.`);
+    return {
+      reading: unknown(`KUI could not read ${noun}: the server sent something other than a page.`),
+      totalItems: undefined,
+    };
   }
-  return value(items as readonly T[]);
+  const totalItems = typeof page?.page?.totalItems === "number" ? page.page.totalItems : undefined;
+  return { reading: value(items as readonly T[]), totalItems };
 }
 
 function capitalise(text: string): string {
   return text.length === 0 ? text : `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
 }
+
+/**
+ * The largest page the consumer-groups list will hand back in one request (`GroupQuery.MaxPageSize`
+ * on the server, which clamps rather than refuses anything larger). Asking for it, sorted by lag
+ * descending, is what lets the lag cards below be right about the whole cluster rather than about
+ * page one's twenty-five groups in group-id order.
+ */
+const GROUPS_LAG_PAGE_SIZE = 200;
 
 /**
  * Asks the four endpoints and returns whatever came back.
@@ -190,7 +220,15 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
     api.get("/api/v1/clusters/{clusterId}", { params: { path: { clusterId } } }),
     api.get("/api/v1/clusters/{clusterId}/brokers", { params: { path: { clusterId } } }),
     api.get("/api/v1/clusters/{clusterId}/log-dirs", { params: { path: { clusterId } } }),
-    api.get("/api/v1/clusters/{clusterId}/consumer-groups", { params: { path: { clusterId } } }),
+    api.get("/api/v1/clusters/{clusterId}/consumer-groups", {
+      params: {
+        path: { clusterId },
+        // Sorted by lag descending so that the four (or two hundred) rows this page actually
+        // holds are the ones the "Top Lag" card needs — the alternative, the default id-ascending
+        // page, can hold the cluster's twenty-five quietest groups and none of its noisiest.
+        query: { pageSize: GROUPS_LAG_PAGE_SIZE, sort: "lag", direction: "desc" },
+      },
+    }),
     api.get("/api/v1/clusters/{clusterId}/topics", { params: { path: { clusterId } } }),
   ]);
 
@@ -203,9 +241,7 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
       ? readSection<readonly LogDir[]>(logDirs.value.logDirs, "the log directories")
       : unknown(userMessage(logDirs.error)),
     /* A page, not a list — see `readPagedSection`. */
-    groups: groups.ok
-      ? readPagedSection<ConsumerGroup>(groups.value.groups, "the consumer groups")
-      : unknown(userMessage(groups.error)),
+    groups: groups.ok ? groupsReadingOf(groups.value.groups) : unknown(userMessage(groups.error)),
     /* The topic *count*, not the topic list. The list endpoint pages, and its page info carries the
      * total — so the number on the card is the cluster's topic count and not "how many topics fit
      * on the first page", which is the bug this line exists to not have. When the server sends no
@@ -214,6 +250,33 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
       ? topicCountOf(topics.value)
       : unknown(userMessage(topics.error)),
   };
+}
+
+/**
+ * The consumer-groups reading, with the groups the page didn't reach marked as lag-not-counted.
+ *
+ * Even two hundred rows can be short of "every group" on a large cluster, and `totalLag`/`topLag`
+ * have no way to tell "this is the whole cluster" from "this is as much as fit on the page" unless
+ * told. So the gap between the page's `totalItems` and the rows it actually sent becomes that many
+ * placeholder groups with no computable lag — the same shape `totalLag` already gives a group whose
+ * coordinator did not answer, and reusing it is exactly right: from the lag total's point of view,
+ * a group nobody asked about and a group that didn't answer are the same "not counted in this
+ * figure". `lagPill` then shows its existing "N groups not counted" warning instead of a total that
+ * quietly stops being cluster-wide once a cluster passes two hundred groups.
+ */
+function groupsReadingOf(raw: unknown): Reading<readonly ConsumerGroup[]> {
+  const { reading, totalItems } = readPagedSectionDetailed<ConsumerGroup>(raw, "the consumer groups");
+  if (reading.kind !== "value" || totalItems === undefined) return reading;
+
+  const uncounted = totalItems - reading.value.length;
+  if (uncounted <= 0) return reading;
+
+  const placeholders: ConsumerGroup[] = Array.from({ length: uncounted }, () => ({
+    groupId: "",
+    state: "",
+    totalLag: undefined,
+  }));
+  return value([...reading.value, ...placeholders]);
 }
 
 /**

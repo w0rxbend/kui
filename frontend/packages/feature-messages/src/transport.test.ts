@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBrowseTransport } from "./transport.js";
-import type { BrowseEvent, BrowseFailure } from "./session.js";
+import type { BrowseConnection, BrowseEvent, BrowseFailure } from "./session.js";
 
 /**
  * The adapter between the browse session and the network.
@@ -94,6 +94,37 @@ describe("createBrowseTransport", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(events).toContainEqual({ kind: "phase", name: "seeking" });
+    vi.unstubAllGlobals();
+  });
+
+  it("reports every connection transition, not just a one-off snapshot", async () => {
+    /*
+     * `open()` used to read `handle.connection()` exactly once, synchronously, right after
+     * `openFetchStream` returned — a `connecting` snapshot taken before the response even arrived.
+     * The kernel reports connection state as a Solid signal precisely so a subscriber sees every
+     * transition; reading it once instead of subscribing to it means the UI's connection indicator
+     * and Stop/Read toggle never move again for the life of the browse. A real (if short) stream
+     * that opens and then finishes is enough to prove both an `open` and a later `closed` are
+     * delivered, not just the initial state.
+     */
+    const body = ["event: phase", 'data: {"phase":"seeking"}', "", ""].join("\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })),
+    );
+
+    const connections: BrowseConnection[] = [];
+    createBrowseTransport().open("/api/v1/stream", {
+      onEvent: () => undefined,
+      onFailure: () => undefined,
+      onConnection: (connection) => connections.push(connection),
+    });
+
+    // Long enough for the response, the chunk, and the stream's own end to all be observed.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(connections.some((connection) => connection.phase === "open")).toBe(true);
+    expect(connections.at(-1)?.phase).toBe("closed");
     vi.unstubAllGlobals();
   });
 

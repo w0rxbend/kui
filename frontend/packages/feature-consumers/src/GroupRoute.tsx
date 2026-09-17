@@ -13,6 +13,7 @@ import { Actions } from "@kui/api";
 import { ConfirmDialog, createMutation, notify, useKui, valueOf, type Fetched } from "@kui/kernel";
 import { GroupDetail as GroupDetailPage } from "./GroupDetail.jsx";
 import { fetchGroup } from "./data.js";
+import { DEFAULT_POLL_MS } from "./lag.js";
 import { applyReset, deleteGroup, deleteOffsets, planReset } from "./write.js";
 import { subscriptions, type GroupDetail } from "./detail.js";
 
@@ -69,15 +70,32 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
     () => [props.clusterId, props.groupId, attempt()] as const,
     () => {
       let cancelled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       setState({ kind: "loading" });
-      void fetchGroup(kui.api, props.clusterId, props.groupId).then((next) => {
-        // Switching group while a request is out must not land the old group's offsets on the new
-        // group's page: real figures for the wrong subject is the most convincing wrong data there
-        // is, and this page's figures are what a reset is composed from.
-        if (!cancelled) setState(() => next);
-      });
+
+      // Reused for the initial fetch and every poll after it, so a group whose page an operator is
+      // actively watching stays live the way the group list does — via `pollLag` — instead of going
+      // stale the moment it is opened and only moving again on the next manual reload or mutation.
+      const refresh = (background: boolean): void => {
+        void fetchGroup(kui.api, props.clusterId, props.groupId).then((next) => {
+          // Switching group while a request is out must not land the old group's offsets on the new
+          // group's page: real figures for the wrong subject is the most convincing wrong data there
+          // is, and this page's figures are what a reset is composed from.
+          if (cancelled) return;
+          // A background poll that fails leaves the figures on screen alone rather than replacing
+          // them with a spinner or an error: they were real when they were fetched and are still the
+          // best answer available, the same reasoning `pollLag` gives for the group list. `stale`
+          // is a real answer too — the coordinator's own cached snapshot with a reason attached, not
+          // a failure — so it replaces the figures on screen same as `ready` does, badged for it.
+          if (next.kind === "ready" || next.kind === "stale" || !background) setState(() => next);
+          timer = setTimeout(() => refresh(true), DEFAULT_POLL_MS);
+        });
+      };
+
+      refresh(false);
       return () => {
         cancelled = true;
+        if (timer !== undefined) clearTimeout(timer);
       };
     },
   );
@@ -98,6 +116,10 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
   const mayDelete = () => kui.permits(Actions.ConsumerGroupDelete, props.groupId);
 
   const group = () => (state().kind === "loading" ? undefined : valueOf(state(), undefined));
+  const staleReason = (): string | undefined => {
+    const current = state();
+    return current.kind === "stale" ? current.reason : undefined;
+  };
 
   return (
     <Show
@@ -108,6 +130,7 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
         <>
           <GroupDetailPage
             group={detail()}
+            stale={staleReason()}
             listHref={kui.paths.consumerGroups(props.clusterId)}
             reset={{
               plan: (request) => planReset(kui.api, props.clusterId, props.groupId, request),

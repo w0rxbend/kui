@@ -42,7 +42,7 @@
  */
 
 import type { JSX } from "@solidjs/web";
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import {
   Button,
   EmptyState,
@@ -155,8 +155,21 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
 
   /* The filter box's own text, which is not the same thing as the browse's `contains`. The box
    * holds what has been typed; the query holds what has been asked for. Conflating them is what
-   * makes a filter field jump back to the last committed value mid-word. */
-  const [filterText, setFilterText] = createSignal(props.query.contains ?? "");
+   * makes a filter field jump back to the last committed value mid-word. The effect below re-seeds
+   * it only when `contains` changed for a reason other than the box's own commit — Back/Forward
+   * chief among them — mirroring `FieldPredicateControl` in MessageFilterBar.tsx. */
+  const [filterText, setFilterText] = createSignal(untrack(() => props.query.contains ?? ""));
+  let emittedContains = untrack(() => props.query.contains ?? "");
+
+  createEffect(
+    () => props.query.contains ?? "",
+    (incoming) => {
+      if (incoming !== emittedContains) {
+        emittedContains = incoming;
+        setFilterText(incoming);
+      }
+    },
+  );
 
   /* The clock, ticking, so "2s ago" becomes "3s ago" without every record row owning a timer. One
    * interval for the screen; five hundred rows read it. */
@@ -211,9 +224,10 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
         onPartitionsChange={(partitions) => change({ ...props.query, partitions })}
         filter={filterText()}
         onFilterChange={setFilterText}
-        onFilterCommit={(text) =>
-          change({ ...props.query, ...(text === "" ? { contains: undefined } : { contains: text }) })
-        }
+        onFilterCommit={(text) => {
+          emittedContains = text;
+          change({ ...props.query, ...(text === "" ? { contains: undefined } : { contains: text }) });
+        }}
         live={props.query.live}
         onLiveChange={setLive}
         predicates={props.predicates}

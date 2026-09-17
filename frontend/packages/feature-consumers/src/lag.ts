@@ -203,7 +203,12 @@ export interface ListingFigures {
  * protocol cannot continue and the caller must pay for a whole list.
  */
 export type LagMerge =
-  | { readonly kind: "merged"; readonly rows: readonly GroupSummary[] }
+  | {
+      readonly kind: "merged";
+      readonly rows: readonly GroupSummary[];
+      /** How many rows `gone` removed, so a caller holding a server-given total can adjust it. */
+      readonly removed: number;
+    }
   | { readonly kind: "needs-full-list"; readonly reason: string };
 
 /**
@@ -244,8 +249,13 @@ export function applyLagDelta(rows: readonly GroupSummary[], delta: LagDelta): L
   }
 
   const gone = new Set(delta.gone);
+  let removed = 0;
   const merged = rows
-    .filter((row) => !gone.has(row.groupId))
+    .filter((row) => {
+      if (!gone.has(row.groupId)) return true;
+      removed += 1;
+      return false;
+    })
     .map((row) => {
       const update = updates.get(row.groupId);
       // Identity, not a copy. An untouched row keeps every field it had, including a `totalLag` of
@@ -254,7 +264,7 @@ export function applyLagDelta(rows: readonly GroupSummary[], delta: LagDelta): L
       return { ...row, totalLag: update.totalLag, state: update.state, members: update.members };
     });
 
-  return { kind: "merged", rows: merged };
+  return { kind: "merged", rows: merged, removed };
 }
 
 /**
@@ -286,8 +296,10 @@ export function pollLag(
   api: KuiApiClient,
   clusterId: string,
   rows: () => readonly GroupSummary[],
-  onRows: (next: readonly GroupSummary[], listing: ListingFigures | null) => void,
+  onRows: (next: readonly GroupSummary[], listing: ListingFigures | null, removedCount: number) => void,
   query: GroupQuery = FIRST_PAGE,
+  /** Reports whether the last poll reached the server, so a caller can surface and clear a banner. */
+  onHealth?: (ok: boolean) => void,
 ): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -304,10 +316,14 @@ export function pollLag(
     // saying they are still on page 4.
     const answer = await fetchGroups(api, clusterId, query);
     if (stopped || answer.kind !== "ready") return;
-    onRows(answer.value.groups, {
-      coordinatorsMissing: answer.value.coordinatorsMissing,
-      totalItems: answer.value.page.totalItems,
-    });
+    onRows(
+      answer.value.groups,
+      {
+        coordinatorsMissing: answer.value.coordinatorsMissing,
+        totalItems: answer.value.page.totalItems,
+      },
+      0,
+    );
   };
 
   /** The page, as the request names it. Read per request: the rows are edited in place by polls. */
@@ -317,14 +333,16 @@ export function pollLag(
     const answer = await fetchLagDelta(api, clusterId, since, onScreen());
     if (stopped) return;
     if (answer.kind !== "ready") {
+      onHealth?.(false);
       later(DEFAULT_POLL_MS);
       return;
     }
+    onHealth?.(true);
 
     const delta = answer.value;
     since = delta.token ?? undefined;
     const merge = applyLagDelta(rows(), delta);
-    if (merge.kind === "merged") onRows(merge.rows, null);
+    if (merge.kind === "merged") onRows(merge.rows, null, merge.removed);
     else await fullList();
     later(delta.nextPollMs);
   };
@@ -336,9 +354,11 @@ export function pollLag(
     const answer = await fetchLagDelta(api, clusterId, undefined, onScreen());
     if (stopped) return;
     if (answer.kind === "ready") {
+      onHealth?.(true);
       since = answer.value.token ?? undefined;
       later(answer.value.nextPollMs);
     } else {
+      onHealth?.(false);
       later(DEFAULT_POLL_MS);
     }
   };

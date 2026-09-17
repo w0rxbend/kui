@@ -31,6 +31,7 @@ import { Actions, type KuiApiClient } from "@kui/api";
 
 import { mount } from "./testing.js";
 import { presetsKey } from "./presets.js";
+import { FILTER_DEBOUNCE_MS } from "./MessageFilterBar.jsx";
 import Messages from "./MessagesRoute.jsx";
 
 const CLUSTER = "quickstart";
@@ -41,6 +42,12 @@ const TOPIC = "orders.payments.v2";
 /** Solid batches writes to a microtask; a router navigation takes a couple of them to settle. */
 async function settle(times = 6): Promise<void> {
   for (let i = 0; i < times; i += 1) await flush();
+}
+
+/** Real time, for the boxes `MessageFilterBar` debounces before it commits and writes the address. */
+async function pastDebounce(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, FILTER_DEBOUNCE_MS + 20));
+  await settle();
 }
 
 interface Call {
@@ -474,10 +481,10 @@ describe("the typed predicates", () => {
     boxes[0]?.dispatchEvent(new Event("input", { bubbles: true }));
     if (boxes[0] !== undefined) boxes[0].value = "ord_";
     boxes[0]?.dispatchEvent(new Event("input", { bubbles: true }));
-    await settle();
+    await pastDebounce();
     if (boxes[1] !== undefined) boxes[1].value = "UAH";
     boxes[1]?.dispatchEvent(new Event("input", { bubbles: true }));
-    await settle();
+    await pastDebounce();
 
     const written = new URL(url(), "http://localhost");
     expect(written.searchParams.get("key")).toBe("ord_");

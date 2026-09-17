@@ -270,7 +270,11 @@ a.kui-nav-item--current:hover {
  * live, it is in the tab order, and the page behind it is the only place the reason and the retry
  * exist. The focus ring is untouched, because a keyboard user must still see where they are. */
 .kui-nav-item--dimmed {
-  opacity: 0.62;
+  /* Not `--kui-opacity-disabled` (0.8): against this drawer's `--kui-color-surface-raised`
+     background in light mode, `--kui-color-text-muted` at 0.8 measures ~4.35:1, still under the
+     4.5:1 AA floor for normal-size text. 0.85 clears it (~4.90:1) while staying within AA in dark
+     mode (~5.44:1 at 0.8 already passed, and 0.85 only widens that margin). */
+  opacity: 0.85;
 }
 
 .kui-nav-item--dimmed:hover,

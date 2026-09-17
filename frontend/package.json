@@ -44,5 +44,14 @@
     "@solidjs/router": "2.0.0-next.21",
     "@solidjs/web": "2.0.0-rc.6",
     "solid-js": "2.0.0-rc.6"
+  },
+  "kui": {
+    "pinnedPrereleaseDependencies": {
+      "_comment": "No stable solid-js 2.x line exists yet (checked npm 2026-09-17: solid-js/@solidjs/web latest is 2.0.0-rc.8, @solidjs/router latest is 2.0.0-next.24 - still no beta/rc cut). These pins are a deliberate, time-boxed exception, not an oversight: pre-release/next tags carry no stability or patch guarantees and can be republished or yanked without notice. Re-check upstream release notes each review cycle and move to the first stable 2.0.0 tag as soon as one ships (mirror the bump into every workspace package.json, not just this one).",
+      "solid-js": "2.0.0-rc.6",
+      "@solidjs/web": "2.0.0-rc.6",
+      "@solidjs/router": "2.0.0-next.21",
+      "reviewBy": "2026-12-31"
+    }
   }
 }
