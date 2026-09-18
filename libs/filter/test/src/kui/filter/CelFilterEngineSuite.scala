@@ -110,6 +110,59 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     evaluate("has(record.value)", numeric).assertEquals(Right(false))
   }
 
+  test("a JSON value over the node budget is treated as absent, not evaluated regardless") {
+    // The producer controls these bytes. A wide object with more entries than the budget allows must not
+    // reach the CEL evaluator at all, the same way a non-JSON payload does not — the alternative is a
+    // filter on `record.value` that quietly stops erroring only for the record that is trying to hurt it.
+    val wide = record.copy(valueAsText = (1 to 20).map(i => s""""f$i":$i""").mkString("{", ",", "}"))
+    val tight = generous.copy(maxJsonValueNodes = 5)
+
+    engine(tight).use { port =>
+      for {
+        id <- orFail(port.register("has(record.value)"))
+        predicate <- orFail(port.predicate(id, Some("has(record.value)")))
+        result <- predicate.test(wide)
+      } yield assertEquals(result, Right(false), "a payload well over the node budget was still parsed")
+    } >> // The same payload, under the production default, is nowhere near the budget and still parses.
+      evaluate("has(record.value)", wide).assertEquals(Right(true))
+  }
+
+  test("a JSON value nested deeper than the walk allows is treated as absent, not a stack overflow") {
+    // Depth, not width: a producer can make `[[[[...]]]]` arbitrarily deep for very little wire size, which
+    // costs the walk one JVM stack frame per level rather than one unit of the node budget above.
+    val depth = 5000
+    val deeplyNested = record.copy(valueAsText = ("[" * depth) + "1" + ("]" * depth))
+    evaluate("has(record.value)", deeplyNested).assertEquals(Right(false))
+  }
+
+  test("referencedDynamicFields finds record.key/record.value however a filter spells them, and nothing" +
+    " when a filter never mentions either") {
+    // The set this returns decides whether `recordFields` bothers parsing a record's key or value as JSON
+    // at all. Under-detecting is the dangerous direction — it would silently make a field a live filter
+    // reads disappear — so every shape a filter can use to reach `record.key`/`record.value` is asserted
+    // here on its own, not just exercised incidentally by some other test.
+    def fieldsOf(source: String): Set[String] =
+      CelEnvironment.referencedDynamicFields(CelEnvironment.compiler.compile(source).getAst)
+
+    assertEquals(fieldsOf("record.partition == 0"), Set.empty[String])
+    assertEquals(fieldsOf("record.keyAsText == 'x' && record.valueAsText == 'y'"), Set.empty[String])
+    assertEquals(fieldsOf("record.key == 'x'"), Set("key"))
+    assertEquals(fieldsOf("record.value.status == 'FAILED'"), Set("value"))
+    assertEquals(fieldsOf("has(record.value.status)"), Set("value"))
+    assertEquals(fieldsOf("record.value.items[0].price > 1.0"), Set("value"))
+    assertEquals(fieldsOf("record.value.items.exists(i, i.price > 1.0)"), Set("value"))
+    assertEquals(fieldsOf("record[\"value\"].status == 'x'"), Set("value"))
+    assertEquals(fieldsOf("record.key == 'a' && record.value.status == 'b'"), Set("key", "value"))
+  }
+
+  test("a filter that never mentions record.key/record.value still evaluates correctly end to end") {
+    // The optimisation `referencedDynamicFields` enables must not change what any filter answers, only how
+    // much work answering it costs. `record` here has a value that would fail to parse as JSON at all, and
+    // the filter below still has to see the correct verdict.
+    val textOnly = record.copy(valueAsText = "not json at all")
+    evaluate("record.partition == 3 && record.keyAsText == 'order-1'", textOnly).assertEquals(Right(true))
+  }
+
   // ------------------------------------------------------------------ compilation
 
   test("the three examples from the user-facing help compile") {

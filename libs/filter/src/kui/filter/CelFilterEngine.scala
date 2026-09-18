@@ -66,7 +66,13 @@ final case class FilterLimits(
       * its whole deadline on a program that cannot finish. Consecutive, not total: a filter that times out on
       * one record in a thousand is slow, and a filter that times out on every record is broken.
       */
-    consecutiveTimeoutLimit: Int
+    consecutiveTimeoutLimit: Int,
+    /** The node/depth budget `CelEnvironment.asDynamic` walks a record's decoded key or value under, so that
+      * a producer-controlled JSON payload cannot spend unbounded CPU converting `record.key`/`record.value`
+      * regardless of whether `evaluationDeadline`'s `Thread.interrupt()` is honored (see `CelEnvironment`'s
+      * `## The limits`).
+      */
+    maxJsonValueNodes: Int
 )
 
 object FilterLimits {
@@ -78,7 +84,8 @@ object FilterLimits {
     evaluationDeadline = scala.concurrent.duration.DurationInt(10).millis,
     cacheSize = 10000L,
     cacheTtl = scala.concurrent.duration.DurationInt(1).hour,
-    consecutiveTimeoutLimit = 100
+    consecutiveTimeoutLimit = 100,
+    maxJsonValueNodes = CelEnvironment.DefaultMaxJsonNodes
   )
 
   given CanEqual[FilterLimits, FilterLimits] = CanEqual.derived
@@ -315,13 +322,28 @@ object CelFilterEngine {
           .catchNonFatal(runtime.createProgram(ast))
           .leftMap(t => FilterError.Runtime(Option(t.getMessage).getOrElse(t.getClass.getSimpleName)))
 
+      /** Computed once per compiled program rather than once per record, so a filter that never mentions
+        * `record.key`/`record.value` — `record.partition == 0` being the obvious one — does not pay to parse
+        * and convert either payload as JSON on every record of the browse. Falls back to converting both,
+        * the pre-existing behaviour, if inspecting the AST itself ever fails; a failure here is a reason to
+        * do the extra work, never a reason to skip a field a filter might actually need.
+        */
+      private val neededDynamicFields: Set[String] =
+        Either.catchNonFatal(CelEnvironment.referencedDynamicFields(ast)).getOrElse(CelEnvironment.AllDynamicFields)
+
       def test(record: FilterableRecord): F[Either[FilterError, Boolean]] = {
         val evaluate = Sync[F]
           .interruptible {
             // `interruptible`, not `blocking`: cancelling a browse has to cancel the evaluation in flight
             // rather than wait out its deadline. With twenty thousand records queued behind it, ten
             // milliseconds each is more than three minutes of work nobody is waiting for any more.
-            prepared.map(_.eval(CelEnvironment.activation(record)))
+            //
+            // `interruptible` only requests `Thread.interrupt()`; it is best-effort, not a wall-clock
+            // guarantee, because CEL's own evaluation and the JSON conversion inside `activation` are not
+            // obligated to check for it. `maxJsonValueNodes` is what actually bounds the JSON half of this
+            // call regardless (see `CelEnvironment`'s `## The limits`); nothing bounds the CEL half beyond
+            // the AST node limit already applied at compile time.
+            prepared.map(_.eval(CelEnvironment.activation(record, limits.maxJsonValueNodes, neededDynamicFields)))
           }
           .map(_.flatMap(asBoolean))
           .handleError(t =>

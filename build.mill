@@ -1306,7 +1306,10 @@ object services extends Module {
       )
 
       object test extends ScalaTests with KuiTests {
-        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+        // `libs.serdeConfluent` is test-only here: `CelFilterSourceSuite`'s decode-then-filter cases prove
+        // that the Avro/Protobuf/JSON-Schema JSON this module's `app` wires in at runtime is the same JSON
+        // `CelFilterSource` filters against, without making the adapter itself depend on a concrete serde.
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test, libs.serdeConfluent.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
           mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
