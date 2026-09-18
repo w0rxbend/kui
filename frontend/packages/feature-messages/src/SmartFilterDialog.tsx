@@ -351,7 +351,11 @@ function FilterHelp(props: { readonly onUse: (source: string) => void }): JSX.El
         <p class="kui-smart-filter__help-note">
           <code>record.key</code> and <code>record.value</code> are <strong>absent</strong>, not
           null, when the payload is not JSON — so a filter reading a field of a plain-text value
-          throws rather than quietly matching nothing.
+          throws rather than quietly matching nothing. Avro, Protobuf and JSON Schema payloads are
+          decoded to JSON before a filter runs, so field paths, array indexing and array predicates
+          (below) work on those topics too — with one Avro wrinkle: a nullable field decodes as{" "}
+          <code>{"{"}"&lt;type&gt;": value{"}"}</code>, so its path includes the branch type (see the
+          example below).
         </p>
         <ul class="kui-smart-filter__examples">
           <For each={FILTER_EXAMPLES}>

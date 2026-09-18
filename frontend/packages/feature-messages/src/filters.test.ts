@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { KafkaRecord } from "@kui/kernel";
 
-import { MAX_FILTER_SOURCE_BYTES, filterProblem, verdictOf } from "./filters.js";
+import { FILTER_EXAMPLES, MAX_FILTER_SOURCE_BYTES, filterProblem, verdictOf } from "./filters.js";
 import {
   MAX_RESEND_RECORDS,
   draftSize,
@@ -284,5 +284,25 @@ describe("how a finished resend is read", () => {
 
   it("does not invent a shortfall when nothing said how many were asked for", () => {
     expect(readingOf({ toTopic: "t", read: 6, written: 6 })).toEqual({ kind: "complete" });
+  });
+});
+
+/**
+ * A CEL filter has to answer true or false — a bare field-access expression compiles and then fails
+ * at test/browse time with "the filter returned <type> rather than true or false" (CelEnvironment's
+ * own documented failure mode). `SmartFilterDialog`'s help panel inserts an example's `source`
+ * verbatim into the filter box on click, so an example that is not itself a boolean expression is a
+ * "use this" button that hands the operator a broken filter. This is a structural check standing in
+ * for the one a JS test cannot make directly (there is no CEL evaluator here): every example must
+ * contain a comparison or a macro call CEL defines to return a boolean, not just a field path.
+ */
+describe("the filter examples the help panel offers", () => {
+  const booleanShaped =
+    /==|!=|<=|>=|[<>]|\.(?:exists|all|matches|startsWith|endsWith|contains)\(|^has\(|^!|&&|\|\|/;
+
+  it("is itself an expression that can answer true or false, not a bare field path", () => {
+    for (const example of FILTER_EXAMPLES) {
+      expect(example.source).toMatch(booleanShaped);
+    }
   });
 });

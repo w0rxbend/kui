@@ -101,13 +101,49 @@ export const FILTER_VARIABLES: readonly {
   { name: "record.keyAsText", type: "string", describe: "the key, as the key serde decoded it" },
   { name: "record.valueAsText", type: "string", describe: "the value, as the value serde decoded it" },
   { name: "record.headers", type: "map(string, string)", describe: "header names to their values" },
-  { name: "record.key", type: "dyn", describe: "the key parsed as JSON — absent when it is not JSON" },
-  { name: "record.value", type: "dyn", describe: "the value parsed as JSON — absent when it is not JSON" },
+  {
+    name: "record.key",
+    type: "dyn",
+    describe:
+      "the key parsed as JSON — absent when it is not JSON. This also covers Avro, Protobuf and " +
+      "JSON Schema keys: they are decoded to JSON text before a filter ever sees them, so the same " +
+      "dot-path and array access works on those topics too, not only on plain-JSON ones.",
+  },
+  {
+    name: "record.value",
+    type: "dyn",
+    describe:
+      "the value parsed as JSON — absent when it is not JSON. This also covers Avro, Protobuf and " +
+      "JSON Schema values, for the same reason: decoding renders the record as JSON text first, so " +
+      "a field path like record.value.customer.address.city reaches into those values too — with " +
+      "one Avro-specific wrinkle: a nullable field (a [\"null\", T] union, the usual way Avro spells " +
+      "'optional') decodes as {\"<type>\": value} on its non-null branch, so it reads as " +
+      "record.value.email.string, not record.value.email — see the example below.",
+  },
 ];
 
 /** Expressions worth starting from, and the shape of question each one answers. */
 export const FILTER_EXAMPLES: readonly { readonly source: string; readonly describe: string }[] = [
   { source: 'record.value.status == "CAPTURED"', describe: "a field of the JSON value" },
+  {
+    source: 'record.value.customer.address.city == "Kyiv"',
+    describe: "a nested field path — works the same on Avro, Protobuf and JSON Schema values",
+  },
+  {
+    source: 'record.value.items[0].sku == "SKU-1"',
+    describe: "an indexed array element, the JSONPath $.items[0].sku equivalent",
+  },
+  {
+    source: "record.value.items.exists(i, i.price > 100)",
+    describe: "an array predicate — CEL's exists() for the JSONPath $.items[?(@.price>100)] pattern",
+  },
+  {
+    source: 'record.value.email != null && record.value.email.string == "a@b.com"',
+    describe:
+      "a nullable Avro field — a [\"null\",\"string\"] union decodes as {\"string\": ...} on its " +
+      "non-null branch, so the branch type is part of the path; the field's own map key is present " +
+      "either way (Avro always writes it), so != null guards the null case, not has()",
+  },
   { source: 'record.keyAsText.startsWith("ord_")', describe: "a prefix of the key" },
   { source: 'record.headers["content-type"] == "application/json"', describe: "a header" },
   { source: "record.partition == 0 && record.offset > 1000", describe: "a position in the log" },
