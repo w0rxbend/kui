@@ -109,8 +109,33 @@ export function BrokersScreen(props: BrokersScreenProps): JSX.Element {
     () => {},
   );
 
-  /** Which cards are open, and therefore which settings have been asked for. */
-  const [expanded, setExpanded] = createSignal<readonly number[]>([]);
+  /**
+   * Which cards are open, and therefore which settings have been asked for — paired with the
+   * cluster the operator opened them on.
+   *
+   * A memo derived from this, {@link expanded}, is what `<For>` actually iterates: memos recompute
+   * synchronously, in the same pass that `props.clusterId` itself changes, while an effect (even a
+   * deferred one) runs afterward. A still-mounted `BrokerSettings` reads `props.clusterId`
+   * reactively in its own query key, so on a cluster switch its fetch fires for the *new* cluster
+   * the instant the id changes — synchronously, before any effect has a chance to unmount it. Only
+   * a synchronous derivation empties the open-card list in time to prevent that request; an effect
+   * arrives one tick too late, no matter how it is scheduled.
+   */
+  const [expandedRaw, setExpandedRaw] = createSignal<{
+    readonly clusterId: string;
+    readonly ids: readonly number[];
+  }>({ clusterId: props.clusterId, ids: [] });
+  const expanded = createMemo<readonly number[]>(() =>
+    expandedRaw().clusterId === props.clusterId ? expandedRaw().ids : [],
+  );
+  const setExpanded = (
+    updater: (current: readonly number[]) => readonly number[],
+  ): void => {
+    setExpandedRaw((current) => ({
+      clusterId: props.clusterId,
+      ids: updater(current.clusterId === props.clusterId ? current.ids : []),
+    }));
+  };
 
   /*
    * The settings that have arrived, keyed by broker.
@@ -130,6 +155,21 @@ export function BrokersScreen(props: BrokersScreenProps): JSX.Element {
     answers = new Map(answers).set(brokerId, state);
     setConfigs(answers);
   };
+
+  /*
+   * A cluster change without a remount — the router reuses this component across `/clusters/:id`
+   * navigations. `expanded` is already narrowed to the current cluster synchronously (see its own
+   * definition above); this only clears the settings cache, so `settingsFor` cannot answer a
+   * reopened card with the old cluster's config entries for a broker id the two clusters share.
+   */
+  createEffect(
+    () => props.clusterId,
+    () => {
+      answers = new Map();
+      setConfigs(answers);
+    },
+    { defer: true },
+  );
 
   const rows = createMemo(() =>
     withDisks(valueOf(brokers.state(), []), valueOf(disks.state(), [])),

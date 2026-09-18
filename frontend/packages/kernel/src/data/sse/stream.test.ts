@@ -219,6 +219,38 @@ describe("a stream over EventSource", () => {
     const { subscriber } = recorder(["done"]);
     expect(() => openEventSourceWith(() => fakeSource(), subscriber)).toThrow(/must not be listed/);
   });
+
+  it("closes itself if the connection goes silent for too long, rather than reading 'open' forever", () => {
+    vi.useFakeTimers();
+    try {
+      const source = fakeSource();
+      const { errors, subscriber } = recorder();
+
+      createRoot((dispose) => {
+        const handle = openEventSourceWith(() => source, subscriber);
+        source.emit("open");
+        flush();
+        expect(handle.connection().phase).toBe("open");
+
+        // A heartbeat shortly before the deadline keeps the connection alive.
+        vi.advanceTimersByTime(40_000);
+        source.emit("heartbeat", "{}");
+        flush();
+        expect(handle.connection().phase).toBe("open");
+
+        // But once nothing arrives at all for that long, the connection is presumed wedged.
+        vi.advanceTimersByTime(45_000);
+        flush();
+
+        expect(handle.connection()).toEqual({ phase: "closed", reason: "no heartbeat received" });
+        expect(errors).toEqual([{ kind: "transport", cause: "stream went silent" }]);
+        expect(source.closed).toBe(true);
+        dispose();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /** A response whose chunks the test hands over one at a time. */
@@ -439,6 +471,38 @@ describe("a stream over fetch", () => {
       expect(handle.connection().phase).toBe("open");
       dispose();
     });
+  });
+
+  it("closes itself and aborts the request if the body goes silent for too long", async () => {
+    vi.useFakeTimers();
+    try {
+      const response = fakeResponse(200);
+      const transport = fakeTransport(Promise.resolve(response));
+      const { errors, subscriber } = recorder();
+
+      await createRoot(async (dispose) => {
+        const handle = openFetchStreamWith(transport, subscriber);
+        await vi.advanceTimersByTimeAsync(0);
+        flush();
+
+        // A chunk shortly before the deadline keeps the connection alive.
+        await vi.advanceTimersByTimeAsync(40_000);
+        response.push('event: heartbeat\ndata: {}\n\n');
+        flush();
+        expect(handle.connection().phase).toBe("open");
+
+        // But once nothing arrives at all for that long, the connection is presumed wedged.
+        await vi.advanceTimersByTimeAsync(45_000);
+        flush();
+
+        expect(handle.connection()).toEqual({ phase: "closed", reason: "no heartbeat received" });
+        expect(errors).toEqual([{ kind: "transport", cause: "stream went silent" }]);
+        expect(transport.isAborted).toBe(true);
+        dispose();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

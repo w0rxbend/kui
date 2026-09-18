@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { flush } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { KuiProvider, clearToasts, toasts } from "@kui/kernel";
 import type { KuiApiClient } from "@kui/api";
 import { describeViolations, findViolations, mount, settle, testContext } from "./testing.js";
@@ -621,6 +621,35 @@ describe("the brokers screen", () => {
     await settle(container);
     expect(configRequests(asked)).toBe(1);
     expect(container.textContent).toContain("log.retention.hours");
+    dispose();
+  });
+
+  it("asks the new cluster for nothing when a card was left open on the old one", async () => {
+    // The route this screen is mounted behind (`ClustersRoute.tsx`'s `<Show>`) keeps the component
+    // alive across `/clusters/:id` navigations — only `clusterId` changes, not the whole tree. A
+    // card left open on the cluster the operator is leaving must not turn into a settings request
+    // against the cluster they are arriving at for a broker nobody opened there.
+    const { api, asked } = gateway(everything(0));
+    const [clusterId, setClusterId] = createSignal("switch-a");
+    const { container, dispose } = mount(() => (
+      <KuiProvider value={testContext(api)}>
+        <BrokersScreen
+          clusterId={clusterId()}
+          clustersHref="/ui/clusters"
+          hrefFor={(brokerId) => `/ui/clusters/${clusterId()}/brokers/${brokerId}`}
+          now={() => new Date(fetchedAt)}
+        />
+      </KuiProvider>
+    ));
+    await settle(container);
+    expand(container);
+    await settle(container);
+    expect(configRequests(asked)).toBe(1);
+
+    asked.length = 0;
+    setClusterId("switch-b");
+    await settle(container);
+    expect(configRequests(asked)).toBe(0);
     dispose();
   });
 

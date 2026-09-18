@@ -180,6 +180,7 @@ export function ManageScreen(): JSX.Element {
     <ClusterAdmin
       clusters={rows()}
       loading={state().kind === "loading"}
+      failure={failureOf(state(), reload)}
       editing={editing()}
       onAdd={() => {
         forget();
@@ -228,6 +229,11 @@ export function ManageScreen(): JSX.Element {
         if (!built.ok) return;
         void test.run(built.request).then((outcome) => {
           if (outcome.kind !== "done") return;
+          // `editing()` is replaced wholesale on every keystroke and on cancel/switch, so identity
+          // here means "still the same form this result was tested against"; a slower response for
+          // a form the user has since changed or left is discarded rather than painted underneath
+          // whatever is on screen now.
+          if (editing() !== current) return;
           setConnectivity(outcome.value as Connectivity);
         });
       }}
