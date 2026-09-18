@@ -1,6 +1,7 @@
 package kui.connect.api
 
-import cats.MonadThrow
+import cats.effect.kernel.Concurrent
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
@@ -49,7 +50,18 @@ object ConnectCapabilities {
   val NotConfiguredMessage: String =
     "no Kafka Connect cluster is configured for this cluster (kui.clusters.<n>.connect[].url)"
 
-  def make[F[_]: MonadThrow](
+  /** How many clusters' Connect workers this poll probes at once, and how many Connect clusters within one
+    * Kafka cluster's profile it probes at once.
+    *
+    * A sequential `traverse` here means one slow or dead worker delays the capability rows of every other
+    * cluster in the same poll cycle, which is the same shape `SubjectListUseCase.MaxConcurrentRows` exists to
+    * avoid for subject rows. The `api` module cannot see `ConnectWiring.MaxConcurrentPerWorker` (it sits in
+    * `app`, which depends on `api` and not the other way around), so this is its own small, local bound
+    * rather than a shared one.
+    */
+  private val MaxConcurrentClusters: Int = 8
+
+  def make[F[_]: Concurrent](
       clusters: ClusterConnectSource[F],
       logger: StructuredLogger[F]
   ): ConnectCapabilities[F] =
@@ -57,12 +69,16 @@ object ConnectCapabilities {
 
       def report: F[Map[ClusterId, ClusterCapability]] =
         clusters.all.flatMap(
-          _.traverse(profile => stateOf(profile).map(profile.cluster -> _)).map(_.toMap)
+          _.parTraverseN(MaxConcurrentClusters)(profile => stateOf(profile).map(profile.cluster -> _))
+            .map(_.toMap)
         )
 
       private def stateOf(profile: ConnectProfileView): F[ClusterCapability] =
         if !profile.configured then notConfigured(profile).pure[F]
-        else profile.connects.traverse(connect => probe(profile, connect)).map(worst(profile, _))
+        else
+          profile.connects
+            .parTraverseN(MaxConcurrentClusters)(connect => probe(profile, connect))
+            .map(worst(profile, _))
 
       /** One Connect cluster, asked the question the feature itself asks.
         *

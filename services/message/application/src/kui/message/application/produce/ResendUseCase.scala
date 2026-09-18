@@ -192,7 +192,12 @@ object ResendUseCase {
           // Dropping the headers is a real choice an operator makes: a replayed record often carries the
           // retry counters and dead-letter stamps of the machinery that failed it, and feeding those back
           // in is how a record loops forever.
-          headers = if request.keepHeaders then record.headers else Nil
+          headers = if request.keepHeaders then record.headers else Nil,
+          // Only a `CreateTime` source has a timestamp worth replaying — it is the moment the event
+          // actually happened. A `LogAppendTime` (or unknown) source's timestamp is the broker's own
+          // bookkeeping from the first write, and stamping the copy with it would misrepresent when the
+          // replay happened rather than preserve anything.
+          timestamp = Option.when(record.timestampType == TimestampType.CreateTime)(record.timestamp)
         )
     }
 

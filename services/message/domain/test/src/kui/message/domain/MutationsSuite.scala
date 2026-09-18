@@ -23,7 +23,7 @@ final class MutationsSuite extends ScalaCheckSuite {
   private val archive = TopicName.unsafe("orders-archive")
   private val p0 = PartitionId.unsafe(0)
 
-  private def produce(count: Option[Int], headers: List[(String, String)] = Nil) =
+  private def produce(count: Option[Int], headers: List[(String, Option[String])] = Nil) =
     ProduceRequest.of(
       cluster = cluster,
       topic = orders,
@@ -93,8 +93,9 @@ final class MutationsSuite extends ScalaCheckSuite {
   }
 
   test("aHeaderWithNoNameIsRefused") {
-    assert(produce(Some(1), headers = List("" -> "v")).isLeft)
-    assert(produce(Some(1), headers = List("k" -> "")).isRight, "an empty header value is legal")
+    assert(produce(Some(1), headers = List("" -> Some("v"))).isLeft)
+    assert(produce(Some(1), headers = List("k" -> Some(""))).isRight, "an empty header value is legal")
+    assert(produce(Some(1), headers = List("k" -> None)).isRight, "a header with no value is legal")
   }
 
   test("everyProduceCarriesItsMutationKind") {

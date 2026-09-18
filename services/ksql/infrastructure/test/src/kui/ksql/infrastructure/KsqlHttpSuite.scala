@@ -237,6 +237,24 @@ final class KsqlHttpSuite extends KuiIOSuite {
     }
   }
 
+  test("a pull query answer past the byte ceiling fails instead of being buffered whole") {
+    // One byte past `MaxPullQueryResponseBytes`, so this asserts the ceiling is actually enforced rather
+    // than merely declared: a regression that widens it to "unbounded" again should fail this test without
+    // needing gigabytes of heap to prove it.
+    val oversized = "x" * (KsqlHttp.MaxPullQueryResponseBytes.toInt + 1)
+    val statement = KsqlStatement.parse("SELECT * FROM ORDERS;").toOption.get
+
+    server { case "/query" => (StatusCode.Ok, oversized) }.execute(statement).map {
+      case Left(error) =>
+        assertEquals(error.code, ErrorCode.UpstreamKsql)
+        assert(
+          error.message.toLowerCase.contains("larger") || error.message.toLowerCase.contains("limit"),
+          s"expected the size ceiling named in the error, got: ${error.message}"
+        )
+      case Right(other) => fail(s"expected the oversized answer to be refused, got $other")
+    }
+  }
+
   test("a push query that reached this adapter is a caller defect and says so rather than buffering") {
     val statement = KsqlStatement.parse("SELECT * FROM ORDERS EMIT CHANGES;").toOption.get
 

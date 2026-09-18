@@ -30,7 +30,8 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
       key: Option[String] = Some("k1"),
       value: Option[String] = Some("""{"id":1}"""),
       partition: Option[PartitionId] = None,
-      count: Option[Int] = None
+      count: Option[Int] = None,
+      headers: List[(String, Option[String])] = List("trace" -> Some("abc"))
   ): ProduceRequest =
     ProduceRequest
       .of(
@@ -39,7 +40,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
         partition = partition,
         key = key,
         value = value,
-        headers = List("trace" -> "abc"),
+        headers = headers,
         keySerde = None,
         valueSerde = None,
         keySerdeProperties = Map.empty,
@@ -90,6 +91,17 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
       assertEquals(written.head.value, None)
       assert(written.head.key.isDefined, "a tombstone still has a key; that is what it deletes")
     }
+  }
+
+  test("aHeaderWithNoValueIsProducedAsANullValueAndNotAsAnEmptyOne") {
+    // The same distinction as the tombstone test, one level down: a header explicitly marked "no value"
+    // must reach the producer as an absent payload, not `Array.emptyByteArray`, because that is what a
+    // consumer like Spring's dead-letter machinery checks for.
+    for {
+      (produce, producers, _, _) <- rig()
+      _ <- produce.produce(ProduceRig.Caller, requestOf(headers = List("trace" -> None)))
+      written <- producers.sent.get
+    } yield assertEquals(written.head.headers.map(_.value), List(None))
   }
 
   test("aRecordWithNoKeyIsNotARecordWithAnEmptyKey") {

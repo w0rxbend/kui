@@ -1,6 +1,7 @@
 package kui.schema.api
 
-import cats.effect.kernel.Sync
+import cats.effect.kernel.Concurrent
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
@@ -57,7 +58,17 @@ object SchemaCapabilities {
   val NotConfiguredMessage: String =
     "no Schema Registry is configured for this cluster (kui.clusters.<n>.schemaRegistry.url)"
 
-  def make[F[_]: Sync](
+  /** How many clusters' registries this poll probes at once.
+    *
+    * A sequential `traverse` here means one slow or dead registry on cluster A delays the capability rows of
+    * every other cluster in the same poll cycle, which is the same shape
+    * `SubjectListUseCase.MaxConcurrentRows` exists to avoid for subject rows. The `api` module cannot see
+    * `SchemaWiring.MaxConcurrentPerRegistry` (it sits in `app`, which depends on `api` and not the other way
+    * around), so this is its own small, local bound rather than a shared one.
+    */
+  private val MaxConcurrentClusters: Int = 8
+
+  def make[F[_]: Concurrent](
       registries: ClusterRegistries[F],
       logger: StructuredLogger[F]
   ): SchemaCapabilities[F] =
@@ -65,7 +76,8 @@ object SchemaCapabilities {
 
       def report: F[Map[ClusterId, ClusterCapability]] =
         registries.all.flatMap(
-          _.traverse(profile => stateOf(profile).map(profile.cluster -> _)).map(_.toMap)
+          _.parTraverseN(MaxConcurrentClusters)(profile => stateOf(profile).map(profile.cluster -> _))
+            .map(_.toMap)
         )
 
       private def stateOf(profile: RegistryProfile): F[ClusterCapability] =

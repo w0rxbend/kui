@@ -1,5 +1,7 @@
 package kui.ksql.infrastructure
 
+import java.io.{ByteArrayOutputStream, InputStream}
+
 import scala.concurrent.duration.FiniteDuration
 
 import cats.effect.kernel.Async
@@ -146,13 +148,22 @@ final class KsqlHttp[F[_]: Async](
         .contentType(MediaType)
     ).map(_.flatMap(body => entitiesOf(body)))
 
-  /** A pull query through `/query`, read to the end because a pull query has one. */
+  /** A pull query through `/query`, read to the end because a pull query has one.
+    *
+    * Unlike the push query above, this does not stream — a pull query's array completes, so it is read whole
+    * and parsed as a document. "Whole" still has a ceiling: [[KsqlHttp.MaxPullQueryResponseBytes]] bounds how
+    * much of ksqlDB's answer this call will hold in memory, the same way a request body is bounded elsewhere
+    * (`CompatibilityCheckUseCase.MaxDefinitionBytes`), because a `SELECT * FROM <large topic>` with no
+    * `LIMIT` would otherwise let one request buffer an unbounded amount of ksqlDB's JSON into this process's
+    * heap — a process every other cluster's schema, connect and cluster calls share.
+    */
   private def pullQuery(statement: KsqlStatement): F[Either[KuiError, StatementOutcome]] =
     send(
       basicRequest
         .post(callRoot.addPath(QueryPath))
         .body(payloadFor(statement.canonical))
-        .contentType(MediaType)
+        .contentType(MediaType),
+      maxResponseBytes = Some(KsqlHttp.MaxPullQueryResponseBytes)
     ).map(_.flatMap { body =>
       parser.parse(body).left.map(_ => malformed("its query answer is not JSON")).map { json =>
         val frames = json.asArray.map(_.toList).getOrElse(List(json)).flatMap(frameOfJson)
@@ -174,8 +185,13 @@ final class KsqlHttp[F[_]: Async](
     * upstream body wholesale; one field it wrote for this purpose is the difference between "ksqlDB said no,
     * and here is why" and a status code.
     */
-  private def send(request: Request[Either[String, String]]): F[Either[KuiError, String]] =
-    credentials.authenticate(request.header("Accept", MediaType).response(asStringAlways)).flatMap {
+  private def send(
+      request: Request[Either[String, String]],
+      maxResponseBytes: Option[Long] = None
+  ): F[Either[KuiError, String]] = {
+    val responseAs = maxResponseBytes.fold(asStringAlways)(cappedResponseAs)
+
+    credentials.authenticate(request.header("Accept", MediaType).response(responseAs)).flatMap {
       case Left(error) => error.asLeft[String].pure[F]
       case Right(authenticated) =>
         authenticated
@@ -186,12 +202,40 @@ final class KsqlHttp[F[_]: Async](
           )
           .recover {
             // The resilient backend carries its typed error inside this one exception rather than losing
-            // it in a message. Anything else is genuinely unexpected and is reported as an upstream that
-            // did not produce a response, which is the honest description.
+            // it in a message. A response past `maxResponseBytes` is reported the same way a malformed one
+            // is, because both are "ksqlDB answered something this call cannot use", not an unreachable
+            // upstream. Anything else is genuinely unexpected and is reported as an upstream that did not
+            // produce a response, which is the honest description.
             case UpstreamFailure(error) => Left(error)
+            case KsqlHttp.ResponseTooLarge(limit) =>
+              Left(malformed(s"its answer was larger than the $limit-byte limit KUI enforces on this call"))
             case failure: Exception => Left(thrown(failure))
           }
     }
+  }
+
+  /** A `String` response, capped at `maxBytes` — read incrementally rather than buffered whole and then
+    * measured, so the excess itself is never held in memory. The backend closes the stream once this function
+    * returns, same as it would for [[asStringAlways]].
+    */
+  private def cappedResponseAs(maxBytes: Long): ResponseAs[String] =
+    asInputStreamAlways(readCapped(_, maxBytes))
+
+  private def readCapped(input: InputStream, maxBytes: Long): String = {
+    val buffer = new Array[Byte](8192)
+    val out = new ByteArrayOutputStream(math.min(maxBytes, 8192L).toInt)
+    var total = 0L
+    var chunk = input.read(buffer)
+
+    while chunk != -1 do {
+      total += chunk
+      if total > maxBytes then throw KsqlHttp.ResponseTooLarge(maxBytes)
+      out.write(buffer, 0, chunk)
+      chunk = input.read(buffer)
+    }
+
+    out.toString(java.nio.charset.StandardCharsets.UTF_8)
+  }
 
   private def upstreamName: String = UpstreamName
 
@@ -285,6 +329,21 @@ object KsqlHttp {
 
   val KsqlPath: String = "ksql"
   val QueryPath: String = "query"
+
+  /** The most bytes a single pull-query answer may occupy before this call gives up on it.
+    *
+    * A pull query completes and is read whole (see [[KsqlHttp.pullQuery]]), unlike a push query, which
+    * streams. Without a ceiling, an operator-written `SELECT` with no `LIMIT` over a large topic would let
+    * one request hold an unbounded slice of ksqlDB's JSON in this process's heap — the same process that
+    * answers every other cluster's schema, connect and cluster calls.
+    */
+  val MaxPullQueryResponseBytes: Long = 16L * 1024 * 1024
+
+  /** Thrown by [[KsqlHttp.readCapped]] once a response has grown past its ceiling, and turned back into a
+    * [[kui.kernel.error.KuiError]] by [[KsqlHttp.send]] before it ever reaches a caller.
+    */
+  final private case class ResponseTooLarge(limitBytes: Long)
+      extends Exception(s"response exceeded $limitBytes bytes")
 
   /** ksqlDB's own media type, sent and accepted.
     *

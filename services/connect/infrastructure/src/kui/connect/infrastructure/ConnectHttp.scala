@@ -1,6 +1,7 @@
 package kui.connect.infrastructure
 
 import cats.effect.kernel.Async
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import io.circe.{parser, Json}
 import sttp.client4.*
@@ -50,6 +51,16 @@ final class ConnectHttp[F[_]: Async](
 ) extends ConnectWorkerPort[F] {
 
   import ConnectHttp.*
+
+  /** How many `GET /connectors/{name}/status` calls the pre-2.3 fallback keeps in flight at once.
+    *
+    * Half of `ConnectWiring.MaxConcurrentPerWorker` (8), deliberately not equal to it: that limit is the
+    * bulkhead for *everything* KUI sends this one worker, and a connector-list request that filled it would
+    * queue every other screen's call to the same worker behind itself. `SubjectListUseCase.MaxConcurrentRows`
+    * uses the identical halving for the same reason against a registry. It cannot be read from here — `app`
+    * depends on `infrastructure`, not the other way round — so the number is restated rather than shared.
+    */
+  private val MaxConcurrentPerConnector: Int = 4
 
   /** The address every request below is built against, with the configured **path stripped**.
     *
@@ -132,10 +143,15 @@ final class ConnectHttp[F[_]: Async](
     * A status request that fails takes its connector to `unreadable` and does **not** fail the call. That is
     * the difference this list exists to carry: one worker of a Connect cluster being wedged loses the status
     * of the connectors it owns, and the other rows are real answers that a screen should draw.
+    *
+    * Bounded, not sequential: `MaxConcurrentPerConnector` requests in flight at once, not one after another.
+    * A legacy or partially-unhealthy worker with many connectors would otherwise turn one connector-list
+    * request into N sequential round trips — each up to the worker's own `callTimeout` — before the screen
+    * could render anything at all.
     */
   private def perConnector(names: List[String]): F[Either[KuiError, ConnectorFacts]] =
     names.sorted
-      .traverse(name =>
+      .parTraverseN(MaxConcurrentPerConnector)(name =>
         get(root.addPath(ConnectorsPath, name, "status")).map {
           case Left(_) => name.asLeft[Connector]
           case Right(body) =>

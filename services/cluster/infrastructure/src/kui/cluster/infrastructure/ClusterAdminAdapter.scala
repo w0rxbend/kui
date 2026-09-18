@@ -47,15 +47,16 @@ final class ClusterAdminAdapter[F[_]: Async](
 
   def describeCluster(profile: ClusterProfile): F[Either[KuiError, dom.ClusterDescription]] =
     traced(profile, Operations.DescribeCluster) { connection =>
-      for {
-        // The domain's `ClusterDescription` carries the controller *mode*, which `describeCluster` alone
-        // cannot tell you: a KRaft cluster and a ZooKeeper cluster describe themselves identically. The
-        // quorum call is the only thing that distinguishes them, and its failure costs the mode and not the
-        // description — which is why it is an `attempt` folded into `ControllerMode.Unknown` rather than a
-        // second thing that can fail the call.
-        described <- admin.describeCluster(connection)
-        quorum <- admin.describeQuorum(connection)
-      } yield described.flatMap(raw => KafkaToDomain.description(raw, KafkaToDomain.controllerMode(quorum)))
+      // The domain's `ClusterDescription` carries the controller *mode*, which `describeCluster` alone
+      // cannot tell you: a KRaft cluster and a ZooKeeper cluster describe themselves identically. The
+      // quorum call is the only thing that distinguishes them, and its failure costs the mode and not the
+      // description — which is why it is folded into `ControllerMode.Unknown` rather than a second thing
+      // that can fail the call. The two calls are independent, so they run concurrently rather than paying
+      // two sequential broker round trips on every 30-second refresh.
+      Async[F].both(admin.describeCluster(connection), admin.describeQuorum(connection)).map {
+        case (described, quorum) =>
+          described.flatMap(raw => KafkaToDomain.description(raw, KafkaToDomain.controllerMode(quorum)))
+      }
     }
 
   def detectVersion(profile: ClusterProfile): F[Either[KuiError, Option[dom.KafkaVersion]]] =
