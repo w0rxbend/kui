@@ -1,27 +1,18 @@
 /**
- * The three preferences an operator sets once, and the build they are looking at.
+ * Preferences an operator sets once, and the build they are looking at.
  *
- * ## Why this page reads nothing from any service
+ * ## Why the controls arrive as props
  *
- * It is one of two screens that has to keep working when everything behind KUI is down. Every value
- * on it is either a browser preference or a build string the shell already holds, so a gateway that
- * has stopped answering takes nothing away from it. Adding a server call here would remove the page
- * at exactly the moment somebody is on it trying to work out what has happened.
- *
- * ## Why the preferences arrive as props
- *
- * The preference objects in the kernel are module-level singletons backed by `localStorage`, which
- * is right for the application and wrong for a test: a suite that drove them would share state with
- * the next suite and would need a working browser storage. So the page is handed them, and the shell
- * is the one place that hands it the real ones. That is what makes it possible to assert "changing
- * this control writes to this preference and to nothing else".
+ * The shell owns immediate browser state plus durable principal-and-cluster synchronization. The
+ * page only renders the preferences it is handed, so it stays usable while the gateway is down and
+ * tests can drive it without sharing storage. A failed save is reported inline while the locally
+ * cached choice keeps working.
  *
  * ## Every control takes effect immediately
  *
- * There is no Save. These are three attributes on the `<html>` element and each is written the
- * moment it is chosen, so the page you are changing is the demonstration of the change. A Save
- * button would imply a round trip that does not exist and a state — chosen but not applied — that
- * cannot occur.
+ * There is no Save. Appearance paints immediately and message defaults affect the next browse;
+ * persistence follows in the background. A Save button would create an unnecessary chosen-but-not-
+ * applied state.
  *
  * ## Why there is no timezone and no refresh rate
  *
@@ -35,8 +26,15 @@
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Card, Select } from "@kui/kernel";
-import type { AccentChoice, DensityChoice, RootPreference, ThemeChoice } from "@kui/kernel";
+import type {
+  AccentChoice,
+  DensityChoice,
+  MessageViewMode,
+  RootPreference,
+  ThemeChoice,
+} from "@kui/kernel";
 import type { AppearanceSyncStatus } from "../data/appearance.js";
+import type { MessageBrowserSyncStatus } from "../data/messageBrowser.js";
 
 import {
   ACCENT_OPTIONS,
@@ -46,7 +44,7 @@ import {
 } from "../chrome/appearance.js";
 
 /** One preference, as this page needs it: what it is now, and how to change it. */
-export interface Preference<A extends string> {
+export interface Preference<A extends string | number> {
   readonly choice: () => A;
   readonly select: (chosen: A) => void;
 }
@@ -55,8 +53,12 @@ export interface SettingsPageProps {
   readonly theme: Preference<ThemeChoice>;
   readonly accent: Preference<AccentChoice>;
   readonly density: Preference<DensityChoice>;
+  readonly messagePageSize: Preference<number>;
+  readonly messageViewMode: Preference<MessageViewMode>;
   /** Whether the current cluster's choices have reached durable server storage. */
   readonly persistence?: AppearanceSyncStatus | undefined;
+  /** Whether message browsing defaults have reached durable server storage. */
+  readonly messagePersistence?: MessageBrowserSyncStatus | undefined;
   /** The build, for a bug report. `undefined` when the shell was not told. */
   readonly version?: string | undefined;
   /** Which gateway this browser is talking to, for the same reason. */
@@ -100,7 +102,44 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
           />
           <Help of={appearanceHelp(DENSITY_OPTIONS)} />
           <Show when={props.persistence}>
-            {(persistence) => <PersistenceStatus status={persistence()} />}
+            {(persistence) => <PersistenceStatus status={persistence()} subject="appearance" />}
+          </Show>
+        </div>
+      </Card>
+
+      <Card title="Message browsing">
+        <div class="kui-settings__fields">
+          <Select
+            label="Default page size"
+            value={String(props.messagePageSize.choice())}
+            options={[
+              { value: "25", label: "25 records" },
+              { value: "50", label: "50 records" },
+              { value: "100", label: "100 records" },
+              { value: "250", label: "250 records" },
+              { value: "500", label: "500 records" },
+            ]}
+            onChange={(value) => props.messagePageSize.select(Number(value))}
+          />
+          <p class="kui-settings__help">
+            Used when a message URL does not include its own <code>limit</code>.
+          </p>
+          <Select
+            label="Default mode"
+            value={props.messageViewMode.choice()}
+            options={[
+              { value: "pages", label: "Pages" },
+              { value: "infinite", label: "Infinite scroll" },
+            ]}
+            onChange={(value) => props.messageViewMode.select(value as MessageViewMode)}
+          />
+          <p class="kui-settings__help">
+            Pages keep one offset range visible; infinite scroll preloads the next range near the end.
+          </p>
+          <Show when={props.messagePersistence}>
+            {(persistence) => (
+              <PersistenceStatus status={persistence()} subject="message browsing defaults" />
+            )}
           </Show>
         </div>
       </Card>
@@ -135,15 +174,18 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
   );
 }
 
-function PersistenceStatus(props: { readonly status: AppearanceSyncStatus }): JSX.Element {
+function PersistenceStatus(props: {
+  readonly status: AppearanceSyncStatus | MessageBrowserSyncStatus;
+  readonly subject: string;
+}): JSX.Element {
   const copy = (): string => {
     switch (props.status.kind) {
       case "idle":
-        return "Choose a cluster to sync appearance settings.";
+        return `Choose a cluster to sync ${props.subject}.`;
       case "loading":
-        return "Loading this cluster's saved appearance…";
+        return `Loading this cluster's saved ${props.subject}…`;
       case "saving":
-        return "Saving appearance…";
+        return `Saving ${props.subject}…`;
       case "saved":
         return "Saved for this cluster.";
       case "local-only":

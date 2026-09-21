@@ -90,6 +90,15 @@ export type CallScope = "shell" | "feature";
  */
 export type KnownAction = (typeof Actions)[keyof typeof Actions];
 
+/** The two bounded-browse presentations a message screen can start in. */
+export type MessageViewMode = "pages" | "infinite";
+
+/** Reactive defaults supplied by the shell; explicit values in a message URL still win. */
+export interface MessageBrowserDefaults {
+  readonly pageSize: () => number;
+  readonly mode: () => MessageViewMode;
+}
+
 export interface KuiContextValue {
   readonly api: KuiApiClient;
   /** The cluster the user has selected, or `undefined` before one is chosen. */
@@ -120,6 +129,8 @@ export interface KuiContextValue {
   readonly paths: KuiPaths;
   /** Report a call's outcome. `undefined` means it succeeded. */
   readonly report: (scope: CallScope, failed: boolean) => void;
+  /** Principal-and-cluster-scoped message browsing defaults, when the shell has them. */
+  readonly messageBrowser?: MessageBrowserDefaults | undefined;
 }
 
 /**

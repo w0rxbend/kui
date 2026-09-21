@@ -88,6 +88,7 @@ import {
 } from "./data/alerts.js";
 import { createAlertFeedCache } from "./data/alertCache.js";
 import { createAppearanceSync } from "./data/appearance.js";
+import { createMessageBrowserSync } from "./data/messageBrowser.js";
 import { brokerStorageOf, createClusterStore } from "./data/clusterStore.js";
 import {
   SEARCH_DEBOUNCE_MS,
@@ -251,6 +252,7 @@ export function App() {
     },
     storage: safeLocalStorage(),
   });
+  const messageBrowser = createMessageBrowserSync({ api, storage: safeLocalStorage() });
 
   createEffect(
     () => {
@@ -264,9 +266,15 @@ export function App() {
             principalName: principal.name,
           };
     },
-    (scope) => appearance.selectScope(scope),
+    (scope) => {
+      appearance.selectScope(scope);
+      messageBrowser.selectScope(scope);
+    },
   );
-  onCleanup(() => appearance.dispose());
+  onCleanup(() => {
+    appearance.dispose();
+    messageBrowser.dispose();
+  });
 
   /**
    * The search input, once it exists, and the `⌘K` that focuses it.
@@ -661,6 +669,9 @@ export function App() {
         accent={asPreference(appearance.preferences.accent)}
         density={asPreference(appearance.preferences.density)}
         persistence={appearance.status()}
+        messagePageSize={messageBrowser.preferences.pageSize}
+        messageViewMode={messageBrowser.preferences.mode}
+        messagePersistence={messageBrowser.status()}
         version={bootstrap.buildVersion}
         apiBase={bootstrap.apiBase}
       />
@@ -764,6 +775,10 @@ export function App() {
       session.permits(action.resource, action.action, clusterForFrame(), name),
     paths,
     report: (scope, failed) => health.report(scope, failed ? "answered" : "ok"),
+    messageBrowser: {
+      pageSize: messageBrowser.preferences.pageSize.choice,
+      mode: messageBrowser.preferences.mode.choice,
+    },
   };
 
   const banner = createMemo<string | undefined>(() =>

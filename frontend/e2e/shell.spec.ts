@@ -93,6 +93,89 @@ test.describe("the shell", () => {
     await expect(body).not.toContainText("undefined");
   });
 
+  test("message browsing defaults persist and drive a real browse", async ({ page }) => {
+    /* Give the clusterless Settings address an explicit current cluster first. With several
+       environments configured, choosing one on the user's behalf would be unsafe. */
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    await page.goto("/ui/settings");
+
+    const card = page.locator(".kui-card").filter({ hasText: "Message browsing" });
+    const pageSize = card.getByRole("combobox", { name: "Default page size" });
+    const mode = card.getByRole("combobox", { name: "Default mode" });
+    await expect(pageSize).toBeVisible();
+    await expect(mode).toBeVisible();
+
+    const originalSize = (await pageSize.textContent())?.trim() ?? "100 records";
+    const originalMode = (await mode.textContent())?.trim() ?? "Pages";
+    const targetSize = originalSize === "25 records" ? "50 records" : "25 records";
+    const targetMode = originalMode === "Infinite scroll" ? "Pages" : "Infinite scroll";
+
+    const saveSize = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/api/v1/clusters/${CLUSTER}/settings/messages`),
+    );
+    await pageSize.click();
+    await page.getByRole("option", { name: targetSize, exact: true }).click();
+    expect((await saveSize).status()).toBe(200);
+
+    const saveMode = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/api/v1/clusters/${CLUSTER}/settings/messages`),
+    );
+    await mode.click();
+    await page.getByRole("option", { name: targetMode, exact: true }).click();
+    expect((await saveMode).status()).toBe(200);
+
+    /* Force the next page to hydrate from the backend rather than succeeding from the warm cache. */
+    await page.evaluate(() => {
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith("kui.message-browser.") === true) window.localStorage.removeItem(key);
+      }
+    });
+
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/connect.file.lines/messages?seekTo=beginning`,
+    );
+    await expect(
+      page.getByRole("radio", { name: targetMode, exact: true }),
+    ).toBeChecked();
+
+    const browse = page.waitForRequest(
+      (request) =>
+        request.url().includes(`/topics/connect.file.lines/messages/stream`) &&
+        request.method() === "GET",
+    );
+    await page.getByRole("button", { name: "Read", exact: true }).click();
+    const request = await browse;
+    expect(new URL(request.url()).searchParams.get("limit")).toBe(targetSize.split(" ")[0]);
+
+    /* Restore the operator's settings so this verification leaves the manual stack as it found it. */
+    await page.goto("/ui/settings");
+    const restoredCard = page.locator(".kui-card").filter({ hasText: "Message browsing" });
+    const restoredSize = restoredCard.getByRole("combobox", { name: "Default page size" });
+    const restoreSize = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/api/v1/clusters/${CLUSTER}/settings/messages`),
+    );
+    await restoredSize.click();
+    await page.getByRole("option", { name: originalSize, exact: true }).click();
+    expect((await restoreSize).status()).toBe(200);
+
+    const restoredMode = restoredCard.getByRole("combobox", { name: "Default mode" });
+    const restoreMode = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/api/v1/clusters/${CLUSTER}/settings/messages`),
+    );
+    await restoredMode.click();
+    await page.getByRole("option", { name: originalMode, exact: true }).click();
+    expect((await restoreMode).status()).toBe(200);
+  });
+
   test("an address that names nothing says so, and offers a way back", async ({ page }) => {
     await page.goto("/ui/clusters/quickstart/not-a-real-section");
     await expect(page.getByRole("link").first()).toBeVisible();

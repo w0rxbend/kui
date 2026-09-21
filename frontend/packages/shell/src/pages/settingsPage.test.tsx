@@ -18,6 +18,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { flush } from "solid-js";
 import type { AccentChoice, DensityChoice, ThemeChoice } from "@kui/kernel";
+import type { MessageViewMode } from "@kui/kernel";
 
 import type { RootPreference } from "@kui/kernel";
 
@@ -49,25 +50,36 @@ const keep = (m: Mounted): Mounted => {
 };
 
 /** A preference that records what it was told, so a case can assert who wrote to it. */
-function recorder<A extends string>(initial: A): Preference<A> & { readonly written: A[] } {
+function recorder<A extends string | number>(initial: A): Preference<A> & { readonly written: A[] } {
   const written: A[] = [];
   return { choice: () => initial, select: (chosen) => void written.push(chosen), written };
+}
+
+function defaultMessagePreferences() {
+  return {
+    messagePageSize: recorder<number>(100),
+    messageViewMode: recorder<MessageViewMode>("pages"),
+  };
 }
 
 function page() {
   const theme = recorder<ThemeChoice>("auto");
   const accent = recorder<AccentChoice>("blue");
   const density = recorder<DensityChoice>("comfortable");
+  const messagePageSize = recorder<number>(100);
+  const messageViewMode = recorder<MessageViewMode>("pages");
   const mounted = mount(() => (
     <SettingsPage
       theme={theme}
       accent={accent}
       density={density}
+      messagePageSize={messagePageSize}
+      messageViewMode={messageViewMode}
       version="1.4.2+build.7c1f0a3"
       apiBase="https://kui.internal/api/v1"
     />
   ));
-  return { ...mounted, theme, accent, density };
+  return { ...mounted, theme, accent, density, messagePageSize, messageViewMode };
 }
 
 /**
@@ -132,9 +144,15 @@ function choose(container: HTMLElement, control: HTMLElement, option: string): v
 }
 
 describe("the settings page's controls", () => {
-  it("offers exactly three, and they are theme, accent and density", () => {
+  it("offers appearance and message browsing defaults", () => {
     const { container, dispose } = page();
-    expect(controls(container).map((control) => control.label)).toEqual(["Theme", "Accent", "Density"]);
+    expect(controls(container).map((control) => control.label)).toEqual([
+      "Theme",
+      "Accent",
+      "Density",
+      "Default page size",
+      "Default mode",
+    ]);
     dispose();
   });
 
@@ -161,12 +179,29 @@ describe("the settings page's controls", () => {
     dispose();
   });
 
+  it("writes message page size and mode independently", () => {
+    const { container, messagePageSize, messageViewMode, dispose } = page();
+    const size = controls(container).find((entry) => entry.label === "Default page size");
+    const mode = controls(container).find((entry) => entry.label === "Default mode");
+    expect(size).not.toBeUndefined();
+    expect(mode).not.toBeUndefined();
+    if (size === undefined || mode === undefined) return;
+
+    choose(container, size.el, "250 records");
+    choose(container, mode.el, "Infinite scroll");
+
+    expect(messagePageSize.written).toEqual([250]);
+    expect(messageViewMode.written).toEqual(["infinite"]);
+    dispose();
+  });
+
   it("says a fact it was not told rather than leaving a gap", () => {
     const { container, dispose } = mount(() => (
       <SettingsPage
         theme={recorder<ThemeChoice>("dark")}
         accent={recorder<AccentChoice>("teal")}
         density={recorder<DensityChoice>("compact")}
+        {...defaultMessagePreferences()}
       />
     ));
     // A blank value reads as a rendering fault; "not reported" is itself worth putting in a bug
@@ -203,6 +238,7 @@ describe("one vocabulary for the appearance preferences", () => {
           theme={recorder<ThemeChoice>(chosen)}
           accent={recorder<AccentChoice>("blue")}
           density={recorder<DensityChoice>("comfortable")}
+          {...defaultMessagePreferences()}
         />
       )),
     );
@@ -271,6 +307,7 @@ describe("one vocabulary for the appearance preferences", () => {
           theme={recorder<ThemeChoice>("auto")}
           accent={recorder<AccentChoice>("blue")}
           density={recorder<DensityChoice>("comfortable")}
+          {...defaultMessagePreferences()}
         />
       )),
     );
@@ -279,6 +316,11 @@ describe("one vocabulary for the appearance preferences", () => {
       ["Theme", appearanceHelp(THEME_OPTIONS)],
       ["Accent", appearanceHelp(ACCENT_OPTIONS)],
       ["Density", appearanceHelp(DENSITY_OPTIONS)],
+      ["Default page size", "Used when a message URL does not include its own limit."],
+      [
+        "Default mode",
+        "Pages keep one offset range visible; infinite scroll preloads the next range near the end.",
+      ],
     ]);
     // And all three vocabularies really do carry one, so this is not a case that passes on three
     // `undefined`s agreeing with each other.
@@ -298,6 +340,7 @@ describe("one vocabulary for the appearance preferences", () => {
           theme={recorder<ThemeChoice>("auto")}
           accent={recorder<AccentChoice>("blue")}
           density={recorder<DensityChoice>("comfortable")}
+          {...defaultMessagePreferences()}
         />
       )),
     );

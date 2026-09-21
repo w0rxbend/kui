@@ -711,7 +711,7 @@ describe("a record on the wire", () => {
 });
 
 describe("the messages screen", () => {
-  function screen(query: BrowseQuery = DEFAULT_BROWSE) {
+  function screen(query: BrowseQuery = DEFAULT_BROWSE, defaultView?: "pages" | "infinite") {
     const fake = fakeTransport();
     let session!: BrowseSession;
     const mounted = mount(() => {
@@ -725,6 +725,7 @@ describe("the messages screen", () => {
           query={query}
           onQueryChange={() => undefined}
           session={session}
+          defaultView={defaultView}
           now={Date.parse("2026-09-05T10:00:02Z")}
         />
       );
@@ -802,6 +803,16 @@ describe("the messages screen", () => {
     expect(container.textContent).toContain("Page 1");
     expect(container.textContent).toContain("ord_9");
     expect(fake.urls).toHaveLength(2);
+    dispose();
+  });
+
+  test("uses the configured default loading mode until the operator overrides it", () => {
+    const { container, dispose } = screen(DEFAULT_BROWSE, "infinite");
+
+    expect(container.querySelector<HTMLInputElement>('input[value="infinite"]')?.checked).toBe(true);
+    container.querySelector<HTMLInputElement>('input[value="pages"]')?.click();
+    expect(container.querySelector<HTMLInputElement>('input[value="pages"]')?.checked).toBe(true);
+
     dispose();
   });
 

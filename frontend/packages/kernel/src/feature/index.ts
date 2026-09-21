@@ -35,4 +35,6 @@ export {
   type CallScope,
   type KuiContextValue,
   type KuiPaths,
+  type MessageBrowserDefaults,
+  type MessageViewMode,
 } from "./context.jsx";

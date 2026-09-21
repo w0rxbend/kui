@@ -240,6 +240,7 @@ function routeAt(
      told to, and that has a case — what decides whether it is told is `mayProduce()` and
      `mayResend()` here, and a harness that can only mount permitted cannot observe either. */
   permits: KuiContextValue["permits"] = () => true,
+  messageBrowser?: KuiContextValue["messageBrowser"],
 ): { readonly container: HTMLElement; readonly dispose: () => void; readonly url: () => string } {
   /* Mounted at `/ui`, as the product is, and this is not decoration. `navigate` resolves a `to`
    * that begins with `/` against the base, and `useLocation().pathname` already carries the base —
@@ -261,6 +262,7 @@ function routeAt(
     permits,
     paths: PATHS,
     report: () => undefined,
+    ...(messageBrowser === undefined ? {} : { messageBrowser }),
   };
 
   const mounted = mount(() => (
@@ -699,6 +701,56 @@ describe("the typed predicates", () => {
     // The common browse costs one request, as it did before any of this existed.
     expect(calls.some((call) => call.path.endsWith("/messages/filters"))).toBe(false);
     expect(opened).toHaveLength(1);
+  });
+
+  test("applies the configured page size when the URL does not name one", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.default-size") });
+    const opened: string[] = [];
+    await withFetch(
+      (url) => opened.push(url),
+      async () => {
+        const { container, dispose } = routeAt(
+          "",
+          api,
+          "orders.default-size",
+          () => true,
+          { pageSize: () => 250, mode: () => "pages" },
+        );
+        await settle();
+        press(container, "Read");
+        await settle();
+        dispose();
+      },
+    );
+
+    expect(new URL(opened[0] ?? "", "http://localhost").searchParams.get("limit")).toBe("250");
+  });
+
+  test("keeps an explicit URL page size and uses the configured loading mode", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.explicit-size") });
+    const opened: string[] = [];
+    await withFetch(
+      (url) => opened.push(url),
+      async () => {
+        const { container, dispose } = routeAt(
+          "?limit=25",
+          api,
+          "orders.explicit-size",
+          () => true,
+          { pageSize: () => 250, mode: () => "infinite" },
+        );
+        await settle();
+
+        expect(
+          container.querySelector<HTMLInputElement>('input[value="infinite"]')?.checked,
+        ).toBe(true);
+        press(container, "Read");
+        await settle();
+        dispose();
+      },
+    );
+
+    expect(new URL(opened[0] ?? "", "http://localhost").searchParams.get("limit")).toBe("25");
   });
 });
 

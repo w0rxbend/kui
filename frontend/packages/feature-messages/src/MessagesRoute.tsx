@@ -119,7 +119,14 @@ function BrowserScreen(props: {
    * reload all produce exactly the same browse. `fromParams` is total: a query string somebody has
    * edited by hand yields a valid browse rather than an exception.
    */
-  const query = createMemo<BrowseQuery>(() => fromParams(new URLSearchParams(location.search)));
+  const query = createMemo<BrowseQuery>(() => {
+    const fromUrl = fromParams(new URLSearchParams(location.search));
+    if (fromUrl.limit !== undefined) return fromUrl;
+    const configured = kui.messageBrowser?.pageSize() ?? 100;
+    const pageSize =
+      Number.isSafeInteger(configured) && configured >= 1 && configured <= 500 ? configured : 100;
+    return { ...fromUrl, limit: pageSize };
+  });
 
   const streamUrl = () =>
     `/api/v1/clusters/${encodeURIComponent(props.clusterId)}` +
@@ -424,6 +431,7 @@ function BrowserScreen(props: {
            is both impossible and reassuring. */
           partitionCount={partitionCount()}
           query={query()}
+          defaultView={kui.messageBrowser?.mode() ?? "pages"}
           onQueryChange={writeQuery}
           predicates={predicates()}
           onPredicatesChange={(next) => writeQuery(currentQuery(), next)}

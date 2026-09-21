@@ -53,6 +53,7 @@ import {
   RecordRow,
   recordKey,
   type KafkaRecord,
+  type MessageViewMode,
 } from "@kui/kernel";
 import { userMessage } from "@kui/api";
 import {
@@ -82,6 +83,8 @@ export interface MessagesTabProps {
    */
   readonly onQueryChange: (query: BrowseQuery) => void;
   readonly session: BrowseSession;
+  /** Saved presentation used until this screen's operator chooses another one. */
+  readonly defaultView?: MessageViewMode | undefined;
   /** Whether this principal may publish into this topic. */
   readonly mayProduce?: boolean | undefined;
   /** Why not, when they may not. A disabled control without a reason is a control that looks broken. */
@@ -154,8 +157,9 @@ export interface MessagesTabProps {
 
 export function MessagesTab(props: MessagesTabProps): JSX.Element {
   const session = props.session;
-  const [view, setView] = createSignal<"pages" | "infinite">("pages");
-  const effectiveView = (): "pages" | "infinite" => props.query.live ? "infinite" : view();
+  const [viewOverride, setViewOverride] = createSignal<MessageViewMode>();
+  const effectiveView = (): MessageViewMode =>
+    props.query.live ? "infinite" : (viewOverride() ?? props.defaultView ?? "pages");
 
   /* The filter box's own text, which is not the same thing as the browse's `contains`. The box
    * holds what has been typed; the query holds what has been asked for. Conflating them is what
@@ -328,7 +332,7 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
             { value: "pages", label: "Pages", icon: "table", disabled: props.query.live },
             { value: "infinite", label: "Infinite scroll", icon: "chevron-down" },
           ]}
-          onChange={setView}
+          onChange={setViewOverride}
         />
         <Show when={props.query.live}>
           <span class="kui-browse__view-note">Live browsing follows new offsets continuously.</span>
