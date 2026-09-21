@@ -1,670 +1,201 @@
+<div align="center">
+
 # KUI
 
-A Kafka management and observability interface. Scala 3 on the server, TypeScript and SolidJS in
-the browser, built and shipped as two independent halves that talk over HTTP.
+### Kafka ops, minus the tab chaos.
 
-## Application tour
+See the cluster. Find the event. Fix the lag. Keep moving.
 
-[![Animated walkthrough of the KUI cluster dashboard, topics, message filtering and Kafka ecosystem pages](docs/frontend/screenshots/kui-walkthrough.gif)](docs/frontend/screenshots/kui-walkthrough.gif)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-7c3aed.svg)](LICENSE)
+[![Scala 3](https://img.shields.io/badge/backend-Scala%203-dc322f.svg)](https://www.scala-lang.org/)
+[![TypeScript](https://img.shields.io/badge/frontend-TypeScript-3178c6.svg)](https://www.typescriptlang.org/)
+[![Docker](https://img.shields.io/badge/run_with-Docker-2496ed.svg)](https://www.docker.com/)
 
-These captures come from the real current-source quickstart with its seeded Kafka, Schema Registry,
-Kafka Connect and ksqlDB services—not mocked screens.
+KUI is a modern web console for operating Apache Kafka. Explore records, watch brokers and
+consumer lag, manage topics and schemas, run Kafka Connect and ksqlDB, and follow live cluster
+health without bouncing between five different tools.
 
-| Cluster overview and traffic | Topics and message browsing |
+[Quick start](#quick-start) · [Features](#everything-in-one-control-room) · [Showcase](#showcase) · [Gallery](#the-captured-product-tour) · [Deployment](#built-to-run-your-way)
+
+</div>
+
+[![A 37-page and state animated tour of KUI](docs/frontend/screenshots/kui-walkthrough.gif)](docs/frontend/screenshots/kui-walkthrough.gif)
+
+> The walkthrough above is a 37-screen capture of the real quickstart stack—not a mockup. It
+> covers every navigable unauthenticated quickstart page plus selected record formats, loading
+> modes, error pages, and optional-service states.
+
+## Everything in one control room
+
+| Area | What you get |
 | --- | --- |
-| [![Cluster overview with responsive health, traffic and storage cards](docs/frontend/screenshots/current/05-cluster-overview.png)](docs/frontend/screenshots/current/05-cluster-overview.png) | [![Kafka topics table with cluster-wide statistics](docs/frontend/screenshots/current/10-topics.png)](docs/frontend/screenshots/current/10-topics.png) |
-| [![Traffic dashboard with throughput, latency and producer metrics](docs/frontend/screenshots/current/06-cluster-traffic.png)](docs/frontend/screenshots/current/06-cluster-traffic.png) | [![JSONPath-style field filtering over decoded Kafka records](docs/frontend/screenshots/current/26-filter-json.png)](docs/frontend/screenshots/current/26-filter-json.png) |
-| [![Consumer groups with lag and assignment details](docs/frontend/screenshots/current/17-consumer-groups.png)](docs/frontend/screenshots/current/17-consumer-groups.png) | [![Expanded Kafka record with syntax-highlighted collapsible JSON and copy controls for value, key and headers](docs/frontend/screenshots/current/31-copy-controls.png)](docs/frontend/screenshots/current/31-copy-controls.png) |
-| [![Schema Registry subjects and compatibility controls](docs/frontend/screenshots/current/22-schemas.png)](docs/frontend/screenshots/current/22-schemas.png) | [![Offset-relative message pages with previous and next navigation](docs/frontend/screenshots/current/32-pagination.png)](docs/frontend/screenshots/current/32-pagination.png) |
+| **Cluster pulse** | Multi-cluster navigation, broker topology, storage, throughput, p99 latency, handler utilization, producer traffic, and record-size views. |
+| **Topics without guesswork** | Search and inspect topics, partitions, consumers, and configuration. Create, reconfigure, expand, empty, or delete topics with previewed destructive actions. |
+| **Find the event, not the needle** | Stream records from earliest, latest, offset, or timestamp; paginate or infinite-scroll; filter strings and decoded fields; publish and resend messages. |
+| **Serde-aware payloads** | Read String, JSON, numeric, UUID, Base64, and Hex values plus Schema Registry-backed Avro, JSON Schema, and Protobuf. |
+| **Lag without the spreadsheet** | Inspect consumer state, members, assignments, and per-partition lag; preview and apply offset resets from a guided workflow. |
+| **Schema Registry workspace** | Browse subjects and versions, inspect definitions, register schemas, and manage or test compatibility. |
+| **Kafka ecosystem** | See connector and task health, pause/resume/restart connectors, explore ksqlDB streams/tables/queries, and execute statements. |
+| **Alerts that explain themselves** | Filter the live alert feed, acknowledge events, and see cluster notifications without leaving the current workflow. |
+| **Safer operations** | Read-only mode, form or OIDC authentication, RBAC, CSRF protection, audit records, server-side masking, and plan-token confirmation for destructive changes. |
 
-The [complete set of 37 current screenshots](docs/frontend/screenshots/current/) covers every
-navigable page, JSON and string filtering, registry-backed
-[Avro](docs/frontend/screenshots/current/28-filter-avro.png),
-[JSON Schema](docs/frontend/screenshots/current/29-filter-json-schema.png) and
-[Protobuf](docs/frontend/screenshots/current/30-filter-protobuf.png), plus
-[infinite-scroll preloading](docs/frontend/screenshots/current/33-infinite-scroll.png) and explicit
-not-configured states.
+## Why KUI
 
-> **Status: every milestone of [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) is closed except its
-> last one, M10, which is open on one of the five things it defines as done — the documentation
-> item, and `docs/plan/ROADMAP.md` names what is open on it with the command that finds each.** KUI
-> connects to real Kafka clusters and is usable from a browser: a dashboard with a traffic tab
-> drawn from a real metrics scrape, clusters and brokers, topics and their configuration, browsing
-> and publishing records, consumer groups with their lag, an offset-reset wizard, schema subjects
-> with their versions and compatibility, an alert feed with a notification bell, Kafka Connect
-> connectors with their per-task state, and ksqlDB objects and statements. It can also create a
-> topic, change a setting, add partitions, empty a topic and delete one — the three that cannot be
-> undone are confirmed against a plan the server computed and applied against a token naming
-> exactly what you were shown. Sign-in and role-based authorization are built, but
-> **`kui.auth.type` defaults to `disabled`**, so an unconfigured deployment lets anyone who can
-> reach the port do anything KUI can do. What is *not* built is named plainly under
-> [What is built, and what is not](#what-is-built-and-what-is-not) below, and the roster there is
-> **compared against `services/` and against the gateway's own contract map** by
-> `./scripts/feature-matrix-check.sh`, because this banner said *milestones 0 to 5* and that list
-> said *no Kafka Connect, no ksqlDB* for four milestones after both shipped, with every gate in the
-> repository green over it. See [ROADMAP.md](docs/ROADMAP.md) for how the backend was built, and
-> [docs/plan/](docs/plan/) for the plan that closes the gap to the current design.
+- **Fails in sections, not as a whole.** Each domain can run independently. When an optional
+  service is unavailable, the rest of the console stays useful and the affected screen tells you
+  what happened.
+- **Streams instead of stockpiling.** Record browsing, live queries, metrics, and alerts flow to
+  the browser without buffering entire topics in memory.
+- **Keeps risky clicks intentional.** Topic deletion, offset resets, and destructive ksqlDB
+  statements use plan → token → confirm flows, with read-only and authorization checks at the
+  edge.
+- **One contract from server to screen.** Scala 3 services publish OpenAPI contracts that generate
+  the TypeScript client used by the SolidJS interface.
 
-## What it is
+## Showcase
 
-KUI lets you operate Apache Kafka clusters from a browser: inspect brokers and topics, browse and
-publish records, follow consumer groups and their lag, manage schemas, connectors and access
-control lists, and watch it all through metrics and traces.
-
-Three existing tools were studied in depth so that KUI starts from their combined capability
-rather than a blank page: [Kafbat Kafka UI](https://github.com/kafbat/kafka-ui), its predecessor
-[Provectus Kafka UI](https://github.com/provectus/kafka-ui), and
-[Consdata Kouncil](https://github.com/Consdata/kouncil). KUI reimplements their functionality; it
-copies none of their code. The analysis is in [`research/`](research/), with every claim cited
-back to the source it came from.
-
-## What makes it different
-
-**It keeps working when parts of it break.** Each area of the domain runs as its own service. If
-schema registry access fails, or consumer group inspection becomes unreachable, the rest of the
-interface carries on. The navigation entry for the affected area stays clickable and tells you
-what is wrong instead of disappearing or greying out.
-
-**The two halves are one contract.** The backend is Scala 3 built with Mill; the user interface is
-TypeScript and SolidJS, built with Vite in its own pnpm workspace under `frontend/`, and shipped as
-its own container image. They talk over HTTP. The same endpoint definitions generate the server, its
-documentation, and — through the committed OpenAPI documents the browser's types are generated from
-— the client the browser uses, so a change to a contract cannot silently break one side (ADR-048).
-
-**It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
-of it flows from Kafka to the browser without buffering whole topics in memory.
-
-**It can be one process or eleven.** The same modules compose into a single JVM for local use, or
-into a gateway, nine services and the interface as separate containers for production. No code
-changes between the two: `deployment/compose/docker-compose.yml` runs the second shape — eleven KUI
-containers beside the Kafka broker, the schema registry, the Connect worker, the ksqlDB server and
-the metrics exporter it is pointed at — and `deployment/compose/smoke.sh` stops one of them and
-shows the other eight services carrying on. Eight, because the script derives that list from
-`ServiceContracts.byService` — nine contracted services — and checks every one of them except the
-container it stopped; it said five while there were six, and the count is now read out of the script
-rather than remembered. The tenth and eleventh directories under `services/` are the gateway itself
-and `identity`, which is reached through the gateway's own sign-in routes and has no proxied
-contract by design.
-
-**New here?** `docs/overview/README.md` is one document that describes the eleven services, the
-eight feature packages, the two deployment shapes and the gates, for somebody who has never opened
-this repository before.
-
-## What is built, and what is not
-
-The honest version, because a tool you are going to point at a production cluster should not make
-you find its limits by hitting them.
-
-**The bar this project set itself** is that somebody who has never seen KUI can clone it, run one
-command and have KUI and a Kafka broker both running; see their clusters, brokers and topics
-without configuring anything beyond a bootstrap address; read messages from a topic, including the
-JSON inside them, and publish one; see consumer groups and how far behind they are; point it at
-their own cluster with a documented example configuration, including a secured one; and have any
-part of it fail without the rest becoming unusable. That last point is not a feature — it is the
-reason the architecture is shaped the way it is, and it is tested rather than asserted.
-
-**What works today:**
-
-| Area | State |
+| Cluster health without the archaeology | Filter decoded records down to the field |
 | --- | --- |
-| Build, gateway, single-process and multi-container assembly, container images | done |
-| Cluster connectivity: real Kafka connections with SASL/TLS, clusters, brokers, metadata store | done |
-| Topics: list, search, detail, partitions, configuration | done |
-| Topic administration: create, reconfigure, add partitions, empty, delete | done, with read-only mode, plan-token confirmation and an audit trail |
-| Messages: browsing with every seek mode, streaming, serialization formats, publishing, filters | done except purge from the message screen |
-| Consumer groups: groups, members, assignments, lag, offset reset | done, wizard included |
-| Schema registry: subjects, versions, registering a version, compatibility levels and checks, registry-backed Avro and JSON Schema decoding | done |
-| Sign-in and access control: form and OIDC authentication, sessions, CSRF, role-based authorization at the edge | done, and disabled by default |
-| Alerts: four cluster rules, event feed, acknowledgement, Alerts screen, dashboard card and notification bell | done, with an SSE change stream and polling fallback |
-| Kafka Connect: the connector list with each connector's tasks and failure reason, pause, resume, restart | done, over one or many Connect workers per cluster (ADR-054) |
-| ksqlDB: streams, tables and running queries, statement execution, push queries as a stream | done, with plan→token→confirm on `DROP … DELETE TOPIC` (ADR-055, ADR-056) |
-| Broker metrics: the dashboard's Traffic tab — throughput, p99 latency, request-handler idle, top producers, record size | done from one Prometheus exposition; see the limits below |
-| Cross-entity search over topics, consumer groups and subjects, from the top bar | done, and says which services it could not ask |
-| Quickstart, configuration examples, demonstration environment | done |
+| [![KUI cluster overview with broker health, topic count, uptime, throughput and consumer lag](docs/frontend/screenshots/current/05-cluster-overview.png)](docs/frontend/screenshots/current/05-cluster-overview.png) | [![KUI message browser filtering a decoded JSON field](docs/frontend/screenshots/current/26-filter-json.png)](docs/frontend/screenshots/current/26-filter-json.png) |
+| **Your cluster's pulse, at a glance.** | **The event you need, minus the scroll marathon.** |
 
-<!-- checked: capability-claims -- verified by ./scripts/feature-matrix-check.sh -- claims: service-count, service-routed-count, service-state, service-roster, residue, capability-prose -->
-**What is not built:**
+| Consumer lag, members, and assignments | Schemas and compatibility in the same flow |
+| --- | --- |
+| [![KUI consumer group detail with state, members, assignments and partition lag](docs/frontend/screenshots/current/18-consumer-group-detail.png)](docs/frontend/screenshots/current/18-consumer-group-detail.png) | [![KUI Schema Registry subjects and compatibility controls](docs/frontend/screenshots/current/22-schemas.png)](docs/frontend/screenshots/current/22-schemas.png) |
+| **Debug the group, then reset offsets with a preview.** | **Browse, validate, and register without leaving KUI.** |
 
-- **Authentication and authorization ship disabled.** Both are built — form and OIDC sign-in, a
-  session and CSRF layer at the gateway, and a role-based policy evaluated at the edge — but
-  `kui.auth.type` defaults to `disabled`. Until you configure it, anyone who can reach the port can
-  do anything KUI can do, including deleting topics. Run it on a network you control.
-- **No ACL and no client-quota management.** It is the one whole area of the reference products
-  KUI has not begun: no screen, no endpoint, no service. The roster below is what a reader should
-  trust about that, because it is compared against the tree rather than written from memory.
+| Kafka Connect operations | ksqlDB workspace |
+| --- | --- |
+| [![KUI Kafka Connect screen showing connector and task state](docs/frontend/screenshots/current/20-connect.png)](docs/frontend/screenshots/current/20-connect.png) | [![KUI ksqlDB workspace showing streams, tables, queries and statement execution](docs/frontend/screenshots/current/21-ksql.png)](docs/frontend/screenshots/current/21-ksql.png) |
+| **Connector health and controls, right where you need them.** | **Inspect the topology, run a statement, keep the context.** |
 
-KUI is **11 services** under `services/`, **9 of them routed** through the gateway. Every name below
-is compared against a directory on disk and against `ServiceContracts.byService` — the gateway's own
-map, and the single place that association is declared — so a sentence here that says a service is
-not built fails the build instead of misleading a reader for four milestones, which is what the
-sentence this block replaced did. The three lists are the only place inside these markers where a
-service's state may be stated: any other sentence that names one beside a negation is refused by
-`./scripts/feature-matrix-check.sh` with the name printed, because a claim it cannot compare is a
-claim it has to refuse.
+## The captured product tour
 
-**Built and routed:** `alerts`, `cluster`, `connect`, `consumer`, `ksql`, `message`, `metrics`,
-`schema`, `topic`.
+These 37 screenshots are captured at 1440×900 from the seeded quickstart stack by
+[`frontend/e2e/capture-readme.ts`](frontend/e2e/capture-readme.ts). The capture fails on browser
+errors, verifies the frontend and gateway are the same build, and rebuilds the 37-frame walkthrough
+GIF automatically.
 
-**Built, not routed:** `gateway`, which is the edge itself, and `identity`, which is reached only
-through the gateway's own sign-in routes and deliberately has no proxied contract — a proxied login
-would answer with a principal in a body and set no cookie.
+<details>
+<summary><strong>Start, settings, clusters, and dashboards — screens 01–09</strong></summary>
 
-**Not built:** `acl` and `quota`. Nothing in this repository implements either, and the roster
-above is the whole of what does exist.
-<!-- /checked -->
+| | |
+| --- | --- |
+| [![Landing dashboard](docs/frontend/screenshots/current/01-landing.png)](docs/frontend/screenshots/current/01-landing.png) **Landing dashboard** | [![Appearance and interface settings](docs/frontend/screenshots/current/02-settings.png)](docs/frontend/screenshots/current/02-settings.png) **Settings** |
+| [![Registered clusters](docs/frontend/screenshots/current/03-clusters.png)](docs/frontend/screenshots/current/03-clusters.png) **Clusters** | [![Cluster configuration overview](docs/frontend/screenshots/current/04-manage-clusters.png)](docs/frontend/screenshots/current/04-manage-clusters.png) **Manage clusters** |
+| [![Cluster health overview](docs/frontend/screenshots/current/05-cluster-overview.png)](docs/frontend/screenshots/current/05-cluster-overview.png) **Health overview** | [![Cluster traffic metrics](docs/frontend/screenshots/current/06-cluster-traffic.png)](docs/frontend/screenshots/current/06-cluster-traffic.png) **Traffic** |
+| [![Cluster storage and replica health](docs/frontend/screenshots/current/07-cluster-storage.png)](docs/frontend/screenshots/current/07-cluster-storage.png) **Storage** | [![Kafka broker list](docs/frontend/screenshots/current/08-brokers.png)](docs/frontend/screenshots/current/08-brokers.png) **Brokers** |
+| [![Kafka broker detail](docs/frontend/screenshots/current/09-broker-detail.png)](docs/frontend/screenshots/current/09-broker-detail.png) **Broker detail** | |
 
-- **Broker metrics from one Prometheus exposition, and not a metrics system.** KUI scrapes a
-  JMX-exporter endpoint the deployment declares under `kui.metrics.sources.<cluster>` and keeps a
-  bounded series from it. Five reads come off that one scrape — bytes in and out per second, p99
-  request latency, request-handler and network-processor idle, the busiest producers, and record
-  size — and the dashboard's Traffic tab draws them, checked in a browser against a running
-  stack and not inferred from the endpoints answering: two of the five drew nothing for a whole
-  milestone because the server and the browser had guessed different field names for one wire and
-  every gate on both sides was green. **Three of them are deliberately not the card
-  the design drew, and each divergence is an ADR rather than a derived number wearing the design's
-  label** (ADR-052): purgatory is a queue *length* and Kafka publishes no percentage, so it is drawn
-  as a count; the busiest producers are ranked by *topic*, because a broker publishes no
-  per-`client.id` byte rate unless quotas are configured, and the card's title says the word the
-  server answered with; and there is no record-size distribution anywhere in Kafka's JMX surface, so
-  the card prints the mean and says the twelve-bucket histogram cannot be measured. A cluster with
-  no configured source answers `not_configured` and its cards say *that*, which is the design rather
-  than a failure. There is still no JMX client: `MetricsSourceKind.Jmx` is declared, refuses with a
-  sentence naming the build, and cannot be configured at all while a metrics source's address is an
-  `http`/`https` URL (ADR-050).
-- **Prometheus HTTP API queries are wired internally, with a deliberately narrow boundary.** A
-  `prometheus-api` source owns a bounded, authenticated instant/range client with TLS/mTLS,
-  concurrency and response limits, coalescing, caching, stale-on-transient-failure rules and
-  low-cardinality telemetry. It starts no exposition scraper and does not make dashboard claims by
-  guessing PromQL: no public metrics route consumes it until a server-owned Kafka metric catalog
-  defines those queries. See [the metrics-source configuration guide](docs/operations/configuration.md)
-  for the exact source kinds, limits and security model.
-- **Field masking is configured, applied and has been watched in a browser.** The engine is called
-  from the browse and track paths, and `kui.clusters.<n>.masking` decodes ten keys into its own rule
-  type at start-up, so a rule an operator writes is a start-up error rather than a policy that loads
-  and masks nothing. The quickstart configures a rule, `docs/operations/masking.md` is the
-  key-by-key page, and at the wave-10 close a person opened the seeded `customers.profiles` topic
-  in a browser and read back `"name":"<redacted>"` with the seed record's real values absent from
-  the page. That was the last step this project requires before anything is called done, so the row
-  is `COMPLETE` in the feature matrix, which records the record it was closed on. What the operator
-  page guarantees about the length of a masked value is narrower than it looks at a glance, and the
-  block below quotes that page rather than paraphrasing it.
+</details>
 
-<!-- checked: quotations -- verified by ./scripts/feature-matrix-check.sh -- claims: quotation, quotation-path, residue -->
-**What the masking page actually guarantees, in its own words.**
-`docs/operations/masking.md` states the length bound as *never returns a value longer than the value
-it replaced*, and states it of the `mask` kind alone: the same paragraph says the bound does not
-hold for `replace` and cannot, because a `replacement` is a literal an operator writes and nothing
-truncates it to fit the field it covers. This paragraph quotes that page instead of summarising it
-on purpose — every quotation of another file inside these markers is compared against that file by
-`./scripts/feature-matrix-check.sh`, so a sentence repaired where it lives turns this page red
-rather than leaving a description here of a defect somebody has already fixed. That is what this
-paragraph used to be: it quoted a sentence that page stopped carrying when the bound was scoped to
-one kind, and nothing in this repository could see the difference.
-<!-- /checked -->
+<details>
+<summary><strong>Topics and messages — screens 10–16</strong></summary>
 
-<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent, residue -->
-71 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
-delivered end to end — about 40%.
-<!-- /checked -->
+| | |
+| --- | --- |
+| [![Kafka topic list and statistics](docs/frontend/screenshots/current/10-topics.png)](docs/frontend/screenshots/current/10-topics.png) **Topics** | [![Kafka topic overview](docs/frontend/screenshots/current/11-topic-overview.png)](docs/frontend/screenshots/current/11-topic-overview.png) **Topic overview** |
+| [![Topic partition layout](docs/frontend/screenshots/current/12-topic-partitions.png)](docs/frontend/screenshots/current/12-topic-partitions.png) **Partitions** | [![Topic consumer groups](docs/frontend/screenshots/current/13-topic-consumers.png)](docs/frontend/screenshots/current/13-topic-consumers.png) **Topic consumers** |
+| [![Topic configuration and administration](docs/frontend/screenshots/current/14-topic-settings.png)](docs/frontend/screenshots/current/14-topic-settings.png) **Topic settings** | [![Kafka message browser](docs/frontend/screenshots/current/15-messages.png)](docs/frontend/screenshots/current/15-messages.png) **Browse messages** |
+| [![Cross-topic message tracker](docs/frontend/screenshots/current/16-message-tracker.png)](docs/frontend/screenshots/current/16-message-tracker.png) **Message tracker** | |
 
-That figure is recounted from the rows every time it is written down, never adjusted from the
-previous figure, and `./scripts/feature-matrix-check.sh` fails the build when the sentence above
-and the rows it summarises disagree — which, until this wave, nothing did. Every row there was set
-by reading the code and driving the running application, not by asking whether the work had been
-scheduled. [docs/ROADMAP.md](docs/ROADMAP.md) says what lands when, and [docs/plan/](docs/plan/)
-holds the plan for the rest.
+</details>
 
-### Editing the checked blocks above
+<details>
+<summary><strong>Consumers, alerts, Connect, ksqlDB, and schemas — screens 17–23</strong></summary>
 
-Three regions of this section are marked `<!-- checked: … -->` and read by
-`./scripts/feature-matrix-check.sh`. Two rules govern what may be written inside them, and both cost
-somebody an afternoon to find, so they are written here rather than left in a comment inside the
-checker. Its length is what `wc -l scripts/feature-matrix-check.sh` prints, and is deliberately not
-copied here: this sentence published **3,700 lines** against a script that had grown to 4,446, and a
-number that moves every time a claim kind is added is a number nobody re-takes.
+| | |
+| --- | --- |
+| [![Consumer group list and lag](docs/frontend/screenshots/current/17-consumer-groups.png)](docs/frontend/screenshots/current/17-consumer-groups.png) **Consumer groups** | [![Consumer group members assignments and offsets](docs/frontend/screenshots/current/18-consumer-group-detail.png)](docs/frontend/screenshots/current/18-consumer-group-detail.png) **Consumer detail** |
+| [![Cluster alerts and acknowledgements](docs/frontend/screenshots/current/19-alerts.png)](docs/frontend/screenshots/current/19-alerts.png) **Alerts** | [![Kafka Connect connectors and tasks](docs/frontend/screenshots/current/20-connect.png)](docs/frontend/screenshots/current/20-connect.png) **Kafka Connect** |
+| [![ksqlDB streams tables queries and editor](docs/frontend/screenshots/current/21-ksql.png)](docs/frontend/screenshots/current/21-ksql.png) **ksqlDB** | [![Schema Registry subject list](docs/frontend/screenshots/current/22-schemas.png)](docs/frontend/screenshots/current/22-schemas.png) **Schemas** |
+| [![Schema Registry subject versions and compatibility](docs/frontend/screenshots/current/23-schema-subject.png)](docs/frontend/screenshots/current/23-schema-subject.png) **Schema subject** | |
 
-**State goes in the three labelled lists; prose about a service goes outside the markers.** Inside
-`capability-claims` a service's state is stated in *Built and routed*, *Built, not routed* and *Not
-built*, where every name is compared against `services/` and against the gateway's contract map — or
-it is not stated inside the markers at all. Any other sentence naming a service beside a negation
-(*no*, *not*, *neither*, *nor*, *without*, *never*) or beside a word that puts it in a state
-(*placeholder*, *stub*, *stubbed*, *unimplemented*, *not implemented*, *empty*, *todo*, *coming
-soon*) is refused with the service's name printed. **That includes honest sentences.** *"The Connect
-screen is the placeholder for a worker that is not configured"* is true of an unconfigured
-deployment and the gate refuses it — measured here, one disagreement naming `connect`, exit 1 —
-because the refusal is not *that sentence is false*, it is *nothing here can check that sentence, so
-do not make it where the markers promise everything is checked*. The escape is four lines long:
-write it below the `<!-- /checked -->`, which is where every paragraph of that shape in this file
-already lives. Qualifying the rule instead — allowing *placeholder* when *configured* appears
-nearby — was considered and rejected as a heuristic about meaning that the next synonym defeats.
+</details>
 
-**And the rule reads services, not screens, so a green run says less than it looks like it says.**
-*"KUI has no topic detail page and no consumer lag chart"* appended inside the `capability-claims`
-block leaves the run at *all true*, exit 0 — measured here, on this tree, and restored afterwards.
-It names no service by its backticked id and no product name the gate knows, so there is nothing to
-hold it against. That is the declared scope rather than a hole in it: widening the rule to every
-noun this documentation shares with Kafka's own vocabulary would refuse honest prose far more often
-than it would catch a false claim. But it means a green run says **every sentence in that block that
-names a service is true** — not that every sentence in it is.
+<details>
+<summary><strong>Guardrails and record workflows — screens 24–33</strong></summary>
+
+| | |
+| --- | --- |
+| [![Authorization forbidden page](docs/frontend/screenshots/current/24-forbidden.png)](docs/frontend/screenshots/current/24-forbidden.png) **Forbidden** | [![Not found recovery page](docs/frontend/screenshots/current/25-not-found.png)](docs/frontend/screenshots/current/25-not-found.png) **Not found** |
+| [![Decoded JSON field filtering](docs/frontend/screenshots/current/26-filter-json.png)](docs/frontend/screenshots/current/26-filter-json.png) **JSON filter** | [![String payload filtering](docs/frontend/screenshots/current/27-filter-string.png)](docs/frontend/screenshots/current/27-filter-string.png) **String filter** |
+| [![Avro payload filtering](docs/frontend/screenshots/current/28-filter-avro.png)](docs/frontend/screenshots/current/28-filter-avro.png) **Avro** | [![JSON Schema payload filtering](docs/frontend/screenshots/current/29-filter-json-schema.png)](docs/frontend/screenshots/current/29-filter-json-schema.png) **JSON Schema** |
+| [![Protobuf payload filtering](docs/frontend/screenshots/current/30-filter-protobuf.png)](docs/frontend/screenshots/current/30-filter-protobuf.png) **Protobuf** | [![Expanded record with copy controls](docs/frontend/screenshots/current/31-copy-controls.png)](docs/frontend/screenshots/current/31-copy-controls.png) **Copy value, key, and headers** |
+| [![Offset-based message pagination](docs/frontend/screenshots/current/32-pagination.png)](docs/frontend/screenshots/current/32-pagination.png) **Pagination** | [![Infinite-scroll message loading](docs/frontend/screenshots/current/33-infinite-scroll.png)](docs/frontend/screenshots/current/33-infinite-scroll.png) **Infinite scroll** |
+
+</details>
+
+<details>
+<summary><strong>Configured and optional-service states — screens 34–37</strong></summary>
+
+| | |
+| --- | --- |
+| [![Traffic metrics on the staging cluster](docs/frontend/screenshots/current/34-staging-traffic.png)](docs/frontend/screenshots/current/34-staging-traffic.png) **Configured metrics** | [![Schema Registry not configured state](docs/frontend/screenshots/current/35-staging-schemas-not-configured.png)](docs/frontend/screenshots/current/35-staging-schemas-not-configured.png) **Schemas not configured** |
+| [![Kafka Connect not configured state](docs/frontend/screenshots/current/36-staging-connect-not-configured.png)](docs/frontend/screenshots/current/36-staging-connect-not-configured.png) **Connect not configured** | [![ksqlDB not configured state](docs/frontend/screenshots/current/37-staging-ksql-not-configured.png)](docs/frontend/screenshots/current/37-staging-ksql-not-configured.png) **ksqlDB not configured** |
+
+</details>
 
 ## Quick start
 
-Four ways in. The first two need only Docker; the other two need a JDK 21 and this repository, and
-the last also needs Docker.
+Docker with the Compose plugin is the only prerequisite.
 
-### Just show me it running, with a Kafka behind it
-
-```
+```bash
+git clone https://github.com/w0rxbend/kui.git
+cd kui
 deployment/quickstart/quickstart.sh
 ```
 
-One command, and Docker is the only thing that has to be installed — no JDK, no Mill, no Scala. It
-starts a single-node Kafka 4.3.1 in KRaft mode, waits until the broker can genuinely serve metadata
-rather than merely until it has started, seeds it with topics, JSON messages and a consumer group
-that is behind, starts KUI pointed at it, and prints the URL. `quickstart.sh down` removes all of it,
-volumes included.
+Open **http://localhost:8090/ui/**. The quickstart launches Kafka with seeded topics and records,
+Schema Registry, Kafka Connect, ksqlDB, broker metrics, a lagging consumer, and KUI.
 
-What you get is the product against that broker: two registered clusters, the broker and its node,
-seeded topics with their partitions and configuration, the JSON records inside them, a form to
-publish more, consumer groups with their lag, a schema registry, a Connect worker with a connector
-deployed on it, a ksqlDB server with streams and queries, and a wizard that resets a group's offsets
-and shows you what it would write before it writes it. The
-[manual-QA runbook](deployment/MANUAL_QA.md) documents the current-source launcher, port matrix,
-readiness checks, bounded logs and message-consumer checklist.
+Want to see the sign-in and role flows too?
 
-One caveat if you have run KUI before: the quickstart reuses whatever `kui-allinone` image is
-already on the machine and only builds one when none is there, so after changing code run
-`./mill deployment.docker.allinone.docker.build` first or you will start the previous build.
-
-### Show me three clusters at once, and one of them failing
-
-```
-deployment/demo/demo.sh
+```bash
+deployment/quickstart/quickstart.sh --with-auth
 ```
 
-Also Docker-only, and the demonstration to run if you only run one. It starts **three genuinely
-different Kafka clusters** and one KUI that already knows all three, so the cluster switcher has
-something real in it:
+When you are done:
 
-| Cluster | Shape | Seeded with |
-| --- | --- | --- |
-| Development | one broker, `PLAINTEXT` | 4 topics, replication factor 1, a leftover `scratch.jm-test` nobody cleaned up |
-| Production | three brokers, `PLAINTEXT` | 15 topics at replication factor 3 with `min.insync.replicas=2`, 20 000+ messages, 7 consumer groups |
-| Secured | one broker, `SASL_SSL` + `SCRAM-SHA-512` | 4 topics behind a password and a private certificate authority the script generates for you |
-
-Nothing has to be installed but Docker, and nothing has to be configured — if the KUI image is
-missing the script builds it in a container, and if the demonstration certificate authority is
-missing it generates that in a container too. Measured on a 16-core laptop from a machine with no
-KUI image, no certificates and no containers, `demo.sh` printed its URL after **4 min 41 s**, of
-which 3 min 50 s was the one-time compile. Every run after that is **about 45 seconds**.
-
-Then switch one cluster off and watch the other two carry on:
-
-```
-deployment/demo/demo.sh stop prod          # or: dev, secured, prod-broker
-deployment/demo/demo.sh start prod
-deployment/demo/demo.sh down
+```bash
+deployment/quickstart/quickstart.sh down
 ```
 
-With Production stopped, Development and Secured kept answering in **10–11 ms**, and Production
-itself did not disappear: it went `stale` with the reason `UPSTREAM_UNAVAILABLE`, kept serving the
-15 topics it had last read, and said when it read them. `start prod` brought it back with nothing
-pressed. `stop prod-broker` is the subtler one — it stops a single broker of three, and the cluster
-keeps serving while KUI's topic table shows 96 replicas fallen out of sync, which is exactly what
-Kafka itself reports for the same moment.
+## Built to run your way
 
-The [manual-QA runbook](deployment/MANUAL_QA.md) has the walkthrough and coexistence notes.
+KUI uses the same domain modules in two deployment shapes:
 
-### See the interface, and change it
+- **All-in-one** — one JVM plus the frontend, ideal for a small footprint and the local quickstart.
+- **Fault-isolated** — a gateway and independent domain services, so one unhealthy integration does
+  not take the whole console with it and each service can be scaled or restarted separately.
 
-The two halves build separately, because they are two builds. The backend is Mill and needs only a
-JDK; the interface is a pnpm workspace and needs only Node.
+Start with the [minimal](deployment/examples/minimal.yaml),
+[three-cluster](deployment/examples/three-clusters.yaml), or
+[production-shaped](deployment/examples/production.yaml) configuration examples. Each example
+documents its deployment and security settings inline; the
+[metrics-source guide](docs/operations/configuration.md) covers Prometheus exposition and API
+sources, authentication, TLS/mTLS, caching, and limits.
 
-```
-git clone <this repository> && cd kui
-(cd frontend && pnpm install && pnpm build)   # writes frontend/dist
-./mill dev
-```
+## Current scope and security
 
-`./mill dev` builds the backend and starts the whole product — the gateway and every service — as one
-process on one port, with `frontend/dist` on its classpath so the interface is served from the same
-origin as the API. Open <http://localhost:8080/ui/>. Stop it with Ctrl-C. Skipping the first line is
-not an error: the gateway then answers `/ui/` with a 503 and everything else works.
+KUI is currently pre-1.0. Authentication and authorization are implemented but default to
+**disabled**, so do not expose a default deployment to an untrusted network. Configure form or
+OIDC authentication, RBAC, TLS, and secrets before using KUI beyond a local environment.
 
-To change something and see it:
+ACL and client-quota management are outside the current product scope. Kafka administration that
+is available in KUI is still subject to read-only mode and the permissions of the configured Kafka
+principal.
 
-```
-./mill devStart                # the same server, in the background
-(cd frontend && pnpm watch)    # `vite build --watch`: rebuilds every time you save
-```
+## Product docs
 
-Now edit, say, `frontend/packages/shell/src/chrome/AppFrame.tsx`, save it, and refresh the browser. A
-rebuild takes about a second and nothing restarts: the server reads `frontend/dist` through a symlink,
-so there is no copy step and no proxy in the way. `./mill devStop` when you are done.
-
-The port is 8080 unless you set `KUI_PORT`.
-
-### See it survive a service dying
-
-This is the demonstration worth two minutes of anyone's time, and it needs Docker.
-
-```
-./mill deployment.docker.__.build
-docker compose -f deployment/compose/docker-compose.yml up -d
-
-curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
-# available
-
-docker compose -f deployment/compose/docker-compose.yml stop kui-cluster
-sleep 12
-curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
-# unavailable
-curl -s localhost:8080/api/v1/info | jq -r .authType
-# disabled   <- the gateway is still answering
-
-docker compose -f deployment/compose/docker-compose.yml start kui-cluster
-sleep 12
-curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
-# available   <- it recovered by itself; nobody pressed anything
-
-docker compose -f deployment/compose/docker-compose.yml down -v
-```
-
-A process died and the interface stayed up, told you which part of the product was affected, and
-came back on its own. That is the promise the whole architecture exists to keep.
-`./deployment/compose/smoke.sh` runs that sequence and fails loudly if any step gives the wrong
-answer. The [manual-QA runbook](deployment/MANUAL_QA.md) explains the supported Compose modes and
-commands.
-
-### Where things are
-
-| You want to | Look in |
+| Guide | Covers |
 | --- | --- |
-| Change the interface | `frontend/packages/shell` (pages, layout) and `frontend/packages/kernel` (the design system) |
-| Change what the gateway serves | `services/gateway` |
-| Add a service endpoint | `services/cluster/contract`, then `services/cluster/api` |
-| Run one test | `./mill libs.kernel.jvm.test`, or `./mill <module>.test.testOnly <SuiteName>` |
-| Understand a decision | [docs/adr/](docs/adr/) — one file per decision, with the alternatives that were rejected |
-| Understand the layout | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| [Metrics sources](docs/operations/configuration.md) | Prometheus exposition and API sources, authentication, TLS/mTLS, caching, and limits |
+| [Message masking](docs/operations/masking.md) | Server-side rules for redacting sensitive record fields |
+| [Observability](docs/operations/observability.md) | Logs, metrics, traces, health, and readiness |
+| [Architecture](ARCHITECTURE.md) | Runtime boundaries, fault isolation, and module design |
+| [OpenAPI](docs/api/openapi.json) | The merged HTTP contract |
 
-## Building it
+## License
 
-### Prerequisites
-
-- **JDK 21.** Any distribution works; Temurin 21 is what the project is developed against. Check
-  yours with `java -version` — the first number must be 21.
-- **Docker.** Not needed to compile, but the integration tests start real Kafka brokers in
-  containers, so they need a working Docker daemon.
-
-You do **not** need to install Mill (the build tool). The `./mill` script in the repository root
-downloads the exact version pinned in `.mill-version` the first time you run it, so everyone —
-including the CI machine — builds with the same tool.
-
-### The commands
-
-```
-./mill --version                  # prints the pinned Mill version; also does the one-time download
-./mill resolveAll                 # downloads every third-party library the project pins
-./mill libs.kernel.jvm.compile    # compiles one module
-
-./mill dev                        # the whole product on one port, in the foreground
-./mill devStart                   # the same, in the background, so you can re-link while it runs
-./mill devStop                    # stop the background one
-
-./mill deployment.docker.__.build # the eleven container images
-```
-
-### The quality gates
-
-```
-./mill __.compile        # compiles everything; a warning is an error (see below)
-./mill __.reformat       # rewrites sources to the project's formatting
-./mill __.checkFormat    # fails if anything is not formatted
-./mill __.fix            # applies the lint rules that can be applied automatically
-./mill __.fix --check    # fails if a lint rule is violated, changing nothing
-./mill __.test           # every suite
-./mill checkArchitecture # fails if a module dependency breaks the layering rules of ADR-041
-```
-
-`__` is Mill's wildcard: it means "every module".
-
-**`-Werror` is not negotiable, per module or otherwise.** Every module compiles with
-`-Werror`, which promotes every compiler warning — an unused import, a discarded result, a
-deprecated call — into a build failure. No module may switch it off. The reason is not
-perfectionism: a warning that can be ignored *is* ignored, and a project that tolerates a
-hundred of them can no longer see the one that matters. Fixing each warning as it appears costs
-seconds; clearing a backlog of them costs weeks and nobody ever does it.
-
-Formatting is [scalafmt](https://scalameta.org/scalafmt/), configured in `.scalafmt.conf`.
-Linting is [scalafix](https://scalacenter.github.io/scalafix/), configured in `.scalafix.conf`,
-which forbids `null`, `throw`, `return` and `asInstanceOf` everywhere. `libs/` and every service's
-`domain` module get a stricter set from `.scalafix-pure.conf`, which additionally forbids `var`.
-
-### Adding a module
-
-The build file decides once how modules are compiled and tested, so declaring a new one is short.
-Every module in this build is a JVM module — the interface is not built here at all (see below):
-
-```scala
-object config extends KuiJvmModule {
-  object test extends ScalaTests with KuiTests
-}
-```
-
-Modules that used to be shared with the browser keep a `Shared` trait and a nested `jvm` object:
-
-```scala
-object contractsCore extends Module {
-  trait Shared extends KuiModule with PlatformScalaModule
-  object jvm extends Shared with KuiJvmModule {
-    object test extends ScalaTests with KuiTests with KuiCrossTests
-  }
-}
-```
-
-That shape is left over from when the same sources were also compiled to JavaScript, and the `.jvm`
-suffix in a target name (`./mill libs.kernel.jvm.test`) is where you meet it. Shared code lives in
-`libs/<name>/src` and anything platform-specific in `src-jvm`. Swap `KuiModule` for `KuiPureModule`
-when the module must also be free of `var`.
-
-### A note on the frontend
-
-The interface is **not built by Mill**. It is a pnpm workspace under `frontend/` — TypeScript,
-SolidJS and Vite (ADR-048) — with its own `package.json`, its own tests and its own container image,
-and it reaches the backend over HTTP like any other client. That is deliberate: this build needs
-**nothing but a JDK**, so somebody working on a Kafka adapter never installs Node to run a suite,
-and the interface can be rebuilt or rolled back without reassembling a jar.
-
-Its commands are pnpm commands, run from `frontend/`:
-
-```
-pnpm install          # once, and after a dependency change
-pnpm build            # writes frontend/dist
-pnpm watch            # the same build, rebuilding on save
-pnpm test             # Vitest
-pnpm typecheck        # tsc --build
-```
-
-The one direction that still runs backend-to-frontend is `./mill frontend.apiConstants`, which
-writes the error codes, the RBAC vocabulary and the CSRF header name into
-`frontend/packages/api/src/constants.generated.ts` so a rename on the Scala side becomes a compile
-error on the TypeScript side. `--check` fails when the committed file has drifted. The browser's
-*types* are generated on the frontend's own side, from the committed `docs/api/openapi.browser.json`,
-with `pnpm --filter @kui/api run generate`.
-
-See [docs/frontend/README.md](docs/frontend/README.md) for the whole workspace.
-
-`resolveAll` is worth knowing about: it exists purely to fail fast. It asks the build to download
-every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
-uses yet, so that a wrong version number is caught in seconds instead of surfacing weeks later when
-somebody finally writes the code that needs it.
-
-## What CI runs
-
-Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-Each stage of the CI pipeline is a separate GitHub Actions job, so a red check names the thing that broke
-rather than saying "build failed". Every one of them is a command you can run yourself:
-
-| Job | What it proves | Run it locally |
-| --- | --- | --- |
-| `compile` | Every module compiles, with warnings treated as errors | `./mill __.compile` |
-| `style` | Formatting and lint rules are clean | `./mill __.checkFormat` then `./mill __.fix --check` |
-| `architecture` | No module dependency breaks the layering rules of ADR-041 | `./mill checkArchitecture` |
-| `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from, and every count this repository publishes about itself still matches what it counts — and, since 2026-09-11, that the service roster the README above publishes matches `services/` and the gateway's contract map | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` then `./scripts/feature-matrix-check.sh` |
-| `test` | Every unit, property and contract suite passes on the JVM | `./scripts/run-tests.sh` |
-| `frontend` | The interface's own build, with no JDK and no Mill: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and a check that the committed browser types have not drifted from the OpenAPI document they are generated from | — |
-| `compose` | The container images build — the list is derived from `docker-compose.yml` rather than remembered — and the Compose stack survives one service dying | `./deployment/compose/smoke.sh` |
-| `browser` | The shipped interface works in a real browser against a real stack: `quickstart.sh` brings the product up, then Playwright drives it | `deployment/quickstart/quickstart.sh up` then `pnpm -C frontend e2e` |
-
-One thing about the `test` stage is worth knowing before you are surprised by it.
-
-It runs through `./scripts/run-tests.sh` rather than a list of Mill commands, and the reason is worth
-one paragraph. Mill's `.test` is a *command*, so `./mill a.test b.test` does not run two modules: it
-runs the first and hands `b.test` to the test framework as a name filter. The workflow used exactly
-that form, MUnit matched nothing, every suite was reported "ignored", and the step passed green
-having executed no tests at all. The script asks Mill which test modules exist, names them with
-selector syntax — `./mill '{a.test,b.test}'`, which really does run them all — and then counts
-`<testcase>` elements in the JUnit reports rather than trusting the number Mill prints at the end,
-which is a count of *build tasks* and roughly twice the number of tests. `./mill resolve '__.test'`
-answers **81 test modules** — that command is the figure's only source here, and re-running it is
-how you check this sentence — and the script prints how many of them actually contain
-test sources, and how many cases ran, at the end of every run — it has printed *81 with tests* since
-wave 7, which is the first time in this project's history that no module resolved as a test target
-and shipped nothing.
-
-That sentence used to publish a case count as well — *"4140 test cases across 57 modules"* — and the
-module half was already wrong when it was read again, twice: 63 modules resolved when it said 57,
-and 81 do now. A case total moves on almost every commit and nothing compares it with this file, so it is
-left to the script that measures it rather than restated here, and the module count is dated.
-
-Planned stages that have no build task yet are deliberately not in the workflow. The task that
-creates each one adds its own job. A job that cannot fail is not a check.
-
-Caching: `~/.cache/coursier`, `~/.cache/mill` and `out/` are cached, keyed on `build.mill`,
-`.mill-version` and `mill-build/build.mill`, so a dependency change invalidates the cache instead of
-reusing a stale classpath.
-
-## Checking which version is running
-
-A support conversation starts with "which version are you running?", and a container tag is not a
-reliable answer — a tag can be moved, rebuilt, or typed by hand. The gateway reports what it was
-actually compiled from:
-
-```
-$ curl -s localhost:8080/api/v1/info | jq .build
-{
-  "version": "0.1.0-SNAPSHOT",
-  "gitCommit": "44a33c1cd587efe016f95f554f36b57dfcd9f742",
-  "gitCommitShort": "44a33c1",
-  "gitDirty": false,
-  "builtAt": "2026-09-03T13:00:34.000Z",
-  "scalaVersion": "3.9.0",
-  "jdkVersion": "21.0.10"
-}
-```
-
-`gitDirty` is the field worth knowing about: it is `true` when the build was made from a working
-tree with uncommitted changes, which is what explains the otherwise impossible situation where "it
-works on the commit you gave me" and "it does not work for you" are both true.
-
-The endpoint needs no authentication, so a health dashboard can read it. For that reason it contains
-no URL, no hostname and no key id — `services` lists configured service *ids* only. The same values
-appear in the one INFO line the process logs at startup, so a log file and a live endpoint can be
-cross-checked rather than compared and hoped about.
-
-A build made outside a git checkout — a release tarball, say — reports `"unknown"` for the git
-fields rather than failing or leaving them blank.
-
-## Running one service on its own
-
-Every service is an ordinary process with its own `main`. There is no orchestration to set up and
-nothing to install: point it at a configuration file and it starts.
-
-```
-$ export KUI_PRINCIPAL_KEY=0123456789abcdef0123456789abcdef
-$ ./mill services.cluster.app.run -- --config my-cluster.yaml
-{"timestamp":"...","message":"starting kui-cluster 0.1.0-SNAPSHOT (f62de3f)","level":"INFO",...}
-{"timestamp":"...","message":"listening on http://localhost:8081","level":"INFO",...}
-```
-
-with `my-cluster.yaml`:
-
-```yaml
-kui:
-  server:
-    host: "127.0.0.1"
-    port: 8081
-  gateway:
-    principalKeys:
-      - kid: "local-1"
-        key: "env:KUI_PRINCIPAL_KEY"
-        notBefore: "2026-01-01T00:00:00Z"
-```
-
-The three endpoints every KUI service serves need no credentials, because a probe has none to give:
-
-```
-$ curl -s localhost:8081/health/live
-{"alive":true,"at":"2026-09-03T16:48:38.581Z"}
-
-$ curl -s localhost:8081/capabilities
-{"service":"cluster","clusters":{}}
-```
-
-Everything under `/internal/v1` does. A service is only ever called by the gateway, which signs a
-short-lived principal for each call, so a request without one is refused — and refused identically
-however it is wrong, so that nobody can use the response to work out what to forge next:
-
-```
-$ curl -s localhost:8081/internal/v1/clusters
-{"code":"KUI-UNAUTHENTICATED","message":"Unauthenticated","details":[],"correlationId":"cde7...","timestamp":"...","retryable":false}
-```
-
-**A service started with no signing keys refuses to start.** For local development, and only for
-that, `KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and says so in the log every minute.
-`docs/operations/configuration.md` documents the metrics-source and shared server-path configuration used here;
-`services/cluster/app/resources/reference.yaml` is a commented file to copy from.
-
-## Running the gateway with a locally built frontend
-
-In a **release** the two halves are two images. The interface is built by Vite and served by the
-nginx in `deployment/frontend/`, which proxies `/api/…` through to the gateway so that the browser
-still sees one origin — no CORS, no `SameSite` decisions, no preflight on every mutation (ADR-019,
-ADR-048). The gateway's jar contains no interface at all.
-
-In **development** one process is more convenient than two, so the gateway can still serve the
-build. `StaticRoutes` serves `GET /ui/**` from the classpath under `/web`, and `./mill dev` and
-`./mill devStart` put one extra entry at the front of that classpath: a directory whose `web` is a
-symbolic link to `frontend/dist`, the Vite build's output. Nothing is copied, which is what makes
-"save, rebuild, refresh" the whole loop — see the comment on `dev` in `build.mill`.
-
-Running the gateway without having built the interface is not an error:
-
-```
-$ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ui/
-503
-```
-
-is what a developer running the API alone should see, with a plain HTML page explaining that the UI
-was not bundled into this build — never a stack trace, and never an empty `200`.
-
-`server.basePath` moves every served URL, the injected `<base href>`, and the API prefix the shell
-reads together: set `KUI_SERVER_BASEPATH=/kui` and the same build answers under `/kui/ui/`, while
-the bare paths 404 — see `docs/operations/configuration.md`.
-
-## Reading the design
-
-| Document | What it covers |
-| --- | --- |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | The system: services, their boundaries, contracts, and how failure is contained |
-| [docs/adr/](docs/adr/) | Every significant decision, why it was made, and what was rejected |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Milestones, in order, with what each delivers |
-| [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) | Every capability and where it stands |
-| [docs/domain/kafka-glossary.md](docs/domain/kafka-glossary.md) | The vocabulary the code uses |
-| [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md) | Every library, its version, and why it is here |
-| [research/](research/) | What the reference projects do, in detail |
-
-## Licence
-
-Apache 2.0.
+KUI is available under the [Apache License 2.0](LICENSE).
