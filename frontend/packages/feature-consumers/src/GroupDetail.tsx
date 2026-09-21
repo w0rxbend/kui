@@ -46,6 +46,8 @@ export interface GroupDetailProps {
   readonly group: Group;
   /** Where "Consumer groups" in the breadcrumb points. */
   readonly listHref: string;
+  /** Builds the topic destination used by assignment rows. */
+  readonly topicHref?: ((topic: string) => string) | undefined;
   /** Everything the offset-reset wizard needs except the topic list, which is read off the group. */
   readonly reset: Omit<ResetWizardProps, "topics">;
   /** Opens the delete confirmation. Absent when this user may not delete groups. */
@@ -74,6 +76,7 @@ export interface GroupDetailProps {
 export function GroupDetail(props: GroupDetailProps): JSX.Element {
   const chip = () => (props.group.state === null ? UNREADABLE_STATE_CHIP : stateChip(props.group.state));
   const topics = createMemo(() => subscriptions(props.group));
+  const assignmentColumns = createMemo(() => offsetColumns(props.topicHref));
 
   /**
    * A group with members cannot be deleted, and Kafka refuses it with a code an operator can act on
@@ -151,7 +154,7 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
       >
         <DataTable<PartitionOffset>
           caption={`Partition offsets and lag for ${props.group.groupId}`}
-          columns={OFFSET_COLUMNS}
+          columns={assignmentColumns()}
           rows={props.group.offsets}
           rowKey={(row) => `${row.topic}/${row.partition}`}
           testId="group-assignments-table"
@@ -393,50 +396,87 @@ export function memberColumns(members: readonly Member[]): readonly Column<Membe
   return MEMBER_COLUMNS.filter((column) => column.id !== "instance");
 }
 
-const OFFSET_COLUMNS: readonly Column<PartitionOffset>[] = [
-  { id: "topic", header: "Topic", render: (row) => <span class="kui-cg-mono">{row.topic}</span> },
-  { id: "partition", header: "Partition", align: "numeric", width: "7rem", render: (row) => formatCount(row.partition) },
-  {
-    id: "committed",
-    header: "Committed",
-    align: "numeric",
-    render: (row) =>
-      row.committed === null ? (
-        <span title="This group has never committed an offset on this partition.">{MISSING}</span>
-      ) : (
-        formatCount(row.committed)
-      ),
-  },
-  {
-    id: "end",
-    header: "End offset",
-    align: "numeric",
-    render: (row) =>
-      row.endOffset === null ? <span title="The partition's end offset could not be read.">{MISSING}</span> : formatCount(row.endOffset),
-  },
-  {
-    id: "lag",
-    header: "Lag",
-    align: "numeric",
-    width: "9rem",
-    render: (row) => {
-      const lag = partitionLag(row);
-      if (lag === null) {
-        return <span title="Lag needs both a committed offset and an end offset; one of them is missing.">{MISSING}</span>;
-      }
-      return <ThresholdValue value={formatCount(lag)} level={lagLevel(lag)} announcement={lagAnnouncement} />;
+function offsetColumns(
+  topicHref: ((topic: string) => string) | undefined,
+): readonly Column<PartitionOffset>[] {
+  return [
+    {
+      id: "topic",
+      header: "Topic",
+      render: (row) =>
+        topicHref === undefined ? (
+          <span class="kui-cg-mono">{row.topic}</span>
+        ) : (
+          <a class="kui-cg-name__link kui-cg-mono kui-cg-topic-link" href={topicHref(row.topic)}>
+            {row.topic}
+          </a>
+        ),
     },
-  },
-  {
-    id: "member",
-    header: "Held by",
-    render: (row) =>
-      row.memberId === null ? (
-        <span title="No member currently holds this partition.">{MISSING}</span>
-      ) : (
-        <span class="kui-cg-mono">{row.memberId}</span>
-      ),
-  },
-];
+    {
+      id: "partition",
+      header: "Partition",
+      align: "numeric",
+      width: "7rem",
+      render: (row) => formatCount(row.partition),
+    },
+    {
+      id: "committed",
+      header: "Committed",
+      align: "numeric",
+      render: (row) =>
+        row.committed === null ? (
+          <span title="This group has never committed an offset on this partition.">{MISSING}</span>
+        ) : (
+          formatCount(row.committed)
+        ),
+    },
+    {
+      id: "end",
+      header: "End offset",
+      align: "numeric",
+      render: (row) =>
+        row.endOffset === null ? (
+          <span title="The partition's end offset could not be read.">{MISSING}</span>
+        ) : (
+          formatCount(row.endOffset)
+        ),
+    },
+    {
+      id: "lag",
+      header: "Lag",
+      align: "numeric",
+      width: "9rem",
+      render: (row) => {
+        const lag = partitionLag(row);
+        if (lag === null) {
+          return (
+            <span title="Lag needs both a committed offset and an end offset; one of them is missing.">
+              {MISSING}
+            </span>
+          );
+        }
+        return (
+          <ThresholdValue
+            value={formatCount(lag)}
+            level={lagLevel(lag)}
+            announcement={lagAnnouncement}
+          />
+        );
+      },
+    },
+    {
+      id: "member",
+      header: "Held by",
+      render: (row) =>
+        row.memberId === null ? (
+          <span title="No member currently holds this partition.">{MISSING}</span>
+        ) : (
+          <span class="kui-cg-mono">{row.memberId}</span>
+        ),
+    },
+  ];
+}
+
+const OFFSET_COLUMNS: readonly Column<PartitionOffset>[] = offsetColumns(undefined);
 
 export { MEMBER_COLUMNS, OFFSET_COLUMNS };

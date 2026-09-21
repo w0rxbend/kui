@@ -59,6 +59,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* An assignment is a cross-reference, not the row's own identity. Keep it visibly actionable at
+ * rest so operators can discover the route without first guessing that the topic is clickable. */
+.kui-cg-topic-link {
+  color: var(--kui-color-primary);
+  text-decoration: underline;
+}
+
 /* --- Lag ------------------------------------------------------------------------------------ */
 
 .kui-cg-lag {

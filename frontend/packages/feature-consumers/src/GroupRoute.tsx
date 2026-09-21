@@ -132,6 +132,7 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
             group={detail()}
             stale={staleReason()}
             listHref={kui.paths.consumerGroups(props.clusterId)}
+            topicHref={(topic) => kui.paths.topic(props.clusterId, topic)}
             reset={{
               plan: (request) => planReset(kui.api, props.clusterId, props.groupId, request),
               apply: async (token) => {

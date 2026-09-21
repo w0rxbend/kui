@@ -139,6 +139,28 @@ test.describe("consumer groups", () => {
     await expect(page.getByRole("button", { name: /reset offsets/i })).toBeVisible();
   });
 
+  test("an assignment topic opens that topic's own page", async ({ page }) => {
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/consumer-groups/${encodeURIComponent(GROUP_WITH_OFFSETS)}`,
+    );
+
+    const assignments = page.getByTestId("group-assignments-table");
+    await expect(assignments).toBeVisible({ timeout: 20_000 });
+    const topic = assignments.locator("tbody a").first();
+    const name = (await topic.textContent())?.trim() ?? "";
+    expect(name).not.toBe("");
+    await expect(topic).toHaveAttribute(
+      "href",
+      `/ui/clusters/${CLUSTER}/topics/${encodeURIComponent(name)}`,
+    );
+
+    await topic.click();
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    await expect(page).toHaveURL(
+      `/ui/clusters/${CLUSTER}/topics/${encodeURIComponent(name)}`,
+    );
+  });
+
   test("offers forgetting the offsets on each topic the group holds them on", async ({
     page,
     api,

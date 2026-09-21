@@ -626,6 +626,30 @@ describe("the coordinator's address", () => {
 });
 
 describe("the group detail page", () => {
+  it("links every assignment topic to that topic's page", async () => {
+    const { container, dispose } = mount(() => (
+      <GroupDetail
+        group={SAMPLE_GROUP_DETAIL}
+        listHref="/groups"
+        topicHref={(topic) => `/topics/${encodeURIComponent(topic)}`}
+        reset={{
+          plan: async () => ({ ok: false, problem: "no" }),
+          apply: async () => ({ ok: false, problem: "no" }),
+        }}
+      />
+    ));
+    await flush();
+
+    const link = container.querySelector<HTMLAnchorElement>(
+      '[data-testid="group-assignments-table"] tbody a',
+    );
+    expect(link?.textContent).toBe(SAMPLE_GROUP_DETAIL.offsets[0]?.topic);
+    expect(link?.getAttribute("href")).toBe(
+      `/topics/${encodeURIComponent(SAMPLE_GROUP_DETAIL.offsets[0]?.topic ?? "")}`,
+    );
+    dispose();
+  });
+
   it("carries no voice line, because it is a page about one object", async () => {
     const { container, dispose } = mount(() => (
       <GroupDetail group={SAMPLE_GROUP_DETAIL} listHref="/groups" reset={{ plan: async () => ({ ok: false, problem: "no" }), apply: async () => ({ ok: false, problem: "no" }) }} />
