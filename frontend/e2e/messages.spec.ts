@@ -203,6 +203,52 @@ test.describe("the typed predicates", () => {
 });
 
 test.describe("offset cursor pagination", () => {
+  test("paints a useful partial page before committing a 100-record burst", async ({ page }) => {
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/connect.file.lines/messages?seekTo=latest&limit=100`,
+    );
+    await page.evaluate(() => {
+      const browse = document.querySelector(".kui-browse");
+      if (browse === null) throw new Error("the message browser did not render");
+      const evidence: { mutations: number[]; firstFrame?: number } = { mutations: [] };
+      (window as Window & { __kuiProgressiveRender?: typeof evidence }).__kuiProgressiveRender =
+        evidence;
+      let frameRequested = false;
+      new MutationObserver(() => {
+        const count = document.querySelectorAll(".kui-record").length;
+        if (count === 0 || evidence.mutations.at(-1) === count) return;
+        evidence.mutations.push(count);
+        if (frameRequested) return;
+        frameRequested = true;
+        requestAnimationFrame(() => {
+          evidence.firstFrame = document.querySelectorAll(".kui-record").length;
+        });
+      }).observe(browse, { childList: true, subtree: true });
+    });
+
+    await page.getByRole("button", { name: /^read$/i }).first().click();
+    await expect(page.locator(".kui-record")).toHaveCount(100, { timeout: 30_000 });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as Window & { __kuiProgressiveRender?: { firstFrame?: number } })
+              .__kuiProgressiveRender?.firstFrame,
+        ),
+      )
+      .toBeDefined();
+
+    const evidence = await page.evaluate(
+      () =>
+        (window as Window & {
+          __kuiProgressiveRender?: { mutations: number[]; firstFrame?: number };
+        }).__kuiProgressiveRender,
+    );
+    expect(evidence?.firstFrame).toBeGreaterThan(0);
+    expect(evidence?.firstFrame).toBeLessThan(100);
+    expect(evidence?.mutations.length).toBeGreaterThan(1);
+  });
+
   test("a full message page scrolls inside the frame without creating a blank document tail", async ({
     page,
   }) => {

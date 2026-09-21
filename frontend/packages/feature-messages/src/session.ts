@@ -161,6 +161,37 @@ export interface BrowseSessionOptions {
   /** `/api/v1/clusters/{id}/topics/{topic}/messages/stream`, already escaped. */
   readonly streamUrl: string;
   readonly transport: BrowseTransport;
+  /**
+   * Schedules continuation work after the browser has had an opportunity to paint.
+   * Tests may replace it with a deterministic scheduler.
+   */
+  readonly scheduleAfterPaint?: (resume: () => void) => () => void;
+}
+
+/** Records committed before the stream yields so the first useful rows can paint immediately. */
+export const INITIAL_RECORD_BATCH = 8;
+/** Records committed between subsequent paint opportunities. */
+export const STREAM_RECORD_BATCH = 24;
+const MAX_PENDING_RECORDS = MAX_ROWS + STREAM_RECORD_BATCH;
+
+function afterNextPaint(resume: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let frame: number | undefined;
+  const run = (): void => {
+    frame = undefined;
+    // A timer queued from rAF runs after the frame containing the rows already committed. Calling
+    // `resume` directly inside rAF would add the next batch before that frame was painted.
+    timer = setTimeout(resume, 0);
+  };
+  if (typeof requestAnimationFrame === "function") frame = requestAnimationFrame(run);
+  else timer = setTimeout(resume, 0);
+
+  return () => {
+    if (frame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(frame);
+    }
+    if (timer !== undefined) clearTimeout(timer);
+  };
 }
 
 export interface BrowseSession {
@@ -210,12 +241,23 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
   let lastQuery: BrowseQuery | undefined;
   let cursorNow: string | undefined;
   let arrivedResetQueued = false;
+  let immediatelyCommitted = 0;
+  type PendingWork =
+    | { readonly kind: "record"; readonly record: KafkaRecord }
+    | { readonly kind: "action"; readonly run: () => void };
+  let pendingWork: PendingWork[] = [];
+  let pendingRecordCount = 0;
+  let pendingPayloadBytes = 0;
+  let droppedPendingRecords = 0;
+  let cancelContinuation: (() => void) | undefined;
+  let draining = false;
   /* Every transport callback belongs to the run that registered it. Closing an HTTP stream is an
    * asynchronous cancellation, so callbacks already queued by an older run can arrive after a new
    * one has started. The generation makes those callbacks inert before they touch shared state. */
   let generation = 0;
   const retainedByteSizes = new WeakMap<KafkaRecord, number>();
   const utf8 = new TextEncoder();
+  let committedPayloadBytes = 0;
 
   function retainedBytes(record: KafkaRecord): number {
     const cached = retainedByteSizes.get(record);
@@ -232,24 +274,33 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     return bytes;
   }
 
-  function withinPayloadBudget(record: KafkaRecord): KafkaRecord {
-    const incoming = retainedBytes(record);
-    if (incoming === 0) return record;
-    // A record is normally referenced by both `rowList` and its cached page. Count the object once,
-    // but include every owner: while a successor page is in flight, `rowList` can evict records
-    // that its predecessor page still retains until terminal cursor processing trims the cache.
+  function measureCommittedPayloadBytes(): number {
     const retainedRecords = new Set<KafkaRecord>([...rowList, ...heldList, ...pageList.flat()]);
-    const retained = [...retainedRecords].reduce(
+    return [...retainedRecords].reduce(
       (total, existing) => total + retainedBytes(existing),
       0,
     );
-    if (retained + incoming <= MAX_RETAINED_PAYLOAD_BYTES) return record;
+  }
 
+  function refreshCommittedPayloadBytes(): void {
+    committedPayloadBytes = measureCommittedPayloadBytes();
+  }
+
+  function withoutPayload(record: KafkaRecord, incoming = retainedBytes(record)): KafkaRecord {
     const value = record.value;
     const sourceKind =
       value.kind === "json" ? "json" : value.kind === "large" ? (value.sourceKind ?? "text") : "text";
     const bytes = value.kind === "large" ? Math.max(value.bytes, incoming) : incoming;
     return { ...record, value: { kind: "large", bytes, sourceKind } };
+  }
+
+  function withinPayloadBudget(record: KafkaRecord, newlyCommitted = 0): KafkaRecord {
+    const incoming = retainedBytes(record);
+    if (incoming === 0) return record;
+    if (committedPayloadBytes + newlyCommitted + incoming <= MAX_RETAINED_PAYLOAD_BYTES) {
+      return record;
+    }
+    return withoutPayload(record, incoming);
   }
 
   const [rows, setRows] = createSignal<readonly KafkaRecord[]>([], { ownedWrite: true });
@@ -280,6 +331,196 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     setHeld(heldList.length);
   }
 
+  function commitRecords(records: readonly KafkaRecord[], omitted = 0): void {
+    if (records.length === 0 && omitted === 0) return;
+    const committed: KafkaRecord[] = [];
+    let newlyCommittedPayloadBytes = 0;
+    for (const incoming of records) {
+      const record = withinPayloadBudget(incoming, newlyCommittedPayloadBytes);
+      newlyCommittedPayloadBytes += retainedBytes(record);
+      committed.push(record);
+      if (pausedNow) {
+        if (liveNow) heldList.unshift(record);
+        else heldList.push(record);
+        if (heldList.length > MAX_ROWS) heldList.length = MAX_ROWS;
+        continue;
+      }
+
+      const page = pageList[activePageNow] ?? [];
+      pageList[activePageNow] = page;
+      if (liveNow) {
+        rowList.unshift(record);
+        page.unshift(record);
+        if (rowList.length > MAX_ROWS) rowList.length = MAX_ROWS;
+        if (page.length > MAX_ROWS) page.length = MAX_ROWS;
+      } else {
+        rowList.push(record);
+        if (rowList.length > MAX_ROWS) rowList.splice(0, rowList.length - MAX_ROWS);
+        page.push(record);
+        if (page.length > MAX_ROWS) page.length = MAX_ROWS;
+      }
+    }
+
+    refreshCommittedPayloadBytes();
+
+    setProgress((current) => ({
+      ...current,
+      delivered: current.delivered + committed.length + omitted,
+      phase: undefined,
+      failure: current.failure?.kind === "decode" ? undefined : current.failure,
+    }));
+    if (committed.length > 0) {
+      setArrived((current) => {
+        const next = new Set(current);
+        for (const record of committed) next.add(recordId(record));
+        return next;
+      });
+    }
+    if (committed.length > 0 && !arrivedResetQueued) {
+      arrivedResetQueued = true;
+      const arrivedGeneration = generation;
+      queueMicrotask(() => {
+        if (generation !== arrivedGeneration) return;
+        arrivedResetQueued = false;
+        setArrived(new Set<string>());
+      });
+    }
+    if (committed.length > 0) publishRows();
+  }
+
+  function drainPending(maxRecords = STREAM_RECORD_BATCH, scheduleRemainder = true): void {
+    if (draining) return;
+    draining = true;
+    let records: KafkaRecord[] = [];
+    let recordCount = 0;
+    const commitBuffered = (): void => {
+      const omitted = droppedPendingRecords;
+      droppedPendingRecords = 0;
+      commitRecords(records, omitted);
+      records = [];
+    };
+
+    while (pendingWork.length > 0) {
+      const pending = pendingWork[0];
+      if (pending?.kind === "record" && recordCount >= maxRecords) break;
+      const next = pendingWork.shift();
+      if (next === undefined) break;
+      if (next.kind === "record") {
+        pendingRecordCount -= 1;
+        pendingPayloadBytes = Math.max(0, pendingPayloadBytes - retainedBytes(next.record));
+        records.push(next.record);
+        recordCount += 1;
+      } else {
+        commitBuffered();
+        next.run();
+      }
+    }
+    commitBuffered();
+    draining = false;
+    if (scheduleRemainder && pendingWork.length > 0) scheduleContinuation();
+    else if (pendingWork.length === 0) immediatelyCommitted = 0;
+  }
+
+  function scheduleContinuation(): void {
+    if (cancelContinuation !== undefined || pendingWork.length === 0) return;
+    const scheduledGeneration = generation;
+    let invokedSynchronously = false;
+    const cancel = (options.scheduleAfterPaint ?? afterNextPaint)(() => {
+      invokedSynchronously = true;
+      cancelContinuation = undefined;
+      if (generation !== scheduledGeneration) return;
+      drainPending();
+    });
+    // A deterministic test scheduler may run the callback inline. Do not leave its already-spent
+    // cancellation handle installed, or later work would believe a continuation was pending.
+    if (!invokedSynchronously) cancelContinuation = cancel;
+  }
+
+  function enqueue(work: PendingWork): void {
+    pendingWork.push(work);
+    scheduleContinuation();
+  }
+
+  function dropOldestPendingRecords(count: number): void {
+    if (count <= 0) return;
+    let recordsLeft = count;
+    const kept: PendingWork[] = [];
+    for (const work of pendingWork) {
+      if (work.kind !== "record" || recordsLeft <= 0) {
+        kept.push(work);
+        continue;
+      }
+      const size = retainedBytes(work.record);
+      pendingRecordCount -= 1;
+      pendingPayloadBytes = Math.max(0, pendingPayloadBytes - size);
+      droppedPendingRecords += 1;
+      recordsLeft -= 1;
+    }
+    pendingWork = kept;
+  }
+
+  function stripOldestPendingPayloads(bytes: number): void {
+    if (bytes <= 0) return;
+    let bytesLeft = bytes;
+    pendingWork = pendingWork.map((work) => {
+      if (work.kind !== "record" || bytesLeft <= 0) return work;
+      const size = retainedBytes(work.record);
+      if (size === 0) return work;
+      bytesLeft -= size;
+      pendingPayloadBytes = Math.max(0, pendingPayloadBytes - size);
+      return { kind: "record", record: withoutPayload(work.record, size) };
+    });
+  }
+
+  function enqueueRecord(record: KafkaRecord): void {
+    if (liveNow && pendingRecordCount >= MAX_PENDING_RECORDS) {
+      dropOldestPendingRecords(STREAM_RECORD_BATCH);
+    }
+
+    const incoming = retainedBytes(record);
+    if (
+      liveNow &&
+      incoming > 0 &&
+      committedPayloadBytes + pendingPayloadBytes + incoming > MAX_RETAINED_PAYLOAD_BYTES
+    ) {
+      stripOldestPendingPayloads(
+        committedPayloadBytes + pendingPayloadBytes + incoming - MAX_RETAINED_PAYLOAD_BYTES,
+      );
+    }
+    const queued =
+      committedPayloadBytes + pendingPayloadBytes + incoming <= MAX_RETAINED_PAYLOAD_BYTES
+        ? record
+        : withoutPayload(record, incoming);
+    pendingWork.push({ kind: "record", record: queued });
+    pendingRecordCount += 1;
+    pendingPayloadBytes += retainedBytes(queued);
+    scheduleContinuation();
+  }
+
+  function enqueueOrRun(action: () => void): void {
+    if (pendingWork.length === 0 && cancelContinuation === undefined) action();
+    else enqueue({ kind: "action", run: action });
+  }
+
+  function flushPending(): void {
+    cancelContinuation?.();
+    cancelContinuation = undefined;
+    drainPending(Number.POSITIVE_INFINITY, false);
+  }
+
+  function detachPendingRecords(): { readonly records: KafkaRecord[]; readonly omitted: number } {
+    cancelContinuation?.();
+    cancelContinuation = undefined;
+    const records = pendingWork.flatMap((work) => (work.kind === "record" ? [work.record] : []));
+    const omitted = droppedPendingRecords;
+    pendingWork = [];
+    pendingRecordCount = 0;
+    pendingPayloadBytes = 0;
+    droppedPendingRecords = 0;
+    immediatelyCommitted = 0;
+    return { records, omitted };
+  }
+
   function trimPageCache(): void {
     let cachedRecords = pageList.reduce((total, page) => total + page.length, 0);
     while (
@@ -293,15 +534,18 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
       activePageNow = Math.max(0, activePageNow - 1);
       setPageIndex((current) => Math.max(0, current - 1));
     }
+    refreshCommittedPayloadBytes();
   }
 
   function stop(): void {
     const stopped = handle;
+    const pending = detachPendingRecords();
     handle = undefined;
     generation += 1;
     /* Invalidate before closing: a transport is allowed to report `closed` synchronously from
      * `close()`, and that callback belongs to the stream that has already been stopped. */
     stopped?.close();
+    commitRecords(pending.records, pending.omitted);
     setRunning(false);
     arrivedResetQueued = false;
     setArrived(new Set<string>());
@@ -325,6 +569,7 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
       }
       heldList = [];
     }
+    refreshCommittedPayloadBytes();
     publishRows();
   }
 
@@ -333,6 +578,7 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     const runGeneration = generation;
     const isCurrentRun = (): boolean => generation === runGeneration;
     liveNow = query.live;
+    immediatelyCommitted = 0;
     if (!keepRows) {
       rowList = [];
       pageList = [[]];
@@ -344,6 +590,7 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
       activePageNow = pageList.length;
       pageList = [...pageList, []];
     }
+    refreshCommittedPayloadBytes();
     lastQuery = { ...query, cursor: undefined };
     /* The cursor from the *previous* page is spent the moment this one starts. Leaving it in place
      * would leave "Load more" offering the page that is already being read. */
@@ -393,51 +640,26 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
         if (!isCurrentRun()) return;
         switch (event.kind) {
           case "record": {
-            const record = withinPayloadBudget(event.record);
-            /* The count moves even while paused, because it counts what the *stream* delivered. A
-             * paused screen that also stopped counting would be indistinguishable from a stream
-             * that had stalled, which is the one thing a pause must not be mistaken for. */
-            if (pausedNow) {
-              heldList = liveNow
-                ? [record, ...heldList].slice(0, MAX_ROWS)
-                : [...heldList, record].slice(0, MAX_ROWS);
+            /* Commit only the first handful inline. Once those useful rows exist, hold subsequent
+             * records until after a paint so a fast 100-record SSE burst cannot monopolise the
+             * main thread and make the page look empty. */
+            if (
+              immediatelyCommitted < INITIAL_RECORD_BATCH &&
+              pendingWork.length === 0 &&
+              cancelContinuation === undefined
+            ) {
+              immediatelyCommitted += 1;
+              commitRecords([event.record]);
             } else {
-              const page = pageList[activePageNow] ?? [];
-              if (liveNow) {
-                rowList = [record, ...rowList].slice(0, MAX_ROWS);
-                pageList[activePageNow] = [record, ...page].slice(0, MAX_ROWS);
-              } else {
-                /* The source already orders a bounded page relative to its offsets: forward
-                 * browses arrive low-to-high and backward browses high-to-low. Preserve that
-                 * order, including across continuation pages, instead of reversing every page as
-                 * records happen to reach the browser. */
-                rowList = [...rowList, record].slice(-MAX_ROWS);
-                pageList[activePageNow] = [...page, record].slice(0, MAX_ROWS);
-              }
+              enqueueRecord(event.record);
             }
-            setProgress((current) => ({
-              ...current,
-              delivered: current.delivered + 1,
-              phase: undefined,
-              failure: current.failure?.kind === "decode" ? undefined : current.failure,
-            }));
-            setArrived((current) => new Set(current).add(recordId(record)));
-            if (!arrivedResetQueued) {
-              arrivedResetQueued = true;
-              queueMicrotask(() => {
-                if (!isCurrentRun()) return;
-                arrivedResetQueued = false;
-                setArrived(new Set<string>());
-              });
-            }
-            publishRows();
             return;
           }
           case "phase":
-            setProgress((current) => ({ ...current, phase: event.name }));
+            enqueueOrRun(() => setProgress((current) => ({ ...current, phase: event.name })));
             return;
           case "consumed":
-            setProgress((current) => ({ ...current, consumed: event.consumed }));
+            enqueueOrRun(() => setProgress((current) => ({ ...current, consumed: event.consumed })));
             return;
         }
       },
@@ -446,23 +668,25 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
        * evidence. */
       onFailure: (failure) => {
         if (!isCurrentRun()) return;
-        setProgress((current) => ({ ...current, failure }));
+        enqueueOrRun(() => setProgress((current) => ({ ...current, failure })));
       },
       onConnection: (connection) => {
         if (!isCurrentRun()) return;
-        setProgress((current) => ({ ...current, connection }));
-        if (connection.phase !== "closed") return;
-        /* A closed stream releases the handle. `running` is "is there a handle", and the control
-         * reads Stop while it is true — so without this a browse that ended by itself, which is
-         * what every bounded browse does the moment it has read its limit, left the button saying
-         * Stop for ever, beside a status line reading "finished", with no way back to Read short of
-         * reloading the page. The handle is already closed by then; dropping the reference is all
-         * that is left to do. */
-        if (opened === undefined) {
-          closedBeforeOpenReturned = true;
-          return;
-        }
-        finish(opened);
+        enqueueOrRun(() => {
+          setProgress((current) => ({ ...current, connection }));
+          if (connection.phase !== "closed") return;
+          /* A closed stream releases the handle. `running` is "is there a handle", and the control
+           * reads Stop while it is true — so without this a browse that ended by itself, which is
+           * what every bounded browse does the moment it has read its limit, left the button saying
+           * Stop for ever, beside a status line reading "finished", with no way back to Read short of
+           * reloading the page. The handle is already closed by then; dropping the reference is all
+           * that is left to do. */
+          if (opened === undefined) {
+            closedBeforeOpenReturned = true;
+            return;
+          }
+          finish(opened);
+        });
       },
     });
 
@@ -517,6 +741,9 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
       setPageIndex(pageIndex() - 1);
     },
     setPaused: (on) => {
+      /* Apply everything delivered before the click under the old pause state. Without this, a
+       * record already received by the transport could be hidden as though it arrived afterwards. */
+      flushPending();
       if (on) {
         pausedNow = true;
         setPausedSignal(true);

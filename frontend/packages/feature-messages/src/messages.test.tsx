@@ -16,9 +16,11 @@ import { NO_PREDICATES } from "./predicates.js";
 import {
   createBrowseSession,
   decodeBrowseEvent,
+  INITIAL_RECORD_BATCH,
   MAX_CACHED_PAGES,
   MAX_RETAINED_PAYLOAD_BYTES,
   MAX_ROWS,
+  STREAM_RECORD_BATCH,
   type BrowseHandle,
   type BrowseSession,
   type BrowseTransport,
@@ -90,7 +92,16 @@ function withSession(run: (session: BrowseSession, fake: ReturnType<typeof fakeT
   /* The session registers an `onCleanup`, so it needs an owner. Mounting a component that creates
    * it is the honest way to give it one — and it is also how the screen uses it. */
   const { dispose } = mount(() => {
-    const session = createBrowseSession({ streamUrl: "/stream", transport: fake.transport });
+    const session = createBrowseSession({
+      streamUrl: "/stream",
+      transport: fake.transport,
+      // Most tests exercise state semantics, not scheduling. Keep those synchronous and reserve a
+      // manual scheduler for the dedicated progressive-rendering regression above.
+      scheduleAfterPaint: (resume) => {
+        resume();
+        return () => undefined;
+      },
+    });
     run(session, fake);
     return null;
   });
@@ -98,6 +109,267 @@ function withSession(run: (session: BrowseSession, fake: ReturnType<typeof fakeT
 }
 
 describe("a browse session", () => {
+  test("yields a large stream after the first visible record batch", () => {
+    const fake = fakeTransport();
+    const continuations: Array<() => void> = [];
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => {
+            const index = continuations.indexOf(resume);
+            if (index >= 0) continuations.splice(index, 1);
+          };
+        },
+      });
+
+      session.start(DEFAULT_BROWSE);
+      for (let index = 0; index < 100; index += 1) fake.emit(record(String(index)));
+      fake.close(undefined, "limit");
+      void flush();
+
+      expect(session.rows()).toHaveLength(INITIAL_RECORD_BATCH);
+      expect(session.running()).toBe(true);
+      expect(continuations).toHaveLength(1);
+
+      continuations.shift()?.();
+      void flush();
+      expect(session.rows()).toHaveLength(INITIAL_RECORD_BATCH + STREAM_RECORD_BATCH);
+      expect(session.running()).toBe(true);
+
+      while (continuations.length > 0) continuations.shift()?.();
+      void flush();
+      expect(session.rows()).toHaveLength(100);
+      expect(session.rows().map((row) => row.offset)).toEqual(
+        Array.from({ length: 100 }, (_, index) => String(index)),
+      );
+      expect(session.progress().delivered).toBe(100);
+      expect(session.progress().endReason).toBe("limit");
+      expect(session.running()).toBe(false);
+      return null;
+    });
+    dispose();
+  });
+
+  test("bounds a live render backlog while keeping the newest rows and delivered count", () => {
+    const fake = fakeTransport();
+    const continuations: Array<() => void> = [];
+    const total = MAX_ROWS * 3 + 25;
+    let continuationRuns = 0;
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => undefined;
+        },
+      });
+
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      for (let index = 0; index < total; index += 1) fake.emit(record(String(index)));
+      fake.close(undefined, "cancelled");
+      while (continuations.length > 0) {
+        continuationRuns += 1;
+        continuations.shift()?.();
+      }
+      void flush();
+
+      expect(continuationRuns).toBeLessThanOrEqual(
+        Math.ceil((MAX_ROWS + STREAM_RECORD_BATCH) / STREAM_RECORD_BATCH),
+      );
+      expect(session.rows()).toHaveLength(MAX_ROWS);
+      expect(session.rows()[0]?.offset).toBe(String(total - 1));
+      expect(session.rows().at(-1)?.offset).toBe(String(total - MAX_ROWS));
+      expect(session.progress().delivered).toBe(total);
+      expect(session.running()).toBe(false);
+      return null;
+    });
+    dispose();
+  });
+
+  test("strips queued live payloads before they can exceed the retained byte budget", () => {
+    const fake = fakeTransport();
+    const continuations: Array<() => void> = [];
+    const text = `{"padding":"${"x".repeat(300_000)}"}`;
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => undefined;
+        },
+      });
+
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      for (let index = 0; index < 40; index += 1) {
+        fake.emit({ ...record(String(index)), value: { kind: "json", text } });
+      }
+      fake.close(undefined, "cancelled");
+      while (continuations.length > 0) continuations.shift()?.();
+      void flush();
+
+      const retained = session.rows().reduce((total, row) => {
+        const value = row.value;
+        const payload =
+          value.kind === "json" || value.kind === "text" || value.kind === "large"
+            ? value.text
+            : undefined;
+        return total + (payload === undefined ? 0 : new TextEncoder().encode(payload).length);
+      }, 0);
+      expect(session.rows()).toHaveLength(40);
+      expect(session.progress().delivered).toBe(40);
+      expect(retained).toBeLessThanOrEqual(MAX_RETAINED_PAYLOAD_BYTES);
+      expect(session.rows().some((row) => row.value.kind === "large" && row.value.text === undefined)).toBe(true);
+      return null;
+    });
+    dispose();
+  });
+
+  test("stopping aborts first, cancels the scheduled continuation, and keeps delivered backlog rows", () => {
+    const fake = fakeTransport();
+    const continuations: Array<() => void> = [];
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => {
+            const index = continuations.indexOf(resume);
+            if (index >= 0) continuations.splice(index, 1);
+          };
+        },
+      });
+
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      for (let index = 0; index < 20; index += 1) fake.emit(record(String(index)));
+      void flush();
+      expect(session.rows()).toHaveLength(INITIAL_RECORD_BATCH);
+      expect(continuations).toHaveLength(1);
+
+      session.stop();
+      void flush();
+      expect(fake.closes()).toBe(1);
+      expect(continuations).toHaveLength(0);
+      expect(session.rows()).toHaveLength(20);
+      expect(session.rows()[0]?.offset).toBe("19");
+      expect(session.progress().delivered).toBe(20);
+      expect(session.running()).toBe(false);
+      return null;
+    });
+    dispose();
+  });
+
+  test("applies records received before Pause under the old pause state", () => {
+    const fake = fakeTransport();
+    const continuations: Array<() => void> = [];
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => {
+            const index = continuations.indexOf(resume);
+            if (index >= 0) continuations.splice(index, 1);
+          };
+        },
+      });
+
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      for (let index = 0; index < 12; index += 1) fake.emit(record(String(index)));
+      session.setPaused(true);
+      void flush();
+      expect(session.rows()).toHaveLength(12);
+      expect(session.held()).toBe(0);
+      expect(continuations).toHaveLength(0);
+
+      fake.emit(record("12"));
+      fake.emit(record("13"));
+      void flush();
+      expect(session.rows()).toHaveLength(12);
+      expect(session.held()).toBe(2);
+      session.setPaused(false);
+      void flush();
+      expect(session.rows()).toHaveLength(14);
+      expect(session.rows()[0]?.offset).toBe("13");
+      return null;
+    });
+    dispose();
+  });
+
+  test("ignores a stale continuation after a new browse replaces its run", () => {
+    const fake = fakeTransport();
+    let staleContinuation: (() => void) | undefined;
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          staleContinuation = resume;
+          return () => undefined;
+        },
+      });
+
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      for (let index = 0; index < 20; index += 1) fake.emit(record(`old-${String(index)}`));
+      const oldContinuation = staleContinuation;
+      session.start(DEFAULT_BROWSE);
+      oldContinuation?.();
+      fake.emit(record("new"));
+      void flush();
+
+      expect(fake.closes()).toBe(1);
+      expect(session.rows().map((row) => row.offset)).toEqual(["new"]);
+      return null;
+    });
+    dispose();
+  });
+
+  test("defers a synchronous transport close until its whole burst is committed", () => {
+    const continuations: Array<() => void> = [];
+    const transport: BrowseTransport = {
+      open: (_url, handlers) => {
+        const handle: BrowseHandle = {
+          close: () => undefined,
+          endMarker: () => undefined,
+          endReason: () => "limit",
+        };
+        for (let index = 0; index < 20; index += 1) {
+          handlers.onEvent({ kind: "record", record: record(String(index)) });
+        }
+        handlers.onConnection({ phase: "closed", reason: "done" });
+        return handle;
+      },
+    };
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => undefined;
+        },
+      });
+
+      session.start(DEFAULT_BROWSE);
+      void flush();
+      expect(session.rows()).toHaveLength(INITIAL_RECORD_BATCH);
+      expect(session.running()).toBe(true);
+      while (continuations.length > 0) continuations.shift()?.();
+      void flush();
+      expect(session.rows()).toHaveLength(20);
+      expect(session.progress().endReason).toBe("limit");
+      expect(session.running()).toBe(false);
+      return null;
+    });
+    dispose();
+  });
+
   test("keeps a latest browse in the newest-first order delivered by the backend", async () => {
     withSession((session, fake) => {
       session.start(DEFAULT_BROWSE);
