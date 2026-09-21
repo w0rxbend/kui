@@ -23,8 +23,9 @@
  * where a cluster has been quiet. This is a different case and must not borrow that picture.
  */
 
+import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { Icon } from "@kui/kernel";
+import { Icon, type Fetched } from "@kui/kernel";
 
 export interface NotMeasuredProps {
   /**
@@ -53,5 +54,77 @@ export function NotMeasured(props: NotMeasuredProps): JSX.Element {
           renders nothing. A conditional wrapper here would only add a component to the tree. */}
       {props.instead === undefined ? undefined : <p class="kui-not-measured__instead">{props.instead}</p>}
     </div>
+  );
+}
+
+/* --- The two sentences every metrics card shares ------------------------------------------------ */
+
+/**
+ * A cluster with no metrics source, in words, for whichever card is asking.
+ *
+ * Five cards on this tab reach this state and they must reach it in one voice: the operator is
+ * looking at a screen where four panels are saying the same thing, and four spellings of it read as
+ * four different problems. It names the *deployment choice* rather than a fault, which is the
+ * difference between "this is broken" and "this is not switched on" — and it is the sentence M7's
+ * old exit criterion could be satisfied by, so the cards that draw it also assert an axis and a
+ * table are absent beside it.
+ *
+ * @param noun what is not being measured, in the possessive: `this cluster's throughput`
+ */
+export function notConfiguredSentence(noun: string): string {
+  return (
+    `KUI is not measuring ${noun}. No metrics source is configured for it, so there is nothing ` +
+    `to draw — a deployment choice rather than a fault.`
+  );
+}
+
+/** The one a card shows when the principal may not read the cluster's metrics. */
+export function forbiddenSentence(noun: string): string {
+  return `You do not have permission to read ${noun}.`;
+}
+
+export interface MetricAbsenceProps {
+  readonly state: Fetched<unknown>;
+  /** What is missing, in the possessive, for both sentences above. */
+  readonly noun: string;
+  readonly testId?: string | undefined;
+}
+
+/**
+ * What a metrics card draws when it has no reading, and why `failed` is not in it.
+ *
+ * `Card` already draws that state's own body — the message, the stable code and the Retry button —
+ * so a second sentence underneath would say the same thing twice. The three that reach here are the
+ * three a card has to distinguish, and each is a different next action: **wait**, **configure
+ * something**, **ask for a permission**. Collapsing any pair produces a screen that says "try
+ * again" when trying again is either pointless or the wrong action entirely.
+ *
+ * One component rather than five, because five cards on one tab reaching the same three states is
+ * five chances for one of them to draw an empty axis where a sentence belongs.
+ */
+export function MetricAbsence(props: MetricAbsenceProps): JSX.Element {
+  return (
+    <>
+      <Show when={props.state.kind === "loading"}>
+        {/* The same reserved box the rest of the dashboard draws: a figure that has not arrived
+            must not look like one that is missing. */}
+        <div
+          class="kui-overview__waiting"
+          role="status"
+          aria-busy="true"
+          aria-label={`Reading ${props.noun}`}
+        />
+      </Show>
+      <Show when={props.state.kind === "not-configured"}>
+        {/* No axis and no ring. Both are claims that the quantity is measured and merely absent
+            right now, and this cluster has nothing measuring it. */}
+        <NotMeasured why={notConfiguredSentence(props.noun)} testId={props.testId} />
+      </Show>
+      <Show when={props.state.kind === "forbidden"}>
+        <p class="kui-overview__blank" role="note">
+          {forbiddenSentence(props.noun)}
+        </p>
+      </Show>
+    </>
   );
 }

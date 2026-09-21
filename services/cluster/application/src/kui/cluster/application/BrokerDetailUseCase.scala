@@ -189,9 +189,11 @@ object BrokerDetailUseCase {
             BrokerListRow(
               broker = broker,
               isController = topology.description.controller.exists(_.id == broker.id),
+              partitions = topology.partitionsOn(broker.id),
+              leaders = topology.leadersOn(broker.id),
               replicas = load.map(_.replicas),
-              leaders = None,
               skewPercent = load.flatMap(_.skewPercent),
+              leaderSkewPercent = topology.leaderSkewOn(broker.id),
               totalBytes = load.flatMap(_.totalBytes),
               usableBytes = load.flatMap(_.usableBytes),
               usedByKafkaBytes = load.flatMap(_.usedByKafkaBytes),

@@ -13,6 +13,7 @@
 
 export { ClusterList, type ClusterListProps } from "./ClusterList.jsx";
 export { BrokerList, type BrokerListProps } from "./BrokerList.jsx";
+export { BrokerTopology, type BrokerTopologyProps } from "./BrokerTopology.jsx";
 export { BrokerDetail, type BrokerDetailProps, type BrokerTabKey, type Loaded } from "./BrokerDetail.jsx";
 export * from "./model.js";
 

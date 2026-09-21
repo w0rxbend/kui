@@ -17,6 +17,13 @@
  * answer is not to smuggle PACE back into a table the design does not draw it in; it is on the group
  * detail page, where there is room to print it with the word "per second" beside it.
  *
+ * ## The count over the table is the cluster's, and the rows are one page of it
+ *
+ * The voice line reads `totalItems` from the server and the table draws whatever page came back.
+ * They are allowed to disagree, and on any cluster with more groups than fit a page they must:
+ * screenshot `04` says `14 groups` over six rows. Before this, `healthOf` counted the array, so the
+ * sentence was a restatement of the table — true, useless, and wrong about the cluster.
+ *
  * ## The row is a link, and it is also a row
  *
  * Every row carries a real `<a href>` in its first cell, because copy-link, bookmark and
@@ -37,6 +44,7 @@
 import { Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import {
+  Banner,
   Button,
   Card,
   DataTable,
@@ -44,6 +52,7 @@ import {
   MISSING,
   NARROW_QUERY,
   PageHeader,
+  Pagination,
   StatusPill,
   ThresholdValue,
   createMediaQuery,
@@ -65,6 +74,21 @@ export interface GroupListProps {
   readonly rows: readonly GroupSummary[];
   /** How many coordinators did not answer. Drives the voice line and the incomplete chips. */
   readonly coordinatorsMissing?: number | undefined;
+  /**
+   * How many groups the **cluster** has, as the server counted them.
+   *
+   * `null` or absent when the server did not say, which the voice line then states in words. It is
+   * never replaced by `rows.length`: this table draws one page, and the sentence above it is about
+   * the cluster. Screenshot `04` prints `14 groups` over six rows for exactly this reason.
+   */
+  readonly totalItems?: number | null | undefined;
+  /** One-based, and the server's, not this array's index. */
+  readonly page?: number | undefined;
+  /** How many rows a page holds, as asked of the API. Not `rows.length`, which is what came back. */
+  readonly pageSize?: number | undefined;
+  /** Asks the server for another page. The control is drawn only when this is supplied. */
+  readonly onPage?: ((page: number) => void) | undefined;
+  readonly onPageSize?: ((size: number) => void) | undefined;
   readonly loading?: boolean | undefined;
   /**
    * Why the table has no rows, when it has none. `null` means "there is genuinely nothing yet".
@@ -83,22 +107,41 @@ export interface GroupListProps {
   /** Where a group's name points. A real URL, so the browser's own gestures work. */
   readonly hrefFor: (groupId: string) => string;
   readonly onOpen?: ((groupId: string) => void) | undefined;
+  /**
+   * The background lag poll has stopped reaching the cluster. The rows on screen are the last
+   * figures it read, not a claim that lag has stopped moving — see `pollLag`'s `onHealth`.
+   */
+  readonly lagUnavailable?: boolean | undefined;
 }
 
 export function GroupList(props: GroupListProps): JSX.Element {
   const narrow = createMediaQuery(NARROW_QUERY);
-  const health = createMemo(() => healthOf(props.rows, props.coordinatorsMissing ?? 0));
+  const health = createMemo(() =>
+    healthOf(
+      props.rows,
+      props.coordinatorsMissing ?? 0,
+      props.totalItems ?? null,
+      props.loading === true,
+    ),
+  );
 
   /**
    * The voice line, chosen from the health of the rows on screen and never assembled from a
    * template. See `groupsVoice`: SPEC §6.3 rule 3 is that the aside disappears when the state is
    * not healthy, and only a union of whole sentences can guarantee that.
    */
-  const voice = createMemo(() =>
-    props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden"
-      ? "Consumer group data is unavailable."
-      : groupsVoice(health()),
-  );
+  const voice = createMemo(() => {
+    if (props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden") {
+      return "Consumer group data is unavailable.";
+    }
+    // A filtered list's count is the filter's, not the cluster's, and this screen has no figure for
+    // either — so it names the filter instead of publishing a group count that would be read as the
+    // cluster's. The empty state below carries the way out.
+    if (props.failure?.kind === "filtered") {
+      return `No consumer group on this cluster is named like ${props.failure.term}.`;
+    }
+    return groupsVoice(health());
+  });
 
   /*
    * The widths are percentages taken off screenshot `04`, not rem values.
@@ -149,9 +192,47 @@ export function GroupList(props: GroupListProps): JSX.Element {
 
   const failed = (): boolean => props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden";
 
+  /**
+   * Whether there may be another page, for a server that carried no total.
+   *
+   * One weak signal, and it is the only one available: a page that came back full may have a
+   * successor. It enables `next` and nothing more — `Pagination` still draws no numbered buttons
+   * and no `last` step without a total, because both would be arithmetic over a figure nobody gave.
+   * Disabling `next` instead would strand the operator on page 1 of a list the server can page.
+   */
+  const mayHaveMore = (): boolean =>
+    props.pageSize !== undefined && props.rows.length >= props.pageSize;
+
+  /**
+   * The paginator, when there is one — and it needs **both** halves, not just a handler.
+   *
+   * `pageSize` used to fall back to `props.rows.length`, which is the array's own length: the
+   * quantity the doc on that prop four lines up forbids, and the one this screen was rewritten to
+   * stop publishing. On the last page of a list it is smaller than the page, so the control's
+   * "showing X to Y" arithmetic and its page count were both computed off how many rows happened to
+   * come back. A caller that can answer `onPage` knows what it asked for, so it supplies both;
+   * a story or a test holding a fixed array supplies neither and gets no control.
+   */
+  const paging = createMemo<
+    { readonly onPage: (page: number) => void; readonly pageSize: number } | undefined
+  >(() => {
+    const onPage = props.onPage;
+    const pageSize = props.pageSize;
+    if (onPage === undefined || pageSize === undefined) return undefined;
+    return { onPage, pageSize };
+  });
+
   return (
     <section class="kui-cg-page" data-testid="consumer-groups">
       <PageHeader title="Consumer groups" voice={voice()} testId="consumer-groups-head" />
+
+      <Show when={props.lagUnavailable === true}>
+        <Banner
+          tone="warning"
+          message="Lag updates are paused — KUI cannot reach the cluster right now. The figures below are the last it read."
+          testId="consumer-groups-lag-paused"
+        />
+      </Show>
 
       {/*
         A failure gets a titled card and the happy path does not, and that asymmetry is deliberate.
@@ -217,6 +298,34 @@ export function GroupList(props: GroupListProps): JSX.Element {
             )
           }
         />
+
+        {/*
+          The paging control, drawn only when a caller can actually answer it.
+
+          `SCREENS-V4.md` §4.12 records that the capture draws none — `14 groups` over six rows and
+          no way to the other eight. This packet's brief asks for one, and the two go together: the
+          sentence is only allowed to name a figure larger than the table once the table can be
+          moved through. A story or a test that hands this a fixed array supplies no `onPage` and
+          gets no control, rather than one that does nothing.
+        */}
+        <Show when={paging()}>
+          {(control) => (
+            <Pagination
+              page={props.page ?? 1}
+              pageSize={control().pageSize}
+              // The server's figure, straight through. `undefined` is `Pagination`'s own word for
+              // "no total was given", and it then hides the numbered buttons rather than guessing
+              // a last page — which is the same refusal the voice line makes in words.
+              total={props.totalItems ?? undefined}
+              shown={props.rows.length}
+              hasNext={mayHaveMore()}
+              onPage={control().onPage}
+              onPageSize={props.onPageSize}
+              label="Consumer group pages"
+              testId="consumer-groups-pagination"
+            />
+          )}
+        </Show>
       </Show>
     </section>
   );

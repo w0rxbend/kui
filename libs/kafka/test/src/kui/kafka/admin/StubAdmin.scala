@@ -3,11 +3,11 @@ package kui.kafka.admin
 import java.lang.reflect.{InvocationHandler, Method, Proxy}
 
 import cats.effect.IO
+import org.apache.kafka.clients.admin.Admin
 
 import kui.kafka.AdminClientPool
 import kui.kernel.ClusterId
 import kui.kernel.cluster.ClusterConnection
-import org.apache.kafka.clients.admin.Admin
 
 /** An `Admin` that answers one method and refuses every other.
   *

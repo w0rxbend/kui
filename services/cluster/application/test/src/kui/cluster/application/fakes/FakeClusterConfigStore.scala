@@ -9,8 +9,8 @@ import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 
 /** A metadata store a suite can drive.
   *
-  * It lives here and not in `libs/testkit` because a fake of a domain port necessarily depends on the
-  * service that owns the port, and the layering rules forbid a library depending on a service.
+  * It lives here and not in `libs/testkit` because a fake of a domain port necessarily depends on the service
+  * that owns the port, and the layering rules forbid a library depending on a service.
   *
   * `put` implements the real version check rather than always succeeding, so that a suite about concurrent
   * writers is asserting the rule and not the fake's opinion of it.

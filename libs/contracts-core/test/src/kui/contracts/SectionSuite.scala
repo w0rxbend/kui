@@ -11,13 +11,13 @@ import kui.kernel.error.*
 
 /** How a partial answer is shaped, and which failure becomes which section.
   *
-  * The mapping table is the interesting half. A user interface says different things about "the
-  * upstream is unreachable" and "we have stopped calling it while it recovers", and both of those
-  * carry the same error code, so the mapping has to be by failure case.
+  * The mapping table is the interesting half. A user interface says different things about "the upstream is
+  * unreachable" and "we have stopped calling it while it recovers", and both of those carry the same error
+  * code, so the mapping has to be by failure case.
   */
 final class SectionSuite extends FunSuite {
 
-  private val at    = Instant.parse("2026-09-03T10:11:12Z")
+  private val at = Instant.parse("2026-09-03T10:11:12Z")
   private val since = Instant.parse("2026-09-03T09:00:00Z")
 
   test("a success becomes an ok section carrying the moment it was fetched") {
@@ -92,7 +92,7 @@ final class SectionSuite extends FunSuite {
   test("a circuit-open section keeps the moment the circuit opened, not the moment we asked") {
     Section.fromEither[Nothing](Left(InfrastructureError.CircuitOpen("ksql", since)), at) match {
       case Section.Unavailable(_, _, Some(actual)) => assertEquals(actual, since)
-      case other                                   => fail(s"expected an unavailable section, got $other")
+      case other => fail(s"expected an unavailable section, got $other")
     }
   }
 
@@ -107,7 +107,11 @@ final class SectionSuite extends FunSuite {
     )
 
     cases.foreach { section =>
-      assertEquals(decode[Section[List[String]]](section.asJson.noSpaces), Right(section), clue = section.status)
+      assertEquals(
+        decode[Section[List[String]]](section.asJson.noSpaces),
+        Right(section),
+        clue = section.status
+      )
     }
   }
 

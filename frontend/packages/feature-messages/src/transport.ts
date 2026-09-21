@@ -35,9 +35,11 @@
  * `phase` event.
  */
 import { openFetchStream, type SseConnection, type SseError } from "@kui/kernel";
+import { createEffect, createRoot } from "solid-js";
 import {
   decodeBrowseEvent,
   type BrowseConnection,
+  type BrowseEndReason,
   type BrowseEvent,
   type BrowseFailure,
   type BrowseHandle,
@@ -58,6 +60,7 @@ export function createBrowseTransport(options?: {
 }): BrowseTransport {
   return {
     open(url, handlers): BrowseHandle {
+      let endReason: BrowseEndReason | undefined;
       const handle = openFetchStream(
         {
           url,
@@ -78,21 +81,57 @@ export function createBrowseTransport(options?: {
             const decoded = decodeBrowseEvent("phase", data);
             if (decoded.ok) handlers.onEvent(decoded.value);
           },
+          onDone: (data) => {
+            endReason = decodeEndReason(data);
+          },
           onError: (error) => handlers.onFailure(toFailure(error)),
         },
       );
 
-      // The kernel reports connection state as a signal; the session wants callbacks. Reading it
-      // here rather than exposing the signal keeps the session free of any reactive dependency on
-      // the kernel's streaming module, which is what lets a test replace this whole object.
-      handlers.onConnection(toConnection(handle.connection()));
+      // The kernel reports connection state as a signal; the session wants callbacks on every
+      // transition (connecting -> open -> closed), not a one-off snapshot. `createEffect` re-runs
+      // each time `handle.connection()` changes, and the `createRoot` gives this adapter a `dispose`
+      // it can call from `close()` rather than relying on an ambient owner that may not exist here.
+      const disposeConnectionEffect = createRoot((dispose) => {
+        createEffect(
+          () => handle.connection(),
+          (connection) => {
+            handlers.onConnection(toConnection(connection));
+          },
+        );
+        return dispose;
+      });
 
       return {
-        close: () => handle.close(),
+        close: () => {
+          disposeConnectionEffect();
+          handle.close();
+        },
         endMarker: () => handle.endMarker(),
+        endReason: () => endReason,
       };
     },
   };
+}
+
+/** Decode only the bounded enum the browser understands; malformed additions remain non-fatal. */
+function decodeEndReason(data: string): BrowseEndReason | undefined {
+  try {
+    const decoded: unknown = JSON.parse(data);
+    if (typeof decoded !== "object" || decoded === null) return undefined;
+    const reason = (decoded as { readonly reason?: unknown }).reason;
+    switch (reason) {
+      case "limit":
+      case "exhausted":
+      case "budget":
+      case "cancelled":
+        return reason;
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -2,11 +2,12 @@ package kui.message.domain
 
 import java.time.{Duration, Instant}
 
-import kui.kernel.error.ErrorCode
-import kui.kernel.{ClusterId, TopicName}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+
+import kui.kernel.error.ErrorCode
+import kui.kernel.{ClusterId, TopicName}
 
 /** A track query is the one request in M3 that can ask a broker for a month of several topics at once, so
   * every bound on it is checked here rather than trusted to the use case.
@@ -94,7 +95,10 @@ final class TrackQuerySuite extends ScalaCheckSuite {
       attempt match {
         case Left(error) =>
           assertEquals(error.code, ErrorCode.Validation)
-          assert(error.details.forall(_.field.exists(_.nonEmpty)), s"a detail names no field: ${error.details}")
+          assert(
+            error.details.forall(_.field.exists(_.nonEmpty)),
+            s"a detail names no field: ${error.details}"
+          )
         case Right(query) => fail(s"expected a rejection, got $query")
       }
     }

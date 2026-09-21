@@ -3,6 +3,7 @@ import { For, Show, Repeat } from "solid-js";
 import { Checkbox } from "./Checkbox.jsx";
 import { EmptyState, Skeleton } from "./EmptyState.jsx";
 import { Icon } from "./Icon.jsx";
+import { activatesRow } from "./rowActivation.js";
 
 /**
  * How a column's cells line up.
@@ -305,7 +306,18 @@ export function DataTable<Row>(props: DataTableProps<Row>): JSX.Element {
                   // and Space. A row that only answers to a mouse is a row half the operators
                   // cannot use, and this is the failure that passes every visual review.
                   tabindex={clickable() ? 0 : undefined}
-                  onClick={clickable() ? () => props.onRowClick?.(row()) : undefined}
+                  // A modified click is a request to open something *elsewhere*, and this row
+                  // cannot honour it — `onRowClick` navigates the current document. Activating
+                  // anyway is how a ⌘-click on a link inside a row opens a background tab and
+                  // navigates the one the operator is reading. See `./rowActivation.ts`.
+                  onClick={
+                    clickable()
+                      ? (event: MouseEvent) => {
+                          if (!activatesRow(event)) return;
+                          props.onRowClick?.(row());
+                        }
+                      : undefined
+                  }
                   onKeyDown={
                     clickable()
                       ? (event: KeyboardEvent) => {
@@ -320,7 +332,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): JSX.Element {
                 >
                   <Show when={props.selection}>
                     {(selection) => (
-                      <td class="kui-table__cell kui-table__cell--select">
+                      <td
+                        class="kui-table__cell kui-table__cell--select"
+                        /* The row is the control and the checkbox is inside it, so without this a
+                           tick also activates the row: the operator loses the list they were
+                           selecting from, and the ticks with it. `VirtualizedTable` has the same
+                           cell and the same guard, and the two agree. */
+                        onClick={(event: MouseEvent) => event.stopPropagation()}
+                      >
                         <Checkbox
                           labelHidden
                           label={`Select ${selection().rowLabel?.(key()) ?? key()}`}

@@ -33,6 +33,15 @@ import kui.kernel.TopicName
   *   latest minus earliest, summed over the partitions, or `None` if any partition could not answer
   * @param sizeBytes
   *   the topic's on-disk size across every log directory, or `None` when `describeLogDirs` is unavailable
+  * @param produceRate
+  *   records appended per second, differenced from the two most recent scrapes. `None` on the first scrape
+  *   after a restart, across a partition increase, and whenever either scrape's offsets were incomplete —
+  *   never `0`, which would say the topic is idle about a topic nobody has measured yet
+  * @param cleanupPolicy
+  *   `"delete"`, `"compact"` or `"compact,delete"` as the broker spells it, or `None` when the batched
+  *   `describeConfigs` behind the scrape did not cover this topic. A string rather than an enum for the
+  *   reason [[TopicDetailDto]] gives: a broker may name a policy this version of KUI has never heard of, and
+  *   a cosmetic column must not fail a page
   */
 final case class TopicRowDto(
     name: TopicName,
@@ -42,7 +51,13 @@ final case class TopicRowDto(
     outOfSyncReplicas: Int,
     offlinePartitions: Int,
     messageCount: Option[Long],
-    sizeBytes: Option[Long]
+    sizeBytes: Option[Long],
+    // Defaulted, so that a producer written before M5 — the gateway's topic-overview aggregation, a
+    // fixture — still constructs a row rather than failing to compile. Both are `None` by default and
+    // `None` here means "not knowable", which is the truthful answer for a producer that does not measure
+    // them.
+    produceRate: Option[Double] = None,
+    cleanupPolicy: Option[String] = None
 )
 
 object TopicRowDto {
@@ -58,6 +73,11 @@ object TopicRowDto {
         offlinePartitions <- cursor.getOrElse[Int]("offlinePartitions")(0)
         messageCount <- cursor.get[Option[Long]]("messageCount")
         sizeBytes <- cursor.get[Option[Long]]("sizeBytes")
+        // Absent decodes as `None`, which is what lets a document recorded before M5 added these two — a
+        // committed fixture, a browser's cached response — still decode. Absent and null both mean "not
+        // knowable" here, and the row renders the same for either.
+        produceRate <- cursor.get[Option[Double]]("produceRate")
+        cleanupPolicy <- cursor.get[Option[String]]("cleanupPolicy")
       } yield TopicRowDto(
         name,
         internal,
@@ -66,7 +86,9 @@ object TopicRowDto {
         outOfSyncReplicas,
         offlinePartitions,
         messageCount,
-        sizeBytes
+        sizeBytes,
+        produceRate,
+        cleanupPolicy
       ),
     (dto: TopicRowDto) =>
       Json.obj(
@@ -77,7 +99,9 @@ object TopicRowDto {
         "outOfSyncReplicas" -> dto.outOfSyncReplicas.asJson,
         "offlinePartitions" -> dto.offlinePartitions.asJson,
         "messageCount" -> dto.messageCount.asJson,
-        "sizeBytes" -> dto.sizeBytes.asJson
+        "sizeBytes" -> dto.sizeBytes.asJson,
+        "produceRate" -> dto.produceRate.asJson,
+        "cleanupPolicy" -> dto.cleanupPolicy.asJson
       )
   )
 
@@ -90,8 +114,13 @@ object TopicRowDto {
 /** A topic's detail page, as one document.
   *
   * It **embeds** the row rather than repeating its fields. The list row and the detail header show the same
-  * numbers, and two flat records carrying the same eight fields would let the two screens drift apart one
-  * field at a time.
+  * numbers, and two flat records carrying the same ten fields would let the two screens drift apart one field
+  * at a time.
+  *
+  * `cleanupPolicy` is the one exception, and it predates the row's copy of it: M5 put the same field on
+  * [[TopicRowDto]], so this one now repeats `row.cleanupPolicy`. It stays because it is on the wire and the
+  * browser decodes it, and the two cannot disagree — `TopicDetail.of` fills the summary and the detail from
+  * one argument, so a reader that trusts either is reading the same value.
   *
   * @param cleanupPolicy
   *   `"delete"`, `"compact"` or `"compact,delete"` as the broker spells it, or `None` when the configuration

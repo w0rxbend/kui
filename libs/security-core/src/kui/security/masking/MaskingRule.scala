@@ -9,6 +9,12 @@ import cats.data.NonEmptyList
   * Kouncil offers `FIRST_5` and `LAST_5` as two fixed policies; this is the same idea with the numbers made
   * parameters, because the useful case — a card number showing its last four digits — is neither of theirs.
   * `KeepEnds(0, 4)` on `4111111111111111` gives `************1111`.
+  *
+  * **Two ends that together leave nothing masked mask the whole value**, rather than returning it. `4242`
+  * under `KeepEnds(0, 4)` is `****`, not `4242`, and `KeepEnds(20, 20)` on a sixteen-digit card number is
+  * sixteen asterisks. These numbers are a bound on what a mask may *reveal*, so the arithmetic running out
+  * has to fail towards hiding; `MaskingEngine.maskKeepingEnds` argues it at the branch, and until wave 10
+  * that branch handed the value back in full.
   */
 final case class KeepEnds(prefix: Int, suffix: Int)
 
@@ -24,11 +30,11 @@ object KeepEnds {
 
 /** What masking does to a matched field.
   *
-  * | Kind      | On a matched field                                                                                                               | Notes                                         |
-  * |:----------|:---------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------|
-  * | `Remove`  | the key is deleted from the object                                                                                               | in an array, the element is removed           |
-  * | `Mask`    | every character replaced, cycling through `replacementChars`, except `keep.prefix` leading and `keep.suffix` trailing characters | **the result is never longer than the input** |
-  * | `Replace` | the value becomes the literal `replacement`                                                                                      | the type becomes string                       |
+  * | Kind      | On a matched field                                                                                                               | Notes                                                                                                       |
+  * |:----------|:---------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|
+  * | `Remove`  | the key is deleted from the object                                                                                               | in an array, the element is removed                                                                         |
+  * | `Mask`    | every character replaced, cycling through `replacementChars`, except `keep.prefix` leading and `keep.suffix` trailing characters | **the result is never longer than the input**, and a `keep` that would leave nothing masked masks all of it |
+  * | `Replace` | the value becomes the literal `replacement`                                                                                      | the type becomes string                                                                                     |
   */
 enum MaskingKind {
   case Remove
@@ -63,11 +69,20 @@ object MaskingKind {
   * reading. Per-group policies are DM-002 in M6, and adding the field now would ship an access control
   * nothing enforces, which is worse than not having one.
   *
-  * ## What it protects, exactly
+  * ## What it protects, exactly, and where the protection stops
   *
-  * A masked value is never *longer* than the value it replaced. That is a rule about a side channel: a mask
-  * that padded a four-digit field out to sixteen characters would announce that the field was not a card
-  * number, and a reader counting characters would learn something the mask was there to hide.
+  * A **`Mask`** never returns a value *longer* than the value it replaced, and `Remove` returns no value at
+  * all. That is a rule about a side channel: a mask that padded a four-digit field out to sixteen characters
+  * would announce that the field was not a card number, and a reader counting characters would learn
+  * something the mask was there to hide.
+  *
+  * **`Replace` is outside that rule and cannot be inside it.** `replacement` is a literal the operator wrote,
+  * and `MaskingEngine.maskLeaf` emits it verbatim with no length bound, so `"<redacted by policy>"` over a
+  * four-character field returns twenty-two characters. Truncating it to fit would make the one kind whose
+  * whole purpose is to say *why* a field is gone unreadable at exactly the moment it is read. The kind table
+  * above scopes the sentence to the `Mask` row for this reason; `docs/operations/masking.md` published it
+  * unscoped, with a security rationale attached, until wave 11, and this paragraph is what stops the two
+  * files from disagreeing again.
   */
 final case class MaskingRule(
     kind: MaskingKind,

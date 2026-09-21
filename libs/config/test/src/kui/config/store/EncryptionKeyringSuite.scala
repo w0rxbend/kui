@@ -5,8 +5,8 @@ import kui.testkit.KuiSuite
 /** That bad key material is refused with a message an operator can act on, and that no such message ever
   * quotes the material it is complaining about.
   *
-  * The second half matters more than it looks. A "expected 32 bytes, got 'AAEC…'" message is how a key
-  * ends up in a log aggregator that a hundred people can read.
+  * The second half matters more than it looks. A "expected 32 bytes, got 'AAEC…'" message is how a key ends
+  * up in a log aggregator that a hundred people can read.
   */
 final class EncryptionKeyringSuite extends KuiSuite {
 

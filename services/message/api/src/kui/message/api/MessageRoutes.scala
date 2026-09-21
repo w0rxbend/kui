@@ -138,31 +138,34 @@ object MessageRoutes {
           .asLeft[BrowseRequest]
           .pure[F]
       case Some(cursor) =>
-        browse.resume(params.cluster, params.topic, cursor, params.stringFilter, limits)
+        browse.resume(params.cluster, params.topic, cursor, params.stringFilter, limits, params.filterSource)
     }
 
   private def requestOf(
       params: BrowseStreamParams,
       limits: BrowseLimits
   ): Either[KuiError, BrowseRequest] =
-    BrowseRequest.of(
-      cluster = params.cluster,
-      topic = params.topic,
-      // No seek given means "the newest records", which is what a person opening a topic wants to see
-      // first. It is decided here rather than in the codec so that the choice is visible to a reader of
-      // the endpoint instead of buried in a parser.
-      seek = params.seek.getOrElse(kui.kernel.browse.SeekMode.Latest),
-      direction = params.direction,
-      partitions = params.partitions.map(_.toSortedSet.toSet),
-      limit = params.limit,
-      isolation = params.isolation,
-      keySerde = params.keySerde,
-      valueSerde = params.valueSerde,
-      stringFilter = params.stringFilter,
-      filter = filterOf(params),
-      live = params.live.getOrElse(false),
-      limits = limits
-    )
+    for {
+      filter <- filterOf(params)
+      request <- BrowseRequest.of(
+        cluster = params.cluster,
+        topic = params.topic,
+        // No seek given means "the newest records", which is what a person opening a topic wants to see
+        // first. It is decided here rather than in the codec so that the choice is visible to a reader of
+        // the endpoint instead of buried in a parser.
+        seek = params.seek.getOrElse(kui.kernel.browse.SeekMode.Latest),
+        direction = params.direction,
+        partitions = params.partitions.map(_.toSortedSet.toSet),
+        limit = params.limit,
+        isolation = params.isolation,
+        keySerde = params.keySerde,
+        valueSerde = params.valueSerde,
+        stringFilter = params.stringFilter,
+        filter = filter,
+        live = params.live.getOrElse(false),
+        limits = limits
+      )
+    } yield request
 
   /** The smart filter this browse names, if it names one.
     *
@@ -171,6 +174,6 @@ object MessageRoutes {
     * malformed id *is* refused, by `FilterRef.of`, which is what turns `filterId=nonsense` into a 400 naming
     * the parameter instead of a stream that opens a consumer and then fails.
     */
-  private def filterOf(params: BrowseStreamParams): Option[FilterRef] =
-    params.filterId.flatMap(id => FilterRef.of(id, params.filterSource).toOption)
+  private def filterOf(params: BrowseStreamParams): Either[KuiError, Option[FilterRef]] =
+    params.filterId.traverse(id => FilterRef.of(id, params.filterSource))
 }

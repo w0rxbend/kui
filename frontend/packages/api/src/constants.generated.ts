@@ -195,6 +195,8 @@ export const Resources = {
   Acl: "ACL",
   Audit: "AUDIT",
   ClientQuotas: "CLIENT_QUOTAS",
+  Metrics: "METRICS",
+  Alerts: "ALERTS",
 } as const;
 
 /** One resource in the RBAC vocabulary. */
@@ -246,12 +248,16 @@ export const Actions = {
   ConnectorDelete: { resource: "CONNECTOR", action: "DELETE" },
   ConnectorOperate: { resource: "CONNECTOR", action: "OPERATE" },
   ConnectorResetOffsets: { resource: "CONNECTOR", action: "RESET_OFFSETS" },
+  KsqlView: { resource: "KSQL", action: "VIEW" },
   KsqlExecute: { resource: "KSQL", action: "EXECUTE" },
   AclView: { resource: "ACL", action: "VIEW" },
   AclEdit: { resource: "ACL", action: "EDIT" },
   AuditView: { resource: "AUDIT", action: "VIEW" },
   ClientQuotasView: { resource: "CLIENT_QUOTAS", action: "VIEW" },
   ClientQuotasEdit: { resource: "CLIENT_QUOTAS", action: "EDIT" },
+  MetricsView: { resource: "METRICS", action: "VIEW" },
+  AlertsView: { resource: "ALERTS", action: "VIEW" },
+  AlertsAcknowledge: { resource: "ALERTS", action: "ACKNOWLEDGE" },
 } as const satisfies Record<string, PermissionAction>;
 
 /**

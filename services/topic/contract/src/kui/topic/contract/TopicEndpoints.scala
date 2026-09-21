@@ -13,7 +13,7 @@ import kui.topic.contract.dto.*
 
 /** Everything `kui-topic-service` serves, described once.
   *
-  * The same five values produce the service's routes, the gateway's proxy routes, the browser's client and
+  * The same seven values produce the service's routes, the gateway's proxy routes, the browser's client and
   * the OpenAPI document (ADR-003). Nothing is served that is not in [[all]], and no path is written out by
   * hand anywhere else — a hand-written path is a path that drifts from the handler it was supposed to name.
   *
@@ -40,6 +40,8 @@ object TopicEndpoints {
   val ConfigSegment: String = "config"
   val PartitionsSegment: String = "partitions"
   val RefreshSegment: String = "refresh"
+  val StatisticsSegment: String = "statistics"
+  val NamesSegment: String = "names"
 
   val ClusterIdParam: String = "clusterId"
   val TopicNameParam: String = "topicName"
@@ -66,6 +68,51 @@ object TopicEndpoints {
         "The page's total is counted after every filter, including the internal-topic filter, so the " +
           "page count always agrees with the rows. Read from a per-cluster snapshot: the response carries " +
           "when it was taken and whether that is current."
+      )
+      .tag("topic")
+
+  /** The cluster-wide totals above the list, which the list's own filter must not move.
+    *
+    * ==Why it sits under `/topics/` and what that costs==
+    *
+    * `statistics` and `names` are fixed segments in the same position as `{topicName}`, so both are declared
+    * **before** [[getTopic]] in [[all]] and the router tries them first. The order is the whole mechanism:
+    * reverse it and `GET …/topics/statistics` is served as the detail page of a topic called `statistics`.
+    *
+    * The cost is that a cluster with a topic genuinely named `statistics` or `names` cannot reach that
+    * topic's detail page. That is a real defect and it is accepted rather than unnoticed: the alternative
+    * addresses — `/topic-statistics` beside `/topics`, or a query parameter on the list — each put one screen
+    * region at an address that does not say what it belongs to, and the reference products make the same
+    * trade. `TopicEndpointsSuite` pins the order so a later edit cannot quietly undo it.
+    */
+  val topicStatistics: Endpoint[SignedPrincipal, ClusterId, ErrorEnvelope, TopicStatisticsResponse, Any] =
+    KuiEndpoint.internal.get
+      .in(topicsBase / clusterIdPath / TopicsSegment / StatisticsSegment)
+      .out(jsonBody[TopicStatisticsResponse])
+      .name("topic.statistics")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("topic.statistics"))
+      .summary("Cluster-wide topic totals: how many topics, partitions and bytes")
+      .description(
+        "Cluster-wide and unaffected by any list filter: the totals keep reading the whole cluster while " +
+          "the table below them shows a search result. Each sum is absent rather than partial — a scrape " +
+          "that could not describe a topic knows how many topics exist and not how many partitions they " +
+          "hold — and incompleteTopics says how many topics that was, so the screen can explain the gap."
+      )
+      .tag("topic")
+
+  /** Every topic name, for the drawer's tree. Names and nothing else. */
+  val topicNames: Endpoint[SignedPrincipal, ClusterId, ErrorEnvelope, TopicNamesResponse, Any] =
+    KuiEndpoint.internal.get
+      .in(topicsBase / clusterIdPath / TopicsSegment / NamesSegment)
+      .out(jsonBody[TopicNamesResponse])
+      .name("topic.names")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("topic.names"))
+      .summary("Every topic name on the cluster, unpaged")
+      .description(
+        "The drawer's topic tree is a fold over names, so it needs the names and none of the figures. " +
+          "Unpaged on purpose: a page of names would make the tree's counts depend on how far something " +
+          "had scrolled a list it never shows. Topics the scrape could not describe are included — they " +
+          "have no list row, they do exist, and a tree that omitted them would say a topic is gone."
       )
       .tag("topic")
 
@@ -155,5 +202,5 @@ object TopicEndpoints {
     * path end up disagreeing.
     */
   val all: List[AnyEndpoint] =
-    List(listTopics, getTopic, topicConfig, topicPartitions, refresh)
+    List(listTopics, topicStatistics, topicNames, getTopic, topicConfig, topicPartitions, refresh)
 }

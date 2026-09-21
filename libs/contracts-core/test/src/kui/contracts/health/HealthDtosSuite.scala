@@ -8,8 +8,8 @@ import munit.FunSuite
 
 import kui.contracts.GoldenDocuments
 
-/** That the three health documents look the same on both platforms and stay the shape an operator
-  * and an orchestrator were promised.
+/** That the three health documents look the same on both platforms and stay the shape an operator and an
+  * orchestrator were promised.
   */
 final class HealthDtosSuite extends FunSuite {
 

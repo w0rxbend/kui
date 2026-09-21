@@ -112,8 +112,7 @@ final class ClusterRecordCodecSuite extends KuiSuite {
     //
     // The sample holds the plaintext markers, not ciphertext: this is the payload the crypto layer is
     // handed, and pinning an encrypted form would pin a fresh random IV that changes on every write.
-    val committed = scala.util
-      .Using
+    val committed = scala.util.Using
       .resource(Option(getClass.getResourceAsStream("/golden/cluster-record.json")).getOrElse {
         fail("golden/cluster-record.json is missing from the test resources")
       })(stream => scala.io.Source.fromInputStream(stream, "UTF-8").mkString)
@@ -159,7 +158,8 @@ final class ClusterRecordCodecSuite extends KuiSuite {
       SaslMechanism.Plain("u", Secret("p")),
       SaslMechanism.ScramSha256("u", Secret("p")),
       SaslMechanism.ScramSha512("u", Secret("p")),
-      SaslMechanism.Gssapi("kafka", "kui@REALM", Some("/etc/kui.keytab"), useTicketCache = false, storeKey = true),
+      SaslMechanism
+        .Gssapi("kafka", "kui@REALM", Some("/etc/kui.keytab"), useTicketCache = false, storeKey = true),
       SaslMechanism.OAuthBearer("https://issuer/token", "kui", Secret("p"), Some("kafka")),
       SaslMechanism.AwsMskIam(Some("default"), None, Some("eu-west-1")),
       SaslMechanism.AzureEntra("ns", None),
@@ -182,7 +182,12 @@ final class ClusterRecordCodecSuite extends KuiSuite {
       .encode(withSecurity(ClusterSecurity.Plaintext))
       .deepMerge(Json.obj("security" -> Json.obj("type" -> Json.fromString("kerberos-v9"))))
 
-    ClusterRecordCodec.decode(ClusterId.unsafe("local"), ProfileVersion.Static, ProfileOrigin.Stored, payload) match {
+    ClusterRecordCodec.decode(
+      ClusterId.unsafe("local"),
+      ProfileVersion.Static,
+      ProfileOrigin.Stored,
+      payload
+    ) match {
       case Right(profile) => fail(s"an unknown security mode must not decode: $profile")
       case Left(why) => assert(why.contains("kerberos-v9"), s"the failure names what it found: $why")
     }
@@ -201,13 +206,15 @@ final class ClusterRecordCodecSuite extends KuiSuite {
     // Hand-edited into an illegal state: an override of a property KUI renders itself. Refusing it here, with
     // the message the operator would have seen at startup, is much better than the alternative — failing
     // later inside a refresh loop on a background fiber.
-    val payload = ClusterRecordCodec.encode(loud).deepMerge(
-      Json.obj(
-        "properties" -> Json.obj(
-          "sasl.jaas.config" -> Json.obj("value" -> Json.fromString("anything"))
+    val payload = ClusterRecordCodec
+      .encode(loud)
+      .deepMerge(
+        Json.obj(
+          "properties" -> Json.obj(
+            "sasl.jaas.config" -> Json.obj("value" -> Json.fromString("anything"))
+          )
         )
       )
-    )
 
     ClusterRecordCodec.decode(loud.id, loud.version, loud.origin, payload) match {
       case Right(profile) => fail(s"a reserved property override must not decode: $profile")

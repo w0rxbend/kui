@@ -434,11 +434,12 @@
   height: var(--kui-control-height-md);
 }
 
-.kui-select__trigger:hover:not(:disabled) {
+.kui-select__trigger:hover:not(:disabled):not([aria-disabled="true"]) {
   background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
 }
 
-.kui-select__trigger:disabled {
+.kui-select__trigger:disabled,
+.kui-select__trigger[aria-disabled="true"] {
   opacity: var(--kui-opacity-disabled);
   cursor: not-allowed;
 }
@@ -593,6 +594,9 @@
   border-radius: var(--kui-radius-xs);
   background-color: transparent;
   color: transparent;
+  /* The native input occupies this same hit area. This span is only its drawing, so allowing it to
+   * receive pointer events makes the visible box intercept clicks intended for the real control. */
+  pointer-events: none;
   transition:
     background-color var(--kui-duration-fast) ease,
     border-color var(--kui-duration-fast) ease;

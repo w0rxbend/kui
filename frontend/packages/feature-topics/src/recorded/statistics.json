@@ -1,0 +1,12 @@
+{
+    "statistics": {
+        "status": "ok",
+        "data": {
+            "topicCount": 10,
+            "partitionCount": 86,
+            "sizeBytes": 1550921,
+            "incompleteTopics": 0
+        },
+        "fetchedAt": "2026-09-06T15:58:03.489Z"
+    }
+}

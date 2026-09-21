@@ -12,8 +12,12 @@
  * a value pulled out "for convenience" — any of them makes the feature reachable from the entry
  * chunk, and the bundler then ships it to every user on first paint, including users whose
  * deployment has no such service at all. Nothing about the source looks different when that
- * happens, which is why `frontend.checkBundleShape` asserts the shape of the build manifest's
- * module graph rather than trusting a reviewer to spot it.
+ * happens, which is why `frontend/scripts/bundle-shape.mjs` — run as `pnpm bundle-shape`, and in CI
+ * as a step of the frontend job — asserts the shape of the build manifest's module graph rather than
+ * trusting a reviewer to spot it. It reads its roster of features from the filesystem, so a package
+ * added under `frontend/packages/` is checked from the moment its directory exists. (There is no
+ * `frontend.checkBundleShape` Mill task: that was `build-tests`' `BundleShape.scala`, which parsed
+ * the Scala.js linker output ADR-048 deleted. ARCHITECTURE.md A7 records the pair as dead.)
  *
  * Everything *else* here is ordinary static data — a label, an icon name, a service id, a sort
  * order — and the shell links against it normally, because all of it has to be known before anything
@@ -25,11 +29,18 @@ import { Actions } from "@kui/api";
 import { featureModule, type FeatureRegistration } from "@kui/kernel";
 
 /**
- * The four features this build contains, in navigation order.
+ * The features this build contains, in navigation order.
  *
  * The orders leave wide gaps: they are a product decision about where an operator's eye goes, and
  * the sequence — the cluster, then its topics, then the records in them, then who is reading them —
  * is the one the reference products use and the one operators already have in their fingers.
+ *
+ * **How many there are is not written here.** This sentence used to say "seven of them, counted in
+ * this array" and had been wrong by inheritance twice: `app.render.test.tsx` iterates the registry
+ * rather than sizing it, so nothing in the workspace could tell that the prose and the array had
+ * parted company. {@link FEATURE_COUNT} is the number, `registry.test.ts` asserts the array is that
+ * long, and a comment that states a figure now states one something in the tree can check (house
+ * rule 11).
  */
 export const featureRegistry: readonly FeatureRegistration[] = [
   {
@@ -40,11 +51,15 @@ export const featureRegistry: readonly FeatureRegistration[] = [
     // A cluster is administered through its configuration resource, which is why this is not
     // `Resources.Topic`-style guessable from the service name.
     viewAction: Actions.ClusterConfigView,
-    label: "Clusters",
+    // The sidebar sits inside one chosen cluster's context already (the environment rail and the
+    // brand block above it say which one), so this entry lands on that cluster's own brokers rather
+    // than on the cross-cluster registry list — the registry stays reachable from the "+" in the
+    // brand block and from the cluster-name crumb on the brokers/broker pages.
+    label: "Brokers",
     icon: "brokers",
     group: "Cluster",
     order: 100,
-    requiresCluster: false,
+    requiresCluster: true,
     sidebar: true,
     load: () => import("@kui/feature-clusters").then(featureModule),
   },
@@ -108,7 +123,82 @@ export const featureRegistry: readonly FeatureRegistration[] = [
        rather than vanishing and leaving somebody wondering whether KUI supports schemas. */
     load: () => import("@kui/feature-schemas").then(featureModule),
   },
+  {
+    id: "alerts",
+    // The service and the feature are the same word here, and it is still stated rather than
+    // derived: `clusters`/`cluster` above is why nothing in this table guesses one from the other.
+    serviceId: "alerts",
+    viewAction: Actions.AlertsView,
+    label: "Alerts",
+    icon: "bell",
+    group: "Cluster",
+    order: 500,
+    // Every rule the alerts service ships reads a fact about one cluster — its partitions, its
+    // groups, its log directories — so there is nothing for this entry to point at until a cluster
+    // is chosen.
+    requiresCluster: true,
+    sidebar: true,
+    /* The screen behind this is one of three readers of one feed: this feature draws the screen and
+       the card, the shell's chrome draws the bell, and the store both read is in `@kui/kernel`,
+       because a feature may not import the shell and the shell must not statically import a
+       feature. */
+    load: () => import("@kui/feature-alerts").then(featureModule),
+  },
+  {
+    id: "connect",
+    // The seventh feature and the first under `ECOSYSTEM`. Feature and service are the same word
+    // again, and it is stated again for the reason `clusters`/`cluster` gives above.
+    serviceId: "connect",
+    // `CONNECT:VIEW` and not `CONNECTOR:VIEW`. The screen lists the connectors on a *connect
+    // cluster*, so the permission that decides whether the destination exists at all is the one on
+    // the connect cluster; a principal who may see it and may operate only some of its connectors
+    // gets a page with some of its buttons disabled, which is decided per row and not here.
+    viewAction: Actions.ConnectView,
+    label: "Kafka Connect",
+    icon: "connect",
+    /* `SCREENS-V4.md` §2.2's second heading, empty since it was declared: Connect and ksqlDB are
+       what it was declared for. `navigation.ts` uppercases it, so "Ecosystem" and "ECOSYSTEM" are
+       one group and not two halves of one list. */
+    group: "Ecosystem",
+    order: 600,
+    // Every Connect worker KUI knows about is configured under a Kafka cluster
+    // (`kui.clusters.<n>.connect`), so there is nothing for this entry to point at until one is
+    // chosen — the same rule the five cluster-scoped entries above follow.
+    requiresCluster: true,
+    sidebar: true,
+    load: () => import("@kui/feature-connect").then(featureModule),
+  },
+  {
+    id: "ksql",
+    // The eighth feature and the second under `ECOSYSTEM`. Feature and service are the same word
+    // again, and it is stated again for the reason `clusters`/`cluster` gives above.
+    serviceId: "ksql",
+    // `KSQL:VIEW` and not `KSQL:EXECUTE`. Seeing the streams, the tables and what is running is a
+    // read, and `Action.KsqlExecute` implies `KsqlView` rather than the other way round
+    // (`Vocabulary.scala:249`) — so an operator who may look and may not run gets the destination
+    // with its Run control refused, which is decided on the screen and not here.
+    viewAction: Actions.KsqlView,
+    label: "ksqlDB",
+    icon: "ksql",
+    /* `SCREENS-V4.md` §2.2's second heading. `navigation.ts` uppercases it, so "Ecosystem" and
+       "ECOSYSTEM" are one group and not two halves of one list. */
+    group: "Ecosystem",
+    order: 700,
+    // One ksqlDB server per Kafka cluster (`kui.clusters.<n>.ksql.url`), so there is nothing for
+    // this entry to point at until one is chosen — the same rule the six entries above follow.
+    requiresCluster: true,
+    sidebar: true,
+    load: () => import("@kui/feature-ksql").then(featureModule),
+  },
 ];
+
+/**
+ * How many features this build contains.
+ *
+ * Stated as a value rather than in the prose above so that `registry.test.ts` can hold the array to
+ * it. The count is what the header used to assert in words and nothing checked — twice.
+ */
+export const FEATURE_COUNT = 8;
 
 /** The registration for one id, or `undefined` when this build has no such feature. */
 export function registrationOf(id: string): FeatureRegistration | undefined {

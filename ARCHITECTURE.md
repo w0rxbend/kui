@@ -52,6 +52,8 @@ Sections:
    ├── kui-ksql-service        Optional    statements, push/pull queries, tables, streams
    ├── kui-metrics-service     Degradable  JMX/Prometheus scrape, inferred metrics, graphs,
    │                                       /metrics exposition
+   ├── kui-alerts-service      Degradable  rules over facts KUI already reads, the event store,
+   │                                       the feed, the open count and the acknowledgement
    └── kui-identity-service    Core*       login (form/OIDC/LDAP), sessions, roles, audit sink
                                            (* only when auth is enabled)
    ▼
@@ -109,6 +111,7 @@ Tier = what the UI does when the service is down.
 | `kui-connect-service` | Kafka Connect Management | connect clusters, connectors, tasks, plugins, validation, actions, offsets | Optional plugin |
 | `kui-ksql-service` | ksqlDB | statement execution, query streaming, tables/streams | Optional plugin |
 | `kui-metrics-service` | Kafka Observability | JMX/Prometheus scrapers, inferred metrics, graph descriptions, PromQL templates, `/metrics` exposition | Degradable |
+| `kui-alerts-service` | Alerting | the rules KUI runs over facts it already reads, the event store and its retention, the feed with its open count and per-principal read marker, and the acknowledgement | Degradable |
 | `kui-identity-service` | Application Identity and Access | authentication adapters, session store, role model and hot reload, permission query, audit sink | **Core when `kui.auth.type != disabled`**; the gateway runs anonymous when auth is disabled |
 
 Two Degradable/Optional services with different failure domains are never merged.
@@ -148,22 +151,125 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 
 | Service | Key aggregates / value objects | Ports in `domain` | Adapters in `infrastructure` |
 | --- | --- | --- | --- |
-| cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]` | kui-kafka admin adapter, Kafka `ConfigStore` adapter (file adapter for dev), probe clients |
-| topic | `Topic` (NonEmptyList[Partition], ISR ⊆ replicas), `TopicConfig`, `TopicAnalysis` | `TopicAdmin[F]`, `ClusterProfileSource[F]`, `TopicAnalysisPort[F]` | kui-kafka, cluster-service contract client, datasketches |
-| message | `BrowseRequest`, `SeekMode`, `PollingMode`, `OffsetRange`, `MaskingPolicy`, `TrackQuery` | `MessageBrowsePort[F]`, `SerdeRegistry[F]`, `MessageFilterPort[F]`, `ClusterProfileSource[F]` | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL) |
-| consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdmin[F]`, `ClusterProfileSource[F]` | kui-kafka |
-| security | `AclBinding`, `AclFilter`, `ClientQuotaEntity`, `AclPreset` | `SecurityAdmin[F]`, `ClusterProfileSource[F]` | kui-kafka, fs2-data-csv |
+| cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]`, `ClockPort[F]` | kui-kafka admin adapter, Kafka `ConfigStore` adapter (file adapter for dev), probe clients |
+| topic | `Topic` (NonEmptyList[Partition], ISR ⊆ replicas), `TopicConfig`, `TopicAnalysis` | `TopicAdmin[F]`, `TopicWriter[F]`, `ClusterProfiles[F]`, `ClockPort[F]` | kui-kafka, cluster-service contract client, datasketches |
+| message | `BrowseRequest`, `PageRequest`, `PageWindow`, `DecodedRecord`, `PurgePlan`, `TrackQuery`; `SeekMode` and `OffsetRange` are `libs/kernel`'s and are used here rather than declared here | `ClusterProfileSource[F]`, `SerdeSource[F]`, `FilterSource[F]`, `CompiledFilter[F]`, `RecordDeleter[F]` — and `RecordMasking[F]` in **`application`**, with `ConfiguredRecordMasking` its adapter | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL), the configured masking adapter |
+| consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdminPort[F]` | kui-kafka |
+| security | `AclBinding`, `AclFilter`, `ClientQuotaEntity`, `AclPreset` | **not built**: there is no `services/security`, and this row is the intent | not built |
 | schema | `Subject`, `SchemaVersion`, `CompatibilityLevel` | `SchemaRegistryPort[F]` | own sttp client (ADR-014) |
-| connect | `ConnectCluster`, `Connector`, `Task`, `Plugin` | `ConnectPort[F]` | sttp client with 409 retry (ADR-037) |
-| ksql | `Statement`, `QueryResult` stream | `KsqlPort[F]` | sttp HTTP/2 `/query-stream` with `/query` fallback |
-| metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `BrokerMetricsScraper[F]`, `MetricsStore[F]`, `TopicSnapshotSource[F]`, `GroupSnapshotSource[F]` | JMX, Prometheus HTTP, contract clients |
-| identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `IdentityProviderPort[F]`, `OidcProviderPort[F]`, `SessionStore[F]`, `RolePolicySource[F]`, `AuditSink[F]` | UnboundID LDAP, nimbus OIDC, bcrypt users, in-memory/Kafka session and audit sinks |
+| connect | `Connector` (state + tasks + `reason`), `ConnectorTask`, `ConnectorState`, `ConnectorKind`, `ConnectorFacts` (readable connectors + the ones KUI could not describe), `ConnectorOperation` | `ConnectWorkerPort[F]` | sttp client with 409 retry (ADR-037), the 2.3 `?expand=` reader and its pre-2.3 fallback |
+| ksql | `KsqlObject` (stream, table, running query, topic), `KsqlObjects`, `KsqlObjectKind`, `KsqlStatement` with `StatementShape` (push query, pull query, statement) and `StatementProblem`, `StatementOutcome` | `KsqlServerPort[F]` | sttp client over the ksqlDB REST API. The push query's port is `KsqlQueryStream` in `application`, not here: an unbounded answer is an `fs2.Stream` and rule A1 keeps fs2 out of a `domain` |
+| metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `MetricsSourcePort[F]` | Prometheus scrape and exposition, per-cluster source resolution, the bounded sample buffer |
+| alerts | `AlertEvent` (opened-at, severity, category, resolution), `ClusterFacts`, `AlertLimits` | `ClusterFactsPort[F]` | kui-kafka admin facts, in-memory event store, logging acknowledgement sink, configured profile source |
+| identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `UserDirectory[F]`, `PasswordHasher[F]` | UnboundID LDAP, nimbus OIDC, PBKDF2 users, in-memory/Kafka session and audit sinks |
+
+**A service's outbound ports are not all in `domain`, and the column above names only the ones that
+are.** A port whose subject is a *store* or another *process* rather than the domain is declared in
+`application`, where the use case that owns it lives: `services/alerts` is the worked example, with
+`AlertStore[F]` and `AcknowledgementSink[F]` in `services/alerts/application/` and only
+`ClusterFactsPort[F]` in `services/alerts/domain/`. Rule A1 is what forces the split — a `domain`
+module may depend on `libs/kernel` and cats-core and nothing else — so a port that needs to speak of
+anything wider cannot live there.
+
+**These services own a `domain`** — `cluster`, `topic`, `message`, `consumer`, `schema`, `connect`,
+`ksql`, `metrics`, `alerts` and `identity` — and `security` is the one row above describing a service
+that does not exist. That roster is read off disk and compared to this sentence by
+`ArchitectureDocumentSuite`, because the previous version of this paragraph published a count that
+had been wrong for two waves and nothing could tell.
+
+**The *Key aggregates* column is not read by anything, and the measurement of what that costs is
+worth more than the correction it prompted.** `MaskingPolicy` stood in the `message` row and
+`grep -rn MaskingPolicy --include='*.scala'` finds it **zero** times in this repository; the real
+type wave 9 shipped is `RecordMasking[F]`, a port in `application`, and the row says so now. But
+`MaskingPolicy` is not the only one. Filtering that column to the tokens that look like Scala
+identifiers and asking, for each, whether
+`grep -rE '(class|trait|object|enum|type) +<Name>' services/<service>` finds a declaration answers
+**no for nine of them**: `Topic` and `TopicAnalysis` (`topic`), `PollingMode` (`message`, now
+removed), `Member` (`consumer`), `MetricSnapshot`, `GraphDescription` and `PromQuery` (`metrics`),
+`AuditRecord` (`identity`), and `MaskingPolicy` itself — beside four more in the `security` row,
+which is the row that says out loud that the service is not built. Several others resolve somewhere
+in the tree but not under the service the row is about: `SeekMode` and `OffsetRange` are
+`libs/kernel`'s, `Principal`, `Role` and `Permission` are `libs/security-core`'s, `Session` is the
+gateway's, and `Subject` is two different types — `libs/kernel`'s opaque subject id and
+`libs/security-core`'s RBAC subject — in the two rows that name it.
+
+So the cheap direction the wave plan proposed — *every name in this column resolves to a `.scala`
+declaration somewhere under that service* — is **false of nine names today, not of one**, and
+landing it as a gate would be a rewrite of five rows rather than a check over a correct table. It is
+filed with the seam instead, in `TECH_DEBT.md`: the check belongs in `ArchitectureDocumentSuite`,
+which already walks `services/<n>/domain/src` and is in `services/gateway/api/test/`, a tree this
+packet does not own. The measurement above is the input that closure needs; what it does not have is
+a decision about whether this column names *types* or names *concepts*, and that decision is the
+whole of the work.
+
+The column was re-read against the tree in wave 7. Eight of the nine rows that had a `domain` then
+named a port (`connect`'s still
+said *not built*, and it is corrected above), and **six of those eight** named at least one
+identifier that is not a `trait` declared in that service's own `domain`: `topic`, `message`,
+`consumer`, `metrics`, `alerts` and `identity`. `cluster` and `schema` were correct.
+Three of the six named a port that is real and lives in `application` (`alerts`, `consumer`,
+`identity`); the rest named identifiers the tree declares nowhere — `TopicAnalysisPort[F]`,
+`MessageBrowsePort[F]`, `BrokerMetricsScraper[F]`, `MetricsStore[F]`,
+`TopicSnapshotSource[F]`, `GroupSnapshotSource[F]`, `IdentityProviderPort[F]` and
+`RolePolicySource[F]`, which is **eight** and was published as nine — or named one that
+belongs to a library or to another service (`SerdeRegistry[F]` in `libs/serde`, `AuditSink[F]` in
+`libs/security-core`, `GroupAdmin[F]` in `libs/kafka`, `MessageFilterPort[F]` in `libs/filter` at
+`CelFilterEngine.scala`, `SessionStore[F]` in the gateway's own
+`application`). `MessageFilterPort[F]` was in the first bucket for a wave and is real: the message
+service's use case holds it, and it is declared by the filter library rather than by that service,
+which is the same shape `SerdeRegistry[F]` has. Nothing read this column, so it drifted for six
+milestones.
+
+`ArchitectureDocumentSuite` (in `services/gateway/api/test/`) reads this table off disk and fails
+when an identifier in the ports column is not a `trait` declared under that service's own
+`domain/src`, when a `trait` declared under `domain/src` is named by no row, and when a built
+service has no row at all. A row for a service that does not exist
+yet says so in words and is checked no further; that exemption is the one hole in this gate and is
+deliberate, because the row is a plan rather than a description until the service lands.
+
+The second of those three arrived in wave 8 and it is the interesting one. The first version read
+the row and asked the tree, so it could only see an identifier that is *wrong*; deleting
+`ClusterFactsPort[F]` from the alerts row left it green, and an emptied cell read as a service with
+no outbound ports rather than as a claim nobody had checked. Omission is the failure mode this
+table is most exposed to, because a row that says too little looks exactly like a row about a
+service that does little.
 
 The gateway has `contract` (its own `/api/v1` endpoint definitions, so
 the frontend derives typed clients from them), `application` (aggregations, capability
 registry, session cache), `api` and `app`. It depends on every service's `contract` module and
 on nothing else from a service. It has no `domain` and no `infrastructure`: it holds no
 business rules (ADR-004) and its only outbound adapters are contract clients.
+
+That dependency is what routing a service *is*, and it is the one thing about a new service the
+gateway cannot do for itself. `ServiceContracts.byService` names an endpoint list; the list is a
+value in the owning service's `contract` module; a module the gateway does not depend on is a
+value it cannot name. `services.gateway.api` therefore depends on `alerts.contract.jvm`, and the
+alerts entry in `ServiceContracts` exposes its feed and acknowledgement through the same derived
+proxy path as the other services.
+
+The alerts **stream** has a second, separate requirement, and it is the same one the message
+service's browse stream has. A stream cannot be a derived proxy route — `ContractRouting` decodes
+and re-encodes, which is the wrong thing to do to a stream — so it needs a hand-written relay in
+the gateway, of which `MessageStreamRoutes` is the worked example. That relay names the upstream
+endpoint value directly, so the endpoint has to live in the service's `contract` module, where
+rule A4 lets the gateway see it: `MessageEndpoints.browseStream` is in
+`services/message/contract/src-jvm/` for exactly this reason, a JVM-only source inside a
+cross-compiled contract. `AlertsStreamEndpoint` likewise lives in
+`services/alerts/contract/src-jvm/`, and `AlertsStreamRoutes` rewrites its prefix, applies the
+gateway's RBAC check before opening the upstream, and relays its event stream.
+
+The ksqlDB **push query** is the third of these and the same shape exactly. `KsqlEndpoints.all` —
+the object listing, the statement plan and the statement apply — is derived like any other service's
+contract; the push query never finishes, so it is declared in
+`services/ksql/contract/src-jvm/` as `KsqlStreamEndpoint` and relayed by `KsqlStreamRoutes`. Its
+permission is re-decided at the relay rather than inherited: ADR-020 leaves the query string outside
+the signed request digest and the statement travels in the query string, so nothing the gateway
+signed can have covered it.
+
+Every one of the three relays appends ADR-035's terminal `error` event when the upstream body ends
+without one (`StreamProxy.withTerminalEvent`). That is the promise a browser depends on to tell a
+finished stream from a broken one, and it is the rule each relay's own suite drives end to end —
+asserting that the *relay* uses the helper, not only that the helper works.
 
 The layering rules above are checked by `./mill checkArchitecture` on every build, not by
 review (ADR-041). The task reads each module's declared `moduleDeps` and `mvnDeps` and fails on
@@ -205,8 +311,12 @@ own so that a sixth has to be argued in the commit that adds it. `libs/config` i
 because the Kafka metadata-store adapter lives there (ADR-042 §5); that exception is deliberate and
 named, which is what makes a second one visible.
 
-A7 (the shell holding no static reference to a feature) is not checkable from module metadata and
-is enforced by the bundle-shape assertion in BUILD-006 instead.
+A7 (the shell holding no static reference to a feature) is not checkable from module metadata. It is
+enforced by `frontend/scripts/bundle-shape.mjs`, which reads the Vite manifest `pnpm build` writes and
+fails if a feature chunk is reachable from the shell's entry without an `import()`; CI runs it as
+`pnpm bundle-shape` in the frontend job. It is **not** enforced by BUILD-006 — that was
+`build-tests`'s `BundleShape.scala`, which parses Scala.js linker output ADR-048 deleted, and no
+`checkBundleShape` task remains for it to run under (`TECH_DEBT.md` records the dead pair).
 
 ## 4. Shared libraries and their public APIs
 
@@ -221,7 +331,7 @@ the *shape*; exact signatures are finalized in the M0 tasks. Scala 3, opaque typ
 | `libs/kafka` (+ `libs/kafka-auth`) | `KafkaAdminPort` family over fs2-kafka `KafkaAdminClient`, consumer/producer factories, `KafkaErrorMapper`, batching, client property assembly from `ClusterProfile`; cloud SASL handlers as optional runtime modules | ADR-006, ADR-022, ADR-030 |
 | `libs/serde` (+ `libs/serde-confluent`) | `Serde[F]` SPI, built-ins, registry/resolution, Kafbat bridge; Confluent wire-format serializers isolated | ADR-028, ADR-014 |
 | `libs/filter` | `MessageFilterPort[F]` over cel-java | ADR-017 |
-| `libs/cache` | `Ref`+TTL `SnapshotCell`, Caffeine wrapper, metrics hooks | ADR-016 |
+| `libs/cache` | `Ref`+TTL `SnapshotCell`, Caffeine wrapper, `SeriesWindow` retention ring, metrics hooks | ADR-016 |
 | `libs/observability` | otel4s bootstrap, log4cats structured logger with MDC bridge, Tapir interceptors, metric names | ADR-008, ADR-009 |
 | `libs/security-core` | `Principal`, `Rbac.decide`, `PrincipalCodec`, masking rule model. Pure; JVM/JS. | ADR-020, ADR-021, ADR-023 |
 | `libs/http` | Netty server setup, error interceptor, health/ready/capabilities endpoints, sttp client factory with failover/retry/circuit breaker/bulkhead, SSE helpers | ADR-003, ADR-037 |
@@ -682,16 +792,54 @@ loops run under a `Supervisor`, are cancellable and emit `kui.cache.*` and
 | connect | per-connect state: connectors + statuses via `?expand=status&expand=info` | every 30 s | after any action | list ≤ 30 s old; detail live |
 | ksql | query pipes (TTL 1 min, single use) | — | — | — |
 | metrics | scraped broker metrics, inferred metrics from topic/consumer snapshot endpoints | every 30 s | — | `/metrics` exposition is the last scrape |
+| metrics | per-(cluster, metric) `SeriesWindow` ring (`libs/cache`), one bucket per `step`, bounded by `maxAge` and by `maxSamples` | the newest scrape of each `step`-wide bucket; every read evicts first, against an `Instant` the caller supplies | `clear` on a cluster-profile change, which restarts the coverage clock | a never-sampled bucket is absent, never `0`; a window collecting for less than the period asked for answers `None` rather than four minutes labelled "the last 24h"; a window whose samples have all been evicted counts a `miss`, so a dead collector shows on `kui.cache.misses` |
+| alerts | per-cluster durable event/rule projection in `alerts/<clusterId>` plus per-principal read watermark in `settings/<clusterId>-<principal digest>`; bounded in-memory fallback only when no metadata store is configured | evaluation interval and store tail | rule evaluation, acknowledgement, mark-read | with a Kafka store, restarts preserve event identity, acknowledgement and unread state; without one startup logs the explicit in-memory degradation |
 | identity | `RbacPolicy` (compiled once, hot-reloaded from the `rbac/roles` key of `__kui_config` or from a file watcher), sessions, OIDC state entries (5 min, single use) | on change | new store record, file change, session expiry | store unreachable means last known policy plus `Degraded`; writes rejected |
 | gateway | capability registry; `sessionId → Principal` (TTL 30 s); OpenAPI merge | readiness every 10 s | logout, role reload event | — |
 
 Cache discipline: TTL, invalidation trigger, bound, hit/miss metrics and a named
 staleness contract, all recorded in the table above. Secrets and message payloads are never
 cached. Small caches use `Ref` + TTL (`libs/cache.SnapshotCell`); bounded large caches
-(schema by id, compiled filters) wrap Caffeine `AsyncCache` in `IO` (no Scaffeine).
+(schema by id, compiled filters) wrap Caffeine `AsyncCache` in `IO` (no Scaffeine); a history
+of one value over time — every chart and sparkline this product draws — uses
+`libs/cache.SeriesWindowCell`, which refuses on each of the three counts its row states
+rather than interpolating across them.
+
+The browser has a narrower cache tier. Non-sensitive appearance preferences use `localStorage`
+for synchronous first paint and reconcile with the principal-scoped backend record. Unsynced
+appearance snapshots use opaque principal-and-cluster-scoped keys, so one operator's retry cannot
+be uploaded into another operator's settings after a shared-browser session change. The alert feed
+may warm from IndexedDB only after `/auth/me` has established a principal: its key is a SHA-256
+digest of cluster, principal and the current authorization grants; entries expire after five
+minutes, are capped at sixteen, are decoded through the network decoder, and are always labelled
+stale until the backend replaces them. A refusal removes that scope and sign-out/session expiry
+clears the store. Authentication material, mutation responses and message payloads are never put in
+browser storage. Hashed frontend assets use the ordinary immutable HTTP cache; `index.html` is
+`no-store`, and API/SSE responses are never proxy-cached.
 
 Search: an in-memory prefix/substring/trigram index inside each snapshot (`libs/kernel`
 `NameIndex`); Lucene only if a benchmark on ≥ 50 k names shows p95 > 50 ms (ADR-038).
+
+**Cross-entity search sits one level above those indexes and holds no state of its own** (ADR-049).
+`GET /api/v1/search?q=<1..200>&limit=<1..50>` is answered by the gateway itself, beside the two
+aggregations it already serves — not by a seventh service and not by an index at the edge. It fans
+out one request per searched service per cluster and no request per result: the topic service's
+unpaged `topics/names`, and the consumer and schema list endpoints, which take the caller's `q` and
+narrow on their own side over the 30-second snapshots this table describes. It adds no cache row of
+its own, so a search is exactly as fresh as the rows above it and never fresher.
+
+Its one piece of vocabulary is `partial`: the service ids the gateway could not ask, de-duplicated
+and sorted so that two identical requests produce identical bytes. A service reaches it in four ways
+and they are one fact to whoever is looking — this deployment routes no such service, the call
+failed, the caller may not list that kind of thing, or the service answered with a freshness section
+carrying no rows (`Unavailable`, `Forbidden`, `NotConfigured`; `Stale` carries rows and is read
+exactly like `Ok`, because a search over slightly old names beats a search that says a cluster holds
+nothing). It is a list of ids rather than a boolean because the remedy differs per service, and it
+is never empty by accident: losing the cluster list names `cluster` and all three searched services,
+and a deployment holding no clusters at all names the three, because an empty document with an empty
+`partial` would be byte-identical to "everybody answered and nothing matched". `limit` caps each
+kind separately and is spent in rounds across the clusters, so one busy cluster cannot make another
+cluster's matches unreachable from the field.
 
 ## 10. Configuration ownership and distribution without restart
 
@@ -750,7 +898,7 @@ static config (Ciris: CLI -> env -> YAML -> defaults)
 
 | Topic | Shape | Key | Value |
 | --- | --- | --- | --- |
-| `__kui_config` | compacted, **single partition**, RF `kui.store.replicationFactor` (default 3; 1 in dev) | section path: `cluster/<clusterId>`, `settings/global`, `rbac/roles`, `masking/<clusterId>` | `StoreRecord` JSON (Circe, ADR-007) |
+| `__kui_config` | compacted, **single partition**, RF `kui.store.replicationFactor` (default 3; 1 in dev) | section path: `cluster/<clusterId>`, `settings/<clusterId>-<principal digest>`, `alerts/<clusterId>`, `rbac/roles`, `masking/<clusterId>` | `StoreRecord` JSON (Circe, ADR-007); principal names never appear in settings keys |
 | `__kui_files` | compacted, single partition, same RF | file id | binary payload in the same envelope, capped by `kui.store.maxFileBytes` (default 4 MiB) |
 | `__kui_audit` | **not** compacted, retention-based, partitioned by cluster id | cluster id | `AuditRecord` JSON (ADR-023) |
 
@@ -784,10 +932,12 @@ operator requirement, documented in `docs/operations/metadata-store.md`.
 
 **Who reads the topic.** The **cluster** and **identity** services connect to the store
 directly, because they own sections and must write them. Every other Kafka-facing service
-(topic, message, consumer, schema, connect, ksql, security, metrics) receives the resolved,
+(topic, message, consumer, schema, connect, ksql, security, metrics, alerts) receives the resolved,
 redacted `ClusterProfile` over the internal contract instead: they need the profile, not the raw
-sections, they must work without store-cluster credentials, and one extra hop is cheaper than
-nine more Kafka connections and nine more holders of the encryption key. The **gateway never
+sections, they must work without store-cluster credentials, and one extra hop is cheaper than one
+more store connection and one more holder of the encryption key **per service in that list** —
+count them there rather than trusting a number written here, which is how the previous figure came
+to be one out. The **gateway never
 touches the store** (ADR-040).
 
 **Failure behavior.** When the store cluster is unreachable, the owning service keeps serving
@@ -854,9 +1004,9 @@ object KafkaConfigStore:
 - Services do not open listeners of their own, and their routes are not mounted on the gateway's
   listener either: they are reachable only through the gateway's proxied routes, which is the same
   rule a distributed deployment enforces with a network policy (§14). One consequence is worth
-  recording because the alternative design does not have it — the eleven services' identical
-  `/health/live`, `/health/ready` and `/capabilities` paths never share a router, so no prefixing
-  scheme is needed and none was invented.
+  recording because the alternative design does not have it — the identical `/health/live`,
+  `/health/ready` and `/capabilities` paths of every service in §1's diagram never share a router,
+  so no prefixing scheme is needed and none was invented.
 - Session store, `RbacPolicy` and the capability registry are single in-memory instances. The
   config store and audit sink are the real Kafka adapters pointed at the single dev broker when
   `kui.store.kafka.*` is set, and the file adapter otherwise; all-in-one works either way (§10.1).
@@ -899,12 +1049,20 @@ fallback panel (reason, `since`, retry, "what still works"); `Degraded` shows an
 Stale data stays on screen greyed with its timestamp; actions are disabled. The frontend
 runs the same `Rbac.decide` on the pre-expanded permission list from `/api/v1/auth/me`.
 
-**Implemented** as of M0 (task UI-010): `kui.ui.shell.nav.Navigation` decides which entries
-exist, `kui.ui.shell.layout.Sidebar` applies the five rendering rules,
-`kui.ui.shell.feature.FeatureGate` decides between the feature and its fallback and is the one
-place that starts a dynamic import, and `kui.ui.kernel.component.ActionPermissionWrapper`
-merges the RBAC and capability reasons into one tooltip. The RBAC half is wired but always
-`true` until M6; see `docs/frontend/README.md` for the rendering-rule and reason-code tables.
+**Implemented**, and re-read against the tree on 2026-09-12 — the four `kui.ui.*` names this
+paragraph carried were the Scala.js implementation ADR-048 deleted, and `git grep` finds no
+occurrence of any of them outside this document. What exists now:
+`frontend/packages/shell/src/nav/navigation.ts` decides which entries exist,
+`frontend/packages/shell/src/chrome/NavDrawer.tsx` and `NavItem.tsx` apply the rendering
+rules, and `frontend/packages/shell/src/features/FeatureGate.tsx` decides between the feature and
+its fallback and is the one place that starts a dynamic import. The fourth,
+`kui.ui.kernel.component.ActionPermissionWrapper`, has **no successor under that name**: the
+permission state it read is `frontend/packages/kernel/src/data/permissions/store.ts`, and no
+component in `frontend/packages/` is the one place both reasons are merged. The clause saying the
+RBAC half is *"always `true` until M6"* is superseded: M6 closed, sign-in and role-based
+authorization are built, and what makes them inert on a default deployment is
+`kui.auth.type: disabled` rather than an unwired frontend. See `docs/frontend/README.md` for the
+rendering-rule and reason-code tables.
 
 ## 13. Observability standard
 
@@ -952,7 +1110,10 @@ Boundary rules:
 - Regex patterns from config (RBAC values, masking, topic patterns) are compiled once at load
   and linted for catastrophic backtracking; user input never becomes a regex except the
   event-tracking `regex` operator, which runs with a match timeout.
-- Threat model document by M6 (`docs/security/threat-model.md`).
+- Threat model document, planned for M6 as `docs/security/threat-model.md` — **not written**.
+  M6 closed without it and `git ls-files docs/security` is empty; nothing else in this repository is
+  that document. It is stated here rather than left as a commitment a reader would assume was
+  kept, and the controls above are the security decisions that were actually made.
 
 ## 15. Errors
 
@@ -986,23 +1147,91 @@ translated by each client's sealed `UpstreamError` (ADR-037).
 
 ## 16. Repository layout
 
-```
-kui/
-├── build.mill  .mill-version  .scalafmt.conf  .scalafix.conf
-├── libs/      kernel/ contracts-core/ kafka/ kafka-auth/ serde/ serde-confluent/ filter/
-│              cache/ observability/ security-core/ http/ config/ testkit/
-├── services/  gateway/ cluster/ topic/ message/ consumer/ security/ schema/ connect/ ksql/
-│              metrics/ identity/       (each: domain application infrastructure contract api app)
-├── frontend/  packages/ api/ kernel/ shell/ feature-clusters/ feature-topics/
-│              feature-messages/ feature-consumers/ feature-schemas/
-│              (a pnpm/TypeScript/Vite workspace — its own build, its own image)
-├── apps/allinone/
-├── deployment/ docker/ compose/ helm/
-├── e2e/        JVM Playwright + Testcontainers suites, fault-injection scenarios
-├── benchmarks/ docs/ research/ tools/
+This tree is what `git ls-files | cut -d/ -f1 | sort -u` answers at the top level, and what
+`git ls-files libs`, `git ls-files services`, `git ls-files frontend/packages` and
+`git ls-files deployment` answer one level in. **It is derived from the index and not from a
+working tree, and that distinction is the whole of why the version before this one was wrong.**
+`ls` cannot tell a tracked directory from an ignored one, so the rewrite of 2026-09-12 — the one
+whose own subject was directories that are not on disk — read `screens/` off a working tree and
+added it here as a fifth phantom, at a moment when the index did not carry it. That is no longer
+the state of the tree: `582c9bc5` ("Add screens", 2026-09-12) committed the twenty-three captures,
+so `git ls-files screens` answers `23` and this listing names `screens/` because the index does.
+`.gitignore` no longer ignores `screens/`: ADR-058 removed the rule so that the ignore file and the
+index agree, and superseded ADR-057, which had decided the other way hours before the commit. The same working-tree reading is why `.github/` was
+missing: it is tracked, it holds the `ci.yml` this document cites repeatedly, and a listing that
+carries `.scalafmt.conf` and `.tool-versions` and not `.github/` is short in the direction §16 says
+it fixed.
+
+**Both directions hold.** Every top-level name the index carries is in the block below, and every
+top-level name the block asserts is in the index. The omission direction — the one that let
+`.github/` sit outside this listing while the document cited its `ci.yml` — is one command, and it
+printed nothing on 2026-09-12:
+
+```bash
+block=$(sed -n '/^kui\/$/,/^```$/p' ARCHITECTURE.md)
+git ls-files | cut -d/ -f1 | sort -u |
+  while read -r name; do grep -qF -- "$name" <<<"$block" || echo "missing from §16: $name"; done
 ```
 
-The `services/config` service named in the original service list does not exist (§2); it was dissolved (see the decisions log). Mill task names follow the project's build-command conventions.
+The phantom direction is the one `ls` cannot answer and a reader should not have to run by hand;
+it belongs to the listing claim in `./scripts/feature-matrix-check.sh`, which reads this block and
+resolves each name it asserts against `git ls-files`.
+
+<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-phantom, listing-omission, residue -->
+```
+kui/
+├── build.mill  mill  .mill-version  .tool-versions  .gitignore
+│             .scalafmt.conf  .scalafix.conf  .scalafix-pure.conf  .scalafix-tests.conf
+├── README.md  ARCHITECTURE.md  CONTRIBUTING.md  DECISIONS.md  DEPENDENCY_MATRIX.md
+│             TECH_DEBT.md  LICENSE  repo.txt
+├── libs/        kernel/ contracts-core/ kafka/ kafka-auth/ serde/ serde-confluent/ filter/
+│                cache/ observability/ security-core/ http/ config/ testkit/
+├── services/    gateway/ cluster/ topic/ message/ consumer/ schema/ connect/ ksql/
+│                metrics/ alerts/ identity/
+│                (each that owns a domain: domain application infrastructure contract api app;
+│                 cluster/ adds client/, and gateway/ has no domain and no infrastructure)
+├── frontend/    packages/ api/ kernel/ shell/ feature-clusters/ feature-topics/
+│                feature-messages/ feature-consumers/ feature-schemas/ feature-alerts/
+│                feature-connect/ feature-ksql/ · e2e/ is the Playwright suite
+│                (a pnpm/TypeScript/Vite workspace — its own build, its own image)
+├── apps/        allinone/
+├── build-tests/ the suites that read build.mill, ci.yml and the Dockerfiles themselves
+├── deployment/  docker/ compose/ quickstart/ demo/ secured/ examples/ frontend/ metrics/
+│                storybook/
+├── .github/     workflows/ci.yml and actions/setup-build/ — the only CI this repository has
+├── scripts/     run-tests.sh, feature-matrix-check.sh
+├── screens/     the design captures, tracked despite `.gitignore` — see below
+├── docs/ research/ tools/ mill-build/
+```
+<!-- /checked -->
+
+Two entries above are worth a sentence so that nobody has to guess why they are there. `mill` is the
+committed launcher script, not a directory, which is why `./mill` works in a fresh clone with no
+installed Mill. `repo.txt` is a committed whole-repository dump — it is in the index, so it is
+listed here rather than quietly omitted, and whether it should still be tracked is a question for
+the register rather than for this listing.
+
+**The captures are here, and the decision that said they would not be has not been reopened.** The
+twenty-three design screenshots `research/design/SCREENS-V4.md` reads are in `screens/`, in the
+index, since `582c9bc5`. ADR-057 — accepted the same day, hours earlier — decided the opposite, and
+`research/design/SCREENS-V4.md`, `docs/plan/README.md` and `.gitignore:43` were all written to that
+decision and now describe a repository this one is not. This section states what `git ls-files`
+answers, which is its whole job; which of the two should move is a decision for ADR-057's owner —
+either a commit that removes the captures again, or an ADR that supersedes 057 and says why six
+megabytes a revision became worth keeping. It is recorded in the register rather than settled here.
+
+**The four the version before 2026-09-12 named and this repository does not have, each absence a
+decision rather than an oversight.**
+`services/security` is the ACL and client-quota service of §2's catalog, which has not been begun —
+no screen, no endpoint, no service — and `libs/security-core` is the authentication and
+authorization *library*, which is a different thing and does exist. `deployment/helm/` has never
+been written. The top-level
+`e2e/` was a JVM Playwright plus Testcontainers tree and was deleted at `41358502` when ADR-048
+replaced the browser build; `frontend/e2e/` is its successor and runs under the frontend's own
+build. `benchmarks/` has no commit in this repository's history at all — it was in the plan this
+listing was copied from and was never written. `services/config`, which this section has always
+said is absent, was dissolved for the reason §2 and the decisions log give. Mill task names follow
+the project's build-command conventions.
 
 ### Naming key
 

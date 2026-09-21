@@ -1,6 +1,11 @@
 /**
  * Rendering, interaction and accessibility for the surfaces: the card, the stat card, the stale
- * badge, the dialog, the confirmation, the drawer, the toast and the banner.
+ * badge, the dialog, the confirmation, the drawer, the toast, the banner and the bulk action bar.
+ *
+ * The windowed table's *selection* is tested here rather than beside the rest of `VirtualizedTable`
+ * in `lists.test.tsx`, and deliberately: the table's checkboxes and the bar that floats over them
+ * are one feature with one contract — the caller holds the set, both sides only read it — and a
+ * change to that contract should break one file rather than two.
  *
  * Every case below is attached either to a statement in `.agent/design/SPEC.md` or to a defect this
  * project has already paid for. Nothing here asserts a colour, a size or a position: jsdom has no
@@ -17,8 +22,12 @@ import { Card } from "./Card.jsx";
 import { ConfirmDialog, Dialog } from "./Dialog.jsx";
 import { Drawer } from "./Drawer.jsx";
 import { StaleBadge, relativeAge } from "./StaleBadge.jsx";
+import { BulkActionBar, type BulkAction } from "./BulkActionBar.jsx";
+import { DataTable, type Column } from "./DataTable.jsx";
 import { StatCard } from "./StatCard.jsx";
 import { ToastRegion, clearToasts, dismissToast, notify, toasts, MAX_VISIBLE_TOASTS } from "./Toast.jsx";
+import { VirtualizedTable } from "./VirtualizedTable.jsx";
+import { focusableWithin } from "./overlay.js";
 import { describeViolations, findViolations, mount } from "./testing.js";
 
 /** The longest strings the product can be asked to draw. Every surface gets one of these. */
@@ -29,14 +38,23 @@ const LONG_SENTENCE =
   "this panel are the last ones it returned, and the count of groups needing attention in the " +
   "navigation drawer has been withheld rather than shown as zero.";
 
-/** A real click on a real element. See the note at the `Dialog` veil test. */
-function clickOn(element: HTMLElement): void {
-  element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+/**
+ * A real click on a real element. See the note at the `Dialog` veil test.
+ *
+ * `init` carries the modifiers, because that is the only way to express them: `userEvent.click`
+ * has no ⌘ and the modifier keys are what separate "open this row" from "open its link somewhere
+ * else". A `MouseEvent` is what the browser delivers either way.
+ */
+function clickOn(element: HTMLElement, init: MouseEventInit = {}): void {
+  element.dispatchEvent(new MouseEvent("click", { bubbles: true, ...init }));
 }
 
 afterEach(() => {
   clearToasts();
   vi.useRealTimers();
+  // A case that mounts a modal surface and asserts on the lock has to hand the page back unlocked,
+  // or the next case inherits a `<body>` nothing in it opened.
+  document.body.style.overflow = "";
 });
 
 /* ------------------------------------------------------------------------------------------- */
@@ -193,6 +211,84 @@ describe("StatCard", () => {
     dispose();
   });
 
+  /**
+   * The visual slot, with the two claims it makes.
+   *
+   * It renders, it sits beside the figure rather than in place of the pill, and — the part that
+   * matters — the card stays `aria-busy` while the figure is pending. A card that dropped
+   * `aria-busy` because there was something to look at would be telling a screen reader that the
+   * number had landed.
+   */
+  it("renders a visual beside the figure and stays busy while the figure is pending", () => {
+    const { container, dispose } = mount(() => (
+      <StatCard
+        label="CONSUME RATE"
+        icon="lag"
+        tone="primary"
+        figure={{ kind: "pending" }}
+        pill={{ text: "last hour", tone: "neutral" }}
+        visual={<svg data-testid="spark" />}
+      />
+    ));
+    expect(container.querySelector(".kui-stat")!.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector('[data-testid="spark"]')).not.toBeNull();
+    // Beside the figure, in the same row, and the pill is still on its own line below it.
+    expect(container.querySelector(".kui-stat__row .kui-stat__figure")).not.toBeNull();
+    expect(container.querySelector(".kui-stat__row .kui-stat__visual")).not.toBeNull();
+    expect(container.querySelector(".kui-stat__pill-slot")).not.toBeNull();
+    // Whatever is in the slot is a second drawing of the figure the card already printed, and
+    // announcing both reads as "128, 128".
+    expect(container.querySelector(".kui-stat__visual")!.getAttribute("aria-hidden")).toBe("true");
+    dispose();
+  });
+
+  /**
+   * A card with no series draws no visual at all — not an empty box, and above all not a flat line
+   * at zero, which is a measured claim about a quantity nobody measured.
+   */
+  it("draws no visual, and reserves no room for one, when there is no series", () => {
+    const { container, dispose } = mount(() => (
+      <StatCard
+        label="PRODUCTION"
+        icon="arrow-up-right"
+        tone="accent"
+        figure={{ kind: "unknown" }}
+        pill={{ text: "metrics unavailable", tone: "neutral" }}
+      />
+    ));
+    expect(container.querySelector(".kui-stat__visual")).toBeNull();
+    // The row holds the figure and nothing else — no empty box standing where a sparkline would
+    // have gone, so the absence of a series is visible rather than reserved for.
+    expect(container.querySelector(".kui-stat__row")!.children).toHaveLength(1);
+    dispose();
+  });
+
+  /**
+   * The shape the absence actually arrives in.
+   *
+   * `visual={hasSeries && <Sparkline .../>}` is what a call site writes, and it evaluates to
+   * `false`, not `undefined` — `JSX.Element` admits both. A guard that tested for presence would
+   * reserve the empty box the component's own header forbids, and would do it only for the callers
+   * who wrote the conditional the natural way. The absent-prop case above is the one that was
+   * already covered, which is why this survived.
+   */
+  it("draws no visual for a slot that is falsy rather than absent", () => {
+    for (const empty of [false, null, undefined] as const) {
+      const { container, dispose } = mount(() => (
+        <StatCard
+          label="CONSUME RATE"
+          icon="lag"
+          tone="primary"
+          figure={{ kind: "value", text: "71.2", unit: "MB/s" }}
+          visual={empty}
+        />
+      ));
+      expect(container.querySelector(".kui-stat__visual")).toBeNull();
+      expect(container.querySelector(".kui-stat__row")!.children).toHaveLength(1);
+      dispose();
+    }
+  });
+
   it("has no axe violations at the extremes", async () => {
     const { container, dispose } = mount(() => (
       <StatCard
@@ -202,6 +298,7 @@ describe("StatCard", () => {
         figure={{ kind: "value", text: "18,446,744,073,709,551,615" }}
         pill={{ text: LONG_SENTENCE, tone: "danger", icon: "warning" }}
         href="/brokers"
+        visual={<svg width="72" height="24" />}
       />
     ));
     const violations = await findViolations(container);
@@ -547,6 +644,153 @@ describe("Drawer", () => {
     dispose();
   });
 
+  it("a nested overlay closing does not unlock the page beneath it", async () => {
+    const [dialogOpen, setDialogOpen] = createSignal(true, { ownedWrite: true });
+
+    // A drawer with a confirmation over it — produce a record, then confirm the topic it goes to.
+    // Both surfaces lock the page, and the inner one is closed first, which is the sequence no
+    // test drove and the one the restore was written for.
+    const { dispose } = mount(() => (
+      <Drawer open onClose={() => {}} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+        <Dialog open={dialogOpen()} onClose={() => setDialogOpen(false)} title="Are you sure?">
+          <p>This writes to a production topic.</p>
+        </Dialog>
+      </Drawer>
+    ));
+    await Promise.resolve();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    setDialogOpen(false);
+    flush();
+    await Promise.resolve();
+
+    // Restored to what it was when the dialog opened, not to "". The drawer is still on screen
+    // over the page, and unlocking here leaves it floating over a document that scrolls underneath
+    // it — the whole page moving behind a surface the user has not finished with.
+    expect(document.querySelector(".kui-modal")).toBeNull();
+    expect(document.querySelector(".kui-sheet")).not.toBeNull();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    dispose();
+    await Promise.resolve();
+    // And the last one out really does give the page back.
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("a nested dialog answers Escape and the drawer under it does not", async () => {
+    const user = userEvent.setup();
+    const [dialogOpen, setDialogOpen] = createSignal(true, { ownedWrite: true });
+    let drawerClosed = 0;
+    let dialogClosed = 0;
+
+    const { dispose } = mount(() => (
+      <Drawer open onClose={() => (drawerClosed += 1)} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+        <Dialog
+          open={dialogOpen()}
+          onClose={() => {
+            dialogClosed += 1;
+            setDialogOpen(false);
+          }}
+          title="Are you sure?"
+        >
+          <p>This writes to a production topic.</p>
+        </Dialog>
+      </Drawer>
+    ));
+    await Promise.resolve();
+
+    await user.keyboard("{Escape}");
+    flush();
+
+    // Both traps listen on `document`, so `stopPropagation` cannot keep one key away from the
+    // other — measured before this case existed: one Escape closed both, and the operator lost the
+    // record they had typed along with the confirmation they were answering.
+    expect([dialogClosed, drawerClosed]).toEqual([1, 0]);
+
+    // And the drawer takes it back once it is the only thing trapping the page.
+    await user.keyboard("{Escape}");
+    flush();
+    expect(drawerClosed).toBe(1);
+    dispose();
+  });
+
+  it("a nested overlay torn down out of order leaves the stack correct", async () => {
+    const user = userEvent.setup();
+    let drawerClosed = 0;
+    let dialogClosed = 0;
+
+    // Two roots rather than one tree, because the sequence being asserted is the one where the
+    // *outer* surface's cleanup runs first: a route change tears the drawer down while the
+    // confirmation opened from inside it is still on screen, and nothing orders the two cleanups.
+    const drawer = mount(() => (
+      <Drawer open onClose={() => (drawerClosed += 1)} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+      </Drawer>
+    ));
+    await Promise.resolve();
+    const dialog = mount(() => (
+      <Dialog open onClose={() => (dialogClosed += 1)} title="Are you sure?">
+        <p>This writes to a production topic.</p>
+      </Dialog>
+    ));
+    await Promise.resolve();
+
+    drawer.dispose();
+    await Promise.resolve();
+
+    await user.keyboard("{Escape}");
+    flush();
+
+    // The dialog is the only surface left trapping the page, so it answers. Removing the *last*
+    // entry instead of this element's takes the dialog's own entry off the stack and leaves the
+    // dead drawer on top of it: the dialog then ignores Escape for the rest of its life, and so
+    // does everything opened over it afterwards, with nothing on screen to say why.
+    expect([dialogClosed, drawerClosed]).toEqual([1, 0]);
+    dialog.dispose();
+    await Promise.resolve();
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("only the innermost surface answers Tab", async () => {
+    const drawer = mount(() => (
+      <Drawer open onClose={() => {}} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+        <button type="button">Produce</button>
+      </Drawer>
+    ));
+    await Promise.resolve();
+    const dialog = mount(() => (
+      <Dialog open onClose={() => {}} title="Are you sure?">
+        <button type="button">Confirm</button>
+      </Dialog>
+    ));
+    await Promise.resolve();
+
+    // The drawer's *last* stop, which is where its own wrap fires: focus lands back there whenever
+    // a control inside it is removed while focused, or after a stray click on the surface.
+    const sheet = document.querySelector(".kui-sheet") as HTMLElement;
+    const stops = focusableWithin(sheet);
+    const lastInDrawer = stops[stops.length - 1] as HTMLElement;
+    lastInDrawer.focus();
+    expect(document.activeElement).toBe(lastInDrawer);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    flush();
+
+    // The drawer is not the surface trapping the page, so it does not wrap. Left unscoped it runs
+    // its own trap on every Tab and pulls focus round to its own first control — a surface the
+    // operator is not looking at, while the dialog over it owns the keyboard.
+    expect(document.activeElement).toBe(lastInDrawer);
+    expect(document.activeElement).not.toBe(stops[0]);
+
+    dialog.dispose();
+    await Promise.resolve();
+    drawer.dispose();
+    await Promise.resolve();
+  });
+
   it("has no axe violations", async () => {
     const { dispose } = mount(() => (
       <Drawer
@@ -646,6 +890,32 @@ describe("Toast", () => {
     dispose();
   });
 
+  it("dismisses the toast the button belongs to when it is pressed", () => {
+    // Filed by this wave's verification pass over W12-04 and reproduced here before it was closed:
+    // `onClick={() => dismissToast(props.toast.id)}` -> `onClick={() => {}}` left `pnpm -C frontend test`
+    // green over 83 files and 1,932 cases. The dismiss button's LABEL had a case and its BEHAVIOUR had
+    // none — the case above reads `aria-label` off the same element and never presses it, and
+    // `dismissToast` is exercised only by calling it directly, which asserts the function and not the
+    // control. A close button that does nothing is the one defect a toast cannot survive: it is the only
+    // way out of a notification raised with `durationMs: null`.
+    const { container, dispose } = mount(() => <ToastRegion />);
+    notify("Topic created", { durationMs: null });
+    notify("Offsets reset", { durationMs: null });
+    flush();
+    const buttons = container.querySelectorAll(".kui-notice__dismiss");
+    // The anchor: with no button found, every expectation below would hold over nothing.
+    expect(buttons).toHaveLength(2);
+
+    clickOn(buttons[0] as HTMLElement);
+    flush();
+
+    // And it dismisses ITS OWN toast, not merely one of them: a handler closing over the wrong id
+    // empties the stack in the wrong order and is invisible to a length check alone.
+    expect(toasts().map((t) => t.title)).toEqual(["Offsets reset"]);
+    expect(container.querySelectorAll(".kui-notice")).toHaveLength(1);
+    dispose();
+  });
+
   it("keeps both when two are raised in the same tick", () => {
     // Solid 2 batches writes onto a microtask and applies an updater to the last *committed*
     // value, so `setToasts(prev => [...prev, mine])` twice in one tick would have both computed
@@ -728,6 +998,448 @@ describe("Banner", () => {
     ));
     const violations = await findViolations(container);
     expect(describeViolations(violations)).toBe("");
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+
+describe("BulkActionBar", () => {
+  const actions: readonly BulkAction[] = [
+    { id: "config", label: "Edit config", icon: "settings", onSelect: () => {} },
+    { id: "delete", label: "Delete", icon: "trash", destructive: true, onSelect: () => {} },
+  ];
+
+  /**
+   * Absent means absent. A bar that is always in the document is a strip of the window nobody can
+   * use, and one that is merely invisible still swallows the clicks meant for the row underneath.
+   */
+  it("renders nothing at all at zero selection", () => {
+    const { container, dispose } = mount(() => (
+      <BulkActionBar count={0} noun="topic" actions={actions} onDismiss={() => {}} />
+    ));
+    expect(container.querySelector(".kui-bulkbar")).toBeNull();
+    expect(container.textContent).toBe("");
+    dispose();
+  });
+
+  it("says what was selected as well as how many, and agrees with itself about number", () => {
+    const [count, setCount] = createSignal(1);
+    const { container, dispose } = mount(() => (
+      <BulkActionBar count={count()} noun="topic" actions={actions} onDismiss={() => {}} />
+    ));
+    // "1 topics selected" is the kind of detail that is read as carelessness about everything else
+    // on the screen.
+    expect(container.querySelector(".kui-bulkbar__count")!.textContent).toBe("1 topic selected");
+    setCount(4);
+    flush();
+    expect(container.querySelector(".kui-bulkbar__count")!.textContent).toBe("4 topics selected");
+    dispose();
+  });
+
+  /**
+   * The rule the component exists to enforce. If Delete disappeared for a principal without the
+   * permission, Purge would slide into its place, and one gesture would purge for one operator and
+   * delete for another.
+   */
+  it("disables an action nobody may take, with its reason, and does not hide it", async () => {
+    const onSelect = vi.fn();
+    const { container, dispose } = mount(() => (
+      <BulkActionBar
+        count={2}
+        noun="topic"
+        onDismiss={() => {}}
+        actions={[
+          actions[0] as BulkAction,
+          {
+            id: "delete",
+            label: "Delete",
+            icon: "trash",
+            destructive: true,
+            disabledReason: "You do not have permission to delete topics on this cluster.",
+            onSelect,
+          },
+        ]}
+      />
+    ));
+
+    const buttons = Array.from(container.querySelectorAll("button"));
+    const remove = buttons.find((button) => button.textContent?.includes("Delete"));
+    expect(remove).toBeDefined();
+    // Second of the two actions, exactly where it is for everybody else.
+    expect(buttons.indexOf(remove!)).toBe(1);
+    expect(remove!.getAttribute("aria-disabled")).toBe("true");
+    // Focusable, or the explanation is unreachable by the people who need it.
+    expect(remove!.disabled).toBe(false);
+
+    await userEvent.click(remove!);
+    flush();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    const described = document.getElementById(remove!.getAttribute("aria-describedby") ?? "");
+    expect(described?.textContent).toContain("permission to delete topics");
+    dispose();
+  });
+
+  it("runs an action the principal may take, and clears on dismiss", async () => {
+    const onSelect = vi.fn();
+    const onDismiss = vi.fn();
+    const { container, dispose } = mount(() => (
+      <BulkActionBar
+        count={2}
+        noun="topic"
+        onDismiss={onDismiss}
+        actions={[{ id: "purge", label: "Purge", icon: "trash", destructive: true, onSelect }]}
+      />
+    ));
+    const buttons = Array.from(container.querySelectorAll("button"));
+    await userEvent.click(buttons[0]!);
+    flush();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+
+    // The dismiss is named by the action, not by the glyph: "Clear selection", never "close".
+    const dismiss = buttons.find((button) => button.textContent?.includes("Clear selection"));
+    expect(dismiss).toBeDefined();
+    await userEvent.click(dismiss!);
+    flush();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("has no axe violations, including with an action nobody may take", async () => {
+    const { container, dispose } = mount(() => (
+      <BulkActionBar
+        count={128}
+        noun="topic"
+        onDismiss={() => {}}
+        actions={[
+          actions[0] as BulkAction,
+          { id: "purge", label: "Purge", icon: "trash", destructive: true, onSelect: () => {} },
+          {
+            id: "delete",
+            label: "Delete",
+            icon: "trash",
+            destructive: true,
+            disabledReason: LONG_SENTENCE,
+            onSelect: () => {},
+          },
+        ]}
+      />
+    ));
+    const violations = await findViolations(container);
+    expect(describeViolations(violations)).toBe("");
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * Selection on the windowed table.
+ *
+ * These cases live beside `BulkActionBar` rather than beside the rest of `VirtualizedTable`
+ * because they are the other half of one contract: the caller holds the set, the table reads it
+ * and the bar reads it, and neither of them prunes it. See the note at the top of this file.
+ *
+ * The window is moved with the keyboard rather than by scrolling. jsdom has no layout engine, so a
+ * scroll event has nothing to report; `End` and `Home` go through the same `scrollToPx` the
+ * scrollbar does, which is the code path a test can actually drive.
+ */
+describe("VirtualizedTable selection", () => {
+  interface Topic {
+    readonly name: string;
+  }
+  const rows: readonly Topic[] = Array.from({ length: 400 }, (_, index) => ({
+    name: `topic-${index}`,
+  }));
+  const columns: readonly Column<Topic>[] = [
+    { id: "name", header: "Topic", render: (topic) => topic.name },
+  ];
+  const base = {
+    columns,
+    rows,
+    rowKey: (topic: Topic) => topic.name,
+    caption: "Topics",
+    viewportHeight: 240,
+    // Pinned, so the arithmetic below does not change with the document's density attribute.
+    compact: false,
+  };
+
+  it("keeps a selected key that scrolls out of the window", async () => {
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set(["topic-0"]));
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        {...base}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    ));
+    expect(container.querySelectorAll(".kui-table__row--selected")).toHaveLength(1);
+
+    container.querySelector<HTMLElement>(".kui-vtable__row")!.focus();
+    await userEvent.keyboard("{End}");
+    flush();
+
+    // The row has genuinely left the document — which is what makes the next assertion mean
+    // something rather than being a test of a row that never moved.
+    expect(container.textContent).not.toContain("topic-0");
+    expect(selected().has("topic-0")).toBe(true);
+
+    await userEvent.keyboard("{Home}");
+    flush();
+    expect(container.textContent).toContain("topic-0");
+    expect(container.querySelectorAll(".kui-table__row--selected")).toHaveLength(1);
+    dispose();
+  });
+
+  /**
+   * Select-all walks the rows the table was handed, never the rows it can see. The obvious
+   * implementation walks the window, and it silently discards every selection made further up the
+   * list — including, here, one made on a page this table has never rendered.
+   */
+  it("selects the whole page without disturbing a key from another page", async () => {
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(
+      new Set(["a-topic-from-page-two"]),
+    );
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        {...base}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    ));
+    await userEvent.click(container.querySelector<HTMLInputElement>('[data-testid="select-all"]')!);
+    flush();
+
+    expect(selected().size).toBe(rows.length + 1);
+    expect(selected().has("a-topic-from-page-two")).toBe(true);
+    // Including rows that were never in the document.
+    expect(selected().has("topic-399")).toBe(true);
+    dispose();
+  });
+
+  /**
+   * Mixed against the page, and only ever against the page. A header that went checked while five
+   * hundred of ten thousand topics were ticked would be a claim that the next Delete acts on all
+   * ten thousand.
+   */
+  it("shows the header checkbox mixed for a partial page selection", async () => {
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set(["topic-1"]));
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        {...base}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    ));
+    const all = container.querySelector<HTMLInputElement>('[data-testid="select-all"]')!;
+    expect(all.indeterminate).toBe(true);
+    expect(all.checked).toBe(false);
+
+    await userEvent.click(all);
+    flush();
+    expect(all.indeterminate).toBe(false);
+    expect(all.checked).toBe(true);
+
+    await userEvent.click(all);
+    flush();
+    expect(selected().size).toBe(0);
+    expect(all.indeterminate).toBe(false);
+    expect(all.checked).toBe(false);
+    dispose();
+  });
+
+  /** A row checkbox names the row it selects, so a screen reader in a column of forty of them is
+   * not reading "checkbox, checkbox, checkbox". */
+  it("names each row's checkbox by the row", () => {
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        {...base}
+        selection={{
+          selectedKeys: new Set<string>(),
+          onChange: () => {},
+          rowLabel: (key) => `topic ${key}`,
+        }}
+      />
+    ));
+    const label = container.querySelector(".kui-vtable__row .kui-checkbox")!;
+    expect(label.textContent).toContain("Select topic topic-0");
+    dispose();
+  });
+
+  /** Ticking a row must not also open it: the list being selected from would be gone, and the
+   * ticks with it. */
+  it("does not activate a clickable row when its checkbox is ticked", async () => {
+    const onRowClick = vi.fn();
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set());
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        {...base}
+        onRowClick={onRowClick}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    ));
+    await userEvent.click(
+      container.querySelector<HTMLInputElement>(".kui-vtable__row .kui-checkbox__input")!,
+    );
+    flush();
+    expect(selected().has("topic-0")).toBe(true);
+    expect(onRowClick).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  /** Absent selection costs nothing: no column, no empty cells, no change to the row count. */
+  it("adds no column at all when it is given no selection", () => {
+    const { container, dispose } = mount(() => <VirtualizedTable {...base} />);
+    expect(container.querySelector(".kui-table__cell--select")).toBeNull();
+    expect(container.querySelector('[data-testid="select-all"]')).toBeNull();
+    dispose();
+  });
+
+  it("has no axe violations with a partial selection", async () => {
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set(["topic-2"]));
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        {...base}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    ));
+    const violations = await findViolations(container);
+    expect(describeViolations(violations)).toBe("");
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * Selection on the plain table, where it meets a clickable row.
+ *
+ * One case, and it is here rather than in `lists.test.tsx` for the reason the file header gives:
+ * the select cell and the row it sits in are one contract, and `VirtualizedTable`'s half of it is
+ * asserted a few lines above. The two tables draw the same `<td class="kui-table__cell--select">`
+ * and must behave alike; for a while only one of them did, and nothing said so.
+ */
+describe("DataTable selection", () => {
+  interface Topic {
+    readonly name: string;
+  }
+  const rows: readonly Topic[] = [{ name: "orders" }, { name: "payments" }];
+  const columns: readonly Column<Topic>[] = [
+    { id: "name", header: "Topic", render: (topic) => topic.name },
+  ];
+
+  /** Ticking a row must not also open it: the list being selected from would be gone, and the
+   * ticks with it. `VirtualizedTable` has the same case, and the two now agree. */
+  it("does not activate a clickable row when its checkbox is ticked", async () => {
+    const onRowClick = vi.fn();
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set());
+    const { container, dispose } = mount(() => (
+      <DataTable
+        caption="Topics"
+        columns={columns}
+        rows={rows}
+        rowKey={(topic) => topic.name}
+        onRowClick={onRowClick}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    ));
+    await userEvent.click(
+      container.querySelector<HTMLInputElement>(".kui-table__cell--select .kui-checkbox__input")!,
+    );
+    flush();
+    expect(selected().has("orders")).toBe(true);
+    expect(onRowClick).not.toHaveBeenCalled();
+
+    // And the row itself still opens, so the guard stopped one click rather than every click.
+    await userEvent.click(container.querySelectorAll<HTMLElement>(".kui-table__row")[1]!);
+    flush();
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * A modified click on a clickable row, in both tables, because it is one rule and two call sites.
+ *
+ * Filed by wave 6's third adversarial pass and measured on the shipped build: a ⌘/ctrl/shift-click
+ * on a link inside a clickable row opened a background tab **and** navigated the tab the operator
+ * was reading, because the row's handler took no event and therefore could not tell the two
+ * gestures apart. There is no "open this row elsewhere" for `onRowClick` to do instead — it
+ * navigates the current document — so declining is the whole behaviour.
+ *
+ * Both tables are asserted here rather than one, for the reason the file header already gives about
+ * the select cell: the two draw the same row and a guard fixed in one of them and not the other is
+ * this project's most repeated defect.
+ */
+describe("row activation and the modifier keys", () => {
+  interface Topic {
+    readonly name: string;
+  }
+  const rows: readonly Topic[] = [{ name: "orders" }, { name: "payments" }];
+  const columns: readonly Column<Topic>[] = [
+    { id: "name", header: "Topic", render: (topic) => topic.name },
+  ];
+
+  /** Every gesture that means "somewhere else", and the one that means "here". */
+  const elsewhere: readonly (readonly [string, MouseEventInit])[] = [
+    ["⌘-click, a background tab on macOS", { metaKey: true }],
+    ["ctrl-click, the same gesture on Linux and Windows", { ctrlKey: true }],
+    ["shift-click, a new window", { shiftKey: true }],
+    ["alt-click, which downloads rather than opens", { altKey: true }],
+    ["a button that is not the primary one", { button: 1 }],
+  ];
+
+  it("does not navigate the current tab when DataTable's row is click-modified", () => {
+    const onRowClick = vi.fn();
+    const { container, dispose } = mount(() => (
+      <DataTable
+        caption="Topics"
+        columns={columns}
+        rows={rows}
+        rowKey={(topic) => topic.name}
+        onRowClick={onRowClick}
+      />
+    ));
+    const row = container.querySelector<HTMLElement>(".kui-table__row")!;
+
+    for (const [gesture, init] of elsewhere) {
+      clickOn(row, init);
+      flush();
+      expect(onRowClick, gesture).not.toHaveBeenCalled();
+    }
+
+    // And the plain click still opens the row, so the guard declined five gestures rather than all
+    // of them — which is the shape of the fix that breaks the feature instead of the defect.
+    clickOn(row);
+    flush();
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("does not navigate the current tab when VirtualizedTable's row is click-modified", () => {
+    const onRowClick = vi.fn();
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        caption="Topics"
+        columns={columns}
+        rows={rows}
+        rowKey={(topic: Topic) => topic.name}
+        viewportHeight={240}
+        compact={false}
+        onRowClick={onRowClick}
+      />
+    ));
+    const row = container.querySelector<HTMLElement>(".kui-vtable__row")!;
+
+    for (const [gesture, init] of elsewhere) {
+      clickOn(row, init);
+      flush();
+      expect(onRowClick, gesture).not.toHaveBeenCalled();
+    }
+
+    clickOn(row);
+    flush();
+    expect(onRowClick).toHaveBeenCalledTimes(1);
     dispose();
   });
 });

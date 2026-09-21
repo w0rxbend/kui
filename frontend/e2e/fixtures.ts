@@ -27,7 +27,40 @@ async function signedIn(request: APIRequestContext): Promise<string> {
   return body.csrfToken ?? "";
 }
 
-export const test = base.extend<{ api: KuiApi }>({
+export const test = base.extend<{ api: KuiApi; browserHealth: void }>({
+  browserHealth: [
+    async ({ page }, use, testInfo) => {
+      const failures: string[] = [];
+      page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+      page.on("console", (message) => {
+        if (message.type() !== "error") return;
+
+        const text = message.text();
+        // Chromium reports every non-2xx fetch as a generic console error, including responses the
+        // product deliberately consumes and renders (for example Kafka's 409 for a live consumer
+        // group and 501 for an unconfigured optional service). Those outcomes belong to the UI
+        // assertions in each scenario; the message contains neither the request URL nor enough
+        // context to distinguish them from an unexpected response. Keep this fixture focused on
+        // actual browser/runtime failures. Broken assets and unhandled API failures still make the
+        // relevant screen assertion fail, while page errors and application console errors remain
+        // fatal here.
+        if (text.startsWith("Failed to load resource: the server responded with a status of")) return;
+
+        failures.push(`console.error: ${text}`);
+      });
+
+      await use();
+
+      if (failures.length > 0) {
+        await testInfo.attach("browser-errors.json", {
+          body: Buffer.from(JSON.stringify(failures, null, 2)),
+          contentType: "application/json",
+        });
+        throw new Error(`The browser reported errors:\n${failures.join("\n")}`);
+      }
+    },
+    { auto: true },
+  ],
   api: async ({ playwright }, use) => {
     // Its own context, with its own cookie jar: the browser's session and this one are different
     // principals as far as the gateway is concerned, and sharing them would make a permissions test

@@ -9,6 +9,40 @@
 # stubbed. A job that always passes is worse than no job: it looks like coverage. That principle is
 # also why the `test` job runs `./scripts/run-tests.sh` rather than a hand-maintained list of
 # modules — a list goes stale the first time somebody adds a suite, and it goes stale silently.
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT READS THIS FILE, AND WHAT THAT LEAVES UNREAD. Asked for by W12-02 and answered plainly rather
+# than reassuringly, because this file has now produced two green-over-nothing defects in two waves.
+#
+# ONE local gate reads this file at all: the case named `everyDocumentGateTheWorkflowRunsAsksIt...`
+# in `build-tests`' `BuildWiringSuite`, which reads `run:` lines, anchors on exactly TWO invocations
+# (`docs.errorCodes`, `frontend.apiConstants`) and requires each to pass `--check`. It is a real
+# gate and it is one gate, over two lines of a file of several hundred. Since wave 12 the three
+# files that suite reads are declared as inputs of `build-tests.test`, so a change here invalidates
+# it; before that, `testCached` answered out of the previous tree.
+#
+# So everything below is checked by GitHub running it, and by nothing else. What that has already
+# cost, twice, both reproduced rather than argued:
+#
+#   * A STEP CAN ASSERT ITS OWN DERIVATION RATHER THAN THE THING. The manifest-roster step reduced
+#     both ends of a `COPY` line to the package name and never read the file being copied, so
+#     `package.json` → `tsconfig.json` printed "every name matched" and exited 0 over an image that
+#     ships without a manifest. Wave 12's repair is one `sed` anchor and a fixture line.
+#   * A FILTER THAT MATCHES NOTHING EXITS 0. `pnpm --filter @kui/nosuchpackage run generate` prints
+#     `No projects matched the filters` and returns 0, so the generated-types step would have
+#     compared the committed file against itself if the package were ever renamed. Anchored in wave
+#     12 with a `grep` on the manifest.
+#
+# And what is STILL unread here, stated so the next reader does not have to rediscover it: a job or
+# a step DELETED from this file fails nothing anywhere — no local gate enumerates the jobs, so the
+# `browser`, `compose` or `frontend` job could vanish and every command in this repository would
+# stay green; a `run:` line that gains `|| true` (one already has, deliberately, on a log dump)
+# reads as a passing step; a `timeout-minutes` raised or a `concurrency` group changed is invisible;
+# and every number these jobs print — the OpenAPI ratio, the case count, the story count — is read
+# by a person, not by an assertion. Adding a gate for any of those is a wave-sized decision and is
+# filed rather than taken; what is NOT acceptable is a step whose own derivation cannot fail, which
+# is the class both defects above belong to.
+# ------------------------------------------------------------------------------------------------
 name: CI
 
 on:
@@ -65,12 +99,18 @@ jobs:
   generated:
     name: generated documents match their sources
     runs-on: ubuntu-latest
-    # Two files in the repository are generated from code and committed alongside it: the OpenAPI
-    # documents (one per service plus the merged product-wide one) and the error-code table. A
-    # generated file that nobody regenerates is worse than no file — an integrator reads it,
-    # believes it, and builds against an API that changed three releases ago — so both checks run
-    # on every push. When one fails, the fix is to run the matching generator and commit the result:
-    # `./mill __.openApi` and `./mill docs.errorCodes`.
+    # Three files in the repository are generated from code and committed alongside it: the OpenAPI
+    # documents (one per service plus the merged product-wide one), the error-code table, and the
+    # browser constants. A generated file that nobody regenerates is worse than no file — an
+    # integrator reads it, believes it, and builds against an API that changed three releases ago —
+    # so all three checks run on every push. When one fails, the fix is to run the matching
+    # generator and commit the result: `./mill __.openApi`, `./mill docs.errorCodes` and
+    # `./mill frontend.apiConstants`.
+    #
+    # The fourth step is here for the same reason with a different mechanism: a count a document
+    # publishes about itself is derived from the repository as surely as a generated file is; it
+    # just happens to be maintained by hand. Its repair is an edit rather than a generator run, and
+    # the script prints the figure that would make each disagreeing sentence true.
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
@@ -78,6 +118,19 @@ jobs:
         run: ./mill __.openApiCheck
       - name: Check the committed error-code table
         run: ./mill docs.errorCodes --check
+      # The third generated file, and the one that had no job at all: the CSRF header name and the
+      # error-code vocabulary are written into the browser's source from the Scala that defines
+      # them, so a rename on the server becomes a diff here rather than a 403 nobody can explain.
+      - name: Check the committed browser constants
+        run: ./mill frontend.apiConstants --check
+      # Not a generated file, but the same failure: a figure a document publishes about itself, and
+      # nothing comparing it to the thing it counts. `docs/FEATURE_MATRIX.md`'s state totals, the
+      # percentage `README.md` repeats, the merged document's operation and path counts in ADR-048
+      # and `frontend/packages/api/README.md`, and `DEPENDENCY_MATRIX.md`'s row per dependency were
+      # all correct when written and all drifted, because the commands offered for checking them
+      # printed numbers for a person to compare rather than comparing them.
+      - name: Check every count the repository publishes about itself
+        run: ./scripts/feature-matrix-check.sh
 
   test:
     name: unit + property + contract tests
@@ -117,14 +170,152 @@ jobs:
   # frontend change that breaks nothing on the server does not wait for the Scala suites, and a
   # server change does not rebuild a browser bundle.
   frontend:
-    name: frontend typecheck + tests + build
+    name: frontend typecheck + tests + build + a11y
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # It now builds Storybook and renders every story twice under axe, so this job is minutes
+    # rather than seconds. The backstop is against a hung browser, not a budget.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+      # BEFORE ANYTHING IS INSTALLED, because this one needs neither Node nor pnpm and it is the
+      # cheapest failure in the workflow.
+      #
+      # `deployment/frontend/Dockerfile` copies each workspace package's `package.json` in by hand,
+      # one `COPY` per package, so that `pnpm install --frozen-lockfile` can resolve the workspace
+      # before the sources arrive and the install layer survives a source change. That roster is
+      # hand-written and it cannot be a glob -- `COPY frontend/packages/*/package.json` flattens
+      # every match into one directory and Docker has no form that preserves the per-package path.
+      #
+      # IT HAD DRIFTED BY THREE AND NOTHING NOTICED FOR TWO WAVES. `feature-alerts`,
+      # `feature-connect` and `feature-ksql` were added by packets that did not own that file, and
+      # the image still built and still carried all eight feature chunks. Measured again in wave 10:
+      # deleting one `COPY` line builds an image that is byte-indistinguishable from the correct
+      # one, because `--frozen-lockfile` resolves a ten-package workspace without complaining --
+      # the only trace is `Scope: all 11 workspace projects` in the build log where the correct
+      # roster prints `all 12`. A line in a build log that nobody reads is not a gate.
+      #
+      # SO THE NAMES ARE COMPARED, AND THE COUNTS ARE ONLY THE MESSAGE. This step compared two
+      # counts until wave 11, and W10-05's verifier walked through it twice with the roster broken:
+      #
+      #   * delete the `feature-ksql` COPY line and duplicate the `kernel` one. Eleven lines, eleven
+      #     packages: `11 packages, 11 manifests copied`, exit 0, and the image ships without the
+      #     ksqlDB chunk.
+      #   * keep every line and misspell one destination only -- `./packages/feature-kqsl/`. The
+      #     count is untouched, the manifest lands in a directory pnpm's workspace does not name,
+      #     and `--frozen-lockfile` resolves the smaller workspace in silence exactly as above.
+      #
+      # The `diff` that names the missing package existed for both of those and sat INSIDE the
+      # failure branch, so on an equal count it never ran. A derivation whose only assertion is its
+      # own cardinality cannot see a substitution, and a substitution is what drift looks like.
+      #
+      # Both ENDS of each line are derived, because those are two different mistakes: the source
+      # names the package that is read and the destination names the directory pnpm will find it in,
+      # and the second one fails with no trace at all. A line whose two halves disagree is caught by
+      # the destination list even when the source list is perfect.
+      #
+      # AND THE SOURCE END NAMES THE FILE, WHICH IS WAVE 12'S REPAIR AND THE THIRD MUTATION OF THE
+      # SAME SHAPE. Both derivations reduced to the PACKAGE NAME and neither read the file being
+      # copied, so `COPY frontend/packages/api/package.json` -> `COPY frontend/packages/api/
+      # tsconfig.json` left every list eleven names long and every name equal. Measured at the
+      # wave-12 open, by making exactly that substitution in the Dockerfile and running this step
+      # from the repository root: `frontend/packages: 11 packages, 11 manifests copied, every name
+      # matched`, exit 0 -- over an image whose `packages/api` ships with NO manifest, which is the
+      # same workspace pnpm resolves for a deleted line. A roster is three facts per line, the
+      # package, the file and the destination, and until now this step read two of them.
+      #
+      # The self-test first, for the reason the compose job's image derivation has one: on every
+      # passing run all three lists are equal, so a `sed` that had stopped matching -- an anchor
+      # removed, the path changed -- would answer an empty list against an empty list somewhere and
+      # read as agreement. The fixture gives the derivation a Dockerfile with a KNOWN roster that is
+      # not the real one, and carries each of the shapes the anchors exist to reject.
+      - name: The interface image copies every workspace manifest
+        working-directory: .
+        run: |
+          # `package\.json` is the anchor that reads the file. A COPY line under a package directory
+          # that names any other file no longer reduces to a package name: it comes through WHOLE,
+          # so it cannot match a directory in `frontend/packages` and appears whole on the `>` side
+          # of the diff beside the package missing from the `<` side.
+          sources() { grep '^COPY frontend/packages/' "$1" |
+                        sed -E 's#^COPY frontend/packages/([^/]+)/package\.json[[:space:]].*#\1#' |
+                        sort; }
+          # The destination end CANNOT carry that anchor -- a destination names a directory and no
+          # file -- so it is the source list alone that sees a substituted file name, and the
+          # fixture below holds a line that proves it rather than leaving it to be believed.
+          targets() { grep '^COPY frontend/packages/' "$1" |
+                        sed -E 's#^.*[[:space:]]\./packages/([^/]+)/[[:space:]]*$#\1#' | sort; }
+
+          fixture="$(mktemp)"
+          cat > "$fixture" <<'FIXTURE'
+          COPY frontend/package.json frontend/pnpm-lock.yaml ./
+          COPY frontend/packages/api/package.json ./packages/api/
+          COPY frontend/packages/kernel/package.json ./packages/kernel/
+           COPY frontend/packages/indented/package.json ./packages/indented/
+          RUN echo 'COPY frontend/packages/quoted/package.json'
+          COPY frontend/packages/shell/package.json ./packages/typo/
+          COPY frontend/packages/decoy/tsconfig.json ./packages/decoy/
+          FIXTURE
+          # The reduced names only: the decoy line is not one and the two assertions below are
+          # separate on purpose. `decoy` appearing here would mean the manifest anchor had been
+          # dropped again, and an empty list here would mean the `sed` had stopped matching at all.
+          probe="$(sources "$fixture" | grep -v '^COPY ' | tr '\n' ' ')"
+          [ "$probe" = "api kernel shell " ] || {
+            echo "the manifest-roster source derivation is broken: a Dockerfile with three anchored" \
+                 "COPY lines, one indented line, one inside a RUN and one copying a file that is" \
+                 "not a manifest, derived [$probe] and not [api kernel shell ]. If 'decoy' is in" \
+                 "that list the derivation has stopped reading the file name, which is the" \
+                 "wave-11 hole: a COPY of anything under packages/<name>/ counts as its manifest."
+            rm -f "$fixture"; exit 1
+          }
+          # And the same line from the other direction: it must survive the derivation UNREDUCED, so
+          # that a real roster carrying it fails the diff instead of agreeing with it. Grepped by
+          # its own text rather than by position, because `sort` orders a sentence against a word
+          # differently under C and under a UTF-8 locale and the runner picks the locale.
+          probe="$(sources "$fixture" | grep -c '^COPY frontend/packages/decoy/tsconfig\.json ')"
+          [ "$probe" = "1" ] || {
+            echo "the manifest-roster source derivation swallowed a COPY line that names no" \
+                 "manifest: [$probe] of them came through whole and exactly 1 should have. A line" \
+                 "that neither reduces to a package name nor survives to be diffed is a line the" \
+                 "assertion below cannot see."
+            rm -f "$fixture"; exit 1
+          }
+          # The destination list reads the fixture's typo AND the decoy's destination, which is
+          # well-formed: `decoy` here is the demonstration that this end cannot tell a manifest from
+          # a tsconfig, and `typo` that it can tell a misspelt directory from a correct one.
+          probe="$(targets "$fixture" | tr '\n' ' ')"
+          [ "$probe" = "api decoy kernel typo " ] || {
+            echo "the manifest-roster destination derivation is broken: the fixture copies" \
+                 "packages/shell to ./packages/typo/ and packages/decoy's tsconfig to" \
+                 "./packages/decoy/, and the derivation answered [$probe] instead of" \
+                 "[api decoy kernel typo ]. A destination that is never read is how a" \
+                 "correctly-spelled COPY lands where pnpm will not look for it."
+            rm -f "$fixture"; exit 1
+          }
+          rm -f "$fixture"
+
+          # THE ASSERTION. Both sides sorted, because the roster is written in dependency order and
+          # `ls` is alphabetical: unsorted, the diff names ten packages instead of the one missing.
+          # `diff` and not a count, and its exit status and not a branch it is printed inside.
+          present="$(ls frontend/packages | sort)"
+          if ! diff <(printf '%s\n' "$present") <(sources deployment/frontend/Dockerfile) ||
+             ! diff <(printf '%s\n' "$present") <(targets deployment/frontend/Dockerfile); then
+            echo ""
+            echo "deployment/frontend/Dockerfile's manifest roster does not name the packages that" \
+                 "exist. '<' is a package in frontend/packages with no COPY line; '>' is a COPY" \
+                 "line naming something that is not a package -- which is what a misspelling looks" \
+                 "like, on either end of the line. A WHOLE COPY LINE on the '>' side is the third" \
+                 "shape: that line copies something other than package.json out of a package" \
+                 "directory, so the package it names ships with no manifest."
+            echo "Each line reads exactly:" \
+                 "COPY frontend/packages/<name>/package.json ./packages/<name>/"
+            echo "Neither mistake fails the image build: pnpm resolves the smaller workspace and" \
+                 "says so only in 'Scope: all N workspace projects', in a build log nobody reads."
+            exit 1
+          fi
+          echo "frontend/packages: $(ls frontend/packages | wc -l) packages," \
+               "$(sources deployment/frontend/Dockerfile | wc -l) manifests copied, every name matched"
       - uses: actions/setup-node@v4
         with:
           # The versions in `.tool-versions`, and pnpm is exact: `frontend/package.json` names the
@@ -144,14 +335,71 @@ jobs:
         run: pnpm typecheck
       - name: Test
         run: pnpm test
+      # The other half of `./mill checkArchitecture`, which cannot see TypeScript. It is cheap and
+      # it runs before the builds because the edge it forbids — one feature package importing
+      # another — is a design mistake rather than a broken build, and it would otherwise be caught
+      # by nothing at all.
+      - name: Import boundaries
+        run: pnpm lint:boundaries
       - name: Build
         run: pnpm build
+      # The guard TD-016 was closed without and TD-022 has carried since. ADR-012 promises that a
+      # feature's code is fetched only when somebody navigates to it, and until this step that
+      # promise was kept by convention: the shell reaches a feature solely through `registry.ts`'s
+      # `import()`, so a static import would have to be written on purpose — which is a sentence
+      # about intentions rather than a gate. It reads the manifest `pnpm build` just wrote, so it
+      # goes here and nowhere earlier.
+      - name: The features are still loaded on demand
+        run: pnpm bundle-shape
+      # The stories are this workspace's stated review surface — 670 of them when this gate was
+      # wired, across rather fewer files than that — and no job compiled one of them, so a story
+      # could reference a prop that no longer exists and stay green for months. Building Storybook
+      # is therefore a check in its own right, and it is also what the sweep below needs to run
+      # against.
+      - name: Build Storybook
+        run: pnpm build-storybook
+      # Playwright drives the sweep, and the browser it drives is not in the runner image. Same
+      # command as the `browser` job, for the same reason: the library only speaks to the revision
+      # it shipped with.
+      - name: Install the pinned browser
+        run: pnpm exec playwright install --with-deps chromium
+      # Every story, in both themes, with axe. This is the only thing in the build that can enforce
+      # "zero accessibility violations in both themes", and until now nothing called it.
+      #
+      # The server is started here rather than by `pnpm storybook:ci` because that script serves in
+      # the foreground, which is right at a terminal and a hang in a job. The wait loop polls the
+      # index the sweep itself fetches, so a server that never comes up fails as a missing index
+      # rather than as a timeout twenty minutes later.
+      - name: Accessibility sweep over every story, in both themes
+        run: |
+          npx --yes http-server storybook-static -p 6017 -s &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:6017/index.json >/dev/null && break
+            sleep 1
+          done
+          pnpm a11y
       # The generated files are committed so that the browser's types can be read without running
       # the backend build. `--check` fails when the committed copy has drifted from the OpenAPI
       # document it is generated from, which is the only way a contract change that nobody
       # regenerated gets noticed.
+      #
+      # AND THE FILTER IS ANCHORED, FOR THE REASON THE MANIFEST ROSTER ABOVE IS. A `pnpm --filter`
+      # that matches NOTHING prints a line and EXITS 0 — measured on this tree at the wave-12 open:
+      # `pnpm --filter @kui/nosuchpackage run generate` → `No projects matched the filters`, exit 0.
+      # So renaming the package leaves the generator un-run and `git diff --exit-code` comparing the
+      # committed file against itself: a step that reports the types are up to date without having
+      # generated any. The `grep` below is the assertion that the name this step filters on is
+      # a package name still, and it is one line rather than a mechanism on purpose.
       - name: The generated types are up to date
         run: |
+          grep -q '"name": "@kui/api"' packages/api/package.json || {
+            echo "this step filters on @kui/api and packages/api/package.json no longer declares" \
+                 "that name, so 'pnpm --filter @kui/api' matches nothing, exits 0, and leaves the" \
+                 "git diff below comparing the committed types against themselves."
+            exit 1
+          }
           pnpm --filter @kui/api run generate
           git diff --exit-code packages/api/src/schema.d.ts
 
@@ -213,30 +461,125 @@ jobs:
   compose:
     name: distributed stack + fault isolation
     runs-on: ubuntu-latest
-    # Assembles five jars and builds five container images before it runs anything. Twenty-five
-    # minutes is a backstop against a hung build, not a budget.
-    timeout-minutes: 25
+    # Assembles a jar and builds a container image for the gateway and for each of the nine
+    # services the distributed stack runs, then builds the interface's image inside
+    # `docker compose up` and pulls the third-party ones the stack needs beside them — the Kafka
+    # broker, the JMX exporter that lets the smoke test assert a measurement rather than a refusal,
+    # the Schema Registry that keeps the schema service's capability row honest, a Kafka Connect
+    # worker for the same reason one service over, and a ksqlDB server for the same reason once
+    # more. The Connect worker runs `apache/kafka`, so the broker and it are one image pulled once;
+    # the registry and the ksqlDB server are one each.
+    #
+    # HOW MANY IMAGES THIS BUILDS IS NOT WRITTEN HERE, and the count above is prose rather than a
+    # gate: the step below derives the list from `docker-compose.yml`, because it was once a
+    # literal in this workflow, said five, and was wrong for a whole milestone. For today's answer,
+    # run the step's own derivation and count it:
+    #
+    #   grep -oE 'image: kui-[a-z-]+:' deployment/compose/docker-compose.yml |
+    #     sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u | wc -l
+    #
+    # It is ten as this is written, the gateway plus nine services.
+    #
+    # THE COMMAND THAT USED TO BE WRITTEN HERE STOPPED AT `| sort -u`, AND AT NINE SERVICES IT
+    # PRINTED TEN. The extra one is `kui-frontend`, which is in that compose file and is built by
+    # `docker compose up` further down rather than by this step -- which is exactly what the
+    # `grep -v '^frontend$'` in the derivation below is for. So the one line in this workflow
+    # written so that a reader could count the figure beside it handed them a different number from
+    # the one it published, which is the defect it was added to prevent, one level up. The eleventh
+    # service has now moved both answers and they still differ by the frontend.
+    #
+    # Raised from 25, which was written when the job built five images. Measured rather than
+    # guessed, on a warm Scala compile cache: seven Mill images took 83s and `smoke.sh` took 126s
+    # and 105s on two consecutive runs against images that already existed. The sentence that stood
+    # here said that measurement had not been re-taken while the list grew twice, and asked the next
+    # reader to treat it as a floor; **re-taken 2026-09-11 on a 16-core developer machine under
+    # concurrent load (`uptime` 15–43)**, with the list at ten: `./mill --no-daemon
+    # deployment.docker.__.docker.build` built **eleven** images (the ten below plus `allinone`,
+    # which this job does not build) in **151s**, and `./deployment/compose/smoke.sh` took
+    # **83s, 112s and 121s** on three consecutive runs against images that already existed. So the
+    # per-image cost fell and the smoke run is where the growth went — three more containers to
+    # start and wait on than the run that produced 126s. Neither figure includes the two things a
+    # cold runner also pays for and neither machine that measured it did — the Scala compile behind
+    # those images, and
+    # `docker compose` building `kui-frontend` from the pnpm workspace, which is the single largest
+    # cost in the job and the reason the old ceiling was already close.
+    #
+    # Forty minutes is therefore a backstop against a hung build and not a budget: it is far above
+    # anything measured, and low enough that a genuine hang is still reported inside the hour.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
 
-      # The smoke test stops one container of the distributed stack, so all five images have to
-      # exist. They are built here rather than pulled: the point is to check the artefacts this
-      # commit produces, and a pulled image would be somebody else's commit. Note the braces —
-      # `./mill a b` passes `b` as an argument to `a` rather than running both, which is the same
-      # trap that once made the test job run no tests.
+      # Every image the stack names, derived from the file that names them rather than listed here.
+      #
+      # This step used to carry a literal list of five while `docker-compose.yml` ran six, and the
+      # sixth — `kui-metrics` — has an `image:` and no `build:` and is published to no registry, so
+      # the job could not get it at all: `docker compose pull kui-metrics` answers `pull access
+      # denied, repository does not exist`. The stack came up on the machine of whoever had run
+      # `./mill deployment.docker.metrics.docker.build` by hand and nowhere else. The packet that
+      # added the container and the packet that owned this file were different packets, which is
+      # precisely the situation a derived list is for: adding a service to the compose file now adds
+      # it here too, with nobody remembering anything.
+      #
+      # `kui-frontend` is excluded because it is the one image Compose builds itself — Mill never
+      # builds a browser bundle — and `smoke.sh` excludes it from its own check for that reason. The
+      # broker and the JMX exporter the stack now runs are third-party images with no `kui-` prefix,
+      # so they never reach this list and Compose pulls them.
+      #
+      # `[a-z-]` and not `[a-z]`. The character class used to have no hyphen in it, so
+      # `image: kui-schema-registry:` matched nothing at all and would have been dropped from the
+      # build list in silence — the exact failure a derived list exists to prevent, reintroduced
+      # inside the derivation.
+      #
+      # THAT FIX WAS UNOBSERVABLE UNTIL THE FIXTURE BELOW EXISTED, and saying so is the whole reason
+      # this step is longer than the one line it used to be. Every image this stack names today is
+      # one word, so the derived list is byte-identical with the hyphen and without it: taking the
+      # hyphen back out changes nothing any run of this workflow could see, and the first hyphenated
+      # image somebody adds is an image CI cannot build and cannot report. A repair whose absence
+      # produces no red is a repair that will be undone by the next person who tidies this line.
+      #
+      # So the derivation is a function, and it is given a made-up compose file containing exactly
+      # the situation it was widened for — one hyphenated KUI image, one `kui-frontend` that must be
+      # filtered out, and one third-party image that must not match at all — before it is given the
+      # real one. Reverting the character class fails the fixture and the job stops here, which is
+      # what "fixed" was supposed to mean the first time.
+      #
+      # The braces matter: `./mill a b` passes `b` as an argument to `a` rather than running both,
+      # which is the same trap that once made the test job run no tests.
       - name: Build the container images the distributed stack runs
-        run: ./mill '{deployment.docker.gateway,deployment.docker.cluster,deployment.docker.topic,deployment.docker.message,deployment.docker.consumer}.docker.build'
+        run: |
+          derive() {
+            grep -oE 'image: kui-[a-z-]+:' "$1" |
+              sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u
+          }
 
+          fixture="$(mktemp)"
+          cat > "$fixture" <<'FIXTURE'
+            image: kui-schema-registry:0.1.0-SNAPSHOT
+            image: kui-frontend:0.1.0-SNAPSHOT
+            image: apache/kafka:4.3.1
+          FIXTURE
+          probe="$(derive "$fixture")"
+          rm -f "$fixture"
+          [ "$probe" = "schema-registry" ] || {
+            echo "the image derivation is broken: a compose file naming kui-schema-registry," \
+                 "kui-frontend and apache/kafka derived [$probe] and not [schema-registry]." \
+                 "Check the character class and the frontend filter in derive() above."
+            exit 1
+          }
+
+          images=$(derive deployment/compose/docker-compose.yml)
+          [ -n "$images" ] || { echo "no kui-* image is named in docker-compose.yml"; exit 1; }
+          echo "building: $images"
+          targets=$(for image in $images; do printf 'deployment.docker.%s,' "$image"; done)
+          ./mill "{${targets%,}}.docker.build"
+
+      # The script's own `fail` prints the stack's state before it exits, so this job's diagnostics
+      # are its stdout and there is no artifact upload here. The one that used to sit here pointed
+      # at an output directory of the deleted Scala browser module, which no step in this workflow
+      # has ever produced — and an `if-no-files-found: ignore` upload of a path nothing writes is a
+      # step that cannot fail, so it read as diagnostics and was none. Write the artefacts first if
+      # this job is ever to have some.
       - name: Run the Compose fault-isolation smoke test
         run: ./deployment/compose/smoke.sh
-
-      # The container logs, which are the only thing that explains a compose failure without
-      # somebody reproducing it locally. On failure only; on success they are noise.
-      - name: Upload the failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compose-artifacts
-          path: out/e2e-artifacts/**
-          if-no-files-found: ignore

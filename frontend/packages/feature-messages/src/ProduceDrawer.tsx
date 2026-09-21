@@ -26,6 +26,8 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Banner, Button, Drawer, Switch, TextField, type Mutation } from "@kui/kernel";
+import { JsonValueEditor } from "./JsonValueEditor.jsx";
+import { analyzeJsonValue, formatJsonValue } from "./jsonValue.js";
 import {
   EMPTY_RECORD_DRAFT,
   draftProblem,
@@ -38,7 +40,13 @@ export interface ProduceDrawerProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly topic: string;
-  /** How many partitions the topic has, for the field's help text. `0` means "not known here". */
+  /**
+   * How many partitions the topic has, for the field's help text.
+   *
+   * `undefined` means KUI has not been told — never `0`, which would be a claim, and which is what
+   * the route above passed for the whole life of this drawer. The help text says which of the two
+   * it is, because "leave it empty" is good advice and "0 to -1" is not.
+   */
   readonly partitionCount?: number | undefined;
   readonly onSend: (draft: RecordDraft) => void;
   readonly state: Mutation<readonly ProducedRecord[]>;
@@ -48,6 +56,7 @@ export function ProduceDrawer(props: ProduceDrawerProps): JSX.Element {
   const [draft, setDraft] = createSignal<RecordDraft>(EMPTY_RECORD_DRAFT);
   const [partitionText, setPartitionText] = createSignal("");
   const [countText, setCountText] = createSignal("1");
+  const [minifyBeforeSending, setMinifyBeforeSending] = createSignal(false);
 
   const patch = (change: Partial<RecordDraft>): void => {
     setDraft({ ...draft(), ...change });
@@ -55,8 +64,30 @@ export function ProduceDrawer(props: ProduceDrawerProps): JSX.Element {
 
   const tombstone = () => draft().value === null;
   const busy = () => props.state.kind === "running";
-  const problem = createMemo(() => draftProblem(draft()));
+  const valueAnalysis = createMemo(() => {
+    const value = draft().value;
+    return value === null ? ({ kind: "empty" } as const) : analyzeJsonValue(value);
+  });
+  const problem = createMemo(() => {
+    const structural = draftProblem(draft());
+    if (structural !== undefined) return structural;
+    const value = valueAnalysis();
+    return value.kind === "invalid-json" ? value.message : undefined;
+  });
   const canSend = () => problem() === undefined && !busy();
+
+  const send = (): void => {
+    const current = draft();
+    if (
+      minifyBeforeSending() &&
+      current.value !== null &&
+      valueAnalysis().kind === "valid-json"
+    ) {
+      props.onSend({ ...current, value: formatJsonValue(current.value, "compact") });
+      return;
+    }
+    props.onSend(current);
+  };
 
   const receipt = (): readonly ProducedRecord[] | undefined =>
     props.state.kind === "done" ? props.state.value : undefined;
@@ -116,7 +147,7 @@ export function ProduceDrawer(props: ProduceDrawerProps): JSX.Element {
               </Button>
             }
           >
-            <Button variant="primary" icon="send" onClick={() => props.onSend(draft())}>
+            <Button variant="primary" icon="send" onClick={send}>
               {sendLabel(draft())}
             </Button>
           </Show>
@@ -152,17 +183,17 @@ export function ProduceDrawer(props: ProduceDrawerProps): JSX.Element {
           </p>
         </div>
 
-        <TextField
-          label="Value"
+        <JsonValueEditor
           value={draft().value ?? ""}
           onInput={(value) => patch({ value })}
-          mono
           disabled={tombstone()}
           help={
             tombstone()
               ? "A tombstone carries no value at all."
               : "An empty box writes a record with an empty value, which is an ordinary record."
           }
+          minifyBeforeSending={minifyBeforeSending()}
+          onMinifyChange={setMinifyBeforeSending}
         />
 
         <TextField
@@ -179,8 +210,9 @@ export function ProduceDrawer(props: ProduceDrawerProps): JSX.Element {
           placeholder="chosen by Kafka"
           help={
             props.partitionCount !== undefined && props.partitionCount > 0
-              ? `0 to ${props.partitionCount - 1}. Leave it empty to let the key decide.`
-              : "Leave it empty to let the key decide."
+              ? `0 to ${String(props.partitionCount - 1)}. Leave it empty to let the key decide.`
+              : "KUI has not been told how many partitions this topic has. " +
+                "Leave it empty to let the key decide."
           }
         />
 

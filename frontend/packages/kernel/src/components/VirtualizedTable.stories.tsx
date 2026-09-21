@@ -262,3 +262,160 @@ export const LongNamesInANarrowColumn: Story = {
     (Story) => <div style={{ height: "480px", width: "420px", display: "flex" }}>{Story()}</div>,
   ],
 };
+
+/* --------------------------------------------------------------------------------------------
+ *
+ * Selection, and the two things windowing does to it.
+ */
+
+/**
+ * Selection over five hundred rows, with the count of what is held printed above the table.
+ *
+ * The story to *drive* rather than look at. Tick a row near the top, scroll it out of the window —
+ * the row leaves the document entirely, which is the whole point of the component — then scroll
+ * back. The tick is still there and the count never moved. Nothing in this component prunes the
+ * set when a row unmounts, and that is a decision rather than an omission: the obvious
+ * implementations of select-all and of clear both walk the rows on screen, and each of them
+ * silently drops a selection made two thousand rows ago.
+ */
+export const Selection: StoryObj = {
+  decorators: [(Story) => <>{Story()}</>],
+  render: () => {
+    const rows = manyTopics(500);
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(
+      new Set([rows[1]?.name ?? "", rows[3]?.name ?? ""]),
+    );
+    return (
+      <div style={{ display: "flex", "flex-direction": "column", gap: "var(--kui-space-4)" }}>
+        <p data-testid="count" style={{ margin: 0 }}>
+          {selected().size} selected
+        </p>
+        <div style={{ height: "420px", display: "flex" }}>
+          <VirtualizedTable
+            {...base}
+            rows={rows}
+            selection={{
+              selectedKeys: selected(),
+              onChange: setSelected,
+              rowLabel: (key) => `topic ${key}`,
+            }}
+          />
+        </div>
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const scroller = canvasElement.querySelector(".kui-vtable__scroller");
+    if (scroller === null) throw new Error("no scroller");
+
+    await expect(canvas.getByTestId("count").textContent).toBe("2 selected");
+
+    // Far past the window, so the two selected rows are no longer in the document at all.
+    scroller.scrollTop = 8000;
+    scroller.dispatchEvent(new Event("scroll"));
+    await waitFor(() => expect(canvas.getByTestId("count").textContent).toBe("2 selected"));
+
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new Event("scroll"));
+    await waitFor(() =>
+      expect(canvasElement.querySelectorAll(".kui-table__row--selected")).toHaveLength(2),
+    );
+  },
+};
+
+/**
+ * The header checkbox against a partial selection: mixed, not unchecked.
+ *
+ * It is mixed against *the rows this table was handed*, which are one page of a list the server
+ * holds ten thousand of. It could not answer anything about the rest even if it wanted to, and a
+ * header that went checked while five hundred of ten thousand topics were ticked would be a claim
+ * that the next Delete acts on all ten thousand.
+ */
+export const SelectionPartial: StoryObj = {
+  render: () => {
+    const rows = manyTopics(40);
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(
+      new Set([rows[0]?.name ?? ""]),
+    );
+    return (
+      <VirtualizedTable
+        {...base}
+        rows={rows}
+        selection={{ selectedKeys: selected(), onChange: setSelected }}
+      />
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const all = canvas.getByTestId("select-all");
+    await expect(all).toBePartiallyChecked();
+    await userEvent.click(all);
+    await expect(all).toBeChecked();
+  },
+};
+
+/** Nothing selected, so the header checkbox is plainly unchecked and the drawn box is visible as
+ * an empty box — the state this project once shipped as nothing at all. */
+export const SelectionEmpty: Story = {
+  args: {
+    ...base,
+    rows: manyTopics(200),
+    selection: { selectedKeys: new Set<string>(), onChange: () => {} },
+  },
+};
+
+/** Every row on the page selected. The header is checked and the rows carry the same fill as the
+ * selected navigation item, because it is the same idea. */
+export const SelectionAll: StoryObj = {
+  render: () => {
+    const rows = manyTopics(30);
+    return (
+      <VirtualizedTable
+        {...base}
+        rows={rows}
+        selection={{ selectedKeys: new Set(rows.map((topic) => topic.name)), onChange: () => {} }}
+      />
+    );
+  },
+};
+
+/**
+ * Selection on a table whose rows are also clickable.
+ *
+ * Tick a checkbox and the row must *not* open. Without that, the gesture that selects a topic also
+ * navigates away from the list being selected from, and the ticks go with it.
+ */
+export const SelectionOnAClickableTable: StoryObj = {
+  render: () => {
+    const rows = manyTopics(60);
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set());
+    const [opened, setOpened] = createSignal<string>("none");
+    return (
+      <div style={{ display: "flex", "flex-direction": "column", gap: "var(--kui-space-4)" }}>
+        <p data-testid="opened" style={{ margin: 0 }}>
+          Opened: {opened()}
+        </p>
+        <div style={{ height: "420px", display: "flex" }}>
+          <VirtualizedTable
+            {...base}
+            rows={rows}
+            onRowClick={(topic) => setOpened(topic.name)}
+            selection={{ selectedKeys: selected(), onChange: setSelected }}
+          />
+        </div>
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const boxes = canvasElement.querySelectorAll<HTMLInputElement>(
+      ".kui-vtable__row .kui-checkbox__input",
+    );
+    const first = boxes[0];
+    if (first === undefined) throw new Error("no row checkboxes rendered");
+    await userEvent.click(first);
+    await waitFor(() => expect(first).toBeChecked());
+    await expect(canvas.getByTestId("opened").textContent).toBe("Opened: none");
+  },
+};

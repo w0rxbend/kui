@@ -9,6 +9,7 @@ import kui.cluster.application.*
 import kui.cluster.domain.{ClusterProfile, ClusterRef, Connectivity, ProfileVersion, StoreHealth}
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{BrokerId, ClusterId}
+import kui.security.Principal
 
 /** The cluster service's use cases over a deployment that has been told about no cluster at all.
   *
@@ -84,6 +85,33 @@ object EmptyClusterUseCases {
       def probe(profile: ClusterProfile): IO[Either[KuiError, Connectivity]] =
         IO.pure(Right(Connectivity.Unreachable("no cluster is configured in this deployment")))
     }
+
+  val uiSettings: UiSettingsUseCase[IO] = new UiSettingsUseCase[IO](
+    registry,
+    new UiSettingsStore[IO] {
+      def get(
+          cluster: ClusterId,
+          principal: Principal
+      ): IO[Either[KuiError, Option[UiAppearance]]] = IO.pure(Right(None))
+
+      def put(
+          cluster: ClusterId,
+          principal: Principal,
+          appearance: UiAppearance
+      ): IO[Either[KuiError, UiAppearance]] = IO.pure(Right(appearance))
+
+      def getMessageBrowser(
+          cluster: ClusterId,
+          principal: Principal
+      ): IO[Either[KuiError, Option[MessageBrowserSettings]]] = IO.pure(Right(None))
+
+      def putMessageBrowser(
+          cluster: ClusterId,
+          principal: Principal,
+          settings: MessageBrowserSettings
+      ): IO[Either[KuiError, MessageBrowserSettings]] = IO.pure(Right(settings))
+    }
+  )
 
   /** A cluster id nothing is configured under, for the cases that need a failure both transports agree on. */
   val UnknownCluster: ClusterId = ClusterId.unsafe("not-configured")

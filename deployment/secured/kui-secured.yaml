@@ -149,9 +149,9 @@ kui:
     type: disabled
 
   telemetry:
-    # Where traces and metrics go. If the collector is down or this is wrong, KUI still starts and
-    # still serves: a monitoring outage must never take the product down.
-    otlpEndpoint: "http://otel-collector.observability.svc.cluster.local:4318"
+    # This self-contained fixture has no OpenTelemetry collector. Keep its process metrics
+    # scrapeable without retrying a production-only collector hostname in the background; the
+    # deployment/compose observability mode exercises OTLP export end to end.
 
     # An extra port exposing THIS PROCESS'S OWN telemetry in Prometheus format. This is not the
     # product's Kafka-cluster metrics endpoint; ADR-009 keeps those two deliberately separate.

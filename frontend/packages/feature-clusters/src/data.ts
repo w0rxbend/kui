@@ -94,6 +94,21 @@ interface BrokerPayload {
   readonly replicaCount?: number | null;
   readonly partitionCount?: number | null;
   readonly diskUsageBytes?: number | null;
+  /*
+   * `leaderSkewPercent` is drawn, since this wave, and it took three to get there: the cluster
+   * service hard-coded it `null` until 2026-09-06, at which point it began deriving it from the
+   * partition census (`ClusterTopology.leaderSkewOn`) and nothing in the browser read it. An
+   * expanded broker card now says it in words — `leaderSkewSentence` — which is the honest form:
+   * a signed percentage beside the word LEADERS reads as a negative partition count, and the
+   * PARTITION SKEW tile a few inches away is a *different* figure (a cluster-wide spread over
+   * replica counts) that this must never be printed under.
+   *
+   * `segmentCount` is the one field this mapping still reads nothing from, declared so the next
+   * reader does not think it was missed: it is `null` on every cluster KUI has been run against,
+   * because the cluster service hard-codes it, so there is no figure to draw and no absence worth
+   * a sentence.
+   */
+  readonly leaderSkewPercent?: number | null;
   readonly segmentCount?: number | null;
 }
 
@@ -140,6 +155,7 @@ function toClusterSummary(entry: ClusterEntryPayload): ClusterSummary {
     name: row.name,
     health: healthOf(summary),
     version: summary?.version ?? null,
+    controllerKind: summary?.controllerKind ?? null,
     // The wire reports how many brokers answered, not how many are configured, so "3 of 3" is the
     // only honest reading when a scrape succeeded — and both are absent when it did not.
     brokersOnline: figure(summary?.brokerCount),
@@ -151,7 +167,15 @@ function toClusterSummary(entry: ClusterEntryPayload): ClusterSummary {
     partitions: figure(topics?.partitionCount),
     underReplicatedPartitions: figure(summary?.underReplicatedPartitionCount),
     readOnly: row.readOnly,
-    observedAt: summary?.scrapedAt === undefined ? null : new Date(summary.scrapedAt),
+    /*
+     * `== null` and not `=== undefined`, which is a two-character fix for a fabricated date.
+     * `new Date(null)` is the Unix epoch, so a wire `scrapedAt: null` — which every other absent
+     * figure on this row arrives as — rendered "Read 20702d ago" in the one line whose own comment
+     * forbids inventing a date. It is latent rather than live today only because
+     * `ClusterSummaryDto.scrapedAt` is non-optional; the row beside it reads `?? null` for exactly
+     * the same wire, so the asymmetry was the defect.
+     */
+    observedAt: summary?.scrapedAt == null ? null : new Date(summary.scrapedAt),
   };
 }
 
@@ -174,12 +198,15 @@ function toBroker(payload: BrokerPayload): Broker {
     // cluster-level figure on the scrape. `null` says so, rather than `0` claiming everything is in
     // sync on evidence nobody produced.
     outOfSyncReplicas: null,
-    diskUsedBytes: figure(payload.diskUsageBytes),
-    // Also not on the wire: KUI reports how much a broker's log directories hold, never how large
-    // the disk under them is — that is the host's business and the admin protocol does not expose
-    // it. `ProgressBar` draws a bar with no total as "we cannot measure this", which is exactly
-    // right, and is why this is `null` rather than an invented denominator.
+    heldBytes: figure(payload.diskUsageBytes),
+    /*
+     * The capacity pair is not on this endpoint at all, and is filled from the log directories by
+     * `withDisks` below when they answer. It stays `null` here rather than being invented from
+     * `diskUsageBytes`, which would draw every broker as a disk that is exactly 100% full.
+     */
+    diskUsedBytes: null,
     diskTotalBytes: null,
+    leaderSkewPercent: figure(payload.leaderSkewPercent),
   };
 }
 
@@ -191,6 +218,36 @@ export async function fetchClusters(
   if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly ClusterEntryPayload[]>(answer.value.clusters);
   return fromSection(section, (rows) => rows.map(toClusterSummary));
+}
+
+/**
+ * One cluster, on its own.
+ *
+ * The brokers screen needs three things the brokers endpoint does not carry: the under-replicated
+ * partition count its voice line reads, the Kafka version its cards tag, and the moment the scrape
+ * was taken. All three are on the cluster's own summary, and asking for one cluster rather than
+ * filtering the list means a deployment with forty registered clusters does not scrape thirty-nine
+ * of them to draw one screen.
+ *
+ * The entry here has no sibling `topics` section — that belongs to the list endpoint — so the topic
+ * and partition counts come back absent, which is the honest reading of a document that does not
+ * carry them.
+ */
+export async function fetchCluster(
+  api: KuiApiClient,
+  clusterId: string,
+): Promise<Fetched<ClusterSummary>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}", { params: { path: { clusterId } } });
+  if (!answer.ok) return apiFailure(answer.error);
+  const row = (answer.value as { readonly cluster?: ClusterEntryPayload["cluster"] }).cluster;
+  if (row === undefined) {
+    return {
+      kind: "failed",
+      message: "The cluster document carried no cluster.",
+      code: "DECODING_FAILED",
+    };
+  }
+  return { kind: "ready", value: toClusterSummary({ cluster: row }) };
 }
 
 /** One cluster's brokers. */
@@ -306,6 +363,9 @@ interface LogDirPayload {
   readonly path: string;
   readonly error?: string | null;
   readonly partitionCount?: number | null;
+  /** The filesystem the directory sits on: its size, and how much of it is free. See above. */
+  readonly totalBytes?: number | null;
+  readonly usableBytes?: number | null;
   readonly replicas?: readonly { readonly sizeBytes?: number | null }[];
 }
 
@@ -346,6 +406,83 @@ export async function fetchBrokerLogDirs(
   if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly LogDirPayload[]>(answer.value.logDirs);
   return fromSection(section, (rows) => rows.map(toLogDir));
+}
+
+/**
+ * What one broker's disks add up to: how much of them is in use, and how large they are.
+ *
+ * Neither figure is about Kafka. `describeLogDirs` reports the filesystem each directory sits on,
+ * so `totalBytes - usableBytes` is everything on that disk — logs, the operating system, whatever
+ * else the machine keeps there — and that is exactly the right numerator for "is this broker about
+ * to run out of disk", which is the question the card's bar and its 75%/90% thresholds exist to
+ * answer.
+ */
+export interface BrokerDisk {
+  readonly brokerId: number;
+  readonly usedBytes: number;
+  readonly capacityBytes: number;
+}
+
+/**
+ * Every broker's disks, from one request.
+ *
+ * The endpoint takes an optional `brokerId`; omitting it asks for the whole cluster, which is one
+ * request for a screen that draws every broker rather than one per card. The shell's storage meter
+ * reads the same document by the same rule, which is why the percentage here and the percentage in
+ * the drawer cannot disagree.
+ *
+ * A directory that did not report **both** halves is skipped in both sums. Half a broker's capacity
+ * produces a percentage that looks perfectly plausible and is wrong, and a failed disk is not a
+ * disk of size zero.
+ */
+export async function fetchClusterDisks(
+  api: KuiApiClient,
+  clusterId: string,
+): Promise<Fetched<readonly BrokerDisk[]>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}/log-dirs", {
+    params: { path: { clusterId } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+  const section = decodeSection<readonly LogDirPayload[]>(answer.value.logDirs);
+  return fromSection(section, disksOf);
+}
+
+function disksOf(dirs: readonly LogDirPayload[]): readonly BrokerDisk[] {
+  const sums = new Map<number, { used: number; capacity: number }>();
+  for (const dir of dirs) {
+    if (dir.brokerId === undefined) continue;
+    if (dir.totalBytes === undefined || dir.totalBytes === null) continue;
+    if (dir.usableBytes === undefined || dir.usableBytes === null) continue;
+    const held = sums.get(dir.brokerId) ?? { used: 0, capacity: 0 };
+    sums.set(dir.brokerId, {
+      used: held.used + (dir.totalBytes - dir.usableBytes),
+      capacity: held.capacity + dir.totalBytes,
+    });
+  }
+  return [...sums]
+    .sort(([left], [right]) => left - right)
+    .map(([brokerId, sum]) => ({ brokerId, usedBytes: sum.used, capacityBytes: sum.capacity }));
+}
+
+/**
+ * The brokers, with whatever the log directories were able to say about their disks.
+ *
+ * A separate step rather than a second field on the brokers request, because the two endpoints fail
+ * separately: a cluster that refuses `describeLogDirs` still draws every card, with a sentence
+ * where the percentage would be. A broker with no entry here keeps its `null`s and says so.
+ */
+export function withDisks(
+  brokers: readonly Broker[],
+  disks: readonly BrokerDisk[],
+): readonly Broker[] {
+  if (disks.length === 0) return brokers;
+  const byBroker = new Map(disks.map((disk) => [disk.brokerId, disk]));
+  return brokers.map((broker) => {
+    const disk = byBroker.get(broker.id);
+    return disk === undefined
+      ? broker
+      : { ...broker, diskUsedBytes: disk.usedBytes, diskTotalBytes: disk.capacityBytes };
+  });
 }
 
 /* ---------------------------------------------------------------------------------------------- */

@@ -170,6 +170,62 @@ describe("the resend confirmation", () => {
     dispose();
   });
 
+  it("counts one partition as one, in both places it says so", async () => {
+    /*
+     * A single-partition topic is the ordinary shape of a compacted config topic and of most of
+     * what a scratch cluster holds, and this dialog said "has 1 partitions" about all of them — in
+     * the sentence under the ranges and again in the reason the `Add a partition` button gives for
+     * being unavailable. On the one screen whose job is to be believed about numbers.
+     */
+    const { dispose } = mount(() => (
+      <ResendDialog
+        {...base}
+        partitionCount={1}
+        initial={{ toTopic: "orders.replay", ranges: [{ partition: 0, from: "0", until: "3" }] }}
+        onSend={() => undefined}
+      />
+    ));
+    await flush();
+
+    expect(text()).toContain("has 1 partition.");
+    expect(text()).not.toContain("has 1 partitions");
+    /* The second place, which is the reason `Add a partition` gives for being unavailable. It lives
+       in a `Tooltip` that renders nothing until the control is pointed at or focused, so the case
+       focuses it — which is also the path a keyboard user takes to that sentence. */
+    const add = buttons().find((button) => (button.textContent ?? "").includes("Add a partition"));
+    expect(add?.getAttribute("aria-disabled")).toBe("true");
+    add?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await flush();
+    // The bubble portals out of the dialog, so this reads the document rather than the panel.
+    expect(document.body.textContent).toContain("has 1 partition,");
+    expect(document.body.textContent).not.toContain("has 1 partitions,");
+
+    dispose();
+  });
+
+  it("marks the sentence that states a count as a statement, not as a gap", async () => {
+    /*
+     * The known and the unknown sentences shared `kui-resend__unknown` — the class whose entire job
+     * is to mark an absence — so the one line here that carries a measured figure was drawn as the
+     * absence of one. Opposite statements, and they must not look alike.
+     */
+    const known = mount(() => (
+      <ResendDialog {...base} partitionCount={12} onSend={() => undefined} />
+    ));
+    await flush();
+    expect(find(".kui-resend__known")?.textContent).toContain("has 12 partitions.");
+    expect(find(".kui-resend__unknown")).toBeNull();
+    known.dispose();
+
+    const unknown = mount(() => (
+      <ResendDialog {...base} partitionCount={undefined} onSend={() => undefined} />
+    ));
+    await flush();
+    expect(find(".kui-resend__unknown")?.textContent).toContain("KUI has not been told");
+    expect(find(".kui-resend__known")).toBeNull();
+    unknown.dispose();
+  });
+
   it("explains the half-open range rather than leaving it to the field names", async () => {
     const { dispose } = mount(() => <ResendDialog {...base} onSend={() => undefined} />);
     await flush();
@@ -215,6 +271,28 @@ describe("the smart filter editor", () => {
     testState: { kind: "idle" } as const,
     applyState: { kind: "idle" } as const,
   };
+
+  it("builds a safe field filter before exposing advanced CEL", async () => {
+    const onApply = vi.fn();
+    const { dispose } = mount(() => <SmartFilterDialog {...base} onApply={onApply} />);
+    await flush();
+
+    expect(text()).toContain("Field path");
+    expect(find(".kui-smart-filter__editor")).toBeNull();
+
+    const value = find<HTMLInputElement>('input[name="json-path-filter-value"]');
+    expect(value).not.toBeNull();
+    if (value !== null) {
+      value.value = "CAPTURED";
+      value.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+
+    buttons().find((button) => (button.textContent ?? "").includes("Use this filter"))?.click();
+    expect(onApply).toHaveBeenCalledWith('record.value.status == "CAPTURED"');
+
+    dispose();
+  });
 
   it("draws an expression that threw differently from one that did not match", async () => {
     const failed = mount(() => (

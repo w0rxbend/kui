@@ -8,7 +8,7 @@ import kui.kernel.error.ErrorCode
 import kui.kernel.{RoleName, Secret, UserName}
 import kui.security.audit.{AuthenticationEvent, MutationOutcome}
 import kui.security.rbac.RbacPolicy
-import kui.security.{PrincipalKind, Principal as SecurityPrincipal}
+import kui.security.{Principal as SecurityPrincipal, PrincipalKind}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -222,10 +222,13 @@ final class ChangePasswordUseCaseSuite extends KuiIOSuite {
     } yield {
       assertEquals(changed, Right(()))
       assertEquals(stored.get("ada").map(_.mustChangePassword), Some(false))
-      assert(second.exists {
-        case LoginResult.SignedIn(_) => true
-        case _ => false
-      }, second.toString)
+      assert(
+        second.exists {
+          case LoginResult.SignedIn(_) => true
+          case _ => false
+        },
+        second.toString
+      )
     }
   }
 

@@ -279,7 +279,8 @@ final class TopicsConfigSuite extends KuiSuite {
     )
     val pageSizes = Gen.oneOf(1, PageSize.Max.value)
 
-    Prop.forAllNoShrink(intervals, prefixes, pageSizes) { (interval, prefix, maxPageSize) =>
+    Prop.forAllNoShrink(intervals, prefixes, pageSizes) {
+      (interval, prefix, maxPageSize) =>
         val loaded = topics(
           load(
             s"""|kui:
@@ -293,7 +294,7 @@ final class TopicsConfigSuite extends KuiSuite {
           )
         )
         loaded.refreshInterval == interval &&
-        loaded.internalPrefix == prefix &&
+          loaded.internalPrefix == prefix &&
       loaded.maxPageSize.value == maxPageSize
     }
   }

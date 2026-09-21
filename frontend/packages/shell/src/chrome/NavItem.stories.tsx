@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { NavItem } from "./NavItem.jsx";
-import { LONG_TOPIC } from "./fixtures.js";
+import { LONG_TOPIC, TOPIC_TREE } from "./fixtures.js";
 
 /**
  * One destination, in every state it has.
@@ -112,19 +112,22 @@ export const BadgeUnavailable: Story = {
 };
 
 /**
- * Not built yet. Present, dimmed, not focusable, and it says why on hover and to a screen reader.
+ * Refused. Present, dimmed, not focusable, and it says why on hover and to a screen reader — the
+ * one state ADR-032 renders as a disabled row, and the only one `destinationFor` produces one for.
  * A dead row with no explanation is worse than no row at all.
+ *
+ * It was a "soon" badge over `KSQL DB` until this wave, which was true while ksqlDB was unbuilt.
+ * It is built now, so the story draws a state a principal can actually be in.
  */
-export const DisabledSoon: Story = {
+export const DisabledForbidden: Story = {
   args: {
     destination: {
       id: "ksql",
-      label: "KSQL DB",
+      label: "ksqlDB",
       icon: "ksql",
       href: "/ksql",
       disabled: true,
-      disabledReason: "Not built yet",
-      badge: { text: "soon", tone: "neutral", description: "not built yet" },
+      disabledReason: "You do not have permission to run ksqlDB statements on this cluster",
     },
   },
 };
@@ -157,5 +160,64 @@ export const LongestLabel: Story = {
       href: "/topics",
       badge: { text: "9,999", tone: "neutral", description: "9,999 topics" },
     },
+  },
+};
+
+/**
+ * A branch: the row is a link *and* a disclosure, and the two are separate controls.
+ *
+ * Clicking the label goes to the topic list; clicking the chevron opens the rows beneath. Merging
+ * them — a row that toggles, or a chevron that navigates — would cost whichever affordance lost,
+ * and both are wanted.
+ */
+export const Expanded: Story = {
+  args: {
+    destination: {
+      id: "topics",
+      label: "Topics",
+      icon: "topics",
+      href: "/topics",
+      badge: { text: "128", tone: "neutral", description: "128 topics" },
+      children: TOPIC_TREE,
+      expanded: true,
+    },
+  },
+};
+
+/** The same row closed. The subtree is removed from the document, not hidden with CSS. */
+export const Collapsed: Story = {
+  args: {
+    destination: {
+      id: "topics",
+      label: "Topics",
+      icon: "topics",
+      href: "/topics",
+      badge: { text: "128", tone: "neutral", description: "128 topics" },
+      children: TOPIC_TREE,
+    },
+  },
+};
+
+/**
+ * The disclosure worked from the keyboard, which is what a real `<button>` buys and a `div` with a
+ * click handler does not.
+ */
+export const DisclosureOpenedByKeyboard: Story = {
+  args: {
+    destination: {
+      id: "topics",
+      label: "Topics",
+      icon: "topics",
+      href: "/topics",
+      children: TOPIC_TREE,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.tab();
+    await userEvent.tab();
+    await expect(canvas.getByTestId("nav-topics-disclosure")).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    await expect(canvas.getByTestId("nav-topics-subtree")).toBeInTheDocument();
   },
 };

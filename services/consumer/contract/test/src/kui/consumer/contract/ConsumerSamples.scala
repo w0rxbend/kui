@@ -3,8 +3,8 @@ package kui.consumer.contract
 import java.time.Instant
 
 import kui.consumer.contract.dto.*
-import kui.contracts.capability.ReasonCode
 import kui.contracts.Section
+import kui.contracts.capability.ReasonCode
 import kui.contracts.consumer.*
 import kui.contracts.paging.{PageDto, PageInfo}
 import kui.kernel.group.{GroupProtocol, GroupState, LagAnomaly, ResetTarget}
@@ -35,6 +35,8 @@ object ConsumerSamples {
     topics = 1,
     partitions = 12,
     coordinatorId = Some(2),
+    coordinatorHost = Some("broker-2.kafka.svc"),
+    coordinatorPort = Some(9092),
     totalLag = Some(1240L),
     pace = Some(415.5d),
     excludedPartitions = 0,
@@ -53,6 +55,8 @@ object ConsumerSamples {
     topics = 1,
     partitions = 12,
     coordinatorId = Some(2),
+    coordinatorHost = Some("broker-2.kafka.svc"),
+    coordinatorPort = Some(9092),
     totalLag = None,
     pace = None,
     excludedPartitions = 3,
@@ -129,6 +133,8 @@ object ConsumerSamples {
     isSimple = false,
     partitionAssignor = "cooperative-sticky",
     coordinatorId = Some(2),
+    coordinatorHost = Some("broker-2.kafka.svc"),
+    coordinatorPort = Some(9092),
     members = List(
       MemberDto(
         memberId = "consumer-orders-indexer-1-6f1c",

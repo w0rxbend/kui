@@ -114,6 +114,12 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
   const [step, setStep] = createSignal<ResetStep>({ kind: "composing" });
   const [form, setForm] = createSignal<ResetForm>(EMPTY_RESET_FORM);
   /**
+   * Bumped every time `preview`/`applyPlan` starts a request and every time it is abandoned, so a
+   * response that finally arrives after the operator has cancelled or started a new one can tell it
+   * is stale and skip writing over whatever the screen shows now.
+   */
+  let requestToken = 0;
+  /**
    * The last thing that went wrong, whether the form refused it or the server did.
    *
    * One place, because from the operator's side "I filled this in wrongly" and "the cluster refused"
@@ -172,8 +178,12 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
       return;
     }
     setProblem(null);
+    const token = ++requestToken;
     setStep({ kind: "planning" });
     const answer = await props.plan(attempt.request);
+    // A cancelled or superseded request: the operator has already been moved off this step, and
+    // writing over whatever they are looking at now would be the stuck-forever bug in reverse.
+    if (token !== requestToken) return;
     if (answer.ok) {
       setStep({ kind: "planned", plan: answer.plan });
       return;
@@ -186,8 +196,10 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
 
   async function applyPlan(plan: ResetPlan): Promise<void> {
     setProblem(null);
+    const token = ++requestToken;
     setStep({ kind: "applying", plan });
     const answer = await props.apply(plan.token);
+    if (token !== requestToken) return;
     if (answer.ok) {
       setStep({ kind: "applied", receipt: answer.receipt });
       return;
@@ -196,6 +208,27 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
     // token has expired the honest next step is to ask for a new one, not to re-plan silently.
     setProblem(answer.problem);
     setStep({ kind: "planned", plan });
+  }
+
+  /**
+   * The escape hatch this file's audit found missing: if `plan`/`apply` never settles because the
+   * coordinator is unreachable, `busy()` had disabled every field and the only way out was closing
+   * the wizard. Cancelling abandons the in-flight call in the browser — `requestToken` makes its
+   * eventual answer, if one ever arrives, a no-op — and says plainly that the server side of it is
+   * unknown, because a write that was cancelled client-side may already have happened.
+   */
+  function cancelPlanning(): void {
+    requestToken++;
+    setStep({ kind: "composing" });
+    setProblem("The plan request was abandoned. It may still be running on the server; try again in a moment.");
+  }
+
+  function cancelApplying(plan: ResetPlan): void {
+    requestToken++;
+    setStep({ kind: "planned", plan });
+    setProblem(
+      "The apply request was abandoned in the browser. It may have already written to the cluster — check the group's offsets before retrying.",
+    );
   }
 
   return (
@@ -211,7 +244,12 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
                 <Button
                   variant="secondary"
                   disabled
-                  disabledReason={props.refusal ?? "You do not have permission to reset this group's offsets."}
+                  /* Cluster-scoped, where the caller's sentence names the group — see the note
+                     on `GroupDetail`'s forget fallback. Two identical sentences make the caller's
+                     gate unobservable. */
+                  disabledReason={
+                    props.refusal ?? "You do not have permission to reset offsets on this cluster."
+                  }
                 >
                   Reset offsets
                 </Button>
@@ -328,6 +366,11 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
             <div class="kui-cg-reset__skeleton" aria-hidden="true">
               <For each={[0, 1, 2, 3]}>{() => <Skeleton width="100%" height="1.75rem" />}</For>
             </div>
+            <div class="kui-cg-reset__actions">
+              <Button variant="ghost" onClick={cancelPlanning}>
+                Cancel
+              </Button>
+            </div>
           </Card>
         </Show>
 
@@ -338,6 +381,7 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
               applying={step().kind === "applying"}
               formatTime={props.formatTime}
               onApply={() => void applyPlan(plan())}
+              onCancelApply={() => cancelApplying(plan())}
               onBack={() => {
                 setStep({ kind: "composing" });
                 setProblem(null);
@@ -396,6 +440,7 @@ function PlanView(props: {
   readonly applying: boolean;
   readonly formatTime?: ((at: Date) => string) | undefined;
   readonly onApply: () => void;
+  readonly onCancelApply: () => void;
   readonly onBack: () => void;
 }): JSX.Element {
   const moved = createMemo(() => recordsMoved(props.plan));
@@ -442,8 +487,8 @@ function PlanView(props: {
         <Show
           when={!props.applying}
           fallback={
-            <Button variant="ghost" disabled disabledReason="The offsets are being written.">
-              Start again
+            <Button variant="ghost" onClick={props.onCancelApply}>
+              Cancel
             </Button>
           }
         >

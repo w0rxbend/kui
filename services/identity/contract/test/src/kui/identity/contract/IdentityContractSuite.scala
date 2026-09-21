@@ -2,13 +2,13 @@ package kui.identity.contract
 
 import io.circe.parser
 import io.circe.syntax.*
+import munit.ScalaCheckSuite
 
 import kui.contracts.rbac.EndpointAuthorization
 import kui.identity.contract.dto.*
-import munit.ScalaCheckSuite
 
-/** That what this service encodes is what a browser decodes, and that no endpoint is published without
-  * saying what it needs permission for.
+/** That what this service encodes is what a browser decodes, and that no endpoint is published without saying
+  * what it needs permission for.
   *
   * The suite is cross-compiled and runs on the JVM and in a JavaScript engine, which is the point: the two
   * halves of every one of these shapes are compiled from this source, and the assertion that matters is that

@@ -15,6 +15,10 @@ export type MessageDto = components["schemas"]["MessageDto"];
 type PayloadDto = components["schemas"]["DecodedPayloadDto"];
 type DecodeErrorDto = components["schemas"]["DecodeErrorDto"];
 
+type DecodeResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly cause: string };
+
 /**
  * The `kind` values KUI's own serdes produce.
  *
@@ -39,6 +43,132 @@ const PAYLOAD_KIND = {
  * threshold on: it is what the record weighs in the log.
  */
 export const LARGE_VALUE_BYTES = 256 * 1024;
+
+/**
+ * Largest value kept solely for an explicit copy action. The session applies a second aggregate
+ * budget; this per-record ceiling prevents one dishonest or unusually large frame owning it all.
+ */
+export const MAX_RETAINED_VALUE_BYTES = 1024 * 1024;
+
+/**
+ * Validates one parsed `message` frame before the typed mapper sees it.
+ *
+ * OpenAPI types describe trusted callers at compile time; an SSE frame is untrusted runtime data.
+ * Keeping that boundary here makes `toRecord`'s input promise true and, importantly, turns one bad
+ * frame into a recoverable decode result instead of an exception that tears down the stream.
+ */
+export function decodeMessageRecord(value: unknown): DecodeResult<KafkaRecord> {
+  const decoded = decodeMessageDto(value);
+  return decoded.ok
+    ? { ok: true, value: toRecord(decoded.value) }
+    : { ok: false, cause: `invalid message: ${decoded.cause}` };
+}
+
+function decodeMessageDto(value: unknown): DecodeResult<MessageDto> {
+  if (!isObject(value)) return { ok: false, cause: "must be an object" };
+
+  const partition = value["partition"];
+  if (!isNonNegativeInteger(partition)) {
+    return { ok: false, cause: "partition must be a non-negative integer" };
+  }
+  const offset = value["offset"];
+  if (!isNonNegativeInteger(offset)) {
+    return { ok: false, cause: "offset must be a non-negative integer" };
+  }
+  const timestamp = value["timestamp"];
+  if (typeof timestamp !== "string") return { ok: false, cause: "timestamp must be a string" };
+  const timestampType = value["timestampType"];
+  if (typeof timestampType !== "string") {
+    return { ok: false, cause: "timestampType must be a string" };
+  }
+
+  const key = decodePayload(value["key"], "key");
+  if (!key.ok) return key;
+  const payload = decodePayload(value["value"], "value");
+  if (!payload.ok) return payload;
+  const headers = value["headers"];
+  if (!isStringMap(headers)) return { ok: false, cause: "headers must be a string map" };
+
+  const keySize = value["keySize"];
+  if (!isNonNegativeInteger(keySize)) {
+    return { ok: false, cause: "keySize must be a non-negative integer" };
+  }
+  const valueSize = value["valueSize"];
+  if (!isNonNegativeInteger(valueSize)) {
+    return { ok: false, cause: "valueSize must be a non-negative integer" };
+  }
+  const headersSize = value["headersSize"];
+  if (!isNonNegativeInteger(headersSize)) {
+    return { ok: false, cause: "headersSize must be a non-negative integer" };
+  }
+
+  const errors = decodeErrors(value["deserializeErrors"]);
+  if (!errors.ok) return errors;
+  return {
+    ok: true,
+    value: {
+      partition,
+      offset,
+      timestamp,
+      timestampType,
+      key: key.value,
+      value: payload.value,
+      headers,
+      keySize,
+      valueSize,
+      headersSize,
+      ...(errors.value === undefined ? {} : { deserializeErrors: errors.value }),
+    },
+  };
+}
+
+function decodePayload(value: unknown, name: "key" | "value"): DecodeResult<PayloadDto> {
+  if (!isObject(value)) return { ok: false, cause: `${name} must be an object` };
+  const kind = value["kind"];
+  const text = value["text"];
+  const serde = value["serde"];
+  const properties = value["properties"];
+  if (typeof kind !== "string") return { ok: false, cause: `${name}.kind must be a string` };
+  if (typeof text !== "string") return { ok: false, cause: `${name}.text must be a string` };
+  if (typeof serde !== "string") return { ok: false, cause: `${name}.serde must be a string` };
+  if (!isStringMap(properties)) {
+    return { ok: false, cause: `${name}.properties must be a string map` };
+  }
+  return { ok: true, value: { kind, text, serde, properties } };
+}
+
+function decodeErrors(value: unknown): DecodeResult<readonly DecodeErrorDto[] | undefined> {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (!Array.isArray(value)) return { ok: false, cause: "deserializeErrors must be an array" };
+
+  const errors: DecodeErrorDto[] = [];
+  for (const error of value) {
+    if (!isObject(error)) return { ok: false, cause: "deserializeErrors entries must be objects" };
+    const target = error["target"];
+    const serde = error["serde"];
+    const cause = error["cause"];
+    if (typeof target !== "string" || typeof serde !== "string" || typeof cause !== "string") {
+      return {
+        ok: false,
+        cause: "deserializeErrors entries must contain string target, serde, and cause",
+      };
+    }
+    errors.push({ target, serde, cause });
+  }
+  return { ok: true, value: errors };
+}
+
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringMap(value: unknown): value is Readonly<Record<string, string>> {
+  return isObject(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
 
 /** One record, as the list draws it. */
 export function toRecord(dto: MessageDto): KafkaRecord {
@@ -98,7 +228,16 @@ function valueOf(dto: MessageDto): RecordValue {
   }
 
   if (dto.value.kind === PAYLOAD_KIND.absent) return { kind: "tombstone" };
-  if (dto.valueSize > LARGE_VALUE_BYTES) return { kind: "large", bytes: dto.valueSize };
+  const actualBytes = byteLength(dto.value.text);
+  const effectiveBytes = Math.max(dto.valueSize, actualBytes);
+  if (effectiveBytes > LARGE_VALUE_BYTES) {
+    return {
+      kind: "large",
+      bytes: effectiveBytes,
+      ...(actualBytes <= MAX_RETAINED_VALUE_BYTES ? { text: dto.value.text } : {}),
+      sourceKind: dto.value.kind === PAYLOAD_KIND.json ? "json" : "text",
+    };
+  }
   if (dto.value.kind === PAYLOAD_KIND.json) return { kind: "json", text: dto.value.text };
   // Binary and every kind this build does not know: plain text. See PAYLOAD_KIND.
   return { kind: "text", text: dto.value.text };
@@ -193,10 +332,8 @@ function schemaOf(
  * operator pointed at — a filter checking `record.keyAsText == ""` would come back matched for a
  * record whose key is genuinely absent.
  *
- * A value the browser declined to preview (`large`) or could not decode (`undecodable`) has no text
- * to give, and the preview is honest about that by sending an empty string with the *real* declared
- * size where one is known. A filter tried against such a record answers about the record as the
- * browser has it, which is the only thing anybody here can promise.
+ * A value the browser declined to preview (`large`) retains its text for copy and filter preview;
+ * not handing it to layout is the performance boundary. An undecodable value has no text to give.
  */
 export function toDto(record: KafkaRecord): MessageDto {
   const value = valueTextOf(record.value);
@@ -241,8 +378,8 @@ export function toDto(record: KafkaRecord): MessageDto {
  * The value as the filter will see it, and the size to declare for it.
  *
  * A tombstone is `null` and not `""` — the whole point of the kind. A payload that was too large to
- * preview or failed to decode has no text on this side, so it is sent as an empty string with its
- * true size, which is the honest statement of "the browser is holding no text for this".
+ * preview keeps its text but not a rendered DOM representation. A payload that failed to decode
+ * has no text on this side, so it is sent as an empty string.
  */
 function valueTextOf(value: RecordValue): {
   readonly kind: string;
@@ -257,7 +394,11 @@ function valueTextOf(value: RecordValue): {
     case "tombstone":
       return { kind: PAYLOAD_KIND.absent, text: "" };
     case "large":
-      return { kind: PAYLOAD_KIND.text, text: "", bytes: value.bytes };
+      return {
+        kind: value.sourceKind === "json" ? PAYLOAD_KIND.json : PAYLOAD_KIND.text,
+        text: value.text ?? "",
+        bytes: value.bytes,
+      };
     case "undecodable":
       return { kind: PAYLOAD_KIND.binary, text: value.hex ?? "" };
   }

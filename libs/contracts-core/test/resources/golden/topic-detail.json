@@ -7,7 +7,9 @@
     "outOfSyncReplicas" : 1,
     "offlinePartitions" : 1,
     "messageCount" : null,
-    "sizeBytes" : null
+    "sizeBytes" : null,
+    "produceRate" : null,
+    "cleanupPolicy" : null
   },
   "partitions" : [
     {

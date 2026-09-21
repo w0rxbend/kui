@@ -1,0 +1,12 @@
+{
+  "requestHandlers" : {
+    "status" : "ok",
+    "data" : {
+      "requestHandlerIdleRatio" : null,
+      "networkProcessorIdleRatio" : 0.7104,
+      "purgatory" : [
+      ]
+    },
+    "fetchedAt" : "2026-09-06T12:00:00.000Z"
+  }
+}

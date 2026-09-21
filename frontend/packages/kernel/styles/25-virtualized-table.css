@@ -123,3 +123,31 @@
   padding: 0;
   border-bottom: 0;
 }
+
+/* --- The selection column ---------------------------------------------------------------------
+ *
+ * `24-kernel-selection.css` already draws a table's select column, and its rules apply here
+ * unchanged — the markup is the same `--select` cells and the same `.kui-table__row--selected`
+ * fill, because it is the same idea. What is here is the part that is different *because* the rows
+ * are windowed.
+ *
+ * The width is one of them. That sheet sizes the column `width: 1%`, which under `table-layout:
+ * auto` means "as narrow as your contents" and is exactly right. This scroller sets
+ * `table-layout: fixed` — it has to, or scrolling into a region of longer topic names re-flows
+ * every column mid-scroll — and under fixed layout a percentage is taken literally: 1% of the
+ * table is a couple of pixels, and the checkbox spills across the first data column. So the column
+ * gets a real width, from the space scale like every other length here.
+ */
+.kui-vtable .kui-table__header-cell--select,
+.kui-vtable .kui-table__cell--select {
+  width: var(--kui-space-7);
+}
+
+/* The row's cells clip so a long name truncates instead of wrapping and throwing off the window
+ * arithmetic. The checkbox's focus ring is drawn just outside its box, so the one cell that must
+ * not clip is this one — otherwise the ring is shaved on three sides and a keyboard user cannot
+ * tell which row they are on. It cannot make the row taller: the control is smaller than the row.
+ */
+.kui-vtable__row > .kui-table__cell--select {
+  overflow: visible;
+}

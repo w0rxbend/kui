@@ -22,14 +22,18 @@ import kui.cluster.domain.{
   StoreHealth
 }
 import kui.cluster.infrastructure.store.{ClusterConfigStoreAdapter, ProfileChangeListener}
-import kui.cluster.infrastructure.{ClusterAdminAdapter, ClusterAdminClients, ConnectivityProbeAdapter}
+import kui.cluster.infrastructure.{
+  ClusterAdminAdapter,
+  ClusterAdminClients,
+  ConnectivityProbeAdapter,
+  KafkaPartitionSweeper
+}
 import kui.config.store.*
 import kui.config.{ClusterConfig, StoreConfig}
 import kui.contracts.health.CheckResult
 import kui.http.health.ReadinessCheck
 import kui.kafka.admin.KafkaClusterAdmin
 import kui.kafka.{AdminClientPool, AdminMetrics}
-import kui.kernel.error.KuiError
 import kui.observability.Telemetry
 
 /** The ordered startup of ADR-042, as one `Resource`.
@@ -92,6 +96,29 @@ object ClusterBootstrap {
 
   val CapabilityProbeInterval: FiniteDuration = 1.hour
 
+  /** How often the partition sweep runs.
+    *
+    * A minute rather than the topology's thirty seconds, and the number is the topic service's own
+    * `kui.topics.refreshInterval` default for the same stated reason: a topic sweep is an order of magnitude
+    * more expensive than a cluster one and its data changes an order of magnitude less often. It is a
+    * constant here rather than a setting because `libs/config` has no `kui.clusters.*` key for it and adding
+    * one is a configuration-compatibility change of its own.
+    */
+  val PartitionSweepInterval: FiniteDuration = 60.seconds
+
+  /** The controller-uptime window, and the bucket it is measured in.
+    *
+    * Six hours at one minute: 360 buckets, which is the ring `SeriesWindow` retains. The step is twice the
+    * refresh interval, so each bucket holds the newest of the two scrapes that land in it — a step shorter
+    * than the refresh would leave every other bucket a gap and report a healthy cluster as half-observed.
+    *
+    * Six and not twenty-four because the window has to *fill* before it answers, and a KUI that had to run
+    * for a day before its uptime card said anything would show nothing at all on the day anybody looked.
+    */
+  val ControllerUptimeWindow: FiniteDuration = 6.hours
+
+  val ControllerUptimeStep: FiniteDuration = 1.minute
+
   /** The instrumentation scope the cache metrics are recorded under. */
   val CacheMeter: String = "kui.cache"
 
@@ -108,7 +135,7 @@ object ClusterBootstrap {
       statics <- Resource.eval(profilesOf[F](clusters))
       // Steps 1 to 3. The store's clients, its topics, and the replay - all three inside `configStore`,
       // because they are one decision ("is there a Kafka store?") with one answer.
-      configStore <- configStoreOf[F](store, logger)
+      configStore <- ConfigStoreResource.resource[F](store, StoreClientId, logger)
       clusterStore <- ClusterConfigStoreAdapter.resource[F](configStore, logger)
       // Step 4. The registry resolves once here, before anything downstream exists.
       registry <- ClusterRegistry.make[F](statics, clusterStore, clockOf[F], logger)
@@ -118,8 +145,17 @@ object ClusterBootstrap {
       metrics <- Resource.eval(AdminMetrics.otel[F](telemetry))
       pool <- AdminClientPool.resource[F](metrics)
       clients <- ClusterAdminClients.resource[F](pool, logger)
+      // The sweeper takes the pool directly rather than going through `libs/kafka`'s `ClusterAdmin`:
+      // `describeTopics` is a topic call and that port is the cluster context's, so the call shape is
+      // local while the client, the timeouts and the metrics stay shared. See `KafkaPartitionSweeper`.
       admin <- Resource.eval(
-        ClusterAdminAdapter.create[F](KafkaClusterAdmin[F](pool), clients, telemetry, logger)
+        ClusterAdminAdapter.create[F](
+          KafkaClusterAdmin[F](pool),
+          new KafkaPartitionSweeper[F](pool, logger),
+          clients,
+          telemetry,
+          logger
+        )
       )
       // Step 6. The refresh loops, owned by this resource so that releasing it stops them.
       cacheMetrics <- Resource.eval(telemetry.meter(CacheMeter).flatMap(CacheMetrics.otel4s[F]))
@@ -127,8 +163,13 @@ object ClusterBootstrap {
         registry,
         admin,
         cacheMetrics,
-        RefreshInterval,
-        CapabilityProbeInterval,
+        ClusterSnapshots.Tuning(
+          refreshInterval = RefreshInterval,
+          capabilityInterval = CapabilityProbeInterval,
+          sweepInterval = PartitionSweepInterval,
+          uptimeWindow = ControllerUptimeWindow,
+          uptimeStep = ControllerUptimeStep
+        ),
         logger
       )
       // A profile edited in the store reaches this replica here: the listener reloads the registry, which
@@ -236,73 +277,6 @@ object ClusterBootstrap {
       )
       .leftMap(error => s"  - ${cluster.id.value}: ${error.message}")
 
-  /** The store, whichever kind this deployment has.
-    *
-    * Three shapes, and the middle one is the one operators actually meet first: a Kafka store when
-    * `kui.store.kafka.*` is set, a read-only directory when `kui.store.dir` is, and nothing at all otherwise.
-    * The store-less path is supported rather than tolerated - a KUI with clusters in its configuration file
-    * and no store is a perfectly good deployment - and it is the reason `ConfigStore` has a zero value that
-    * obeys the same contract.
-    */
-  private def configStoreOf[F[_]: {Async, Parallel, Files, LoggerFactory}](
-      config: StoreConfig,
-      logger: StructuredLogger[F]
-  ): Resource[F, ConfigStore[F]] =
-    config.kafka match {
-      case Some(kafka) =>
-        for {
-          keyring <- Resource.eval(keyringOf[F](config))
-          // The topics, before any consumer assigns a partition on one. KUI creates what is missing and
-          // validates what is there; it never rewrites an operator's topic settings.
-          _ <- StoreClients
-            .admin[F](kafka, s"$StoreClientId-bootstrap")
-            .evalMap(admin =>
-              StoreBootstrap
-                .ensureTopics[F](
-                  admin,
-                  StoreTopics.of(config),
-                  config.replicationFactor,
-                  kafka.bootstrapServers.value
-                )
-                .flatMap {
-                  case Right(()) => Async[F].unit
-                  case Left(error) => Async[F].raiseError[Unit](StoreErrors.asThrowable(error))
-                }
-            )
-          store <- KafkaConfigStore.resource[F](config, kafka, FieldCrypto[F](keyring), StoreClientId)
-          _ <- Resource.eval(logger.info("metadata store: replay complete, following the log"))
-        } yield store
-
-      case None =>
-        config.dir match {
-          case Some(dir) => FileConfigStore.resource[F](dir)
-          case None =>
-            Resource.eval(
-              logger
-                .info("no metadata store is configured; clusters come from configuration alone")
-                .as(ConfigStore.empty[F])
-            )
-        }
-    }
-
-  /** The encryption keyring, or a named failure. A Kafka store with no key cannot read its own secrets. */
-  private def keyringOf[F[_]: Async](config: StoreConfig): F[EncryptionKeyring] =
-    config.encryption match {
-      case None =>
-        Async[F].raiseError(
-          new IllegalStateException(
-            "kui.store.kafka.* is configured but kui.store.encryption is not; stored secrets cannot be " +
-              "read or written without a key"
-          )
-        )
-      case Some(encryption) =>
-        val keyring = encryption.keys.toList
-          .traverse((id, material) => EncryptionKey.fromBase64(id, material.value))
-          .flatMap(EncryptionKeyring.of(_, encryption.activeKeyId))
-
-        Async[F].fromEither(keyring.leftMap(StoreErrors.asThrowable))
-    }
-
   private def logResolved[F[_]: Async](
       registry: ClusterRegistry[F],
       logger: StructuredLogger[F]
@@ -318,18 +292,6 @@ object ClusterBootstrap {
 
   private def clockOf[F[_]: Clock]: ClockPort[F] = new ClockPort[F] {
     def now: F[Instant] = Clock[F].realTimeInstant
-  }
-
-  /** Turning a store failure into something a `Resource` can fail with, without losing its name.
-    *
-    * The message is what an operator reads when the process exits, so it keeps the store error's own words:
-    * those name the topic, the setting, the expected value and the found value.
-    */
-  private object StoreErrors {
-    def asThrowable(error: StoreError): Throwable = {
-      val kui: KuiError = StoreError.toKuiError(error)
-      new IllegalStateException(s"${kui.code.wire}: ${kui.message}")
-    }
   }
 
 }

@@ -9,13 +9,13 @@ import munit.FunSuite
 import kui.contracts.GoldenDocuments
 import kui.kernel.{ClusterId, ServiceId}
 
-/** The capability contract: the strings a browser switches on, and what happens when it meets a
-  * value from a newer gateway.
+/** The capability contract: the strings a browser switches on, and what happens when it meets a value from a
+  * newer gateway.
   */
 final class CapabilityDtosSuite extends FunSuite {
 
-  private val at        = Instant.parse("2026-09-03T10:11:12Z")
-  private val laterOn   = Instant.parse("2026-09-03T10:11:13Z")
+  private val at = Instant.parse("2026-09-03T10:11:12Z")
+  private val laterOn = Instant.parse("2026-09-03T10:11:13Z")
   private val prettyJson = io.circe.Printer.spaces2
 
   private val key = CapabilityKey(ServiceId.unsafe("cluster"), None)
@@ -46,8 +46,8 @@ final class CapabilityDtosSuite extends FunSuite {
     assertEquals(decode[CapabilityState](state.asJson.noSpaces), Right(state))
   }
 
-  /** The literal table. It exists to fail loudly when someone renames a wire string, because the
-    * browser and the metric labels are both built on these exact five words.
+  /** The literal table. It exists to fail loudly when someone renames a wire string, because the browser and
+    * the metric labels are both built on these exact five words.
     */
   test("the discriminator and reason strings are the ones the contract fixes") {
     assertEquals(CapabilityState.Available.status, "available")
@@ -135,7 +135,9 @@ final class CapabilityDtosSuite extends FunSuite {
 
   test("a cluster id that is not a legal slug is not accepted as a map key") {
     assert(
-      decode[ServiceCapabilities]("""{"service":"schema","clusters":{"Not A Slug":{"configured":true,"features":[],"status":"available"}}}""").isLeft
+      decode[ServiceCapabilities](
+        """{"service":"schema","clusters":{"Not A Slug":{"configured":true,"features":[],"status":"available"}}}"""
+      ).isLeft
     )
   }
 

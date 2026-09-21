@@ -1,16 +1,17 @@
 package kui.schema.application
 
+import scala.concurrent.duration.{Duration, FiniteDuration}
+
 import cats.effect.IO
 import cats.effect.kernel.Ref
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
-import kui.kernel.ClusterId
-import kui.kernel.Subject
-import kui.kernel.error.{InfrastructureError, KuiError}
+import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
+import kui.kernel.{ClusterId, SchemaId, Subject}
 import kui.schema.domain.*
-import kui.testkit.fakes.FakeStructuredLogger
 import kui.security.audit.{AuditSink, MutationRecord}
+import kui.testkit.fakes.FakeStructuredLogger
 
 /** A registry that answers from a map, or refuses, on demand.
   *
@@ -23,15 +24,53 @@ final class FakeRegistry(
     val schemas: Map[(String, String), RegisteredSchema] = Map.empty,
     val globalLevel: CompatibilityLevel = CompatibilityLevel.Backward,
     val subjectLevels: Map[String, CompatibilityLevel] = Map.empty,
+    val formats: Map[String, SchemaFormat] = Map.empty,
+    val unenrichable: Set[String] = Set.empty,
+    val vanished: Set[String] = Set.empty,
     val failure: Option[KuiError] = None,
-    val writes: Ref[IO, List[(String, CompatibilityLevel)]]
+    val rejects: Set[String] = Set.empty,
+    val globalFails: Boolean = false,
+    val enrichmentDelay: FiniteDuration = Duration.Zero,
+    val writes: Ref[IO, List[(String, CompatibilityLevel)]],
+    val enrichments: Ref[IO, List[String]],
+    val globalReads: Ref[IO, Int],
+    val registrations: Ref[IO, List[(String, ProposedSchema)]],
+    val inFlight: Ref[IO, Int],
+    val peakInFlight: Ref[IO, Int]
 ) extends SchemaRegistryPort[IO] {
 
   private def answer[A](value: A): IO[Either[KuiError, A]] =
     IO.pure(failure.toLeft(value))
 
+  /** `vanished` names are listed and known to nothing else, which is the shape of a subject deleted between
+    * the list call and the call that would have enriched it.
+    */
   def subjects: IO[Either[KuiError, List[Subject]]] =
-    answer(subjectsByName.keys.toList.sorted.map(Subject.unsafe))
+    answer((subjectsByName.keySet ++ vanished).toList.sorted.map(Subject.unsafe))
+
+  /** Every call is recorded, because the number of them is the promise the list page makes.
+    *
+    * A subject in `unenrichable` refuses the way a registry that stopped answering mid-page does. It is a
+    * per-subject switch rather than the whole-registry `failure` for exactly that reason: the interesting
+    * case is one row failing while the page around it succeeds.
+    */
+  def summary(subject: Subject): IO[Either[KuiError, Option[SubjectSummary]]] =
+    enrichments.update(_ :+ subject.value) *> held {
+      if unenrichable.contains(subject.value) then IO.pure(Left(SchemaRig.unreachable))
+      else
+        answer(
+          subjectsByName
+            .get(subject.value)
+            .map(versions =>
+              SubjectSummary(
+                subject = subject,
+                format = formats.get(subject.value),
+                versionCount = Some(versions.size),
+                compatibility = subjectLevels.get(subject.value).map(SubjectCompatibility.own)
+              )
+            )
+        )
+    }
 
   def versions(subject: Subject): IO[Either[KuiError, Option[List[SchemaVersion]]]] =
     answer(subjectsByName.get(subject.value).map(_.map(SchemaVersion.unsafe)))
@@ -39,10 +78,54 @@ final class FakeRegistry(
   def schema(subject: Subject, version: VersionSelector): IO[Either[KuiError, Option[RegisteredSchema]]] =
     answer(schemas.get(subject.value -> version.path))
 
-  def globalCompatibility: IO[Either[KuiError, CompatibilityLevel]] = answer(globalLevel)
+  /** Runs one enrichment while the number in flight is recorded.
+    *
+    * `peakInFlight` is the only way to see `SubjectListUseCase.MaxConcurrentRows`: the rows a page carries
+    * are identical whether they were fetched eight at a time or all at once, and the bulkhead in front of a
+    * single-writer registry is the whole reason the limit exists.
+    */
+  private def held[A](work: IO[A]): IO[A] =
+    inFlight
+      .updateAndGet(_ + 1)
+      .flatTap(now => peakInFlight.update(_.max(now)))
+      .bracket(_ => IO.sleep(enrichmentDelay) *> work)(_ => inFlight.update(_ - 1))
+
+  /** Counted, for the same reason the per-subject calls are.
+    *
+    * The registry-wide compatibility level is one call the list page makes on top of its rows, and whether it
+    * is made is the difference between a page that short-circuited and one that did not. Nothing about the
+    * rows shows it: an empty page has no rows either way. Until this counter existed, the case named "a page
+    * with no rows asks the registry nothing beyond the list itself" asserted only that no *row* was enriched,
+    * and turning the short-circuit off left it green.
+    */
+  def globalCompatibility: IO[Either[KuiError, CompatibilityLevel]] =
+    globalReads.update(_ + 1) *> {
+      // A registry that answers about subjects and not about `/config` is the state the page's
+      // registry-wide read has to survive: it costs the inheriting rows their level and nothing else.
+      if globalFails then IO.pure(Left(SchemaRig.unreachable)) else answer(globalLevel)
+    }
 
   def subjectCompatibility(subject: Subject): IO[Either[KuiError, Option[CompatibilityLevel]]] =
     answer(subjectLevels.get(subject.value))
+
+  /** Every registration is recorded, because whether the registry was contacted at all is the promise the
+    * read-only refusal makes and no answer can show it.
+    *
+    * A subject in `rejects` refuses the way a registry rejects an incompatible schema: a `KUI-VALIDATION`
+    * carrying the registry's own sentence, which is what `RegistryHttp.errorFrom` produces from a 409.
+    */
+  def register(subject: Subject, proposed: ProposedSchema): IO[Either[KuiError, RegisteredVersion]] =
+    registrations.update(_ :+ (subject.value -> proposed)) *> {
+      if rejects.contains(subject.value) then IO.pure(Left(SchemaRig.registryRejection))
+      else
+        answer(
+          RegisteredVersion(
+            subject,
+            SchemaId.unsafe(SchemaRig.RegisteredId),
+            Some(SchemaVersion.unsafe(subjectsByName.get(subject.value).fold(1)(_.size + 1)))
+          )
+        )
+    }
 
   def setGlobalCompatibility(level: CompatibilityLevel): IO[Either[KuiError, Unit]] =
     writes.update(_ :+ ("global" -> level)) *> answer(())
@@ -92,6 +175,26 @@ object SchemaRig {
 
   val unreachable: KuiError = InfrastructureError.Unreachable("schema-registry", "connection refused")
 
+  /** The id [[FakeRegistry.register]] hands back, so a case can name the number it expects. */
+  val RegisteredId: Int = 41
+
+  /** What a registry that refuses a schema produces, once `RegistryHttp` has read it: the registry's own
+    * sentence, in the message and beside the field the browser has to mark.
+    */
+  val registryRejection: KuiError =
+    ApplicationError.Invalid(
+      "the schema registry refused the request: Schema being registered is incompatible with an earlier " +
+        "schema for subject 'orders-value'",
+      List(
+        kui.kernel.error.FieldError(
+          Some("definition"),
+          List(
+            "Schema being registered is incompatible with an earlier schema for subject 'orders-value'"
+          )
+        )
+      )
+    )
+
   /** The three clusters every suite here uses: one with a registry, one without, one read-only. */
   def profiles: List[RegistryProfile] =
     List(
@@ -108,9 +211,38 @@ object SchemaRig {
       schemas: Map[(String, String), RegisteredSchema] = Map.empty,
       globalLevel: CompatibilityLevel = CompatibilityLevel.Backward,
       subjectLevels: Map[String, CompatibilityLevel] = Map.empty,
-      failure: Option[KuiError] = None
+      formats: Map[String, SchemaFormat] = Map.empty,
+      unenrichable: Set[String] = Set.empty,
+      vanished: Set[String] = Set.empty,
+      failure: Option[KuiError] = None,
+      rejects: Set[String] = Set.empty,
+      globalFails: Boolean = false,
+      enrichmentDelay: FiniteDuration = Duration.Zero
   ): IO[FakeRegistry] =
-    Ref
-      .of[IO, List[(String, CompatibilityLevel)]](Nil)
-      .map(new FakeRegistry(subjects, schemas, globalLevel, subjectLevels, failure, _))
+    for {
+      writes <- Ref.of[IO, List[(String, CompatibilityLevel)]](Nil)
+      enrichments <- Ref.of[IO, List[String]](Nil)
+      globalReads <- Ref.of[IO, Int](0)
+      registrations <- Ref.of[IO, List[(String, ProposedSchema)]](Nil)
+      inFlight <- Ref.of[IO, Int](0)
+      peakInFlight <- Ref.of[IO, Int](0)
+    } yield new FakeRegistry(
+      subjects,
+      schemas,
+      globalLevel,
+      subjectLevels,
+      formats,
+      unenrichable,
+      vanished,
+      failure,
+      rejects,
+      globalFails,
+      enrichmentDelay,
+      writes,
+      enrichments,
+      globalReads,
+      registrations,
+      inFlight,
+      peakInFlight
+    )
 }

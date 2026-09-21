@@ -67,8 +67,8 @@ final class ClusterEndpointsSuite extends FunSuite {
     }
   }
 
-  test("theEndpointListIsExactlyTheSixDeclared") {
-    // A seventh read endpoint must be a deliberate edit to this list rather than something that appears
+  test("theEndpointListIsExactlyTheTenDeclared") {
+    // A ninth endpoint must be a deliberate edit to this list rather than something that appears
     // because a value was declared.
     assertEquals(
       ClusterEndpoints.all.flatMap(_.info.name),
@@ -78,12 +78,16 @@ final class ClusterEndpointsSuite extends FunSuite {
         "cluster.brokers",
         "cluster.broker.configs",
         "cluster.logDirs",
-        "cluster.refresh"
+        "cluster.refresh",
+        "cluster.uiSettings.get",
+        "cluster.uiSettings.put",
+        "cluster.messageBrowserSettings.get",
+        "cluster.messageBrowserSettings.put"
       )
     )
   }
 
-  test("the six read endpoints are at exactly the documented addresses") {
+  test("the endpoints are at exactly the documented addresses") {
     val addresses = ClusterEndpoints.all.map(endpoint =>
       s"${endpoint.method.getOrElse(Method.GET).method} ${pathTemplate(endpoint)}"
     )
@@ -96,7 +100,11 @@ final class ClusterEndpointsSuite extends FunSuite {
         "GET /internal/v1/clusters/{clusterId}/brokers",
         "GET /internal/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
         "GET /internal/v1/clusters/{clusterId}/log-dirs",
-        "POST /internal/v1/clusters/{clusterId}/refresh"
+        "POST /internal/v1/clusters/{clusterId}/refresh",
+        "GET /internal/v1/clusters/{clusterId}/settings/ui",
+        "PUT /internal/v1/clusters/{clusterId}/settings/ui",
+        "GET /internal/v1/clusters/{clusterId}/settings/messages",
+        "PUT /internal/v1/clusters/{clusterId}/settings/messages"
       )
     )
   }
@@ -130,12 +138,12 @@ final class ClusterEndpointsSuite extends FunSuite {
     assert(!ClusterEndpoints.all.exists(_.info.name.exists(_.contains("ping"))))
   }
 
-  test("no broker-config edit endpoint is declared") {
+  test("the only put mutates principal settings, not broker configuration") {
     // BR-002 is read-only in M1. An endpoint declared before its safety net - read-only mode and audit,
     // both M5 - is one somebody implements (DEVPLAN §3).
-    assert(
-      !ClusterEndpoints.all.exists(endpoint => endpoint.method.contains(Method.PUT)),
-      ClusterEndpoints.all.flatMap(_.info.name).toString
+    assertEquals(
+      ClusterEndpoints.all.filter(_.method.contains(Method.PUT)).flatMap(_.info.name),
+      List("cluster.uiSettings.put", "cluster.messageBrowserSettings.put")
     )
   }
 }

@@ -6,8 +6,8 @@ import kui.config.StoreConfig
 import kui.kernel.PositiveInt
 import kui.testkit.KuiSuite
 
-/** That the topics KUI creates are the ones the operator page documents, and that the required settings
-  * are exactly the ones somebody decided were required.
+/** That the topics KUI creates are the ones the operator page documents, and that the required settings are
+  * exactly the ones somebody decided were required.
   *
   * The golden list of required settings is the load-bearing assertion. Adding a setting to
   * `docs/operations/metadata-store.md` without deciding whether KUI refuses to differ on it is the mistake
@@ -50,11 +50,20 @@ final class StoreTopicsSuite extends KuiSuite {
   test("requiredSettingsAreExactlyTheDocumentedSet") {
     val topics = StoreTopics.of(config())
     assertEquals(topics.config.required.keySet, Set("cleanup.policy", "min.insync.replicas"))
-    assertEquals(topics.files.required.keySet, Set("cleanup.policy", "min.insync.replicas", "max.message.bytes"))
+    assertEquals(
+      topics.files.required.keySet,
+      Set("cleanup.policy", "min.insync.replicas", "max.message.bytes")
+    )
     assertEquals(topics.config.required("cleanup.policy"), "compact")
     assertEquals(
       topics.config.advisory.keySet,
-      Set("retention.ms", "delete.retention.ms", "min.compaction.lag.ms", "segment.ms", "min.cleanable.dirty.ratio")
+      Set(
+        "retention.ms",
+        "delete.retention.ms",
+        "min.compaction.lag.ms",
+        "segment.ms",
+        "min.cleanable.dirty.ratio"
+      )
     )
   }
 
@@ -76,7 +85,9 @@ final class StoreTopicsSuite extends KuiSuite {
 
   test("minInsyncReplicasFollowsTheConfiguredValue") {
     val topics = StoreTopics.of(config(isr = 5))
-    topics.managedNow.foreach(topic => assertEquals(topic.required("min.insync.replicas"), "5", clue = topic.name))
+    topics.managedNow.foreach(topic =>
+      assertEquals(topic.required("min.insync.replicas"), "5", clue = topic.name)
+    )
   }
 
   test("creationConfigCarriesRequiredAndAdvisoryTogether") {

@@ -150,6 +150,35 @@ export function TopicConsumers(props: TopicConsumersProps): JSX.Element {
       render: (row) => <span class="kui-table__cell-number">{formatCount(row.members)}</span>,
     },
     {
+      id: "coordinator",
+      header: "Coordinator",
+      width: "14%",
+      /*
+       * The broker the group talks to, as an address (`SCREENS-V4.md` §4.11 — a column no earlier
+       * document mentions). `coordinatorHost` and `coordinatorPort` are on the wire together with
+       * `coordinatorId`, and this prints the two that make an address rather than the id: `broker 1`
+       * is not something an operator can connect to, ping, or find in a log, and the whole reason
+       * the address column exists is that they do all three.
+       *
+       * Absent is absent. A group whose coordinator KUI could not describe shows nothing here —
+       * never `broker {id}` assembled from the one field that survived, which would be an address
+       * this product invented.
+       */
+      render: (row) => (
+        <Show
+          when={row.coordinator}
+          fallback={
+            <span class="kui-table__cell-muted">
+              <span aria-hidden="true">{MISSING}</span>
+              <span class="kui-visually-hidden">no coordinator address</span>
+            </span>
+          }
+        >
+          {(address) => <span class="kui-topic-consumers__coordinator">{address()}</span>}
+        </Show>
+      ),
+    },
+    {
       id: "partitions",
       header: "Partitions here",
       align: "numeric",
@@ -205,7 +234,29 @@ export function TopicConsumers(props: TopicConsumersProps): JSX.Element {
     },
     {
       id: "dormant",
-      header: "",
+      /*
+       * `Activity` is the heading, and that is settled rather than pending.
+       *
+       * This column's header was `""` — the only empty one in the workspace, and all fourteen of
+       * the a11y sweep's `empty-table-header` violations. A blank `<th>` is the one thing a screen
+       * reader cannot work around: it announces a cell by its column, and this column had nothing
+       * to be announced by.
+       *
+       * The design drew no heading because a heading is louder than the one word it heads. A
+       * visually-hidden string would have honoured that exactly, and it is not what ships, for a
+       * reason that is a property of the design system rather than an omission waiting to be
+       * repaired: `Column.header` is a `string` rendered straight into the `<th>`, so hiding it
+       * would need the kernel to accept an element there — a prop on a primitive every table in the
+       * product shares, added so that one column can be quieter. That is the wrong trade. `Activity`
+       * names the *axis* while the cells name the exception on it ("dormant"), which is what a
+       * column heading is for; it costs one word of ink and it is what a screen-reader user hears
+       * before every cell in the column.
+       *
+       * `topics.test.tsx` asserts this `<th>` is not empty. That case exists because the a11y sweep
+       * is a whole-tree gate that says *a* table has a blank heading, and a unit case is what says
+       * which column it was.
+       */
+      header: "Activity",
       width: "10%",
       render: (row) => (
         <Show when={row.dormant}>
@@ -247,9 +298,10 @@ export function TopicConsumers(props: TopicConsumersProps): JSX.Element {
  *
  * A topic nothing consumes is completely ordinary — a topic written to by one service and read by a
  * connector that is not a consumer group, or one that nothing has got round to reading yet — so the
- * empty rendering is a statement of fact and not a problem to solve. It is the *other* three that
- * must never be drawn this way: "nobody reads this topic" and "the consumer service is down" would
- * send an operator in opposite directions.
+ * empty rendering is a statement of fact and not a problem to solve. It is the *other* two —
+ * unavailable and forbidden, the two `ConsumersFailure` carries — that must never be drawn this
+ * way: "nobody reads this topic", "the consumer service is down" and "you may not see who reads
+ * it" send an operator in three different directions.
  */
 function ConsumersEmpty(props: { readonly failure?: ConsumersFailure | undefined }): JSX.Element {
   const failure = (): ConsumersFailure | undefined => props.failure;

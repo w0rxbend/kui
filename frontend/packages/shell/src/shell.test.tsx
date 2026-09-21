@@ -14,9 +14,22 @@ import { deriveFeatureState, type FeatureRegistration, type FeatureState } from 
 
 import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, FailuresBeforeGivingUp, backoffAfter, MaxBackoffMs } from "./health.js";
-import { destinationFor, navigationGroups, stillWorking, type FeatureStatus } from "./nav/navigation.js";
+import {
+  degradedLabels,
+  destinationFor,
+  navigationGroups,
+  stillWorking,
+  type FeatureStatus,
+} from "./nav/navigation.js";
 import { clusterInUrl, createShellRouter, landingFor } from "./routing/routes.jsx";
-import { clusterSummaries, currentFeatureId } from "./App.jsx";
+import {
+  clusterSummaries,
+  countLookup,
+  currentFeatureId,
+  environmentSwitch,
+  topCrumbs,
+} from "./App.jsx";
+import type { NavCounts } from "./chrome/types.js";
 
 const topics: FeatureRegistration = {
   id: "topics",
@@ -101,7 +114,11 @@ describe("the route table", () => {
 
     const atRoot = createShellRouter("", views);
     expect(atRoot.paths()).toBe("/ui");
-    expect(landingFor(atRoot, "clusters", undefined)).toBe("/ui/clusters");
+    // `clusters` now lands on the chosen cluster's own brokers rather than the cross-cluster
+    // registry, so it has nowhere to point until a cluster is chosen — same rule as every other
+    // cluster-scoped entry.
+    expect(landingFor(atRoot, "clusters", undefined)).toBeUndefined();
+    expect(landingFor(atRoot, "clusters", "prod")).toBe("/ui/clusters/prod/brokers");
     expect(landingFor(atRoot, "topics", "prod")).toBe("/ui/clusters/prod/topics");
 
     const behindProxy = createShellRouter("/kui", views);
@@ -200,6 +217,102 @@ describe("the navigation's five states", () => {
     ];
     expect(stillWorking(features, "topics")).toEqual(["Clusters"]);
     expect(stillWorking(features, "clusters")).toEqual([]);
+  });
+
+  it("lists both sentences in declared order, whatever order the frame handed them in", () => {
+    /* Filed by W8-07 as its own two disclosed findings, and they are one rule in two functions:
+       deleting the `.sort((a, b) => a.registration.order - b.registration.order)` from *both*
+       `stillWorking` and `degradedLabels` left all 536 shell cases green. The reason is a fixture
+       problem rather than a missing file — every existing input to either function is already in
+       declared order, so the sort has never once had something to sort.
+
+       Three features, declared 300, 100, 200 and handed over in exactly that wrong order, is what
+       it takes: two would leave `reverse` and the sort agreeing, which is the defect the connect
+       suites record by name.
+
+       The rule is `navigation.ts`'s own module header — *"Order is fixed, and that is a correctness
+       property rather than a nicety… they aim at the position their muscle memory learned."* These
+       two lists are the only places an operator reads the features in prose rather than down the
+       drawer, and both sit inches from the drawer while it is on screen. A list in one order beside
+       a list in another is not read as the same list re-sorted; it is read as a different set, and
+       the fallback panel's whole job is to tell somebody whether the trip was wasted.
+
+       `navigationGroups`' own sort is a third copy and is gated twice already — W8-07 measured that
+       deleting it reddens two cases — so this closes the pair it does not cover and no more. */
+    const declaredOutOfOrder: readonly FeatureStatus[] = [
+      {
+        registration: { ...topics, id: "schemas", label: "Schema Registry", order: 300 },
+        state: ready,
+      },
+      { registration: { ...clusters, label: "Clusters", order: 100 }, state: ready },
+      { registration: { ...topics, id: "topics", label: "Topics", order: 200 }, state: ready },
+    ];
+
+    expect(stillWorking(declaredOutOfOrder, "nothing")).toEqual([
+      "Clusters",
+      "Topics",
+      "Schema Registry",
+    ]);
+
+    const degraded: FeatureState = {
+      kind: "degraded",
+      code: ReasonCodes.UpstreamTimeout,
+      message: "reading the cluster is taking 4s",
+      suggestedPollIntervalMs: undefined,
+    };
+    const allDegraded = declaredOutOfOrder.map((feature) => ({ ...feature, state: degraded }));
+
+    expect(degradedLabels(allDegraded)).toEqual(["Clusters", "Topics", "Schema Registry"]);
+  });
+});
+
+/**
+ * The seam between the frame's store and the drawer's badges.
+ *
+ * `navigationGroups` owns every rule about what a badge says, and `nav/navigation.test.ts` pins
+ * them. What is asserted here is the other half: that the shell actually hands the fold the numbers
+ * its store learned, keyed the way the fold expects, and that plugging a real source in does not
+ * quietly defeat the one rule that matters most when a service is down. Wave 1 shipped the fold and
+ * the store and connected neither to the other, and every rule below was green throughout.
+ */
+describe("the badges the frame hands the drawer", () => {
+  const landing = (registration: FeatureRegistration, cluster: string | undefined) =>
+    registration.requiresCluster
+      ? cluster === undefined
+        ? undefined
+        : `/ui/clusters/${cluster}/topics`
+      : "/ui/clusters";
+
+  const badgeFor = (state: FeatureState, counts: NavCounts | undefined) =>
+    navigationGroups({
+      features: [{ registration: topics, state }],
+      landingFor: landing,
+      cluster: "prod",
+      countFor: countLookup(counts),
+    })
+      .flatMap((group) => group.destinations)
+      .find((destination) => destination.id === "topics")?.badge;
+
+  it("draws the count the store learned", () => {
+    const badge = badgeFor(ready, { topics: { kind: "total", value: 128 } });
+    expect(badge?.text).toBe("128");
+    expect(badge?.tone).toBe("neutral");
+  });
+
+  it("draws no badge at all for a count the store has not learned", () => {
+    /* Not a `0`. "Topics 0" on a cluster whose topic service did not answer is a statement about
+       the cluster, and a false one — and the store has three separate ways of having no number. */
+    expect(badgeFor(ready, {})).toBeUndefined();
+    expect(badgeFor(ready, undefined)).toBeUndefined();
+  });
+
+  it("gives the row to the capability badge when the service is down, count or no count", () => {
+    /* `128` beside a dead topic service is a reassuring picture of an outage: the reader sees a
+       figure, concludes the topics are fine, and the one marker that would have said otherwise is
+       the one dropped to make room for it. */
+    const badge = badgeFor(down, { topics: { kind: "total", value: 128 } });
+    expect(badge?.text).toBe("down");
+    expect(badge?.tone).toBe("danger");
   });
 });
 
@@ -432,8 +545,8 @@ describe("the cluster switcher's rows", () => {
     ...(name === undefined ? {} : { name }),
   });
 
-  /* It shipped as a featureless dot. The row shows the operator's name for the cluster, and the
-   * chevron on the trigger is the chrome's own — see `ClusterSelector`. */
+  /* It shipped as a featureless dot. The row shows the operator's name for the cluster; the chrome
+   * draws the health mark beside it. */
   it("shows the display name the gateway reported, not the identifier", () => {
     const rows = clusterSummaries(
       new Map([["cluster/prod", entry("prod", "available", "Production EU")]]),
@@ -457,6 +570,59 @@ describe("the cluster switcher's rows", () => {
     );
     expect(rows[0]?.health).toBe("unreachable");
   });
+
+  /**
+   * The order the environment rail's tiles are in, and the tie-break under it.
+   *
+   * Rows are sorted by name; the `|| a.id.localeCompare(b.id)` after it could be deleted with all
+   * 498 cases `pnpm -C frontend test packages/shell` runs still green, measured here. Two clusters
+   * carrying the same *name* is a real state — the name is whatever the operator put in their
+   * configuration and nothing makes it unique, and a cluster nobody named falls back to its id —
+   * and `Array.prototype.sort` is stable, so without the tie-break the two keep the order the
+   * **capability map** happened to hold them in. That map is rebuilt from every frame the gateway
+   * streams, which on a struggling cluster is every few seconds: the rail's tiles would then swap
+   * places under the pointer of somebody reaching for one, and switching environment is the one
+   * click in this product that changes what a later destructive action will destroy.
+   *
+   * It is the same rule as the drawer's declared order and the topic tree's alphabetical tie-break,
+   * at the third of the three places this frame sorts something.
+   */
+  it("orders by name and breaks a tie on the identifier, whatever order the frame held them in", () => {
+    const rows = (pairs: readonly (readonly [string, string])[]) =>
+      clusterSummaries(
+        new Map(pairs.map(([id]) => [`cluster/${id}`, entry(id, "available", "Production")])),
+      ).map((row) => row.id);
+
+    // One name, two clusters, offered in each order. Both must draw `eu` before `us`.
+    expect(rows([["us", "Production"], ["eu", "Production"]])).toEqual(["eu", "us"]);
+    expect(rows([["eu", "Production"], ["us", "Production"]])).toEqual(["eu", "us"]);
+  });
+});
+
+describe("changing environment", () => {
+  it("says nothing at all when the chosen cluster is the one already shown", () => {
+    /* The rail marks the current environment, so this is a misclick — and a confirmation for a
+       misclick is what teaches an operator that the toasts in this product are noise. */
+    expect(environmentSwitch("prod", "prod", "Production EU", true)).toBeUndefined();
+  });
+
+  it("names the cluster the way the operator named it, and falls back to the identifier", () => {
+    expect(environmentSwitch("prod", "staging", "Production EU", false)?.title).toBe(
+      "Switched to Production EU",
+    );
+    /* A blank where a name goes reads as a bug in the toast rather than as a cluster nobody has
+       named, which is the same degradation `clusterSummaries` makes for the same reason. */
+    expect(environmentSwitch("prod", "staging", undefined, false)?.title).toBe("Switched to prod");
+  });
+
+  it("rewrites the address only when the address disagrees with the new selection", () => {
+    /* On `/ui/clusters/staging/topics`, leaving the address alone puts a URL saying `staging` in
+       front of a frame describing `prod` — and the address is the half of that pair people copy. */
+    expect(environmentSwitch("prod", "staging", undefined, true)?.rewriteAddress).toBe(true);
+    /* On `/ui/settings` there is nothing to contradict, and moving somebody off a page they
+       deliberately opened is the rudeness `soleClusterChoice` is careful to avoid. */
+    expect(environmentSwitch("prod", "staging", undefined, false)?.rewriteAddress).toBe(false);
+  });
 });
 
 describe("which navigation entry is current", () => {
@@ -464,9 +630,293 @@ describe("which navigation entry is current", () => {
     expect(currentFeatureId("/ui/", "/ui")).toBe("overview");
     expect(currentFeatureId("/ui/settings", "/ui")).toBe("settings");
     expect(currentFeatureId("/ui/clusters", "/ui")).toBe("clusters");
+    expect(currentFeatureId("/ui/clusters/manage", "/ui")).toBe("clusters");
     expect(currentFeatureId("/ui/clusters/prod/brokers", "/ui")).toBe("clusters");
     expect(currentFeatureId("/kui/ui/clusters/prod/topics/orders", "/kui/ui")).toBe("topics");
     expect(currentFeatureId("/ui/clusters/prod/consumer-groups", "/ui")).toBe("consumers");
+    expect(currentFeatureId("/ui/clusters/prod/alerts", "/ui")).toBe("alerts");
+  });
+
+  /**
+   * Alerts, and the address that is not it.
+   *
+   * The screen is a route of its own — `/clusters/<id>/alerts` — and there is no dashboard tab
+   * called alerts. `/dashboard/alerts` therefore has to read as the **dashboard**, because that is
+   * what the route table matches it to; reading it as the alerts screen would highlight a drawer
+   * row for a page the reader is not on, which is the defect the dashboard and the registry both
+   * had until wave 5. The two spellings are one segment apart and the fall-through is a
+   * `segments.includes`, so this is the pair worth writing down.
+   */
+  it("marks the alerts screen as itself and the dashboard's tabs as the dashboard", () => {
+    expect(currentFeatureId("/ui/clusters/prod/alerts", "/ui")).toBe("alerts");
+    expect(currentFeatureId("/kui/ui/clusters/prod/alerts", "/kui/ui")).toBe("alerts");
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/alerts", "/ui")).toBe("overview");
+  });
+
+  /**
+   * The tenth service's screen, which arrives with the same trap the ninth's did.
+   *
+   * Every test under the dashboard line is a `segments.includes`, so a section with no line of its
+   * own does not fail loudly: it falls through to the `clusters` fall-through below and comes back
+   * `"overview"`. The drawer would then highlight the dashboard while `@kui/feature-connect` drew
+   * the connector list, and the trail would read `prod-kyiv-01` alone — the trail for a different
+   * page. That is the exact defect the case above this one exists to record, and it is written here
+   * rather than discovered because the fall-through is silent.
+   */
+  it("marks the Connect screen as itself and not as the dashboard it falls through to", () => {
+    expect(currentFeatureId("/ui/clusters/prod/connect", "/ui")).toBe("connect");
+    expect(currentFeatureId("/kui/ui/clusters/prod/connect", "/kui/ui")).toBe("connect");
+    // And a dashboard tab spelled the same way is still the dashboard, as it is for alerts.
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/connect", "/ui")).toBe("overview");
+  });
+
+  /** The eleventh service's screen, with the same silent fall-through the ninth and tenth had. */
+  it("marks the ksqlDB screen as itself and not as the dashboard it falls through to", () => {
+    expect(currentFeatureId("/ui/clusters/prod/ksql", "/ui")).toBe("ksql");
+    expect(currentFeatureId("/kui/ui/clusters/prod/ksql", "/kui/ui")).toBe("ksql");
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/ksql", "/ui")).toBe("overview");
+  });
+
+  /**
+   * The screen that had been falling through since it was written, and was never noticed because
+   * the feature it belongs to is the one with no drawer entry.
+   *
+   * `/clusters/<id>/messages/track` is `@kui/feature-messages`' cross-topic search. It names no
+   * topic — that is what makes it the *cross-topic* one — so every `segments.includes` above it
+   * missed, and it fell through to the `/clusters/<id>` arm and came back `"overview"`: the drawer
+   * highlighted the cluster dashboard and the trail drew the dashboard's. The other half of the
+   * pair is the record browser under a topic, which stays `topics` because that is where the
+   * operator came from and where the trail should lead back to.
+   */
+  it("marks the cross-topic search as itself while the browser under a topic stays Topics", () => {
+    expect(currentFeatureId("/ui/clusters/prod/messages/track", "/ui")).toBe("messages");
+    expect(currentFeatureId("/kui/ui/clusters/prod/messages/track", "/kui/ui")).toBe("messages");
+    expect(currentFeatureId("/ui/clusters/prod/topics/orders/messages", "/ui")).toBe("topics");
+  });
+
+  /**
+   * The address the product opens on, which was marking the wrong entry.
+   *
+   * `/clusters/<id>/dashboard/overview` fell through to the `clusters` fall-through, so the drawer
+   * highlighted **Brokers** and the top band's trail read "Brokers" over a page headed "Cluster
+   * overview" — three signals about where you are, two of them wrong, on the first screen anybody
+   * sees. The registry's screen had the same defect one row down.
+   */
+  it("marks the dashboard and the registry as themselves rather than as Brokers", () => {
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/overview", "/ui")).toBe("overview");
+    expect(currentFeatureId("/ui/clusters/prod/dashboard", "/ui")).toBe("overview");
+    // The shortest thing anybody types, which resolves to the same page.
+    expect(currentFeatureId("/ui/clusters/prod", "/ui")).toBe("overview");
+    expect(currentFeatureId("/ui/clusters/prod/schemas", "/ui")).toBe("schemas");
+    const deep = currentFeatureId("/kui/ui/clusters/prod/schemas/orders-value", "/kui/ui");
+    expect(deep).toBe("schemas");
+  });
+});
+
+/**
+ * The trail in the top band, which is the *installation* trail: which deployment, which cluster,
+ * which section.
+ *
+ * The section crumb comes from the same reading as the drawer's highlight, so the two cannot
+ * disagree — and "overview" deliberately adds no crumb, because the cluster crumb already links
+ * there and a trail that repeats itself is a trail nobody reads.
+ */
+describe("the top band's trail", () => {
+  const clusters = [{ id: "prod", name: "prod-kyiv-01", health: "healthy" as const }];
+  const router = createShellRouter("", {
+    home: () => null,
+    settings: () => null,
+    forbidden: () => null,
+    notFound: () => null,
+    feature: () => () => null,
+  });
+
+  it("names the cluster and the section, and says nothing twice", () => {
+    const at = "/ui/clusters/prod/dashboard/overview";
+    const dashboard = topCrumbs(clusters, "prod", at, "/ui", router);
+    expect(dashboard.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01"]);
+
+    const schemas = topCrumbs(clusters, "prod", "/ui/clusters/prod/schemas", "/ui", router);
+    expect(schemas.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Schema Registry"]);
+
+    const brokers = topCrumbs(clusters, "prod", "/ui/clusters/prod/brokers", "/ui", router);
+    expect(brokers.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Brokers"]);
+
+    /* The ninth service's screen. Its label comes from the same table as the others, so a section
+       reachable from the drawer with no row in that table would drop its crumb silently — the trail
+       would read `prod-kyiv-01` alone, which is the trail for the dashboard, over a different
+       page. */
+    const alerts = topCrumbs(clusters, "prod", "/ui/clusters/prod/alerts", "/ui", router);
+    expect(alerts.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Alerts"]);
+
+    /* And the tenth's. The failure this asserts against is silent in both directions: a section
+       missing from the label table drops its crumb, and a section missing from `currentFeatureId`
+       draws the *dashboard's* trail over somebody else's page. */
+    const connect = topCrumbs(clusters, "prod", "/ui/clusters/prod/connect", "/ui", router);
+    expect(connect.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Connect"]);
+
+    /* And the eleventh's, where the *spelling* is the assertion as well as the presence. The id is
+       `ksql` because an id is a path segment; the product's word is `ksqlDB` (§4.15), with one
+       capital in the middle. A crumb built from the id rather than from the table would read
+       `Ksql`, which is a word this product does not use anywhere a person can see. */
+    const ksql = topCrumbs(clusters, "prod", "/ui/clusters/prod/ksql", "/ui", router);
+    expect(ksql.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "ksqlDB"]);
+
+    /* Filed by W8-07's verification pass as V3-4. `settings` is the one row in `LABELS` that is not
+       a feature id — it is the shell's own destination, reachable from the drawer's foot on every
+       page — and it was the one row with no assertion: deleting `settings: "Settings",` left all
+       536 shell cases green, and the top band on the settings page silently lost its second crumb.
+
+       Silently is the word that matters. `LABELS` is typed `Record<string, string>`, so a lookup
+       that misses yields `undefined`, the `if` below it declines to push, and the trail comes back
+       as the cluster name alone — which is exactly the trail the *dashboard* draws. The failure is
+       not a blank crumb an eye would catch; it is a correct-looking trail for a different page.
+       The structural half of this — typing the table over the feature ids so the ninth feature's
+       missing crumb is a compile error rather than an empty band, the way `landingFor`'s exhaustive
+       switch made `ksql` impossible to forget — is a production change, filed to its owner. */
+    const settings = topCrumbs(clusters, "prod", "/ui/settings", "/ui", router);
+    expect(settings.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Settings"]);
+  });
+
+  it("names the cross-topic search, which used to draw the dashboard's trail", () => {
+    /*
+     * The section the label table was missing, found by typing the table over `FeatureId` rather
+     * than by anybody noticing on screen — which is the argument for the type in one sentence.
+     * `messages` is a feature id, `/clusters/<id>/messages/track` is an address it owns alone, and
+     * every section test in `currentFeatureId` missed it: it fell through to the `/clusters/<id>`
+     * arm and came back `overview`, so the band drew `prod-kyiv-01` and nothing else — the cluster
+     * dashboard's trail, over the cross-topic search.
+     *
+     * Nothing looked wrong. That is the whole defect: a blank second crumb is a rendering fault an
+     * eye catches, and a *correct trail for a different page* is one nobody does.
+     */
+    const track = topCrumbs(clusters, "prod", "/ui/clusters/prod/messages/track", "/ui", router);
+    expect(track.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Messages"]);
+
+    /* And the record browser is still Topics, which is not the same decision made twice. It is
+       reached from a topic's page and lives under that topic's address, so the trail that leads
+       back where the operator came from is the topic's. The ordering inside `currentFeatureId` is
+       what holds the two apart, and reversing it would send this trail to Messages. */
+    const browse = topCrumbs(
+      clusters,
+      "prod",
+      "/ui/clusters/prod/topics/orders/messages",
+      "/ui",
+      router,
+    );
+    expect(browse.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Topics"]);
+  });
+
+  it("draws a second crumb for every section a person can navigate to", () => {
+    /*
+     * The rule this packet owns, asserted over the product rather than over the table: **a section
+     * the frame can be on says which section it is.** Written as a sweep rather than as one more
+     * literal because the literals above are the vocabulary — is `ksqlDB` spelled with one capital,
+     * is `clusters` called Brokers — and this is the totality. They fail for different reasons and
+     * a rename should not be able to satisfy this one.
+     *
+     * The table's type is the first line of defence and is checked by `pnpm typecheck` before a
+     * case runs: a `FeatureId` with no row will not compile. This is the second, and it is not
+     * redundant with the first, because the type cannot see the *route*. A section named in the
+     * table that `currentFeatureId` never returns has a label nothing can reach, and a section
+     * `currentFeatureId` returns whose address is not in this list is a screen nobody checked. Both
+     * halves are here, one per row.
+     *
+     * `overview` is deliberately absent from the list and deliberately named in the table: the
+     * cluster crumb already links there. It is asserted the other way round, in the case above —
+     * the dashboard's trail is the cluster name alone.
+     */
+    const addresses: readonly (readonly [string, string])[] = [
+      ["/ui/clusters/prod/brokers", "Brokers"],
+      ["/ui/clusters/prod/topics", "Topics"],
+      ["/ui/clusters/prod/messages/track", "Messages"],
+      ["/ui/clusters/prod/consumer-groups", "Consumers"],
+      ["/ui/clusters/prod/schemas", "Schema Registry"],
+      ["/ui/clusters/prod/alerts", "Alerts"],
+      ["/ui/clusters/prod/connect", "Connect"],
+      ["/ui/clusters/prod/ksql", "ksqlDB"],
+      ["/ui/settings", "Settings"],
+    ];
+
+    for (const [address, expected] of addresses) {
+      const trail = topCrumbs(clusters, "prod", address, "/ui", router);
+      expect(trail.map((crumb) => crumb.label), `the trail on ${address}`).toEqual([
+        "prod-kyiv-01",
+        expected,
+      ]);
+    }
+
+    /* And no two sections share a word. A table whose rows were copied from one another draws the
+       same crumb on two different screens, which reads as a navigation that went nowhere.
+
+       Read off the PRODUCT and not off the literal above. `addresses.map(([, label]) => label)` is
+       the test's own answer key compared with itself: it can fail only if the author of this file
+       types one string twice, and no edit to `LABELS` or to `topCrumbs` can redden it. Filed as
+       W9-04/5.4. */
+    const words = addresses.map(
+      ([address]) => topCrumbs(clusters, "prod", address, "/ui", router)[1]?.label,
+    );
+    expect(new Set(words).size).toBe(words.length);
+  });
+
+  it("gives a second crumb to every feature address the route table registers", () => {
+    /*
+     * THE TOTALITY, TAKEN FROM THE REGISTRY THAT KNOWS RATHER THAN FROM A LIST BESIDE IT. The case
+     * above sweeps nine addresses written out by hand, and the type on `LABELS` forces a *key* and
+     * not a *crumb* — its values are `string | undefined`, so the compile error a missing section
+     * produces is satisfied by writing `undefined`. Both defences are therefore defeated by the
+     * same three lines: widen `CrumbSection`, add `reports: undefined` beside `overview`, add one
+     * arm to `currentFeatureId`, and `/clusters/<id>/reports` becomes a navigable section drawing
+     * the cluster dashboard's trail over itself, with `typecheck` and every shell case green.
+     * Filed as W9-04/5.3.
+     *
+     * `routing/routes.tsx` already answers "which feature is this address" for every route, because
+     * every one carries `gate("<featureId>")`; the table is walked here with a tagged gate exactly
+     * as `routing/routes.test.ts` walks it, so a route registered with no crumb fails in this
+     * package instead of being found in a browser. The record browser is not an exception to this
+     * assertion — `…/topics/:topicName/messages` deliberately draws Topics rather than Messages,
+     * which is a crumb, and which word it is is the case above's business.
+     */
+    type TableNode = {
+      readonly path?: string;
+      readonly component?: { readonly featureId?: string };
+      readonly children?: readonly TableNode[];
+    };
+
+    const tagged = createShellRouter("", {
+      home: () => null,
+      settings: () => null,
+      forbidden: () => null,
+      notFound: () => null,
+      feature: (id) => Object.assign(() => null, { featureId: id }),
+    });
+
+    const patterns: string[] = [];
+    const walk = (nodes: readonly TableNode[], prefix: string): void => {
+      for (const node of nodes) {
+        const here = `${prefix}${node.path ?? ""}`;
+        // A trailing `/` is how an index child is written; the router's own pattern has none.
+        if (node.component?.featureId !== undefined) patterns.push(here.replace(/(.)\/$/, "$1"));
+        if (node.children !== undefined) walk(node.children, here);
+      }
+    };
+    walk(tagged.routes as unknown as readonly TableNode[], "/ui");
+
+    /* The roster is derived, so it has to be non-trivial or a walker that found nothing would pass
+       this case in silence. Fifteen feature routes are registered today. */
+    expect(patterns.length).toBeGreaterThanOrEqual(15);
+
+    for (const pattern of patterns) {
+      const address = pattern
+        .replace(":clusterId", "prod")
+        .replace(":topicName", "orders")
+        .replace(":brokerId", "1")
+        .replace(":groupId", "orders-consumer")
+        .replace(":subject", "orders-value");
+      const trail = topCrumbs(clusters, "prod", address, "/ui", router);
+      expect(trail.map((crumb) => crumb.label), `the trail on ${address}`).toHaveLength(2);
+      expect(trail[1]?.label ?? "", `the section crumb on ${address}`).not.toBe("");
+    }
   });
 });
 

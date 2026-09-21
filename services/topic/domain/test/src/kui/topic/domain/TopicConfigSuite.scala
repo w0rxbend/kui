@@ -16,7 +16,15 @@ final class TopicConfigSuite extends KuiSuite {
       sensitive: Boolean = false,
       synonyms: List[ConfigSynonym] = Nil
   ): TopicConfigEntry =
-    TopicConfigEntry(name, value, source, sensitive, isReadOnly = false, documentation = None, synonyms = synonyms)
+    TopicConfigEntry(
+      name,
+      value,
+      source,
+      sensitive,
+      isReadOnly = false,
+      documentation = None,
+      synonyms = synonyms
+    )
 
   private val default: ConfigSynonym = ConfigSynonym("retention.ms", Some("604800000"), ConfigSource.Default)
 
@@ -41,7 +49,10 @@ final class TopicConfigSuite extends KuiSuite {
 
     assertEquals(secret.value, None)
     assertEquals(secret.defaultValue, None)
-    assert(!secret.isOverridden, "'overridden' is not knowable without the value, and a bold row would be a guess")
+    assert(
+      !secret.isOverridden,
+      "'overridden' is not knowable without the value, and a bold row would be a guess"
+    )
   }
 
   test("aValueEqualToItsDefaultIsNotOverridden") {

@@ -2,10 +2,14 @@ package kui.gateway.api.routing
 
 import sttp.tapir.AnyEndpoint
 
+import kui.alerts.contract.AlertsEndpoints
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
+import kui.connect.contract.ConnectEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
+import kui.ksql.contract.KsqlEndpoints
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
+import kui.metrics.contract.MetricsEndpoints
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
@@ -16,7 +20,7 @@ import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
   * written here is only the association between the id an operator configures and the endpoint list to derive
   * routes from.
   *
-  * It grows by one line per service across M1 to M8. A service the gateway has no contract for is not an
+  * It grows by one line per service across M1 to M9. A service the gateway has no contract for is not an
   * error: it is configured, polled, and reported in the capability snapshot, it simply has no proxied routes
   * yet. That is what lets a service be deployed before the gateway build that routes it.
   */
@@ -54,11 +58,43 @@ object ServiceContracts {
         "message"
       ) -> (MessageMutationEndpoints.all ++ FilterEndpoints.all ++ TrackEndpoints.all),
       // Both lists, for the same reason as the topic and consumer services: the schema service
-      // publishes its five reads from one object and its three bodied endpoints from another. The
-      // second list holds the two compatibility writes *and* the compatibility check, which is not a
-      // mutation at all — it is grouped by request shape, not by effect — so leaving that list out
-      // would silently drop the one endpoint a registration flow needs most.
-      ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all)
+      // publishes its five reads from one object and its four bodied endpoints from another. The
+      // second list holds the three writes — the two compatibility settings and the registration —
+      // *and* the compatibility check, which is not a mutation at all: it is grouped by request shape,
+      // not by effect, so leaving that list out would silently drop the one endpoint a registration
+      // flow needs most. The two counts are asserted in `ServiceContractsSuite` rather than left as
+      // prose, because this sentence has been wrong once already.
+      ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all),
+      // One list, because the metrics service publishes reads and no mutation: nothing it publishes
+      // changes a cluster, and there is nothing for a read-only deployment to refuse. It is the eighth
+      // service and the shortest entry in this map, which is the point of it — a service is added here
+      // in one line, and its endpoints arrive without one. M7 adds four reads to that list and this
+      // entry does not move.
+      ServiceId.unsafe("metrics") -> MetricsEndpoints.all,
+      // One list, and the ninth service. `AlertsEndpoints.all` is the feed read and the acknowledgement
+      // write; the stream is deliberately not here, because `ContractRouting.derive` decodes and
+      // re-encodes an upstream's JSON and that is the wrong thing to do to an event stream. A stream is
+      // relayed by hand, the way `MessageStreamRoutes` relays the browse feed, so the endpoint value in
+      // `AlertsStreamEndpoint` is held for that relay rather than for this map.
+      ServiceId.unsafe("alerts") -> AlertsEndpoints.all,
+      // One list, and the tenth service. `ConnectEndpoints.all` is the connector read and the three
+      // operations — pause, resume and restart — published from the same object rather than from a second
+      // one, because none of them is destructive: a paused connector is resumed and a restarted one
+      // re-reads its own committed offsets, so ADR-045's plan → token → confirm does not apply and there
+      // is no marker to group by. They are still writes, they still carry the CSRF header and an audit
+      // record, and `MergedDocumentShapeSuite` asserts their count so that a fourth operation added to
+      // `ConnectEndpoints.writes` and forgotten here is a failure rather than a silent omission.
+      ServiceId.unsafe("connect") -> ConnectEndpoints.all,
+      // One list, and the eleventh service. `KsqlEndpoints.all` is the object listing, the statement plan
+      // and the statement apply; the push query is deliberately not here, for the alerts stream's reason —
+      // `ContractRouting.derive` decodes and re-encodes an upstream's JSON and a push query is an event
+      // stream. `KsqlStreamEndpoint` is held in the contract's JVM half for `KsqlStreamRoutes` to relay.
+      //
+      // The plan and the apply are published from the same object rather than a second one, although both
+      // carry ADR-045 markers: unlike the topic service, ksqlDB has no *known* destructive operation to
+      // group — the statement is whatever somebody typed, so the plan is a classification rather than a
+      // second list. `MergedDocumentShapeSuite` counts the two writes for the connect entry's reason.
+      ServiceId.unsafe("ksql") -> KsqlEndpoints.all
     )
 
   /** The identity service is **deliberately absent** from the map above, and must stay absent.

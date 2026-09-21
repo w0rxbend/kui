@@ -8,8 +8,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The registry that keeps each cluster's admin client in step with the profile it was built from.
   *
-  * The client lifecycle itself is `libs/kafka`'s `AdminClientPool` and is tested there. What is asserted
-  * here is the one thing the pool cannot know: that a profile whose version moved is a different connection
+  * The client lifecycle itself is `libs/kafka`'s `AdminClientPool` and is tested there. What is asserted here
+  * is the one thing the pool cannot know: that a profile whose version moved is a different connection
   * wearing the same cluster id, and that its client is thrown away before anything talks through it again.
   */
 final class ClusterAdminClientsSuite extends KuiIOSuite {
@@ -145,7 +145,11 @@ final class ClusterAdminClientsSuite extends KuiIOSuite {
       } yield {
         assertEquals(open, 1)
         assert(events.size <= 1, s"at most one eviction can have happened, got $events")
-        assertEquals(after, List("evict:local"), s"exactly one eviction for the move to version 2, got $after")
+        assertEquals(
+          after,
+          List("evict:local"),
+          s"exactly one eviction for the move to version 2, got $after"
+        )
       }
     }
   }

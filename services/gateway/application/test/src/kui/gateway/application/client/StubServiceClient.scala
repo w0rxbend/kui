@@ -32,9 +32,9 @@ enum ServiceHealth {
 
 /** A `ServiceClient` that answers health probes from a `Ref` and counts them.
   *
-  * The readiness poller's promises are almost all about calls that did or did not happen — polls that did
-  * not overlap, polls that stopped when the resource was released, one service's poll not blocking
-  * another's — so the fixture has to record calls rather than only answer them.
+  * The readiness poller's promises are almost all about calls that did or did not happen — polls that did not
+  * overlap, polls that stopped when the resource was released, one service's poll not blocking another's — so
+  * the fixture has to record calls rather than only answer them.
   */
 trait StubServiceClient[F[_]] extends ServiceClient[F] {
   def health: Ref[F, ServiceHealth]
@@ -75,7 +75,8 @@ object StubServiceClient {
       ): F[Either[KuiError, O]] = {
         val isReadiness = endpoint.info.name.contains("health.ready")
         val counted = if isReadiness then readyCount else capabilityCount
-        counted.update(_ + 1) *> state.get.flatMap(answer(_, isReadiness)).map(_.asInstanceOf[Either[KuiError, O]])
+        counted
+          .update(_ + 1) *> state.get.flatMap(answer(_, isReadiness)).map(_.asInstanceOf[Either[KuiError, O]])
       }
 
       private def answer(health: ServiceHealth, isReadiness: Boolean): F[Either[KuiError, Any]] =

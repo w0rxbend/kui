@@ -227,7 +227,9 @@ final class HttpClusterProfilesSuite extends CatsEffectSuite {
         result <- client(fake, fastConfig).use { (profiles, _) =>
           for {
             _ <- profiles.onChange(change => changes.update(_ :+ change))
-            _ <- fake.update(current => current.copy(profiles = current.profiles.updated(Prod, profile(Prod, 9L))))
+            _ <- fake.update(current =>
+              current.copy(profiles = current.profiles.updated(Prod, profile(Prod, 9L)))
+            )
             // Nothing has been said on the stream, so nothing has happened yet.
             _ <- IO.sleep(30.seconds)
             before <- profiles.all
@@ -439,9 +441,9 @@ final class HttpClusterProfilesSuite extends CatsEffectSuite {
 
 /** The backoff curve, on its own.
   *
-  * It is a pure function so that it can be asserted as a property rather than observed through a client:
-  * the thing that matters is the shape of the curve — it grows, it is capped, and it never reaches zero —
-  * and a suite that inferred that from sleep times would be asserting the scheduler as well.
+  * It is a pure function so that it can be asserted as a property rather than observed through a client: the
+  * thing that matters is the shape of the curve — it grows, it is capped, and it never reaches zero — and a
+  * suite that inferred that from sleep times would be asserting the scheduler as well.
   */
 final class ClusterProfilesConfigSuite extends ScalaCheckSuite {
 

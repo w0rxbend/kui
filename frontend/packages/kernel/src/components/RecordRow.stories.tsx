@@ -91,7 +91,7 @@ export const OpensFromTheKeyboard: Story = {
   args: { record: first, now: NOW },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const summary = canvas.getByRole("button");
+    const summary = canvas.getByRole("button", { expanded: false });
     summary.focus();
     await expect(summary).toHaveFocus();
     await userEvent.keyboard("{Enter}");

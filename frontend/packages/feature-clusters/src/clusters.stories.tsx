@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { BrokerDetail } from "./BrokerDetail.jsx";
 import { BrokerList } from "./BrokerList.jsx";
 import { ClusterList } from "./ClusterList.jsx";
-import { DEGRADED_BROKERS, RACKED_BROKERS, SAMPLE_BROKERS, SAMPLE_CLUSTERS, SAMPLE_CONFIGS, SAMPLE_LOG_DIRS } from "./fixtures.js";
+import { DEGRADED_BROKERS, RACKED_BROKERS, SAMPLE_BROKERS, SAMPLE_CLUSTERS, SAMPLE_CONFIGS, SAMPLE_LOG_DIRS, UNMEASURED_BROKERS } from "./fixtures.js";
 
 /**
  * The cluster and broker screens.
@@ -101,6 +101,7 @@ export const BrokersExpanded: Story = {
               { name: "compression.type", value: "producer" },
             ]
       }
+      configsMoreFor={(id) => (id === 1 ? 332 : undefined)}
       configsErrorFor={(id) => (id === 3 ? "The cluster refused describeConfigs" : undefined)}
     />
   ),
@@ -111,6 +112,29 @@ export const BrokersExpanded: Story = {
   },
 };
 
+/**
+ * A single-broker cluster nothing has finished scraping — which is what a stack looks like for the
+ * first minute of its life, and what the quickstart answers today.
+ *
+ * Two refusals are on screen at once and neither is drawn as a failure. The disk bar has no
+ * percentage, because Kafka reports what a broker holds and not how large the disk under it is, and
+ * says so underneath. The voice line does **not** say "Zero under-replicated partitions": the count
+ * is `null`, not `0`, and the line's whole value is that it can tell those apart.
+ */
+export const BrokersUnmeasured: Story = {
+  render: () => (
+    <BrokerList
+      clusterName="quickstart"
+      brokers={UNMEASURED_BROKERS}
+      underReplicatedPartitions={null}
+      observedAgo="2s ago"
+      clustersHref="#/clusters"
+      hrefFor={brokerHref}
+      onOpen={noop}
+    />
+  ),
+};
+
 /** A rack-aware cluster, which is the only case where the RACK figure is drawn at all. */
 export const BrokersRacked: Story = {
   render: () => (
@@ -118,8 +142,45 @@ export const BrokersRacked: Story = {
   ),
 };
 
+/**
+ * The first paint, before the brokers request has answered — and the story to look at, because for
+ * two waves it drew the worst rendering in the product.
+ *
+ * `loading` was declared, fed by the route, and read by nothing, so this state was drawn as an
+ * *answered* one: *"The cluster is not answering. Last successful check was 24s ago"*, `TOTAL
+ * LEADERS 0`, `DISK USED — no broker answered`, and *"No brokers. KUI reached the cluster and it
+ * reported no brokers, which should not happen while it is running."* Four claims about a request
+ * that had not come back, two of them contradicting each other, and a bare zero where this
+ * product's central rule demands a sentence. The a11y sweep passed all of it, because none of it
+ * is an accessibility fault — it was simply untrue.
+ *
+ * What it draws now: four pending tiles, a card saying what is being asked, and a voice line that
+ * says nothing whatever about the cluster's health, because nothing about it is known yet.
+ */
 export const BrokersLoading: Story = {
   render: () => <BrokerList clusterName="prod-kyiv-01" brokers={[]} loading clustersHref="#/clusters" hrefFor={brokerHref} />,
+};
+
+/**
+ * A refetch behind rows that are already on screen, which must **not** look like the story above.
+ *
+ * Blanking figures an operator is reading, in order to say they are being fetched again, is the
+ * reference product's five-second full-page loader — the thing `BrokerList`'s own header refuses.
+ * `loading` alone is not the condition; having nothing to draw is.
+ */
+export const BrokersRefetching: Story = {
+  render: () => (
+    <BrokerList
+      clusterName="prod-kyiv-01"
+      brokers={SAMPLE_BROKERS}
+      loading
+      underReplicatedPartitions={0}
+      observedAgo="2s ago"
+      clustersHref="#/clusters"
+      hrefFor={brokerHref}
+      onOpen={noop}
+    />
+  ),
 };
 
 export const BrokersUnavailable: Story = {

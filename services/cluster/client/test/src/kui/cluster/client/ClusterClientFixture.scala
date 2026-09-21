@@ -2,7 +2,6 @@ package kui.cluster.client
 
 import java.time.Instant
 
-
 import cats.effect.IO
 import cats.effect.kernel.{Ref, Resource}
 import fs2.Stream
@@ -175,8 +174,8 @@ object ClusterClientFixture {
       )
     )
 
-  /** A stream that emits the given frames and then stays open, which is what a healthy SSE connection
-    * looks like: it does not end, it just goes quiet.
+  /** A stream that emits the given frames and then stays open, which is what a healthy SSE connection looks
+    * like: it does not end, it just goes quiet.
     */
   def openStreamOf(frames: String*): Stream[IO, Byte] =
     Stream.emits(frames.mkString.getBytes("UTF-8").toList).covary[IO] ++ Stream.never[IO]

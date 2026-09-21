@@ -4,8 +4,8 @@ import io.circe.parser.parse
 import io.circe.syntax.*
 import munit.FunSuite
 
-/** That the record fragments are the same document on both platforms, and that the two decisions which stop
-  * a bad record from hiding a good one — an absent payload is a payload, a decode failure travels beside the
+/** That the record fragments are the same document on both platforms, and that the two decisions which stop a
+  * bad record from hiding a good one — an absent payload is a payload, a decode failure travels beside the
   * record — are asserted on the JSON text rather than on a decoded value.
   */
 final class MessageFragmentsSuite extends FunSuite {
@@ -42,7 +42,10 @@ final class MessageFragmentsSuite extends FunSuite {
   }
 
   test("decodesItsOwnGoldenFile") {
-    assertEquals(parse(MessageGoldenDocuments.decodedPayload).flatMap(_.as[DecodedPayloadDto]), Right(decoded))
+    assertEquals(
+      parse(MessageGoldenDocuments.decodedPayload).flatMap(_.as[DecodedPayloadDto]),
+      Right(decoded)
+    )
     assertEquals(parse(MessageGoldenDocuments.absentPayload).flatMap(_.as[DecodedPayloadDto]), Right(absent))
     assertEquals(parse(MessageGoldenDocuments.decodeError).flatMap(_.as[DecodeErrorDto]), Right(failure))
     assertEquals(parse(MessageGoldenDocuments.header).flatMap(_.as[HeaderDto]), Right(header))

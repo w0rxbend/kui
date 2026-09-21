@@ -13,19 +13,18 @@ import kui.testkit.{KuiSuite, RedactionAssertions}
 
 /** The mapping table, asserted row by row, plus the three properties that make it trustworthy.
   *
-  * The rows matter individually because three separate decisions key on them: whether a failure
-  * dims a capability (the `Application` / `Infrastructure` split), what HTTP status a user sees
-  * (the `ErrorCode`), and whether one bad key fails a whole batch (`suppressible`).
+  * The rows matter individually because three separate decisions key on them: whether a failure dims a
+  * capability (the `Application` / `Infrastructure` split), what HTTP status a user sees (the `ErrorCode`),
+  * and whether one bad key fails a whole batch (`suppressible`).
   */
 final class KafkaErrorMapperSuite extends KuiSuite {
 
   private val operation = "describeConfigs"
 
-  /** One row of the table: the exception, the failure class, the error code it renders as, whether
-    * the error is an infrastructure error, and whether a per-key failure of this kind is
-    * suppressible.
+  /** One row of the table: the exception, the failure class, the error code it renders as, whether the error
+    * is an infrastructure error, and whether a per-key failure of this kind is suppressible.
     */
-  private final case class Row(
+  final private case class Row(
       failure: Throwable,
       failureClass: FailureClass,
       code: ErrorCode,
@@ -264,9 +263,7 @@ final class KafkaErrorMapperSuite extends KuiSuite {
   }
 
   test("everyMappedCodeExistsInTheErrorCodeEnum") {
-    table.foreach(row =>
-      assertEquals(ErrorCode.fromWire(row.code.wire), Some(row.code), row.code.wire)
-    )
+    table.foreach(row => assertEquals(ErrorCode.fromWire(row.code.wire), Some(row.code), row.code.wire))
   }
 
   test("aTimeoutNamesTheBoundThatWasInForce") {

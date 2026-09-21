@@ -33,14 +33,109 @@
  * (`--kui-color-surface-hover`) — a resting input and a hovered surface share one value in this
  * palette, which is §2 of the spec rather than a coincidence.
  *
- * It **wraps**; it never scrolls sideways. A control that has slid off the right edge of a bar is a
- * control nobody finds, and the seek modes that reveal a second input are exactly the case that
- * makes the bar too long. */
+ * Three rows, as `SCREENS-V4.md` §3.12 draws them, and each **wraps**; none scrolls sideways. A
+ * control that has slid off the right edge of a bar is a control nobody finds, and the seek modes
+ * that reveal a second input are exactly the case that makes a row too long. The rows are a column
+ * rather than one long wrapping line so that the division survives the wrap: the second row is
+ * "what to keep", and a predicate that had wrapped up onto the end of the first row would read as
+ * another way of saying where to start. */
 .kui-browse-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse-bar__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--kui-space-2);
+}
+
+/* The arrow between the two ends of a range. Decorative: the two inputs carry their own accessible
+ * names ("Start at offset", "Until offset"), and a reader that announced an arrow between them
+ * would be reading out a picture. */
+.kui-browse-bar__to {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* One typed predicate: a glyph, the match mode and the text, grouped so the three read as one
+ * control rather than as three that happen to be adjacent. */
+.kui-browse-bar__predicate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse-bar__predicate-glyph {
+  color: var(--kui-color-text-muted);
+  flex: none;
+}
+
+/* Saving a preset is a quiet action beside the controls it saves — a ghost affordance rather than
+ * a button, because it competes with Read, which is the thing on this bar people press. */
+.kui-browse-bar__save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  height: 26px;
+  padding-inline: var(--kui-space-2);
+  border: none;
+  border-radius: var(--kui-radius-md);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  cursor: pointer;
+}
+
+.kui-browse-bar__save:hover {
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
+}
+
+/* The presets row. It is absent rather than empty when nothing is saved — that is the component's
+ * rule, not this sheet's, and there is no `:empty` fallback here on purpose: a rule that hid an
+ * empty row would let the component ship one and nobody would notice. */
+.kui-browse-bar__presets {
+  align-items: center;
+}
+
+.kui-browse-bar__presets-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  /* The same 0.04em `60-messages.css` uses for a spaced-out label. There is no letter-spacing token
+   * and this is not a colour, a space or a radius, so writing it is not reaching around the token
+   * set — it is a value the set does not carry. */
+  letter-spacing: 0.04em;
+}
+
+.kui-browse-bar__preset {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Forgetting a preset is its own control and never a second meaning for pressing the chip — the
+ * same rule the smart-filter chip follows, and for the same reason: a control whose effect depends
+ * on state the operator cannot see is a control they stop trusting. */
+.kui-browse-bar__preset-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-inline-start: calc(-1 * var(--kui-space-1));
+  border: none;
+  border-radius: var(--kui-radius-pill);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+}
+
+.kui-browse-bar__preset-remove:hover {
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
 }
 
 /* Everything after this is pushed to the right edge: the read/pause/stop control and the LIVE
@@ -212,6 +307,28 @@
   color: var(--kui-color-warning);
 }
 
+.kui-browse__figure--warning {
+  color: var(--kui-color-warning);
+}
+
+/* Paging is a presentation choice, not part of the Kafka query. Both alternatives stay visible so
+ * the infinite option is discoverable without making it the default. */
+.kui-browse__view-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse__view-note,
+.kui-browse__offset-range {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .kui-browse__reading {
   display: flex;
   align-items: center;
@@ -238,11 +355,72 @@
   font-size: var(--kui-font-size-sm);
 }
 
-.kui-browse__more,
+.kui-browse__pagination,
+.kui-browse__infinite-sentinel,
 .kui-browse__produce {
   display: flex;
-  justify-content: center;
+  align-items: center;
   padding-block: var(--kui-space-2);
+}
+
+.kui-browse__pagination {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  border-block-start: var(--kui-card-border);
+}
+
+.kui-browse__page-actions,
+.kui-browse__preloading {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse__display-limit {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-browse__page-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  min-height: 30px;
+  padding-inline: var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-elevated);
+  color: var(--kui-color-text-strong);
+  font: inherit;
+  font-size: var(--kui-font-size-sm);
+  cursor: pointer;
+}
+
+.kui-browse__page-button:hover:not(:disabled) {
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-browse__page-button:disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.kui-browse__infinite-sentinel {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--kui-space-3);
+  min-height: 48px;
+}
+
+.kui-browse__preloading {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-browse__produce {
+  justify-content: center;
+  gap: calc(var(--kui-space-1) / 2);
 }
 
 /* At this width the bar's four controls no longer fit on one line at their natural sizes, and the
@@ -455,6 +633,242 @@
   display: flex;
   flex-direction: column;
   gap: var(--kui-space-4);
+}
+
+.kui-smart-filter__modes {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-smart-filter__mode {
+  min-block-size: 30px;
+  padding-inline: var(--kui-space-3);
+  border: 0;
+  border-radius: var(--kui-radius-sm);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kui-smart-filter__mode[aria-pressed="true"] {
+  background: var(--kui-color-surface-raised);
+  color: var(--kui-color-text-strong);
+  box-shadow: var(--kui-shadow-sm);
+}
+
+.kui-smart-filter__builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-smart-filter__builder-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(220px, 2fr) minmax(140px, 1fr);
+  align-items: start;
+  gap: var(--kui-space-3);
+}
+
+.kui-smart-filter__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-smart-filter__suggestions-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-smart-filter__suggestion {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-pill);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  cursor: pointer;
+}
+
+.kui-smart-filter__suggestion:hover {
+  border-color: var(--kui-color-primary);
+}
+
+/* The message browser lives in its own lazy feature, but it remains one section of one topic.
+ * Keep the topic identity and route-level section navigation above the browser body. */
+.kui-topic-messages-page {
+  min-width: 0;
+}
+
+.kui-topic-messages-page .kui-page-head {
+  margin-block-end: var(--kui-space-4);
+}
+
+.kui-topic-messages-page__body {
+  min-width: 0;
+  margin-block-start: var(--kui-space-4);
+}
+
+/* --- Produce value editor ----------------------------------------------------------------------
+ *
+ * The textarea stays the only interactive surface. The pre underneath is a visual copy made from
+ * text nodes, never payload HTML, so JSON syntax can be coloured without turning a message into
+ * executable markup or replacing native editing, selection and assistive-technology behaviour. */
+
+.kui-json-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-json-editor__heading,
+.kui-json-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  flex-wrap: wrap;
+}
+
+.kui-json-editor__label {
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-json-editor__status {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+.kui-json-editor__status--valid {
+  background-color: var(--kui-color-success-container);
+  color: var(--kui-color-success);
+}
+
+.kui-json-editor__status--invalid {
+  background-color: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+}
+
+.kui-json-editor__surface {
+  position: relative;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-hover);
+  overflow: hidden;
+  transition: border-color var(--kui-duration-fast) ease;
+}
+
+.kui-json-editor__surface:focus-within {
+  border-color: var(--kui-color-focus);
+  box-shadow: 0 0 0 1px var(--kui-color-focus);
+}
+
+.kui-json-editor--invalid .kui-json-editor__surface {
+  border-color: var(--kui-color-danger);
+}
+
+.kui-json-editor__highlight,
+.kui-json-editor__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 12rem;
+  margin: 0;
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border: 0;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+}
+
+.kui-json-editor__highlight {
+  position: absolute;
+  inset: 0;
+  color: var(--kui-color-text);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.kui-json-editor__input {
+  position: relative;
+  display: block;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--kui-color-text);
+  -webkit-text-fill-color: transparent;
+  resize: vertical;
+  overflow: auto;
+  outline: 0;
+}
+
+.kui-json-editor__input::selection {
+  background-color: color-mix(in srgb, var(--kui-color-primary) 28%, transparent);
+}
+
+.kui-json-editor__input:disabled {
+  cursor: not-allowed;
+}
+
+.kui-json-editor--disabled .kui-json-editor__surface {
+  opacity: var(--kui-opacity-disabled);
+}
+
+.kui-json-editor__token--key { color: var(--kui-color-primary); }
+.kui-json-editor__token--string { color: var(--kui-color-success); }
+.kui-json-editor__token--number { color: var(--kui-color-warning); }
+.kui-json-editor__token--boolean { color: var(--kui-color-info); }
+.kui-json-editor__token--null,
+.kui-json-editor__token--punctuation { color: var(--kui-color-text-muted); }
+.kui-json-editor__token--text { color: var(--kui-color-text); }
+
+.kui-json-editor__actions {
+  justify-content: flex-start;
+}
+
+.kui-json-editor__help {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+@media (forced-colors: active) {
+  .kui-json-editor__highlight { display: none; }
+  .kui-json-editor__input {
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
+.kui-smart-filter__compiled {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .kui-smart-filter__builder-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kui-smart-filter__field {
@@ -713,6 +1127,26 @@
   font-size: var(--kui-font-size-sm);
   /* Sits on the baseline of the inputs beside it rather than on the labels above them. */
   padding-block-end: var(--kui-space-1);
+}
+
+/* The sentence the dialog shows instead of a partition count it does not have. Muted rather than a
+ * warning tone: nothing is wrong, KUI simply has not been told, and drawing it in amber would put a
+ * fault in front of an operator who has none. */
+.kui-resend__unknown {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+/* The sentence for a count the topic did give. It carried `__unknown` — the class whose whole job
+ * is to mark an absence — so the one line on this dialog that states a measured figure was drawn as
+ * a gap. Same size and rhythm, ordinary text colour, because it is an ordinary fact. */
+.kui-resend__known {
+  margin: 0;
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
 }
 
 .kui-resend__range-actions {

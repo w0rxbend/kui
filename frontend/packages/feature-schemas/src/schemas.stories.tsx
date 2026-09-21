@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { SchemaWorkspace } from "./SchemaWorkspace.jsx";
 import { SubjectList } from "./SubjectList.jsx";
 import { SubjectPage } from "./SubjectPage.jsx";
 import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
-import type { Compatibility, SchemaVersion } from "./data.js";
+import { RegisterSchemaDialog } from "./RegisterSchemaDialog.jsx";
+import type { Compatibility, SchemaVersion, SubjectRow } from "./data.js";
 
 /**
  * The subject list, whose headline is the registry's global compatibility level.
@@ -21,11 +23,40 @@ const listMeta: Meta<typeof SubjectList> = {
 export default listMeta;
 type ListStory = StoryObj<typeof listMeta>;
 
-const SUBJECTS = [
-  "orders.payments.v2-value",
-  "orders.payments.v2-key",
-  "analytics.pageviews-value",
-  "inventory.stock-levels-value",
+/*
+ * Four rows, chosen so that every absence the wire allows is on screen at once.
+ *
+ * The first two differ only in `inheritedFromGlobal`, which is the whole point of the screen: the
+ * first moves the next time anybody changes the registry's global level and the second does not.
+ * The third's format and version count were not read — the endpoint documents that the per-subject
+ * call filling them may not answer while the row is still returned — and the fourth's level is a
+ * word the registry named and this browser does not know.
+ */
+const SUBJECTS: readonly SubjectRow[] = [
+  {
+    subject: "orders.payments.v2-value",
+    format: "AVRO",
+    versionCount: 3,
+    compatibility: { level: "BACKWARD", inherited: true },
+  },
+  {
+    subject: "orders.payments.v2-key",
+    format: "AVRO",
+    versionCount: 1,
+    compatibility: { level: "FULL", inherited: false },
+  },
+  {
+    subject: "analytics.pageviews-value",
+    format: undefined,
+    versionCount: undefined,
+    compatibility: undefined,
+  },
+  {
+    subject: "inventory.stock-levels-value",
+    format: "PROTOBUF",
+    versionCount: 12,
+    compatibility: { level: null, inherited: false },
+  },
 ];
 
 const idle = { kind: "idle" } as const;
@@ -34,6 +65,8 @@ const listArgs = {
   subjects: SUBJECTS,
   search: "",
   onSearch: () => undefined,
+  direction: "asc" as const,
+  onDirection: () => undefined,
   page: 1,
   pageSize: 50,
   totalItems: SUBJECTS.length,
@@ -47,6 +80,18 @@ const backward: Compatibility = { level: "BACKWARD", inherited: false };
 
 export const Listed: ListStory = {
   args: { ...listArgs, global: backward },
+};
+
+/**
+ * The row the address names.
+ *
+ * The fill is `--kui-color-selected` and the text is `--kui-color-selected-contrast`, which is what
+ * that token pair is for: `text-muted` over the selected fill measures 4.15:1 in the dark palette,
+ * under what a caption at this size needs. The inline-start rule and `aria-current="page"` are the
+ * two non-colour halves of the same statement.
+ */
+export const SubjectSelected: ListStory = {
+  args: { ...listArgs, global: backward, selected: "orders.payments.v2-key" },
 };
 
 /** The registry checks nothing. Said in words, because a colour is not a distinction to everyone. */
@@ -94,6 +139,58 @@ export const NoSubjects: ListStory = {
 
 export const SearchMatchedNothing: ListStory = {
   args: { ...listArgs, subjects: [], totalItems: 0, global: backward, search: "nothing-like-this" },
+};
+
+/* ------------------------------------------------------------------------------------------------
+ * The workspace: both panes at once
+ *
+ * The screen as it actually ships. Reading a registry is comparing one subject's level against the
+ * next one's, so the list stays on screen while a subject is open — and the selection is the address
+ * rather than a signal, which is what makes a pasted link open the pane it names.
+ * ---------------------------------------------------------------------------------------------- */
+
+type WorkspaceStory = StoryObj<typeof SchemaWorkspace>;
+
+/** Nothing selected. The right-hand pane says what it is for; it is not half a blank page. */
+export const WorkspaceNoSelection: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: <SubjectList {...listArgs} global={backward} />,
+    subjectCount: SUBJECTS.length,
+    globalLevel: "BACKWARD",
+    onRegister: () => undefined,
+  },
+};
+
+/**
+ * The first paint, before the subjects request has answered.
+ *
+ * The state this header used to get wrong, and it is worth looking at beside `WorkspaceNoSelection`:
+ * with no count yet, the line here said *"The registry did not say how many subjects it holds"* — a
+ * claim about an answer to a question nobody had answered. Not asked and answered-without-a-count
+ * are different states and this is the one that says so.
+ */
+export const WorkspaceLoading: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: (
+      <SubjectList {...listArgs} subjects={[]} totalItems={undefined} loading global={undefined} />
+    ),
+    loading: true,
+    onRegister: () => undefined,
+  },
+};
+
+/** An operator who may read the registry and not write to it. The reason is on the control. */
+export const WorkspaceCannotRegister: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: <SubjectList {...listArgs} global={backward} />,
+    subjectCount: SUBJECTS.length,
+    globalLevel: "BACKWARD",
+    registerDisabledReason:
+      "You do not have permission to register a schema in this cluster's registry.",
+  },
 };
 
 /* ------------------------------------------------------------------------------------------------
@@ -162,6 +259,96 @@ export const SubjectWithReferences: SubjectStory = {
       ],
     },
   },
+};
+
+/**
+ * Both panes, which is how this screen is reached in the product.
+ *
+ * The selected row on the left and its subject on the right, at once. Worth looking at for one
+ * thing in particular: the row's caption and the pane's sentence say the same fact about where the
+ * level comes from, because both read `levelSourceWord` and `levelSourceSentence` from the same
+ * module. When they were written separately they disagreed.
+ */
+export const WorkspaceWithSubject: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: <SubjectList {...listArgs} global={backward} selected="orders.payments.v2-value" />,
+    detail: (
+      <SubjectPage {...subjectArgs} compatibility={{ level: "BACKWARD", inherited: true }} />
+    ),
+    subjectCount: SUBJECTS.length,
+    globalLevel: "BACKWARD",
+    onRegister: () => undefined,
+  },
+};
+
+/* ------------------------------------------------------------------------------------------------
+ * Registering a schema
+ *
+ * The dialog M6's last bullet needed an endpoint for. The two worth looking at are `Refused` and
+ * `ReadOnlyCluster`: both are ordinary answers rather than accidents — an incompatible field is
+ * exactly what a compatibility level exists to catch, and a cluster KUI is configured read-only for
+ * refuses every write by design — and in both the dialog stays open with the schema still in it.
+ * ---------------------------------------------------------------------------------------------- */
+
+const registerArgs = {
+  open: true,
+  onClose: () => undefined,
+  onRegister: () => undefined,
+  state: idle,
+  knownSubjects: SUBJECTS.map((row) => row.subject),
+};
+
+type RegisterStory = StoryObj<typeof RegisterSchemaDialog>;
+
+/** Nothing typed yet. The Register button is disabled and says which field it is waiting for. */
+export const RegisterEmpty: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: registerArgs,
+};
+
+/**
+ * The registry refused it, in the registry's own words.
+ *
+ * The sentence below is what a Confluent registry says about a field added without a default: it
+ * names the field, the path and the rule. KUI reproduces it rather than summarising, because "not
+ * backward compatible" tells an operator nothing they did not already know from the refusal.
+ */
+export const RegisterRefused: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: {
+    ...registerArgs,
+    state: {
+      kind: "failed",
+      message:
+        "The registry rejected this schema. The registry said: " +
+        "{errorType:'READER_FIELD_MISSING_DEFAULT_VALUE', description:'The field 'channel' at " +
+        "path '/fields/3' in the new schema has no default value and is missing in the old " +
+        "schema'}",
+      code: "KUI-VALIDATION",
+    },
+  },
+};
+
+/**
+ * A cluster KUI is configured read-only for. Not a permission problem, and the sentence says so.
+ */
+export const RegisterOnReadOnlyCluster: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: {
+    ...registerArgs,
+    state: {
+      kind: "failed",
+      message: "This cluster is configured read-only in KUI, so nothing may be written to it.",
+      code: "KUI-READ-ONLY",
+    },
+  },
+};
+
+/** The request is out. Both actions are disabled, and both say why rather than going grey. */
+export const RegisterInFlight: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: { ...registerArgs, state: { kind: "running" } },
 };
 
 /* ------------------------------------------------------------------------------------------------

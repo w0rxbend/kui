@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../.tsbuild/feature-connect",
+    "tsBuildInfoFile": "../../.tsbuild/feature-connect.tsbuildinfo",
+    "rootDir": "src",
+    // `src/documents/*.json`: whole connector documents in the wire's own shape, decoded by
+    // `wire.test.ts` so that the field names this package reads are checked against a document
+    // rather than against a literal written beside the assertion.
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
+  "references": [{ "path": "../api" }, { "path": "../kernel" }]
+}

@@ -2,7 +2,7 @@ package kui.gateway.api
 
 import java.nio.charset.StandardCharsets
 
-import cats.effect.kernel.{Async, Ref}
+import cats.effect.kernel.{Async, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
 import fs2.{Chunk, Stream}
@@ -69,7 +69,13 @@ object StreamProxy {
         val producer =
           upstream.chunks
             .evalMap(chunk => queue.offer(Some(chunk)))
-            .onFinalize(queue.offer(None))
+            .onFinalizeCase {
+              // A normal upstream completion still has a live consumer, so waiting for room preserves every
+              // queued chunk before the termination marker. If the producer is being cancelled, the consumer
+              // has already stopped: a blocking offer into a full queue would make that cancellation hang.
+              case Resource.ExitCase.Succeeded => queue.offer(None)
+              case Resource.ExitCase.Canceled | Resource.ExitCase.Errored(_) => Async[F].unit
+            }
 
         // `concurrently` is what gives all three rules at once: the producer is cancelled when the consumer
         // finishes or is cancelled, and a producer failure is raised into the consumer rather than leaving
@@ -114,8 +120,24 @@ object StreamProxy {
     * `event: error`. A chunk can end in the middle of a line, so the tail of each chunk is carried into the
     * next one. Only complete lines are examined, which is why a chunk boundary cannot hide a terminal event
     * and cannot invent one either.
+    *
+    * ==Visible to this package's tests, and why it has to be==
+    *
+    * `private[api]` rather than `private`, and the one word is load-bearing. The carry is *usually*
+    * unreachable from [[withTerminalEvent]]: everything above goes through [[relay]], whose bounded queue
+    * re-chunks the body before [[observe]] ever sees it, so a split a caller made upstream usually does not
+    * survive to here. *Usually* is the corrected word — this paragraph said "cannot", and published as a
+    * measurement that with the carry deleted (`(Vector.empty, pieces.init)`) the whole suite stayed green
+    * including `aTerminalEventSplitAcrossChunkBoundariesIsStillSeen`, which feeds `chunkLimit(1)`. That is
+    * not what the mutation does. W11-A2 ran it four consecutive times on 2026-09-12: the case was **red on
+    * run 2** and green on runs 1, 3 and 4. [[relay]] drains its `Queue.bounded` from a second fibre, so how
+    * many source chunks are coalesced into one dequeued chunk is a scheduling outcome rather than a property
+    * of this code, and a gate that fires one run in four reads as a flake. So that case holds the end-to-end
+    * property only — one terminal event out, none appended — and is not a gate on the carry;
+    * `StreamProxySuite` carries the four-run table beside it and says so. The two cases that do hold the
+    * carry's rules drive [[observe]] directly, which is the only level the split is always still there at.
     */
-  final private class TerminalWatch[F[_]: Async](carry: Ref[F, Vector[Byte]], seen: Ref[F, Boolean]) {
+  final private[api] class TerminalWatch[F[_]: Async](carry: Ref[F, Vector[Byte]], seen: Ref[F, Boolean]) {
 
     def observe(chunk: Chunk[Byte]): F[Unit] =
       carry
@@ -151,7 +173,7 @@ object StreamProxy {
 
   private val Newline: Byte = '\n'.toByte
 
-  private object TerminalWatch {
+  private[api] object TerminalWatch {
 
     def apply[F[_]: Async]: F[TerminalWatch[F]] =
       (Ref.of[F, Vector[Byte]](Vector.empty), Ref.of[F, Boolean](false)).mapN(new TerminalWatch[F](_, _))

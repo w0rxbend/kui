@@ -38,6 +38,15 @@ WORKDIR /build
 # The manifests first, and only the manifests. Docker caches a layer by the files that went into it,
 # so an edit to a component invalidates the layer below this one and not the install itself — which
 # is the difference between a 4-second rebuild and a 90-second one.
+#
+# EVERY workspace manifest, and the last three lines are a repair rather than a preference. This list
+# stopped at `feature-schemas` for three packages' worth of history: `pnpm-lock.yaml` declares eleven
+# importers and this file copied eight, so `--frozen-lockfile` below had nothing to be frozen against
+# for `feature-alerts`, `feature-connect` and `feature-ksql`, and each of those three ships a
+# `.stories.` file that is the entire reason this image exists. Nothing built the image, so nothing
+# said so. `ShippedImageManifestSuite` now derives the roster with `git ls-files` and compares it
+# against every Dockerfile under `deployment/` in both directions, so a twelfth package that is not
+# copied here fails a test instead of an image build nobody runs.
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 COPY frontend/packages/api/package.json ./packages/api/
 COPY frontend/packages/kernel/package.json ./packages/kernel/
@@ -47,6 +56,9 @@ COPY frontend/packages/feature-topics/package.json ./packages/feature-topics/
 COPY frontend/packages/feature-messages/package.json ./packages/feature-messages/
 COPY frontend/packages/feature-consumers/package.json ./packages/feature-consumers/
 COPY frontend/packages/feature-schemas/package.json ./packages/feature-schemas/
+COPY frontend/packages/feature-alerts/package.json ./packages/feature-alerts/
+COPY frontend/packages/feature-connect/package.json ./packages/feature-connect/
+COPY frontend/packages/feature-ksql/package.json ./packages/feature-ksql/
 
 # `--frozen-lockfile` so a lockfile that has drifted from the manifests fails the build here, rather
 # than silently resolving to different versions than a developer has. That is the whole reason a

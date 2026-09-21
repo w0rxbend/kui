@@ -11,8 +11,8 @@ import sttp.client4.*
 
 import kui.config.{SafeUrl, UrlPolicy}
 
-/** That several addresses for one upstream behave the way an operator expects: a machine that
-  * refuses a connection is stepped over, and it is given another chance once the wobble has passed.
+/** That several addresses for one upstream behave the way an operator expects: a machine that refuses a
+  * connection is stepped over, and it is given another chance once the wobble has passed.
   */
 final class FailoverSuite extends CatsEffectSuite {
 

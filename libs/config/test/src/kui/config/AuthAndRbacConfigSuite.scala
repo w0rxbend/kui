@@ -380,4 +380,189 @@ final class AuthAndRbacConfigSuite extends KuiSuite {
     )
     assert(found.exists(_.key == "kui.rbac.roles.0.permissions"), found.map(_.key).toString)
   }
+
+  // -----------------------------------------------------------------------------------------------
+  // A role on a cluster that is not here
+  // -----------------------------------------------------------------------------------------------
+
+  /** One configured cluster and one role, with the role's cluster list left to the caller.
+    *
+    * PLAINTEXT and one bootstrap address, because nothing here opens a socket: the cluster exists so that
+    * `kui.clusters[]` is non-empty and has an id worth naming or mis-naming.
+    */
+  private def oneClusterAndARoleOn(named: String, extra: String = ""): String =
+    s"""kui:
+       |  clusters:
+       |    - name: "Local"
+       |      id: "local"
+       |      bootstrapServers:
+       |        - "kafka:9092"
+       |$extra
+       |  rbac:
+       |    roles:
+       |      - name: developers
+       |        clusters: [$named]
+       |        subjects:
+       |          - provider: FORM
+       |            kind: group
+       |            value: devs
+       |        permissions:
+       |          - resource: TOPIC
+       |            value: ".*"
+       |            actions: [VIEW]
+       |""".stripMargin
+
+  test("a role on a cluster this file does not configure is refused, and the message names both") {
+    // THE DEMONSTRATION THIS PREVENTS IS THE ONE IN `kui-quickstart-auth.yaml`. Both of its roles named a
+    // cluster; if either id were wrong the file still loaded, both accounts still signed in, and every
+    // screen was empty -- because `RbacPolicy.held` matches a role's cluster ids against the registry's and
+    // a role that matches nothing grants nothing. That file's own comment claimed this suite caught it,
+    // which it did not until this case existed.
+    val found = problems(oneClusterAndARoleOn("no-such-cluster"))
+
+    assertEquals(found.map(_.key), List("kui.rbac.roles.0.clusters"))
+    assert(
+      found.head.problem.contains("'no-such-cluster'"),
+      s"the message must name the id that is wrong: ${found.head.problem}"
+    )
+    assert(
+      found.head.problem.contains("local"),
+      s"and the ids that are right, or the operator cannot see the typo: ${found.head.problem}"
+    )
+  }
+
+  test("a role on a cluster this file does configure loads, and keeps the id it named") {
+    // The other half, and the reason the case above cannot be satisfied by refusing every role: the shipped
+    // `kui-quickstart-auth.yaml` is exactly this shape and has to keep loading.
+    val policy = loaded(oneClusterAndARoleOn("local")).rbac
+
+    assertEquals(policy.roles.head.clusters, Set(ClusterId.unsafe("local")))
+  }
+
+  test("a file that configures no cluster at all says nothing about a role's clusters") {
+    // `kui.clusters: []` is not an empty set of clusters, it is a deployment that registered none *here* --
+    // the M0 default and the Compose gateway's own `kui.yaml`. There is no set to compare against, so the
+    // rule stays quiet rather than refusing a file it cannot judge. Every other case in this section relies
+    // on it: they all write `clusters: [local]` on a role with no `kui.clusters` anywhere.
+    val policy = loaded(ValidRoles).rbac
+
+    assertEquals(policy.roles.head.clusters, Set(ClusterId.unsafe("local")))
+  }
+
+  test("a deployment with a metadata store may name a cluster this file has never heard of") {
+    // ADR-036 as amended by ADR-042: the store's records overlay `kui.clusters[]` at run time, so an
+    // operator who registered `prod-3` through the UI and wrote a role for it is correct, and this file
+    // cannot see the cluster to agree. Refusing there would refuse a working deployment at start-up.
+    //
+    // A directory store rather than a Kafka one, because `checkStoreRules` demands an encryption key
+    // alongside `kui.store.kafka.bootstrapServers` and that is a different rule being exercised.
+    val stored = loaded(oneClusterAndARoleOn("prod-3", extra = "  store:\n    dir: \"/var/lib/kui\"")).rbac
+
+    assertEquals(stored.roles.head.clusters, Set(ClusterId.unsafe("prod-3")))
+  }
+
+  test("a deployment with a KAFKA metadata store may too, which is the arm the case above cannot reach") {
+    // THE SAME EXEMPTION THROUGH THE OTHER HALF OF ITS CONDITION, AND UNTIL THIS CASE ONLY ONE HALF WAS
+    // LOAD-BEARING. `rolesNameConfiguredClusters` writes `draft.store.kafka.isDefined ||
+    // draft.store.dir.isDefined`; deleting the `kafka` arm left `./mill libs.config.test` at 395/395,
+    // because the case above configures a directory store and nothing anywhere configured a Kafka one
+    // beside a role. The two stores are not interchangeable in this repository -- ADR-042 §7 makes the
+    // Kafka store the production shape and the directory one the single-node convenience -- so the arm
+    // that was ungated is the arm every real ADR-036 deployment takes, and under the mutation such a
+    // deployment is refused at boot for naming a cluster its own store registered.
+    //
+    // The encryption key is here because `checkStoreRules` refuses a Kafka store without one; it is the
+    // fixture's cost of reaching this arm at all, and it is why the case above took the cheaper one.
+    val kafkaStore =
+      """|  store:
+         |    kafka:
+         |      bootstrapServers:
+         |        - "kafka-store:9092"
+         |    encryptionKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+         |""".stripMargin.stripSuffix("\n")
+
+    val stored = loaded(oneClusterAndARoleOn("prod-3", extra = kafkaStore)).rbac
+
+    assertEquals(stored.roles.head.clusters, Set(ClusterId.unsafe("prod-3")))
+    // And the store really is the Kafka one, so a fixture that silently stopped configuring it -- a
+    // renamed key, a policy that dropped the address -- cannot keep this case green by taking the
+    // `configured.isEmpty` exit or the directory arm instead.
+    assertEquals(loaded(oneClusterAndARoleOn("prod-3", extra = kafkaStore)).store.kafkaEnabled, true)
+  }
+
+  /** One configured cluster and two roles, each naming a cluster of the caller's choosing.
+    *
+    * Every other fixture in this section writes exactly one role, which is what left the fold below it unable
+    * to fail: with one role there is no second offender to lose and `$index` is never anything but `0`.
+    */
+  private def oneClusterAndTwoRolesOn(first: String, second: String): String =
+    s"""kui:
+       |  clusters:
+       |    - name: "Local"
+       |      id: "local"
+       |      bootstrapServers:
+       |        - "kafka:9092"
+       |  rbac:
+       |    roles:
+       |      - name: developers
+       |        clusters: [$first]
+       |        subjects:
+       |          - provider: FORM
+       |            kind: group
+       |            value: devs
+       |        permissions:
+       |          - resource: TOPIC
+       |            value: ".*"
+       |            actions: [VIEW]
+       |      - name: analysts
+       |        clusters: [$second]
+       |        subjects:
+       |          - provider: FORM
+       |            kind: group
+       |            value: analysts
+       |        permissions:
+       |          - resource: TOPIC
+       |            value: ".*"
+       |            actions: [VIEW]
+       |""".stripMargin
+
+  test("two roles on clusters this file does not configure are BOTH reported, with their own indices") {
+    // AN OPERATOR FIXES WHAT THEY WERE TOLD ABOUT AND RESTARTS. If only the first offending role is
+    // reported, the second startup fails on the second role, the third on a third, and a file with four bad
+    // roles costs four restarts of a process that takes twenty seconds to come up -- which is the failure
+    // mode every other rule in this loader was written against, since `ConfigProblem` is accumulated in a
+    // `NonEmptyList` precisely so that one boot names everything that is wrong.
+    //
+    // Measured before this case existed: `draft.rbac.roles.zipWithIndex.flatMap` -> `... .take(1).flatMap`
+    // left `./mill libs.config.test` at 395/395 SUCCESS. Every case in this section used a one-role
+    // fixture, so nothing could tell a fold that reports all offenders from one that reports the first.
+    //
+    // The indices are asserted and not just the count, because `$index` is the only thing in the message
+    // that tells the operator WHICH role to edit, and with one role it is `0` whether it is read off the
+    // fold or written as a literal.
+    val found = problems(oneClusterAndTwoRolesOn("no-such-cluster", "also-missing"))
+
+    assertEquals(found.map(_.key), List("kui.rbac.roles.0.clusters", "kui.rbac.roles.1.clusters"))
+    assertEquals(
+      found.map(_.problem.contains("'no-such-cluster'")),
+      List(true, false),
+      clue = s"the first problem is the first role's: ${found.map(_.problem)}"
+    )
+    assertEquals(
+      found.map(_.problem.contains("'also-missing'")),
+      List(false, true),
+      clue = s"and the second is the second role's: ${found.map(_.problem)}"
+    )
+  }
+
+  test("a good role before a bad one does not shift the bad one's index") {
+    // The companion of the case above and the reason it cannot be satisfied by numbering the PROBLEMS
+    // rather than the roles. `kui.rbac.roles.1.clusters` has to be the path an operator can follow into
+    // their own file, so the index is the offending role's position among all the roles and not its
+    // position among the complaints -- a distinction that is invisible while every role in the fixture is
+    // wrong.
+    val found = problems(oneClusterAndTwoRolesOn("local", "no-such-cluster"))
+
+    assertEquals(found.map(_.key), List("kui.rbac.roles.1.clusters"))
+  }
 }

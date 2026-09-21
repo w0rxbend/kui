@@ -166,9 +166,64 @@ export interface ApiClientOptions {
   readonly onUnauthorized?: () => void;
   /** A `fetch` to use instead of the browser's. Tests pass one; nothing else does. */
   readonly fetch?: (input: Request) => Promise<Response>;
+  /**
+   * How long a single request may run before it is treated as a `timeout` failure instead of being
+   * left to hang.
+   *
+   * Only a test overrides this, to something short enough to assert on. Production code leaves it
+   * at {@link RequestTimeoutMs}.
+   */
+  readonly requestTimeoutMs?: number;
 }
 
 const UnauthorizedStatus = 401;
+
+/**
+ * How long a request may run before {@link withDeadline} turns it into a `timeout` failure.
+ *
+ * Without this, `ApiError`'s `timeout` case was dead code: nothing ever constructed one for a plain
+ * request, because nothing ever gave up on one. A backend that stopped answering mid-response — a
+ * hung Kafka admin call, a reverse proxy that accepted the connection and then never replied — left
+ * the calling component's "loading" state on screen for ever, with no failure for it to react to.
+ */
+const RequestTimeoutMs = 30_000;
+
+/**
+ * Bounds every request to {@link RequestTimeoutMs} (or the override a test supplies), so a request
+ * that never answers becomes a `timeout` {@link ApiError} instead of a promise that never settles.
+ *
+ * The deadline is enforced independently of whether `fetchImpl` itself honours the abort signal —
+ * `Promise.race` against a timer that always fires — because the one thing this must never do is
+ * trust an unknown transport (a test's stub, a service worker, a future fetch polyfill) to behave.
+ * The signal is still attached to the outgoing request, and merged with the caller's own if it set
+ * one, so a real `fetch` also stops the underlying connection rather than leaking it.
+ */
+function withDeadline(
+  fetchImpl: (input: Request) => Promise<Response>,
+  timeoutMs: number,
+): (input: Request) => Promise<Response> {
+  return (request) => {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), timeoutMs);
+    const signal = AbortSignal.any([request.signal, deadline.signal]);
+
+    const sent = fetchImpl(new Request(request, { signal }));
+    // Never surfaced: a race that loses still keeps running, and an unhandled rejection from it
+    // would otherwise land in the console — or, in a strict test runner, fail the suite — for a
+    // request nobody is listening to any more.
+    sent.catch(() => {});
+
+    const timedOut = new Promise<Response>((_resolve, reject) => {
+      deadline.signal.addEventListener(
+        "abort",
+        () => reject(new DOMException("The request timed out", "TimeoutError")),
+        { once: true },
+      );
+    });
+
+    return Promise.race([sent, timedOut]).finally(() => clearTimeout(timer));
+  };
+}
 
 /**
  * The one call that establishes the session, and is therefore the one call that cannot wait for it.
@@ -221,7 +276,10 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
     // production.
     credentials: "include",
 
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    fetch: withDeadline(
+      options.fetch ?? ((request) => fetch(request)),
+      options.requestTimeoutMs ?? RequestTimeoutMs,
+    ),
   });
 
   raw.use({

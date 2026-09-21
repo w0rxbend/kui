@@ -9,8 +9,8 @@ import cats.syntax.all.*
 import kui.kernel.ClusterId
 import kui.testkit.KuiIOSuite
 
-/** The four promises of ADR-016's bounded cache: it bounds, it expires, it loads once, and it says what it
-  * is doing.
+/** The four promises of ADR-016's bounded cache: it bounds, it expires, it loads once, and it says what it is
+  * doing.
   */
 final class BoundedCacheSuite extends KuiIOSuite {
 

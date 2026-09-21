@@ -1,0 +1,58 @@
+# A REAL CAPTURE, trimmed. Every line below was served by a Prometheus JMX exporter (bitnamilegacy/
+# jmx-exporter:1.4.0) running with the STOCK ruleset -- `hostPort`, `lowercaseOutputName` and
+# `lowercaseOutputLabelNames` and no `rules:` block at all -- pointed at the quickstart broker
+# (apache/kafka:4.3.1) on 2026-09-07. Nothing here is invented and no number has been rounded.
+#
+# The whole capture was 12,993 lines and 1,285,357 bytes, carrying 902 distinct metric families of
+# which 670 are `kafka_`. That is what "the stock ruleset is about a megabyte per scrape" in
+# deployment/metrics/kafka-jmx-exporter.yml means, measured rather than remembered. This file keeps
+# the families ADR-052 decided on and four that exist only to be ignored.
+#
+# WHAT IT IS EVIDENCE FOR. ADR-052 refuses three of the figures SCREENS-V4.md draws. A refusal is
+# only distinguishable from an endpoint nobody wrote if the absence is on the record, so:
+#
+#   * there is NO purgatory percentage. `PurgatorySize` below is a queue length -- 481 parked Fetch
+#     requests, which is ordinary long-polling on a broker with consumers -- and the broker
+#     publishes no ceiling anywhere in the other 12,968 lines to divide it by.
+#   * there is NO per-client.id byte rate. Nine lines in the whole capture carry a client label,
+#     three values between them, all on the broker's own `app_info` and replica-fetcher beans and
+#     none of them a byte rate; and there is no client-quota metric family at all. What IS
+#     dimensioned per producer is the TOPIC, and those lines are below.
+#   * there is NO record-size distribution. The capture contains zero `_bucket` lines and no
+#     histogram of message size under any name. `BytesInPerSec / MessagesInPerSec` is a mean, and a
+#     mean is what the endpoint answers.
+#
+# TWO THINGS THIS CAPTURE SETTLES THAT A HAND-WRITTEN FIXTURE WOULD HAVE GOT WRONG.
+#
+#   * `RequestHandlerAvgIdlePercent` is published beside `BrokerRequestHandlerAvgIdlePercent` and
+#     `ControllerRequestHandlerAvgIdlePercent`, which are different pools with different numbers. A
+#     substring match on the attribute reads whichever comes first.
+#   * a Yammer meter's `OneMinuteRate` for an idle ratio can read slightly ABOVE 1.0 --
+#     1.0006422923680975 on the broker pool in this very capture. It is a moving-average artifact,
+#     not an error, and KUI reports what the broker published rather than clamping it. A ring gauge
+#     clamps its arc; the number stays true.
+kafka_server_brokertopicmetrics_oneminuterate{name="BytesInPerSec"} 156.9766505883925
+kafka_server_brokertopicmetrics_oneminuterate{name="BytesOutPerSec"} 1.4143085725964638E-18
+kafka_server_brokertopicmetrics_oneminuterate{name="MessagesInPerSec"} 0.9998512776330732
+kafka_server_brokertopicmetrics_oneminuterate{name="ReplicationBytesInPerSec"} 0.0
+kafka_server_brokertopicmetrics_oneminuterate{name="BytesInPerSec",topic="__consumer_offsets"} 156.9725527287428
+kafka_server_brokertopicmetrics_oneminuterate{name="BytesInPerSec",topic="analytics.pageviews"} 3.175204086158749E-107
+kafka_server_brokertopicmetrics_oneminuterate{name="BytesInPerSec",topic="orders.v1"} 5.950733067299049E-20
+kafka_server_brokertopicmetrics_count{name="BytesInPerSec"} 2972708.0
+kafka_network_requestmetrics_99thpercentile{name="TotalTimeMs",request="FetchConsumer"} 502.0
+kafka_network_requestmetrics_99thpercentile{name="TotalTimeMs",request="Produce"} 9.0
+kafka_network_requestmetrics_max{name="TotalTimeMs",request="FetchConsumer"} 1296.0
+kafka_network_requestmetrics_max{name="TotalTimeMs",request="Produce"} 9.0
+kafka_network_requestmetrics_mean{name="TotalTimeMs",request="FetchConsumer"} 499.6285470904541
+kafka_network_requestmetrics_mean{name="TotalTimeMs",request="Produce"} 1.3333333333333333
+kafka_server_kafkarequesthandlerpool_oneminuterate{name="BrokerRequestHandlerAvgIdlePercent"} 1.0006422923680975
+kafka_server_kafkarequesthandlerpool_oneminuterate{name="ControllerRequestHandlerAvgIdlePercent"} 0.999531350418437
+kafka_server_kafkarequesthandlerpool_oneminuterate{name="RequestHandlerAvgIdlePercent"} 0.9993945459789384
+kafka_network_socketserver_value{name="MemoryPoolUsed"} 0.0
+kafka_network_socketserver_value{name="NetworkProcessorAvgIdlePercent"} 1.0
+kafka_server_delayedoperationpurgatory_value{delayedoperation="Fetch",name="NumDelayedOperations"} 1.0
+kafka_server_delayedoperationpurgatory_value{delayedoperation="Fetch",name="PurgatorySize"} 481.0
+kafka_server_delayedoperationpurgatory_value{delayedoperation="Produce",name="NumDelayedOperations"} 0.0
+kafka_server_delayedoperationpurgatory_value{delayedoperation="Produce",name="PurgatorySize"} 0.0
+kafka_controller_kafkacontroller_value{name="ActiveControllerCount"} 1.0
+jmx_scrape_duration_seconds 0.326581471

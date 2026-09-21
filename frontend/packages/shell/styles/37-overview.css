@@ -43,6 +43,34 @@
   gap: var(--kui-space-5);
 }
 
+.kui-alerts-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-alerts-summary__row {
+  display: flex;
+  gap: var(--kui-space-3);
+  align-items: center;
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-alerts-summary__severity {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--kui-color-text-muted);
+}
+
+.kui-alerts-summary__severity[data-tone="danger"] { background: var(--kui-color-danger); }
+.kui-alerts-summary__severity[data-tone="warning"] { background: var(--kui-color-warning); }
+.kui-alerts-summary__note { margin: 0 0 var(--kui-space-3); color: var(--kui-color-text-muted); }
+
 /* --- Broker health ------------------------------------------------------------------------------ */
 
 .kui-broker-health {
@@ -96,6 +124,18 @@
   font-size: var(--kui-font-size-xs);
   font-variant-numeric: tabular-nums;
   color: var(--kui-color-text-muted);
+  white-space: nowrap;
+}
+
+/* "not measured" where the percentage would be.
+ *
+ * `ProgressBar`'s value slot is `min-width: 4ch` and right-aligned, sized for `61%`. Two words need
+ * more than four characters and must not wrap onto a second line — a two-line value box makes the
+ * three broker rows different heights, which reads as a fault rather than as an unmeasured disk. So
+ * the slot is allowed to be as wide as its words here and no wider, and the track gives up the
+ * space, which is the right trade on a bar that has nothing to draw. */
+.kui-broker-health .kui-progress__value--unknown {
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -197,4 +237,219 @@
   50% {
     opacity: 0.55;
   }
+}
+
+/* --- The Throughput card -------------------------------------------------------------------------
+ *
+ * Two things live here and neither is decoration.
+ *
+ * The header holds a legend and a range selector on one line, and the legend is also the readout:
+ * SCREENS-V4.md §3.1 puts the current value in the chip, which is what lets the plot have no
+ * y-axis at all. On a narrow card the pair wraps rather than the legend truncating, because a chip
+ * ellipsised to `prod…` is a number nobody can read.
+ *
+ * The coverage strip is the visible half of the never-a-zero rule. A bar of height zero and a bar
+ * that was never measured are the same picture — no ink — so the steps KUI did not sample are
+ * painted underneath the axis, in the same equal division of the same width the plot makes, and the
+ * card's caption counts them in words for anyone not looking at the picture. */
+
+.kui-throughput__controls {
+  display: flex;
+  gap: var(--kui-space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.kui-throughput {
+  display: flex;
+  flex-direction: column;
+  /* No gap. The strip belongs to the axis above it and a space between them would read as a second
+   * chart rather than as the coverage of the first. */
+  gap: 0;
+}
+
+.kui-throughput__coverage {
+  display: flex;
+  height: 6px;
+  border-radius: var(--kui-radius-xs);
+  /* `hidden` rather than nothing: the runs are square and the strip is rounded, so the first and
+   * last run have to be clipped to the strip's own corners. */
+  overflow: hidden;
+}
+
+.kui-throughput__coverage-run {
+  /* `flex-grow` is set inline, from the run's bucket count. `min-width: 0` so that a one-bucket run
+   * in a 288-bucket series is allowed to be narrower than a pixel rather than forcing the strip
+   * wider than the plot it is describing. */
+  min-width: 0;
+}
+
+/* A sampled step. Deliberately quiet: the interesting runs are the other ones, and a strip of solid
+ * ink under every chart would draw the eye to the chart that has nothing wrong with it. */
+.kui-throughput__coverage-run--measured {
+  background: var(--kui-color-border);
+}
+
+/* A step nothing was sampled in.
+ *
+ * Hatched rather than tinted, because colour is never the only signal (`SCREENS.md` §4.0) and this
+ * mark distinguishes "not measured" from "measured and low" — a pair that a hue alone cannot carry
+ * to a reader who cannot separate two of them. The stripe direction is the same one the product
+ * uses nowhere else, so it reads as its own thing rather than as a disabled control. */
+.kui-throughput__coverage-run--absent {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--kui-color-text-subtle) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+/* --- The Traffic tab's last row ------------------------------------------------------------------
+ *
+ * Three cards, and in each of them the design named a figure a broker does not publish. What is
+ * drawn instead is decided in ADR-052 and in `TrafficCards.tsx`; the rules below only have to make
+ * the two shapes of a request-handler reading — a ring and a count — read as members of one row
+ * rather than as a ring and a rendering fault. */
+
+.kui-handlers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* §3.4 draws each sub-tile on its own `--kui-color-surface-hover` ground. `flex: 1 1 0` with a floor
+ * so three tiles share the card and two tiles do not each take half a card's width and look like a
+ * different component. */
+.kui-handlers__tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 6.5rem;
+  padding: var(--kui-space-4) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-hover);
+}
+
+/* A queue length, which is not a share of anything and therefore not a ring. It borrows the ring's
+ * vertical rhythm — figure above, uppercase caption below — so the row still reads as one row, and
+ * the card's caption says in words why one tile is not a ring. */
+.kui-handlers__count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  text-align: center;
+}
+
+.kui-handlers__count-value {
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--kui-color-text);
+}
+
+.kui-handlers__count-unit,
+.kui-handlers__count-caption {
+  font-size: var(--kui-font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Top producers -------------------------------------------------------------------------------
+ *
+ * §4's row is a monogram tile, the identifier, and a bar with the rate on it. The tile and the name
+ * sit on one line above the bar for the reason the broker-health row does the same: `ProgressBar`
+ * puts its `label` on `aria-label` and nowhere else, so a row that relied on it would name every
+ * producer to a screen reader and none to anybody looking at the screen. */
+
+.kui-producers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-producers__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-producers__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+/* Truncated rather than wrapped: an identifier is one token and a wrapped one doubles the row's
+ * height for every producer whose name is long. The full string is in the bar's accessible name. */
+.kui-producers__name {
+  overflow: hidden;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A footnote about the rows that are not here. It is deliberately quieter than the rows above it —
+ * it is a caveat about the list, not an entry in it — and it sits under the whole list rather than
+ * beside any row, because what it describes is the ranking rather than a producer. */
+.kui-producers__excluded {
+  margin: var(--kui-space-3) 0 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- The record-size card ------------------------------------------------------------------------
+ *
+ * One figure and one sentence. There is no histogram here and there is not going to be one: Kafka
+ * publishes a mean and no distribution, so the twelve buckets §3.5 draws would be a picture of an
+ * assumption. The figure is given the weight a stat card's is, because it is the only measurement
+ * on the card and the sentence beside it is the reason there is only one. */
+
+.kui-record-size {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-record-size__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.kui-record-size__value {
+  font-size: var(--kui-font-size-2xl);
+  font-weight: var(--kui-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--kui-color-text);
+}
+
+/* Words, not an em dash. A dash beside "MEAN RECORD" reads as a figure that failed to arrive, and
+ * the truth is that the exporter served no mean — the product's rule that an unmeasurable figure
+ * says so in words, applied to the one card on this tab that still had a number-shaped hole. */
+.kui-record-size__absent {
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-record-size__label {
+  font-size: var(--kui-font-size-xs);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
 }

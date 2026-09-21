@@ -22,13 +22,14 @@ import kui.message.domain.TimestampType
   * neither is visible in a suite that has one.
   *
   * It polls one record at a time on purpose. A consumer that handed the whole assignment back in a single
-  * poll would let a termination bug pass unnoticed: the loop would happen to have everything it needed
-  * before its stopping condition was ever consulted.
+  * poll would let a termination bug pass unnoticed: the loop would happen to have everything it needed before
+  * its stopping condition was ever consulted.
   */
 final class FakeBrowseConsumer(
     log: Ref[IO, Map[PartitionId, Vector[RawRecord]]],
     assigned: Ref[IO, List[PartitionId]],
     positions: Ref[IO, Map[PartitionId, Long]],
+    assignments: Ref[IO, Int],
     polls: Ref[IO, Int]
 ) extends BrowseConsumer[IO] {
 
@@ -89,7 +90,7 @@ final class FakeBrowseConsumer(
     )
 
   def assign(topic: TopicName, partitions: List[PartitionId]): IO[Either[KuiError, Unit]] =
-    assigned.set(partitions).as(().asRight[KuiError])
+    assignments.update(_ + 1) *> assigned.set(partitions).as(().asRight[KuiError])
 
   def seek(topic: TopicName, partition: PartitionId, offset: Long): IO[Either[KuiError, Unit]] =
     positions.update(_.updated(partition, offset)).as(().asRight[KuiError])
@@ -106,11 +107,17 @@ final class FakeBrowseConsumer(
         val at = current.getOrElse(partition, 0L)
         records.getOrElse(partition, Vector.empty).find(_.offset.value == at).map(partition -> _)
       })
-      _ <- next.traverse_((partition, record) => positions.update(_.updated(partition, record.offset.value + 1L)))
+      _ <- next
+        .traverse_((partition, record) => positions.update(_.updated(partition, record.offset.value + 1L)))
     } yield next.map(_._2).toList.asRight[KuiError])
 
   /** How many polls this browse made, for the suite that asserts a bounded read stops. */
   val pollCount: IO[Int] = polls.get
+
+  /** How many times the source replaced the consumer assignment. Real Kafka pays a coordination and fetch
+    * setup cost for each one, so a backward page must not perform one assignment per record.
+    */
+  val assignmentCount: IO[Int] = assignments.get
 }
 
 object FakeBrowseConsumer {
@@ -140,8 +147,12 @@ object FakeBrowseConsumer {
     Ref.of[IO, Map[PartitionId, Vector[RawRecord]]](log).flatMap(of)
 
   def of(log: Ref[IO, Map[PartitionId, Vector[RawRecord]]]): IO[FakeBrowseConsumer] =
-    (Ref.of[IO, List[PartitionId]](Nil), Ref.of[IO, Map[PartitionId, Long]](Map.empty), Ref.of[IO, Int](0))
-      .mapN(new FakeBrowseConsumer(log, _, _, _))
+    (
+      Ref.of[IO, List[PartitionId]](Nil),
+      Ref.of[IO, Map[PartitionId, Long]](Map.empty),
+      Ref.of[IO, Int](0),
+      Ref.of[IO, Int](0)
+    ).mapN(new FakeBrowseConsumer(log, _, _, _, _))
 
   /** The consumer, as the `Resource` a browse opens — with a flag that records the close.
     *
@@ -157,6 +168,86 @@ object FakeBrowseConsumer {
       Resource
         .make(of(log))(_ => closed.set(true))
         .map(consumer => (consumer: BrowseConsumer[IO]).asRight[KuiError])
+
+  /** The consumer as it behaves in the first moments after an assignment: several polls that return nothing
+    * at all, and only then the records.
+    *
+    * This is not a pathological case. A real consumer returns empty polls while it discovers the leaders for
+    * its assignment, which is why `BrowseTuning.emptyPollsBeforeEnd` is not zero -- and why a suite whose
+    * fake answers on the first poll cannot see that constant being wrong.
+    */
+  def openingSilentAtFirst(
+      log: Map[PartitionId, Vector[RawRecord]],
+      closed: Ref[IO, Boolean],
+      silentPolls: Int
+  ): (ClusterId, IsolationLevel) => Resource[IO, Either[KuiError, BrowseConsumer[IO]]] =
+    (_, _) =>
+      Resource
+        .make(of(log).flatMap(consumer => Ref.of[IO, Int](0).map(silence(consumer, _, silentPolls))))(_ =>
+          closed.set(true)
+        )
+        .map(_.asRight[KuiError])
+
+  private def silence(
+      underlying: FakeBrowseConsumer,
+      polled: Ref[IO, Int],
+      silentPolls: Int
+  ): BrowseConsumer[IO] =
+    new BrowseConsumer[IO] {
+      def partitions(topic: TopicName) = underlying.partitions(topic)
+      def beginningOffsets(topic: TopicName, ids: List[PartitionId]) = underlying.beginningOffsets(topic, ids)
+      def endOffsets(topic: TopicName, ids: List[PartitionId]) = underlying.endOffsets(topic, ids)
+      def offsetsForTimes(topic: TopicName, ids: List[PartitionId], millis: Long) =
+        underlying.offsetsForTimes(topic, ids, millis)
+      def assign(topic: TopicName, ids: List[PartitionId]) = underlying.assign(topic, ids)
+      def seek(topic: TopicName, partition: PartitionId, offset: Long) =
+        underlying.seek(topic, partition, offset)
+
+      def poll(timeout: FiniteDuration): IO[Either[KuiError, List[RawRecord]]] =
+        polled.getAndUpdate(_ + 1).flatMap { before =>
+          if before < silentPolls then IO.pure(List.empty[RawRecord].asRight[KuiError])
+          else underlying.poll(timeout)
+        }
+    }
+
+  /** The log as it stood when the browse planned, plus one record written the moment it had.
+    *
+    * A bounded browse resolves each partition's window against the end of the log at the instant it plans,
+    * and producers do not stop while it reads. This fake writes `appended` immediately after `endOffsets` has
+    * answered, so that record sits at exactly the window's upper bound -- the one offset a half-open
+    * `[low, high)` range has to exclude. Without this arrangement no fixture in the suite can put a record at
+    * `high` at all: every other log here is complete before the browse starts, so `high` is one past the last
+    * record that exists and the bound is never actually tested.
+    */
+  def openingThatGrowsAfterPlanning(
+      initial: Map[PartitionId, Vector[RawRecord]],
+      appended: RawRecord,
+      closed: Ref[IO, Boolean]
+  ): (ClusterId, IsolationLevel) => Resource[IO, Either[KuiError, BrowseConsumer[IO]]] =
+    (_, _) =>
+      Resource
+        .make(of(initial).map(growingAfterPlanning(_, appended)))(_ => closed.set(true))
+        .map(_.asRight[KuiError])
+
+  private def growingAfterPlanning(
+      underlying: FakeBrowseConsumer,
+      appended: RawRecord
+  ): BrowseConsumer[IO] =
+    new BrowseConsumer[IO] {
+      def partitions(topic: TopicName) = underlying.partitions(topic)
+      def beginningOffsets(topic: TopicName, ids: List[PartitionId]) = underlying.beginningOffsets(topic, ids)
+
+      /** The write lands here, between the plan reading the end of the log and the first poll. */
+      def endOffsets(topic: TopicName, ids: List[PartitionId]) =
+        underlying.endOffsets(topic, ids).flatTap(_ => underlying.append(appended))
+
+      def offsetsForTimes(topic: TopicName, ids: List[PartitionId], millis: Long) =
+        underlying.offsetsForTimes(topic, ids, millis)
+      def assign(topic: TopicName, ids: List[PartitionId]) = underlying.assign(topic, ids)
+      def seek(topic: TopicName, partition: PartitionId, offset: Long) =
+        underlying.seek(topic, partition, offset)
+      def poll(timeout: FiniteDuration): IO[Either[KuiError, List[RawRecord]]] = underlying.poll(timeout)
+    }
 
   /** The same thing over a log the test can still write to after the browse has started.
     *

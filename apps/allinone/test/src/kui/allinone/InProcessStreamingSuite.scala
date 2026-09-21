@@ -36,11 +36,19 @@ final class InProcessStreamingSuite extends KuiIOSuite {
           kui.security.RequestDigest.ofRequestLine("GET", "/internal/v1/ticks"),
           now
         )
-        .map(_.leftMap(error => ErrorEnvelope.of(kui.kernel.error.KuiError.remote(
-          kui.kernel.error.ErrorCode.Unauthenticated,
-          error.metricLabel,
-          Nil
-        ), AllInOneFixture.Correlation, now)))
+        .map(
+          _.leftMap(error =>
+            ErrorEnvelope.of(
+              kui.kernel.error.KuiError.remote(
+                kui.kernel.error.ErrorCode.Unauthenticated,
+                error.metricLabel,
+                Nil
+              ),
+              AllInOneFixture.Correlation,
+              now
+            )
+          )
+        )
     )
 
   private def client(produced: Ref[IO, Int]): ServiceClient[IO] =

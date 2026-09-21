@@ -9,9 +9,9 @@ import kui.kernel.Port
 
 /** That telemetry starts, stops and stays out of the way.
   *
-  * The last of those three is the one worth testing hardest: a monitoring outage must never become
-  * a KUI outage, so a telemetry failure has to degrade to recording nothing rather than to a
-  * process that will not boot.
+  * The last of those three is the one worth testing hardest: a monitoring outage must never become a KUI
+  * outage, so a telemetry failure has to degrade to recording nothing rather than to a process that will not
+  * boot.
   */
 final class TelemetrySuite extends CatsEffectSuite {
 
@@ -63,7 +63,8 @@ final class TelemetrySuite extends CatsEffectSuite {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
-        val telemetry = Telemetry.fromProviders(testkit.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
+        val telemetry =
+          Telemetry.fromProviders(testkit.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
         for {
           tracer <- telemetry.tracer("kui.test")
           _ <- tracer.span("kui.test.operation").use_

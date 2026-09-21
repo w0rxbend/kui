@@ -3,6 +3,7 @@ package kui.kafka.admin
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import munit.ScalaCheckSuite
 import org.apache.kafka.clients.admin.{AlterConsumerGroupOffsetsResult, DeleteConsumerGroupsResult}
 import org.apache.kafka.common.errors.*
@@ -12,11 +13,15 @@ import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
 import kui.kafka.KafkaErrorMapper
-import kui.kernel.ClusterId
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.error.ErrorCode
-import kui.kernel.{GroupId, Offset, PartitionId, TopicName, TopicPartition}
-import cats.effect.unsafe.implicits.global
+import kui.kernel.{ClusterId, GroupId, Offset, PartitionId, TopicName, TopicPartition}
 
 /** What the three mutations do, and — mostly — what they say when the cluster refuses.
   *
@@ -45,7 +50,8 @@ final class GroupMutationsSuite extends ScalaCheckSuite {
         case None =>
           KafkaFuture.completedFuture(Map.empty[KafkaTopicPartition, Errors].asJava)
         case Some(error) =>
-          val future = new org.apache.kafka.common.internals.KafkaFutureImpl[java.util.Map[KafkaTopicPartition, Errors]]
+          val future =
+            new org.apache.kafka.common.internals.KafkaFutureImpl[java.util.Map[KafkaTopicPartition, Errors]]
           future.completeExceptionally(error)
           future
       }
@@ -67,7 +73,9 @@ final class GroupMutationsSuite extends ScalaCheckSuite {
 
   test("altering offsets on an empty group succeeds") {
     val answer =
-      alterPort(None).alterOffsets(connection, orders, Map(partition(0) -> Offset.unsafe(12L))).unsafeRunSync()
+      alterPort(None)
+        .alterOffsets(connection, orders, Map(partition(0) -> Offset.unsafe(12L)))
+        .unsafeRunSync()
     assertEquals(answer, Right(()))
   }
 

@@ -13,15 +13,15 @@ final class PagingSuite extends ScalaCheckSuite {
 
   private val listAndSize: Gen[(List[Int], Int)] = for {
     items <- Gen.listOf(Gen.chooseNum(0, 1000))
-    size  <- Gen.chooseNum(1, 50)
+    size <- Gen.chooseNum(1, 50)
   } yield (items, size)
 
   property("every page of a list, concatenated, is the list again") {
     forAll(listAndSize) { pair =>
-      val items    = pair._1
-      val size     = pair._2
+      val items = pair._1
+      val size = pair._2
       val lastPage = math.max(1, math.ceil(items.size.toDouble / size).toInt)
-      val paged    = (1 to lastPage).toList.flatMap(page => Page.of(items, request(page, size)).items)
+      val paged = (1 to lastPage).toList.flatMap(page => Page.of(items, request(page, size)).items)
       assertEquals(paged, items)
     }
   }
@@ -34,9 +34,9 @@ final class PagingSuite extends ScalaCheckSuite {
   }
 
   test("totalItems counts the filtered list, not the list before filtering") {
-    val all      = (1 to 100).toList
+    val all = (1 to 100).toList
     val filtered = all.filter(_ % 10 == 0)
-    val page     = Page.of(filtered, request(1, 25))
+    val page = Page.of(filtered, request(1, 25))
 
     assertEquals(page.totalItems, Some(10L))
     assertEquals(page.items, filtered)
@@ -63,7 +63,7 @@ final class PagingSuite extends ScalaCheckSuite {
   }
 
   test("map converts the items and keeps every piece of pagination metadata") {
-    val page   = Page.of((1 to 10).toList, request(2, 3))
+    val page = Page.of((1 to 10).toList, request(2, 3))
     val mapped = page.map(_.toString)
 
     assertEquals(mapped.items, List("4", "5", "6"))

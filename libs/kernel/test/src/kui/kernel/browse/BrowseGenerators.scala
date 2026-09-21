@@ -2,8 +2,9 @@ package kui.kernel.browse
 
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
 
-import kui.kernel.{Offset, OffsetRange, PartitionId}
 import org.scalacheck.{Arbitrary, Gen}
+
+import kui.kernel.{Offset, OffsetRange, PartitionId}
 
 /** ScalaCheck generators for the browse vocabulary.
   *

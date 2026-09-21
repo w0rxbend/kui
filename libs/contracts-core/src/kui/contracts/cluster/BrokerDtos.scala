@@ -13,20 +13,26 @@ import kui.kernel.BrokerId
 /** One node of a cluster, as the brokers list page shows it.
   *
   * `rack` is `Option` because `Node.rack()` is nullable and a broker with no rack must read as "none", not as
-  * an empty string that sorts between two real racks. `partitionCount` and `leaderCount` have no source in M1
-  * for the reason `ClusterSummaryDto` records, so they are always `None`; replica counts and the skew
-  * percentages *are* derivable from `describeLogDirs` and do ship (BR-001).
+  * an empty string that sorts between two real racks.
   *
+  * @param partitionCount
+  *   partitions with a replica on this broker, and
+  * @param leaderCount
+  *   how many of those it leads. Both come from the cluster service's own `describeTopics` sweep and both are
+  *   `None` unless that sweep covered every topic, for the reason `ClusterSummaryDto` gives: a sum over some
+  *   of the topics is a number that looks measured. They are absent together with the cluster-wide counts
+  *   because all three are sums over one sweep — but independently of `replicaCount` below, which comes from
+  *   a different call and fails for different reasons
   * @param replicaCount
   *   how many partition replicas this broker holds, counted from the log directories it reports. This is the
   *   *total*, in-sync and lagging alike. It was called `inSyncReplicaCount` until 2026-09-04 and was filled
   *   from this same total, which is the same number on a healthy cluster and a false one exactly when a
   *   broker falls behind: with one broker of three stopped, the survivors kept reporting their pre-failure
-  *   figure as if every replica were still caught up. The in-sync count cannot be had from the calls this
-  *   service makes — `describeCluster` and `describeLogDirs` know nothing about ISR, and the only source is
-  *   `describeTopics`, one call per batch of topics, which the cluster service does not sweep
-  *   (`research/kafka/admin-capabilities.md`). So the field says what it holds instead of claiming a number
-  *   nobody computed
+  *   figure as if every replica were still caught up. `describeLogDirs`, which this count comes from, knows
+  *   nothing about ISR; the sweep behind `partitionCount` does, so an in-sync count is now derivable and is
+  *   deliberately still not folded in here. The two answer different questions — what is on the disk, and
+  *   what the metadata says is caught up — and they differ exactly when a replica falls behind, which is the
+  *   moment the difference matters. So the field goes on saying what it holds
   * @param replicaSkewPercent
   *   how far this broker's replica count is from the cluster's mean, as a percentage computed server-side so
   *   that the table, a CSV export and any other client round the same way. `None` means "not computable" — a

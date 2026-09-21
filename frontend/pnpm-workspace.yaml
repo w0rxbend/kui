@@ -13,6 +13,11 @@ allowBuilds:
 # core in one bundle is the framework's classic failure mode (ADR-048 §7 R-7).
 dedupePeerDependents: true
 
+# openapi-typescript's Redocly parser accepts this patch release without an API change. Keep the
+# generator off GHSA-2883-xcg3-v3hh until its parent raises its own lower bound.
+overrides:
+  js-yaml: 4.3.2
+
 minimumReleaseAgeExclude:
   - playwright-core@1.63.0
   - playwright@1.63.0

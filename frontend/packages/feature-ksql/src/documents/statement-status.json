@@ -1,0 +1,12 @@
+{
+  "statement" : "CREATE STREAM ENRICHED_ORDERS AS SELECT * FROM ORDERS EMIT CHANGES;",
+  "shape" : "statement",
+  "outcome" : "status",
+  "columns" : [
+  ],
+  "rows" : [
+  ],
+  "message" : "Stream created and running",
+  "entity" : "stream/ENRICHED_ORDERS/create",
+  "executedAt" : "2026-09-03T10:11:12Z"
+}

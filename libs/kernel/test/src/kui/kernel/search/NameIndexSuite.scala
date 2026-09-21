@@ -1,8 +1,8 @@
 package kui.kernel.search
 
 import munit.ScalaCheckSuite
-import org.scalacheck.Prop.forAll
 import org.scalacheck.Gen
+import org.scalacheck.Prop.forAll
 
 /** The ranking contract of ADR-038, stated as tests.
   *
@@ -14,7 +14,9 @@ final class NameIndexSuite extends ScalaCheckSuite {
 
   /** Names in the shape Kafka actually produces: letters, digits, dots, dashes and underscores. */
   private val nameGen: Gen[String] =
-    Gen.nonEmptyListOf(Gen.oneOf(Gen.alphaNumChar, Gen.const('.'), Gen.const('-'), Gen.const('_'))).map(_.mkString)
+    Gen
+      .nonEmptyListOf(Gen.oneOf(Gen.alphaNumChar, Gen.const('.'), Gen.const('-'), Gen.const('_')))
+      .map(_.mkString)
 
   private val namesGen: Gen[List[String]] = Gen.listOf(nameGen)
 

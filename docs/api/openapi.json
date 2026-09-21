@@ -10,6 +10,149 @@
     }
   ],
   "paths" : {
+    "/api/v1/clusters/{clusterId}/alerts/events" : {
+      "get" : {
+        "tags" : [
+          "alerts"
+        ],
+        "summary" : "What KUI has noticed about this cluster",
+        "description" : "Newest first, resolved events included: the design's card draws five rows of which two are resolved. openCount and unreadCount are counted over the whole store rather than over the page. Each rule carries its own section, so a rule whose facts could not be read says so instead of contributing a zero, and one dead rule costs one row rather than the document.",
+        "operationId" : "alerts.events",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "limit",
+            "in" : "query",
+            "description" : "How many events to return, 1 to 200",
+            "required" : false,
+            "schema" : {
+              "default" : 50,
+              "type" : "integer",
+              "format" : "int32",
+              "minimum" : 1,
+              "maximum" : 200
+            }
+          },
+          {
+            "name" : "markRead",
+            "in" : "query",
+            "description" : "When true, this principal's read marker moves to now after unreadCount has been computed, so the caller still learns how many it had not seen. Default false, so a card polling the feed does not clear somebody's bell",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AlertFeedResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/alerts/events/{eventId}/acknowledgement" : {
+      "post" : {
+        "tags" : [
+          "alerts"
+        ],
+        "summary" : "Mark one alert event acknowledged",
+        "description" : "Part of the alerts.event.acknowledge flow. This call changes nothing. The event stays in the feed with the name of whoever acknowledged it, which is what an incident review reads. An event that is already closed, and an id that names no event, both answer 409 KUI-INVALID-STATE: from the caller's side they are one fact, and neither message says whether the id ever existed.",
+        "operationId" : "alerts.acknowledge",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "eventId",
+            "in" : "path",
+            "description" : "The alert event's id, as the feed reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}" : {
       "get" : {
         "tags" : [
@@ -432,6 +575,244 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/settings/ui" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Read this principal's appearance settings for one cluster",
+        "description" : "Returns the server-side value, or the product defaults when this principal has not saved one.",
+        "operationId" : "cluster.uiSettings.get",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UiAppearanceDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Persist this principal's appearance settings for one cluster",
+        "description" : "Mutation (cluster.uiSettings.put). Replaces theme, accent and density atomically in KUI's metadata store; it does not alter the Kafka cluster itself.",
+        "operationId" : "cluster.uiSettings.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UiAppearanceDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UiAppearanceDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/settings/messages" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Read this principal's message browser defaults for one cluster",
+        "description" : "Returns the saved page size and presentation mode, or product defaults when none were saved.",
+        "operationId" : "cluster.messageBrowserSettings.get",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Persist this principal's message browser defaults for one cluster",
+        "description" : "Mutation (cluster.messageBrowserSettings.put). Replaces the bounded browse page size and presentation mode in KUI metadata; it does not alter Kafka.",
+        "operationId" : "cluster.messageBrowserSettings.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/connection-test" : {
       "post" : {
         "tags" : [
@@ -476,6 +857,291 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ConnectivityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/connectors" : {
+      "get" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "The connectors this cluster's Connect workers are running",
+        "description" : "One section per configured Connect cluster, so a worker that is down costs one row rather than the screen, and a worker that is rebalancing says so instead of reporting no connectors. Each connector carries its tasks with their states and the worker's own failure trace. No throughput is published: the Connect REST API measures none.",
+        "operationId" : "connect.connectors",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorListResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/pause" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Pause one connector",
+        "description" : "Asks the Connect cluster to stop this connector's tasks. Nothing is deleted and `resume` puts it back, so there is no typed confirmation; it is audited, and it is refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.pause",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/resume" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Resume one paused connector",
+        "description" : "Asks the Connect cluster to start this connector's tasks again. Audited, and refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.resume",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/restart" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Restart one connector and its tasks",
+        "description" : "Asks the Connect cluster to restart this connector and its tasks. The connector resumes from its own committed offsets; what it costs is a gap in delivery while the tasks come back. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.restart",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
                 }
               }
             }
@@ -1590,6 +2256,65 @@
         }
       }
     },
+    "/api/v1/search" : {
+      "get" : {
+        "tags" : [
+          "search",
+          "gateway"
+        ],
+        "summary" : "Topics, consumer groups and subjects matching one query, across every cluster",
+        "description" : "Answers 200 whenever the query is well formed, however many of the three services could be asked. A service this deployment does not route, or one that did not answer, contributes its id to `partial` and no results; the other two still answer. A `q` outside 1 to 200 characters is a 400 KUI-VALIDATION naming the field, because a search box with no term is a request the browser should not have made rather than a cluster with nothing in it.",
+        "operationId" : "gateway.search",
+        "parameters" : [
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "What to look for: a case-insensitive substring of a topic, group or subject name",
+            "required" : true,
+            "schema" : {
+              "type" : "string",
+              "maxLength" : 200,
+              "minLength" : 1
+            }
+          },
+          {
+            "name" : "limit",
+            "in" : "query",
+            "description" : "How many hits of each kind to return",
+            "required" : false,
+            "schema" : {
+              "default" : 10,
+              "type" : "integer",
+              "format" : "int32",
+              "minimum" : 1,
+              "maximum" : 50
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SearchAnswerDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream" : {
       "get" : {
         "tags" : [
@@ -1741,6 +2466,294 @@
               "text/event-stream" : {
                 "schema" : {
                   "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/alerts/stream" : {
+      "get" : {
+        "tags" : [
+          "alerts",
+          "gateway"
+        ],
+        "summary" : "One event whenever this cluster's alert feed changes",
+        "description" : "Named events: 'alerts' carries {cluster, openCount, at}; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope. A frame carries the open count and not the events, so one subscriber's unread count never reaches another's socket and a dropped frame costs a fetch rather than a stale screen.",
+        "operationId" : "alerts.stream",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/stream" : {
+      "get" : {
+        "tags" : [
+          "ksql",
+          "gateway"
+        ],
+        "summary" : "Rows of a push query, as they arrive",
+        "description" : "Named events: 'phase' carries {columns} once, as soon as the server accepts the query; 'row' carries {values} in that column order; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope; 'done' says why it ended. A statement that is not a push query is refused before the server is called, and the refusal names the endpoint that does answer it.",
+        "operationId" : "ksql.stream",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "statement",
+            "in" : "query",
+            "description" : "The push query to run. It must be a SELECT ... EMIT CHANGES and nothing else",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/objects" : {
+      "get" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "The streams, tables, queries and topics this cluster's ksqlDB knows about",
+        "description" : "One list, ordered by kind and then by name, because §3.16's pane is one pane and a row that moves between polls is one an operator cannot click accurately. A row the server returned and KUI could not describe is named in `unreadable` rather than dropped.",
+        "operationId" : "ksql.objects",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/KsqlObjectsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/statements/plan" : {
+      "post" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "What running this statement would do",
+        "description" : "Part of the ksql.statement flow. This call changes nothing. Answers what the statement is — a pull query, a push query or a statement — whether it is destructive, whether it deletes a Kafka topic, the warnings to show before it is confirmed, and a token valid for five minutes and for this statement's exact text. A statement that is not destructive plans to no token and needs none.",
+        "operationId" : "ksql.statement.plan",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StatementRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/ksql/statements" : {
+      "post" : {
+        "tags" : [
+          "ksql"
+        ],
+        "summary" : "Run one ksqlDB statement",
+        "description" : "Mutation (ksql.statement). This call changes the cluster and cannot be undone. One statement per request. A `DROP ... DELETE TOPIC` is refused without the token its plan answered with, and the token is checked against the statement's exact text so that a confirmed statement cannot be swapped for another one. A `SELECT ... EMIT CHANGES` is refused here and named at .../ksql/stream, because it never finishes. A pull query answers rows; everything else answers the server's own status sentence.",
+        "operationId" : "ksql.statement.execute",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StatementRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementResultDto"
                 }
               }
             }
@@ -2247,6 +3260,294 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/metrics/throughput" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The cluster's throughput over the requested window",
+        "description" : "Answers 200 with a not_configured section for a cluster that has no kui.metrics.sources entry, which is a deployment choice rather than a failure: the card keeps its 'not measured' sentence. A bucket KUI did not sample carries null rates, so a gap breaks the bar instead of reading as a quiet cluster.",
+        "operationId" : "metrics.throughput",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "range",
+            "in" : "query",
+            "description" : "How far back to reach: 24h, 7d, 30d",
+            "required" : false,
+            "schema" : {
+              "default" : "24h",
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ThroughputResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/metrics/latency" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The cluster's p99 request latency over the requested window",
+        "description" : "Two series, produce and consumer fetch, on the same axis as throughput. A step KUI did not sample carries null, which breaks the line rather than drawing an instant answer. An unavailable section here means the exporter answered and publishes no RequestMetrics family at all, so the whitelist is what has to change.",
+        "operationId" : "metrics.latency",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "window",
+            "in" : "query",
+            "description" : "How far back to reach: 24h, 7d, 30d",
+            "required" : false,
+            "schema" : {
+              "default" : "24h",
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LatencyResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/metrics/request-handlers" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "How idle the broker's request handlers are, and how deep its purgatories are",
+        "description" : "Idle figures are ratios in 0..1 exactly as the broker publishes them, so the caller chooses the rounding. Purgatory is a count of parked requests per delayed operation and never a percentage: Kafka publishes a queue length and no ceiling to divide it by (ADR-052).",
+        "operationId" : "metrics.requestHandlers",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RequestHandlersResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/metrics/producers" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The topics receiving the most traffic",
+        "description" : "Ranked by the broker's one-minute bytes-in rate per topic. `measuredBy` is `topic`: a Kafka broker publishes no per-client.id byte rate unless quotas are configured (ADR-052), so this is not a list of clients. An empty list means the exporter served the family and no per-topic line, which is either a cluster where nothing is producing or a ruleset with no per-topic rule; an unavailable section is an exporter that does not publish the family at all.",
+        "operationId" : "metrics.producers",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "top",
+            "in" : "query",
+            "description" : "How many topics to return, 1 to 50",
+            "required" : false,
+            "schema" : {
+              "default" : 5,
+              "type" : "integer",
+              "format" : "int32",
+              "minimum" : 1,
+              "maximum" : 50
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopProducersResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/metrics/record-size" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The mean size of a record on this cluster",
+        "description" : "bytes in over records in, with both rates beside it so a caller can say what the figure is. There is no percentile and no histogram here because Kafka publishes none (ADR-052); a card that needs a distribution keeps its 'not measured' sentence.",
+        "operationId" : "metrics.recordSize",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RecordSizeResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/schemas/compatibility" : {
       "get" : {
         "tags" : [
@@ -2372,7 +3673,7 @@
           "schema"
         ],
         "summary" : "The subjects registered on this cluster's Schema Registry",
-        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned. pageSize=0 answers the total with no rows and asks the registry nothing beyond the subject list.",
         "operationId" : "schema.subjects",
         "parameters" : [
           {
@@ -2425,7 +3726,7 @@
           {
             "name" : "pageSize",
             "in" : "query",
-            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "description" : "How many rows a page holds, up to 100. A value above that is clamped, not refused. Exactly 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment; anything below that is clamped up to one row rather than read as a count",
             "required" : false,
             "schema" : {
               "default" : 25,
@@ -2638,6 +3939,83 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SubjectVersionsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Register a schema under this subject",
+        "description" : "Mutation (schema.subject.version.register). This call adds a version to the subject and cannot be undone from KUI. The registry decides whether the schema is accepted; a rejection comes back as 400 KUI-VALIDATION carrying the registry's own explanation in details[0], because that sentence names the field that broke the rule and is the only part of the answer anybody can act on. Registering a schema that is already registered under this subject is what the registry calls idempotent: it answers the existing id and version and adds no version. The answer's version is absent when the registry stored the schema and then would not say which version it became, which is a registration that succeeded and a number KUI does not know.",
+        "operationId" : "schema.subject.version.register",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RegisterSchemaRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RegisteredVersionDto"
                 }
               }
             }
@@ -2965,6 +4343,108 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/CreatedTopicDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/statistics" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Cluster-wide topic totals: how many topics, partitions and bytes",
+        "description" : "Cluster-wide and unaffected by any list filter: the totals keep reading the whole cluster while the table below them shows a search result. Each sum is absent rather than partial — a scrape that could not describe a topic knows how many topics exist and not how many partitions they hold — and incompleteTopics says how many topics that was, so the screen can explain the gap.",
+        "operationId" : "topic.statistics",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicStatisticsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/names" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Every topic name on the cluster, unpaged",
+        "description" : "The drawer's topic tree is a fold over names, so it needs the names and none of the figures. Unpaged on purpose: a page of names would make the tree's counts depend on how far something had scrolled a list it never shows. Topics the scrape could not describe are included — they have no list row, they do exist, and a tree that omitted them would say a topic is gone.",
+        "operationId" : "topic.names",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicNamesResponse"
                 }
               }
             }
@@ -3594,6 +5074,24 @@
   },
   "components" : {
     "schemas" : {
+      "AcknowledgementDto" : {
+        "title" : "AcknowledgementDto",
+        "description" : "The event as it now stands, and the cluster's open count after the acknowledgement",
+        "type" : "object",
+        "required" : [
+          "event",
+          "openCount"
+        ],
+        "properties" : {
+          "event" : {
+            "$ref" : "#/components/schemas/AlertEventDto"
+          },
+          "openCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "AdminTuningDocument" : {
         "title" : "AdminTuningDocument",
         "description" : "Admin client timeouts, chunk sizes and refresh intervals, in whole milliseconds",
@@ -3664,6 +5162,90 @@
           "parallelism" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "AlertEventDto" : {
+        "title" : "AlertEventDto",
+        "description" : "One row of the alerts feed. `severity` chooses the tone and `category` chooses the glyph; both derived values travel so the bell, the card and the panel cannot map them differently. `openedAt` is when KUI noticed, not when the cluster changed",
+        "type" : "object",
+        "required" : [
+          "id",
+          "severity",
+          "tone",
+          "category",
+          "glyph",
+          "openedAt",
+          "lastSeenAt",
+          "title",
+          "detail"
+        ],
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "tone" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "glyph" : {
+            "type" : "string"
+          },
+          "openedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastSeenAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "resolution" : {
+            "$ref" : "#/components/schemas/AlertResolutionDto"
+          }
+        }
+      },
+      "AlertFeedResponse" : {
+        "title" : "AlertFeedResponse",
+        "description" : "What KUI has noticed about this cluster, or the reason it cannot say",
+        "type" : "object",
+        "required" : [
+          "events"
+        ],
+        "properties" : {
+          "events" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "AlertResolutionDto" : {
+        "title" : "AlertResolutionDto",
+        "description" : "How an event closed: `cleared` means the condition stopped, `acknowledged` means a person said they know. `by` is set only for an acknowledgement",
+        "type" : "object",
+        "required" : [
+          "at",
+          "kind"
+        ],
+        "properties" : {
+          "at" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "by" : {
+            "type" : "string"
           }
         }
       },
@@ -4205,7 +5787,6 @@
         "description" : "A proposed schema to check against a subject. Nothing is registered",
         "type" : "object",
         "required" : [
-          "schemaType",
           "definition"
         ],
         "properties" : {
@@ -4270,6 +5851,45 @@
           },
           "detail" : {
             "type" : "string"
+          }
+        }
+      },
+      "ConnectorListResponse" : {
+        "title" : "ConnectorListResponse",
+        "description" : "The connectors of every Connect cluster configured for this Kafka cluster. `not_configured` with a 200 when this cluster configures none",
+        "type" : "object",
+        "required" : [
+          "connectors"
+        ],
+        "properties" : {
+          "connectors" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "ConnectorOperationDto" : {
+        "title" : "ConnectorOperationDto",
+        "description" : "The worker accepted the operation. It carries no connector state: Connect applies these asynchronously, and the next read of the connector list is where the change appears",
+        "type" : "object",
+        "required" : [
+          "connect",
+          "connector",
+          "operation",
+          "acceptedAt"
+        ],
+        "properties" : {
+          "connect" : {
+            "type" : "string"
+          },
+          "connector" : {
+            "type" : "string"
+          },
+          "operation" : {
+            "type" : "string"
+          },
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },
@@ -4646,6 +6266,13 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "coordinatorHost" : {
+            "type" : "string"
+          },
+          "coordinatorPort" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "members" : {
             "type" : "array",
             "items" : {
@@ -4675,6 +6302,25 @@
           },
           "stale" : {
             "$ref" : "#/components/schemas/StaleDto"
+          }
+        }
+      },
+      "GroupHitDto" : {
+        "title" : "GroupHitDto",
+        "description" : "A consumer group the query matched",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "groupId"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
           }
         }
       },
@@ -4721,6 +6367,13 @@
             "format" : "int32"
           },
           "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "coordinatorHost" : {
+            "type" : "string"
+          },
+          "coordinatorPort" : {
             "type" : "integer",
             "format" : "int32"
           },
@@ -4887,6 +6540,19 @@
           }
         }
       },
+      "KsqlObjectsResponse" : {
+        "title" : "KsqlObjectsResponse",
+        "description" : "What this cluster's ksqlDB named. `not_configured` with a 200 when this cluster has no ksqlDB",
+        "type" : "object",
+        "required" : [
+          "objects"
+        ],
+        "properties" : {
+          "objects" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "LagDeltaDto" : {
         "title" : "LagDeltaDto",
         "description" : "Groups whose lag changed since the given token, the groups that are gone, and a new token",
@@ -4951,6 +6617,19 @@
           "members" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "LatencyResponse" : {
+        "title" : "LatencyResponse",
+        "description" : "The cluster's p99 request latency, or the reason there is none to show",
+        "type" : "object",
+        "required" : [
+          "latency"
+        ],
+        "properties" : {
+          "latency" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },
@@ -5055,6 +6734,24 @@
           },
           "rebalancing" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "MessageBrowserSettingsDto" : {
+        "title" : "MessageBrowserSettingsDto",
+        "description" : "The default page size and presentation mode for bounded message browsing",
+        "type" : "object",
+        "required" : [
+          "pageSize",
+          "mode"
+        ],
+        "properties" : {
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "mode" : {
+            "type" : "string"
           }
         }
       },
@@ -5203,8 +6900,7 @@
           "items" : {
             "type" : "array",
             "items" : {
-              "description" : "a schema registry subject",
-              "type" : "string"
+              "$ref" : "#/components/schemas/SubjectSummaryDto"
             }
           },
           "page" : {
@@ -5825,6 +7521,19 @@
           }
         }
       },
+      "RecordSizeResponse" : {
+        "title" : "RecordSizeResponse",
+        "description" : "The mean record size, or the reason there is none to show",
+        "type" : "object",
+        "required" : [
+          "recordSize"
+        ],
+        "properties" : {
+          "recordSize" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "RefreshAcceptedDto" : {
         "title" : "RefreshAcceptedDto",
         "description" : "A refresh was accepted; the snapshot is not new yet",
@@ -5860,6 +7569,64 @@
           "requestedAt" : {
             "description" : "RFC 3339 timestamp in UTC",
             "type" : "string"
+          }
+        }
+      },
+      "RegisterSchemaRequest" : {
+        "title" : "RegisterSchemaRequest",
+        "description" : "The schema to register under this subject, and what it is written in",
+        "type" : "object",
+        "required" : [
+          "definition"
+        ],
+        "properties" : {
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "RegisteredVersionDto" : {
+        "title" : "RegisteredVersionDto",
+        "description" : "The registered schema's id, and the version it became where the registry reported one",
+        "type" : "object",
+        "required" : [
+          "subject",
+          "id"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "RequestHandlersResponse" : {
+        "title" : "RequestHandlersResponse",
+        "description" : "How busy the broker's handlers are, or the reason there is nothing to show",
+        "type" : "object",
+        "required" : [
+          "requestHandlers"
+        ],
+        "properties" : {
+          "requestHandlers" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },
@@ -6175,6 +7942,51 @@
           }
         }
       },
+      "SearchAnswerDto" : {
+        "title" : "SearchAnswerDto",
+        "description" : "Everything one query found, with the services that could not be asked named",
+        "type" : "object",
+        "required" : [
+          "results"
+        ],
+        "properties" : {
+          "results" : {
+            "$ref" : "#/components/schemas/SearchResultsDto"
+          },
+          "partial" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a KUI service: cluster, topic, message, ...",
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "SearchResultsDto" : {
+        "title" : "SearchResultsDto",
+        "description" : "What the query found, grouped by kind",
+        "type" : "object",
+        "properties" : {
+          "topics" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TopicHitDto"
+            }
+          },
+          "groups" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/GroupHitDto"
+            }
+          },
+          "subjects" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SubjectHitDto"
+            }
+          }
+        }
+      },
       "Sensitive" : {
         "title" : "Sensitive",
         "type" : "object",
@@ -6244,6 +8056,112 @@
           }
         }
       },
+      "StatementPlanDto" : {
+        "title" : "StatementPlanDto",
+        "description" : "What running this statement would do. A destructive statement carries a token valid for five minutes and for this statement's exact text; a harmless one carries none and needs none",
+        "type" : "object",
+        "required" : [
+          "statement",
+          "shape",
+          "destructive",
+          "deletesTopic",
+          "computedAt"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "shape" : {
+            "type" : "string"
+          },
+          "destructive" : {
+            "type" : "boolean"
+          },
+          "deletesTopic" : {
+            "type" : "boolean"
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "computedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StatementRequestDto" : {
+        "title" : "StatementRequestDto",
+        "description" : "One ksqlDB statement, and the plan token confirming it when it is destructive. One statement per request: this service classifies what it is given in order to decide whether it needs a confirmation, and a batch has no single classification",
+        "type" : "object",
+        "required" : [
+          "statement"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "StatementResultDto" : {
+        "title" : "StatementResultDto",
+        "description" : "What a finished statement produced. `outcome` is 'rows' for a pull query — an empty rows list then means the query matched nothing — or 'status' for a DDL or DML statement, whose `message` is the server's own sentence",
+        "type" : "object",
+        "required" : [
+          "statement",
+          "shape",
+          "outcome",
+          "executedAt"
+        ],
+        "properties" : {
+          "statement" : {
+            "type" : "string"
+          },
+          "shape" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "columns" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "entity" : {
+            "type" : "string"
+          },
+          "executedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "StoreMaterialWrite" : {
         "title" : "StoreMaterialWrite",
         "description" : "A keystore or truststore, base64 encoded, with its password",
@@ -6273,6 +8191,49 @@
           }
         ]
       },
+      "SubjectHitDto" : {
+        "title" : "SubjectHitDto",
+        "description" : "A subject the query matched",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "subject"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          }
+        }
+      },
+      "SubjectSummaryDto" : {
+        "title" : "SubjectSummaryDto",
+        "description" : "A subject list row: the name, and the facts a row shows when they could be read",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "format" : {
+            "type" : "string"
+          },
+          "versionCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "compatibility" : {
+            "$ref" : "#/components/schemas/CompatibilityDto"
+          }
+        }
+      },
       "SubjectVersionsDto" : {
         "title" : "SubjectVersionsDto",
         "description" : "A subject's version numbers, ascending",
@@ -6291,6 +8252,19 @@
               "type" : "integer",
               "format" : "int32"
             }
+          }
+        }
+      },
+      "ThroughputResponse" : {
+        "title" : "ThroughputResponse",
+        "description" : "The cluster's throughput, or the reason there is none to show",
+        "type" : "object",
+        "required" : [
+          "throughput"
+        ],
+        "properties" : {
+          "throughput" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },
@@ -6321,6 +8295,19 @@
             "items" : {
               "type" : "string"
             }
+          }
+        }
+      },
+      "TopProducersResponse" : {
+        "title" : "TopProducersResponse",
+        "description" : "Who is producing the traffic, or the reason KUI cannot say",
+        "type" : "object",
+        "required" : [
+          "producers"
+        ],
+        "properties" : {
+          "producers" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },
@@ -6393,6 +8380,38 @@
           }
         }
       },
+      "TopicHitDto" : {
+        "title" : "TopicHitDto",
+        "description" : "A topic the query matched",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "name"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          }
+        }
+      },
+      "TopicNamesResponse" : {
+        "title" : "TopicNamesResponse",
+        "description" : "Every topic name on the cluster, for the drawer's tree; no counts and no paging",
+        "type" : "object",
+        "required" : [
+          "names"
+        ],
+        "properties" : {
+          "names" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "TopicOverviewDto" : {
         "title" : "TopicOverviewDto",
         "description" : "Everything the topic page shows, with each part able to be missing on its own",
@@ -6424,6 +8443,19 @@
           "generatedAt" : {
             "description" : "RFC 3339 timestamp in UTC",
             "type" : "string"
+          }
+        }
+      },
+      "TopicStatisticsResponse" : {
+        "title" : "TopicStatisticsResponse",
+        "description" : "The topics list's cluster-wide statistics region",
+        "type" : "object",
+        "required" : [
+          "statistics"
+        ],
+        "properties" : {
+          "statistics" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },
@@ -6596,6 +8628,27 @@
           },
           "storeType" : {
             "description" : "JKS, PKCS12 or PEM",
+            "type" : "string"
+          }
+        }
+      },
+      "UiAppearanceDto" : {
+        "title" : "UiAppearanceDto",
+        "description" : "The complete appearance snapshot for this principal and cluster",
+        "type" : "object",
+        "required" : [
+          "theme",
+          "accent",
+          "density"
+        ],
+        "properties" : {
+          "theme" : {
+            "type" : "string"
+          },
+          "accent" : {
+            "type" : "string"
+          },
+          "density" : {
             "type" : "string"
           }
         }

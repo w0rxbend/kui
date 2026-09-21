@@ -1,0 +1,63 @@
+{
+  "events" : {
+    "status" : "ok",
+    "data" : {
+      "items" : [
+      ],
+      "total" : 0,
+      "openCount" : 0,
+      "unreadCount" : 0,
+      "lastReadAt" : null,
+      "evaluatedAt" : "2026-09-03T10:11:12Z",
+      "rules" : [
+        {
+          "rule" : "offline-partitions",
+          "category" : "partition",
+          "evaluation" : {
+            "status" : "unavailable",
+            "reason" : "UPSTREAM_UNAVAILABLE",
+            "message" : "kafka-admin could not be reached",
+            "since" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "rule" : "under-replicated-partitions",
+          "category" : "replication",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "rule" : "stuck-rebalance",
+          "category" : "rebalance",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "rule" : "disk-usage",
+          "category" : "storage",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

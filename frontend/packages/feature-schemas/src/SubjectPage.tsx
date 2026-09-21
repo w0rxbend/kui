@@ -8,16 +8,16 @@
  * different numbers and an operator debugging a decode failure needs the id, not the version — the
  * record does not carry a version. Both are shown, labelled, and never conflated.
  *
- * ## The schema text is not pretty-printed
+ * ## The schema preview is readable without changing the registry
  *
- * It is shown exactly as the registry stores it, because that string is what the registry compares
- * for compatibility and what a producer's tooling will send. Reformatting it here would make a
- * "these are identical" comparison in a terminal fail for reasons the operator cannot see.
+ * The stored string is never mutated. The read-only preview gives JSON-family schemas a structured
+ * tree and source languages a formatted, highlighted view, and states that distinction explicitly.
  */
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { Banner, Select, StatusPill, type Mutation } from "@kui/kernel";
+import { Banner, Select, StatusPill, Tag, type Mutation } from "@kui/kernel";
 import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
+import { SchemaDefinition } from "./SchemaDefinition.jsx";
 import {
   COMPATIBILITY_LEVELS,
   type Compatibility,
@@ -26,6 +26,7 @@ import {
   type ProposedSchema,
   type SchemaVersion,
 } from "./data.js";
+import { formatTone, levelSourceSentence } from "./model.js";
 
 export interface SubjectPageProps {
   readonly subject: string;
@@ -38,7 +39,14 @@ export interface SubjectPageProps {
   readonly onSetCompatibility?: ((level: CompatibilityLevel) => void) | undefined;
   readonly setCompatibilityDisabledReason?: string | undefined;
   readonly state: Mutation<unknown>;
-  readonly failure?: { readonly message: string; readonly code?: string | undefined } | undefined;
+  /** See `SubjectListProps.failure`: `tone` is here because a stale answer is not a failure. */
+  readonly failure?:
+    | {
+        readonly message: string;
+        readonly code?: string | undefined;
+        readonly tone?: "danger" | "warning" | undefined;
+      }
+    | undefined;
   /**
    * Runs the "check a schema" panel's question. Absent leaves the panel off the page entirely, which
    * is what a story showing only the registered schema wants — it is not a permission gate: the
@@ -51,16 +59,41 @@ export interface SubjectPageProps {
 export function SubjectPage(props: SubjectPageProps): JSX.Element {
   return (
     <section class="kui-subject" aria-label={`Subject ${props.subject}`}>
+      {/* Not "Schema registry": that is the page's own heading two lines above this, and a trail
+          whose only rung repeats the title says nothing. It is kept rather than dropped because
+          below the workspace's breakpoint the panes stack and the list is a screen away. */}
       <nav class="kui-subject__trail" aria-label="Breadcrumb">
-        <a href={props.listHref}>Schema registry</a>
+        <a href={props.listHref}>All subjects</a>
       </nav>
 
-      <h1 class="kui-subject__title">{props.subject}</h1>
+      {/* The badge sits *beside* the heading and not inside it.
+
+          It was inside, which made the heading's accessible name the two strings run together —
+          `AVROorders.avro-value` — and a heading is the one string a screen reader user navigates
+          this pane by. Keeping the badge a sibling leaves the heading naming the subject and
+          nothing else; the row of the two is laid out by `.kui-subject__heading`, so nothing moves
+          visually.
+
+          The format comes from the version on screen rather than from the list row, because it is a
+          property of the schema being read and the pane can be opened at a version whose language
+          differs from the newest. */}
+      <div class="kui-subject__heading">
+        <Show when={props.current?.schemaType}>
+          {(format) => (
+            <Tag class="kui-subject__format" tone={formatTone(format())}>
+              {format()}
+            </Tag>
+          )}
+        </Show>
+        {/* An `h2`. This pane sits beside the subject list under the workspace's own `h1`, and a
+            second `h1` on the page would make a screen reader's heading list read as two pages. */}
+        <h2 class="kui-subject__title">{props.subject}</h2>
+      </div>
 
       <Show when={props.failure}>
         {(problem) => (
           <Banner
-            tone="danger"
+            tone={problem().tone ?? "danger"}
             message={problem().message}
             {...(problem().code === undefined ? {} : { code: problem().code })}
           />
@@ -78,11 +111,7 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
                 follows the registry's. Changing the global one moves every subject in the second
                 group, and an operator who cannot see which group a subject is in cannot know what
                 they are about to change. */}
-            <span class="kui-subject__compat-source">
-              {level().inherited
-                ? "inherited from the registry's global level"
-                : "set on this subject"}
-            </span>
+            <span class="kui-subject__compat-source">{levelSourceSentence(level())}</span>
 
             <Show
               when={props.onSetCompatibility !== undefined}
@@ -160,11 +189,10 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
               </div>
             </Show>
 
-            {/* Exactly as the registry stores it. Reformatting would make a byte-for-byte comparison
-                in a terminal fail for reasons that are invisible on this screen. */}
-            <pre class="kui-subject__definition" tabindex={0}>
-              <code>{schema().definition}</code>
-            </pre>
+            <SchemaDefinition
+              definition={schema().definition}
+              schemaType={schema().schemaType}
+            />
           </>
         )}
       </Show>

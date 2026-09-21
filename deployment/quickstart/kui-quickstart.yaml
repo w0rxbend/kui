@@ -39,12 +39,25 @@ kui:
     # being treated as an unknown word.
     type: disabled
 
+  # KUI's own durable metadata lives beside the demo data in compacted `__kui_*` topics. This is
+  # what makes appearance settings and alert read state survive a KUI container restart. A real
+  # deployment should normally use a dedicated, replicated metadata cluster; this one-broker
+  # quickstart deliberately uses replication and ISR values of one.
+  store:
+    topicPrefix: "__kui_"
+    replicationFactor: 1
+    minInSyncReplicas: 1
+    encryptionKey: "env:KUI_STORE_ENCRYPTION_KEY"
+    kafka:
+      bootstrapServers:
+        - "kafka:9092"
+
   topics:
     # A topic is internal when Kafka says so OR when its name starts with this prefix. The default is
     # `__`, which catches Kafka's own `__consumer_offsets`. The quickstart lowers it to a single
     # underscore because it seeds `_schemas` — the topic Confluent Schema Registry keeps its schemas
     # in — and a single leading underscore is the convention infrastructure topics like that use. With
-    # this set, the topics screen shows the seven topics that are yours and hides `_schemas` and
+    # this set, the topics screen shows the ten topics that are yours and hides `_schemas` and
     # `__consumer_offsets` behind the "show internal topics" switch.
     internalPrefix: "_"
 
@@ -52,6 +65,94 @@ kui:
     # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
     logFormat: json
     hashUserIds: true
+
+  # ---------------------------------------------------------------------------------------------
+  # Where this cluster's broker metrics are read from.
+  #
+  # `docker-compose.quickstart.yml` runs a Prometheus JMX exporter beside the broker and this is the
+  # line that tells KUI about it. Without it every metrics card on the dashboard answers
+  # `not_configured` and says so — which is the correct rendering for a deployment that has no
+  # exporter, and was for two milestones indistinguishable from KUI not being able to measure
+  # anything at all. That is the hole this key closes.
+  #
+  # `http://` and not a JMX service URL, and it is not a preference: `MetricsSourceSettings.url`
+  # is a `SafeUrl`, which ARCHITECTURE.md §14 restricts to `http` and `https`, so
+  # `service:jmx:rmi:///jndi/rmi://kafka:9999/jmxrmi` cannot be written here at all. See ADR-050.
+  #
+  # `kind` is `prometheus`, which is also the default; it is written out because the other value
+  # (`jmx`) is declared and deliberately unimplemented, and a reader who finds only one of the two
+  # spelled anywhere should be able to see which one this is.
+  #
+  # `callTimeout` must be shorter than `kui.metrics.scrapeInterval` (30s by default) or the loader
+  # refuses the file: a scrape that outlives its interval overlaps the next one.
+  metrics:
+    sources:
+      # The member name is the cluster id below, not a label. A legal id that does not match a
+      # configured cluster is currently ignored, so keep this name aligned with `kui.clusters[].id`.
+      quickstart:
+        url: "http://kafka-metrics:5556/metrics"
+        kind: prometheus
+        callTimeout: "10s"
+
+  # ---------------------------------------------------------------------------------------------
+  # WHAT KUI SHOULD NOTICE ABOUT THIS CLUSTER, AND WHEN.
+  #
+  # There is no on/off switch under `kui.alerts` and there deliberately is not one: every rule the
+  # alerts service runs reads a fact this product already measures, so alerting is on in every
+  # deployment and the only question is where the lines are drawn. The section is here anyway,
+  # spelled out at its own defaults, because the quickstart is what a newcomer copies and a key
+  # nobody can see is a key nobody knows they may set.
+  #
+  # These numbers are local policy rather than truths. A log directory at 80% is a quiet afternoon
+  # in one deployment and a page in another, and a consumer group that has been rebalancing for
+  # five minutes is either wedged behind a dead member or is a large group doing what large groups
+  # do. What is NOT policy is the shape of the answer: a rule whose facts cannot be read says so
+  # and contributes no event, rather than reporting a comfortable zero (ADR-053).
+  #
+  # `diskUsedCriticalPercent` has to stay above `diskUsedWarningPercent` or this file is refused at
+  # start-up, because a critical bound below the warning means the warning never fires on the way
+  # past it. That refusal is asserted by `ShippedConfigurationSuite`, which loads this file.
+  alerts:
+    # Seven days. The feed's own reading is about this week -- a relative age, an open count -- and
+    # an event store with no upper bound is a slow leak with a calendar.
+    retention: "7d"
+    # A minute, which is twice the cluster service's own snapshot cadence: evaluating faster than
+    # the facts change produces the same answer twice and costs a scrape.
+    evaluationInterval: "60s"
+    thresholds:
+      # One, because a single offline partition is data nobody can read and there is no acceptable
+      # number of them. It is a key rather than a constant because a cluster mid-migration can be
+      # knowingly noisy for an hour.
+      offlinePartitions: 1
+      underReplicatedPartitions: 1
+      rebalanceDuration: "5m"
+      # ONE, AND IT IS A DEMONSTRATION VALUE RATHER THAN A RECOMMENDATION. Copy 80 from
+      # `deployment/compose/kui-service.yaml` into a real deployment; do not copy this line.
+      #
+      # The quickstart's job is that every screen has something true on it. It seeds topics,
+      # consumer groups, messages and a second cluster profile for exactly that reason, and the
+      # alerts feed was the one screen it left permanently empty — because nothing in this product
+      # writes an event, an event is opened by a rule reading a fact, and no fact about a laptop
+      # running one broker crosses any of the four thresholds above. So the Alerts tab, the
+      # notification bell and the notifications panel had nothing in them on the deployment a
+      # newcomer runs, and `frontend/e2e/shell.spec.ts`'s acknowledgement case — `M06`, and the one
+      # case in the suite that drives the alerts **stream** end to end — skipped for three waves.
+      #
+      # This is the seam the product allows: the threshold moves, the fact does not. The event that
+      # opens names the real number off the real filesystem — "Log directory /var/lib/kafka/data is
+      # N% full on broker 1", where N is whatever share of your disk is actually used. Nothing is
+      # fabricated and no row is written by hand, which is the rule (`W6-01`: do not seed an event
+      # to make a screen look alive) this obeys rather than bends.
+      #
+      # The cost, said out loud because a reader meets it in their first minute: a first boot of the
+      # quickstart opens one `storage` warning. `diskUsedCriticalPercent` stays at 90, so a disk
+      # that is genuinely nearly full still reads as critical and not as this.
+      #
+      # Acknowledging it does not make it permanent: `AlertRules.evaluate` only counts events that
+      # are still open, so the next pass (`evaluationInterval` above, 60s) opens a fresh one. That
+      # is what makes the browser case re-runnable rather than green once per stack.
+      diskUsedWarningPercent: 1
+      diskUsedCriticalPercent: 90
 
   # ---------------------------------------------------------------------------------------------
   # The broker this quickstart starts.
@@ -83,19 +184,152 @@ kui:
         url:
           - "http://schema-registry:8080/apis/ccompat/v7"
 
+      # The Kafka Connect worker this quickstart starts beside the broker.
+      #
+      # Setting this is the whole on/off switch for the Connect screens on this cluster, exactly as
+      # `schemaRegistry` above is for schema-aware decoding: with it, KUI reads the worker's own
+      # REST API and shows the connectors it is running and each task's state; without it the
+      # connect service answers `not_configured` and ADR-032's rule hides the row rather than
+      # showing one that can never fill.
+      #
+      # A LIST, because an organisation routinely runs one Connect cluster for sources and another
+      # for sinks against the same brokers, and a connector is addressed as (Connect cluster,
+      # connector name). `url` inside an entry is a list too: every worker in one Connect cluster
+      # serves the same REST API and forwards what it cannot answer itself, so a second address
+      # there is failover rather than a second system. This quickstart has one of each.
+      #
+      # THE WORKER RUNS ONE CONNECTOR, and this comment used to say it ran none and should. The
+      # argument was that a measured empty list is a different fact from "this worker cannot be
+      # reached" and that seeding one would erase the distinction. The distinction is real; the
+      # conclusion was wrong, because the empty answer was then the ONLY one anything covered:
+      # `frontend/e2e/connect.spec.ts`'s two positive cases had nothing to list and skipped. The
+      # empty-worker state now lives in `deployment/compose`, whose worker runs nothing, and this
+      # stack holds the other one. `seed/connect-seed.sh` registers it.
+      connect:
+        - name: "quickstart"
+          url:
+            - "http://kafka-connect:8083"
+
+      # The ksqlDB server this quickstart starts beside the broker.
+      #
+      # Setting this is the on/off switch for the ksqlDB screens on this cluster, exactly as the two
+      # keys above are for their features: with it, KUI lists the streams, tables and queries the
+      # server knows about and can run one statement at a time against it; without it the ksql
+      # service answers `not_configured` and ADR-032's rule hides the row.
+      #
+      # SINGULAR where `connect` is a list, and that is `KsqlSettings`' decision rather than a
+      # shortcut here: two ksqlDB clusters over one set of brokers share a command topic and are one
+      # logical service. `url` inside it is still a list, because every server in a ksqlDB cluster
+      # accepts statements, so a second address is failover.
+      #
+      # `streamTimeout` is separate from `callTimeout` because a push query does not finish. Ten
+      # seconds is right for a listing and wrong for a `SELECT ... EMIT CHANGES`, and one key for
+      # both would mean choosing which of those two to get wrong.
+      ksql:
+        url:
+          - "http://ksqldb-server:8088"
+        callTimeout: "10s"
+        streamTimeout: "5m"
+
       # Which serde reads which topic.
       #
-      # `defaultValue` is deliberately NOT set to SchemaRegistry here. Only one topic in this
-      # quickstart is Avro, and the other seven are JSON or plain text; a per-topic pattern says
-      # exactly that, and it is also the setting an operator is most likely to need on a real
-      # cluster where one team's topics are Avro and another's are not. A cluster that is Avro
-      # throughout writes `defaultValue: SchemaRegistry` instead and no patterns at all.
+      # `defaultValue` is deliberately NOT set to SchemaRegistry here. Three topics exercise the
+      # registry's Avro, JSON Schema and Protobuf wire formats; the other topics are plain JSON or
+      # text. A per-topic pattern says exactly that, which is also what a mixed real cluster needs.
       #
-      # The pattern matches a whole topic name. `orders\.avro` matches the topic of that name and
-      # not `orders.avro.retry`, because the dot is escaped and the match is anchored at both ends.
+      # The pattern matches a whole topic name. It selects exactly the three registry fixtures and
+      # not a suffix such as `orders.avro.retry`, because resolution anchors the expression.
       serde:
         patterns:
           - serde: SchemaRegistry
-            topicValuesPattern: "orders\\.avro"
+            topicValuesPattern: "orders\\.(avro|jsonschema|protobuf)"
+
+      # WHICH FIELDS NEVER LEAVE THE SERVICE IN FULL (DM-001, ADR-023).
+      #
+      # The masking engine has existed since wave 1 and could not be switched on by anybody: there was
+      # no configuration that could define a rule until wave 9, and no deployment that configured one
+      # until this block. It is here so that the feature has a running example a person can look at
+      # rather than a scaladoc — open `customers.profiles` in the message browser and the two rules
+      # below are visible in the payload.
+      #
+      # `customers.profiles` is the seeded topic with something worth hiding in it: every record carries
+      # a customer's full name and email address. The other seeded topics are orders, payments and page
+      # views, and they are deliberately left alone — a quickstart whose every screen is asterisks
+      # demonstrates masking and hides the product.
+      #
+      # THE PATTERN IS MATCHED AGAINST THE WHOLE TOPIC NAME, so `customers\.profiles` is that topic and
+      # not `customers.profiles.v2`, and the dot is escaped for the same reason it is under `serde`
+      # above. `topicValuesPattern` and not `topicKeysPattern`: the key of this topic is a customer id,
+      # which is what a person needs in order to find the record at all.
+      #
+      # MASKING IS A PROPERTY OF THIS REGISTERED CLUSTER AND NOT OF THE BROKER. The second cluster below
+      # points at the same `kafka:9092` and configures no masking, so the SAME records read through
+      # `staging-eu-01` come back in full. That is the single most important thing to know about this
+      # feature and this file is where it can be seen rather than read: a rule protects the profile it
+      # is written on. In a real deployment every profile over a broker carrying this data needs its own
+      # block, and docs/operations/masking.md says so beside this example.
+      #
+      # Masking is never applied on produce or on a resend, so the records in the topic are untouched:
+      # masking a value on the way in would write the mask into Kafka and destroy the original.
+      masking:
+        # The email address, with enough of its tail left to tell two records apart. A `keep` bounds
+        # what the mask REVEALS, so the numbers are small on purpose; `keep.prefix` plus `keep.suffix`
+        # above 20 is refused at start-up, because two legal ends together can reveal a whole field.
+        - kind: mask
+          fields: [email]
+          keep:
+            suffix: 4
+          topicValuesPattern: "customers\\.profiles"
+
+        # And the name, which has no useful partial form: a replaced field says plainly that something
+        # was hidden, where a masked one can be mistaken for the data itself.
+        - kind: replace
+          fields: [name]
+          replacement: "<redacted>"
+          topicValuesPattern: "customers\\.profiles"
+
+    # -------------------------------------------------------------------------------------------
+    # A SECOND REGISTERED CLUSTER, AND IT POINTS AT THE SAME BROKER ON PURPOSE.
+    #
+    # KUI manages more than one cluster and none of the machinery that makes that true had ever been
+    # exercised by anything you can run: the cluster selector in the drawer head has never had a
+    # second entry to show, the "Switched to ..." toast has never been raised by a click, and
+    # `frontend/e2e/traffic.spec.ts` carries a `test.skip` whose reason is literally "this
+    # deployment runs one cluster; there is no second one to ask". One entry here is all of that.
+    #
+    # A SECOND PROFILE OVER ONE BROKER, NOT A SECOND BROKER. `bootstrapServers` is the same
+    # `kafka:9092` the cluster above uses. What the screens need is a second *registered profile* —
+    # two entries in the cluster registry, two ids in `/api/v1/clusters`, two rows in the selector —
+    # and that is a property of this file, not of how many Kafka clusters are running. Starting a
+    # second broker would cost a second container, a second exporter, a second set of seeded topics
+    # and an entirely separate set of things that can be broken, and would prove nothing the screens
+    # ask about that this does not. The consequence to know about is that the two clusters show the
+    # SAME topics, groups and brokers, because they are the same broker: this file registers two
+    # views of one cluster, and says so rather than letting a reader infer two Kafkas.
+    #
+    # THE NAME AND THE ID ARE BOTH `staging-eu-01`, AND THAT IS THE DESIGN'S WORD.
+    # research/design/SCREENS-V4.md §1 captures `M08` as the toast *"Switched to staging-eu-01"* and
+    # `M09` as the brokers screen of `staging-eu-01`. The shell builds that toast as
+    # `Switched to ${name ?? id}` (`frontend/packages/shell/src/App.tsx:1222`), so the *name* is
+    # what a browser case reads back, and a display name of "Staging (EU)" would draw a toast the
+    # design does not have. The id is written out as well rather than derived, for the reason the
+    # cluster above gives: a derived id moves when somebody edits the name, and this id is in a URL,
+    # in a Playwright case and in a screenshot.
+    #
+    # NO `metrics.sources` ENTRY FOR IT, DELIBERATELY, AND IT IS AN ASSERTION RATHER THAN AN
+    # OMISSION. `frontend/e2e/traffic.spec.ts:536` — "says the same thing about a cluster nobody
+    # configured a source for" — is the other half of M7's exit criterion: a second cluster with no
+    # source must answer `not_configured` and the screen must draw the sentence instead of an empty
+    # axis. Adding `staging-eu-01` under `kui.metrics.sources` above would take that case's subject
+    # away again, on the same run that finally gives it one.
+    #
+    # AND NO `schemaRegistry`, `connect` OR `ksql` BLOCK, for the same kind of reason: this profile
+    # is where ADR-032's hide-the-row rule gets a cluster to be true about, on a deployment where
+    # the cluster next to it has all three. Those three features are configured per cluster, so the
+    # quickstart cluster's screens are untouched by this.
+    - name: "staging-eu-01"
+      id: "staging-eu-01"
+      bootstrapServers:
+        - "kafka:9092"
 
   rbac: {}

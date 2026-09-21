@@ -4,14 +4,19 @@ import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsResult
+import org.apache.kafka.clients.admin.internals.CoordinatorKey
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.errors.UnsupportedVersionException
-import org.apache.kafka.clients.admin.internals.CoordinatorKey
 import org.apache.kafka.common.{KafkaFuture, TopicPartition as KafkaTopicPartition}
 
-import kui.kernel.ClusterId
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
-import kui.kernel.{GroupId, PartitionId, TopicName, TopicPartition}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
+import kui.kernel.{ClusterId, GroupId, PartitionId, TopicName, TopicPartition}
 import kui.testkit.KuiIOSuite
 
 /** The one rule this call exists to protect: a partition the group has never committed on is *absent*, and

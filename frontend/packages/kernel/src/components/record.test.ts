@@ -72,7 +72,7 @@ describe("previewValue", () => {
     // An empty preview is indistinguishable from a record holding the empty string, which is how
     // three of these were shipped as blank rows.
     expect(previewValue({ kind: "tombstone" })).toBe("null");
-    expect(previewValue({ kind: "large", bytes: 4_200_000 })).toBe("4.2 MB — open to view");
+    expect(previewValue({ kind: "large", bytes: 4_200_000 })).toBe("4.2 MB — value not retained");
     expect(previewValue({ kind: "undecodable", reason: "Avro schema 42 not found" })).toBe(
       "could not deserialize (Avro schema 42 not found)",
     );
@@ -116,5 +116,60 @@ describe("formatBytes", () => {
 
   it("does not render a negative size", () => {
     expect(formatBytes(-1)).toBe("0 B");
+  });
+
+  it("rounds a fractional byte count, because rates come through here too", () => {
+    // Measured on the shipped product before this was fixed: the cluster dashboard's CONSUME stat
+    // card printed `81.2359955010432 B/s` beside a PRODUCTION card reading `1.2 kB/s`, and three
+    // rows of the throughput card's data table carried seventeen significant figures each. The
+    // whole-byte case below is why the rounding is conditional rather than an unconditional
+    // `toFixed(1)`: a 147-byte record is 147 bytes, and `147.0 B` claims a precision nobody has.
+    expect(formatBytes(81.2359955010432)).toBe("81.2 B");
+    expect(formatBytes(214.77853092686576)).toBe("214.8 B");
+    expect(formatBytes(20.149754341786714)).toBe("20.1 B");
+    expect(formatBytes(147)).toBe("147 B");
+  });
+
+  it("says a small rate is small rather than rounding it to a zero it does not mean", () => {
+    // `0.0 B/s` over a cluster that is moving something is the one figure this product is not
+    // allowed to draw. A *measured* zero is different and keeps its own spelling.
+    expect(formatBytes(0.30493676815166676)).toBe("0.3 B");
+    expect(formatBytes(0.04)).toBe("<0.1 B");
+    expect(formatBytes(0)).toBe("0 B");
+  });
+
+  it("stops at the top unit rather than dividing off the end of the scale", () => {
+    // The promotion loop's `unit < units.length - 1` is the only thing keeping `units[unit]` inside
+    // the table; without it an exabyte-scale figure divides one step too far, `units[6]` is
+    // `undefined`, and the `?? "B"` fallback prints `1.5 B` for a billion gigabytes — a figure that
+    // is wrong by eighteen orders of magnitude and reads as perfectly ordinary.
+    //
+    // The last line is the price of that cap, asserted rather than left to be discovered: `PB` is
+    // the ceiling, so the header's "[0, 1000) at every unit below the last one" holds everywhere
+    // below it and the last unit keeps counting. This is the line the previous ceiling's header
+    // falsified — `TB` was the top until this wave, so the plausible `1.5e15` printed `1500.0 TB`
+    // under a header promising `[0, 1000)` unconditionally.
+    expect(formatBytes(1_500_000_000_000)).toBe("1.5 TB");
+    expect(formatBytes(1_500_000_000_000_000)).toBe("1.5 PB");
+    expect(formatBytes(1.5e18)).toBe("1500.0 PB");
+  });
+
+  it("spells a petabyte the way `feature-topics` did, because it is now the same function", () => {
+    // The list of topics on a cluster used to carry its own copy of this function with its own
+    // ladder — `B` through `PB`, promoting at a bare 1000 and printing an unrounded byte count —
+    // and `feature-topics/src/index.tsx` re-exported it, so two functions with one name and one
+    // meaning were both public surface and disagreed about more than rounding. The copy is gone and
+    // its call sites read this one; these are the three figures its own suite pinned, kept here so
+    // the merge is asserted rather than assumed.
+    expect(formatBytes(4096)).toBe("4.1 kB");
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(128_000_000_000)).toBe("128.0 GB");
+  });
+
+  it("never prints a four-digit figure under a three-digit unit", () => {
+    // 999.96 is below the promotion threshold and rounds to 1000.0 at one decimal, which is how a
+    // `1000.0 B` reached a card that has a `kB` to put it in.
+    expect(formatBytes(999.96)).toBe("1.0 kB");
+    expect(formatBytes(999)).toBe("999 B");
   });
 });

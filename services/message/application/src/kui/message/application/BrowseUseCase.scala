@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 
 import scala.concurrent.duration.FiniteDuration
 
+import cats.data.NonEmptySet
 import cats.effect.kernel.{Clock, Concurrent, Ref}
 import cats.syntax.all.*
 import fs2.{Chunk, Stream}
@@ -27,6 +28,9 @@ enum BrowseEnd {
 
   /** The caller's `limit` was reached and there is more where that came from. */
   case Limit
+
+  /** The raw record, byte, or time budget was spent before the requested match limit was reached. */
+  case Budget
 
   /** Every selected partition was read to its end. Asking again returns nothing new. */
   case Exhausted
@@ -118,7 +122,8 @@ trait BrowseUseCase[F[_]] {
       topic: TopicName,
       cursor: String,
       stringFilter: Option[String],
-      limits: BrowseLimits
+      limits: BrowseLimits,
+      filterSource: Option[String] = None
   ): F[Either[KuiError, BrowseRequest]]
 }
 
@@ -139,7 +144,8 @@ object BrowseUseCase {
       serdes: SerdeSource[F],
       source: RecordSource[F],
       cursors: CursorCodec[F],
-      filters: FilterSource[F]
+      filters: FilterSource[F],
+      masking: RecordMasking[F]
   ): BrowseUseCase[F] =
     new BrowseUseCase[F] {
 
@@ -148,11 +154,12 @@ object BrowseUseCase {
           topic: TopicName,
           cursor: String,
           stringFilter: Option[String],
-          limits: BrowseLimits
+          limits: BrowseLimits,
+          filterSource: Option[String]
       ): F[Either[KuiError, BrowseRequest]] =
         Clock[F].realTimeInstant
           .flatMap(now => cursors.decode(cursor, (cluster, topic), now))
-          .map(_.flatMap(decoded => requestOf(decoded, stringFilter, limits)))
+          .map(_.flatMap(decoded => requestOf(decoded, stringFilter, filterSource, limits)))
 
       /** The cursor, as the browse it describes.
         *
@@ -167,6 +174,7 @@ object BrowseUseCase {
       private def requestOf(
           cursor: BrowseCursor,
           stringFilter: Option[String],
+          filterSource: Option[String],
           limits: BrowseLimits
       ): Either[KuiError, BrowseRequest] =
         BrowseRequest.of(
@@ -180,7 +188,7 @@ object BrowseUseCase {
           keySerde = cursor.keySerde,
           valueSerde = cursor.valueSerde,
           stringFilter = stringFilter,
-          filter = cursor.filterId.flatMap(id => FilterRef.of(id, None).toOption),
+          filter = cursor.filterId.flatMap(id => FilterRef.of(id, filterSource).toOption),
           // A continuation is never a tail: `live` and a start position are mutually exclusive, and a cursor
           // is nothing but a start position.
           live = false,
@@ -197,7 +205,16 @@ object BrowseUseCase {
             case Right(_) =>
               Stream.eval(predicateFor(request)).flatMap {
                 case Left(error) => Stream.emit(BrowseEvent.Failed(error))
-                case Right(predicate) => reading(request, budget, predicate)
+                case Right(predicate) =>
+                  // The mask is resolved once for the whole browse, before the first record is read
+                  // (ADR-023, DM-001). Once, because which rules reach this topic cannot change
+                  // mid-stream and re-deciding per record would re-walk the rule list a million times
+                  // on a browse of a million records; before, because `kui.masking.applied` counts
+                  // browses on which masking applied, and a browse that delivered nothing still had
+                  // its rules in force.
+                  Stream
+                    .eval(masking.forTopic(request.cluster, request.topic))
+                    .flatMap(mask => reading(request, budget, predicate, mask))
               }
           }
 
@@ -216,13 +233,14 @@ object BrowseUseCase {
       private def reading(
           request: BrowseRequest,
           budget: PollBudget,
-          filter: Option[CompiledFilter[F]]
+          filter: Option[CompiledFilter[F]],
+          mask: RecordMask
       ): Stream[F, BrowseEvent] =
         Stream.emit(BrowseEvent.Phase(ReadingRecords)) ++
           Stream
             .eval((Clock[F].monotonic, Ref.of[F, State](State.empty)).tupled)
             .flatMap { case (startedAt, state) =>
-              records(request, budget, state, filter) ++ ending(request, budget, state, startedAt)
+              records(request, budget, state, filter, mask) ++ ending(request, budget, state, startedAt)
             }
 
       /** The record events, and the progress events between them. */
@@ -230,7 +248,8 @@ object BrowseUseCase {
           request: BrowseRequest,
           budget: PollBudget,
           state: Ref[F, State],
-          filter: Option[CompiledFilter[F]]
+          filter: Option[CompiledFilter[F]],
+          mask: RecordMask
       ): Stream[F, BrowseEvent] =
         source
           .browse(request, budget)
@@ -240,7 +259,7 @@ object BrowseUseCase {
           .takeThrough(_.isRight)
           .evalMap {
             case Left(error) => state.update(_.copy(failure = Some(error))).as(Step.stop)
-            case Right(raw) => deliver(request, budget, state, raw, filter)
+            case Right(raw) => deliver(request, budget, state, raw, filter, mask)
           }
           .takeThrough(_.more)
           .flatMap(step => Stream.chunk(step.events))
@@ -251,10 +270,11 @@ object BrowseUseCase {
           budget: PollBudget,
           state: Ref[F, State],
           raw: RawRecord,
-          filter: Option[CompiledFilter[F]]
+          filter: Option[CompiledFilter[F]],
+          mask: RecordMask
       ): F[Step] =
         for {
-          record <- decode(request, raw)
+          record <- decode(request, raw, mask)
           // Both filters, in the cheap-first order: the substring is a `contains` over text already in
           // hand, and the expression is a program. A record the substring rejected is never handed to the
           // engine, which is what keeps a smart filter's cost proportional to what it is asked about.
@@ -266,7 +286,7 @@ object BrowseUseCase {
           next <- state.updateAndGet(_.saw(raw, matched, failed(verdict)))
         } yield {
           val progress =
-            if matched && next.delivered % ProgressEvery.toLong == 0L then
+            if next.read % ProgressEvery.toLong == 0L then
               Chunk.singleton(
                 BrowseEvent
                   .Consumed(next.bytes, next.read, next.delivered, next.filterErrors, elapsed, budget)
@@ -275,7 +295,7 @@ object BrowseUseCase {
 
           Step(
             events =
-              if matched then Chunk.singleton(BrowseEvent.Record(record)) ++ progress else Chunk.empty,
+              (if matched then Chunk.singleton(BrowseEvent.Record(record)) else Chunk.empty) ++ progress,
             // A tail has no total. `limit` is a page size, and a page is a thing a bounded browse has; a
             // browse that is still open after an hour has delivered whatever was written in that hour and
             // is not finished. The bound on a tail is on the *screen* — `BrowseSession.MaxRows` keeps the
@@ -298,8 +318,14 @@ object BrowseUseCase {
             case Some(error) => Stream.emit(BrowseEvent.Failed(error))
             case None =>
               val elapsed = now - startedAt
+              val remaining = budget.consume(
+                records = math.min(finalState.read, Int.MaxValue.toLong).toInt,
+                bytes = finalState.bytes,
+                elapsed = elapsed
+              )
               val reason =
                 if finalState.delivered >= request.limit.toLong then BrowseEnd.Limit
+                else if remaining.isExhausted then BrowseEnd.Budget
                 else BrowseEnd.Exhausted
 
               Stream.emit(
@@ -327,16 +353,74 @@ object BrowseUseCase {
           state: State,
           reason: BrowseEnd
       ): F[Option[String]] =
-        if reason != BrowseEnd.Limit || state.delivered == 0L then Option.empty[String].pure[F]
+        if (reason != BrowseEnd.Limit && reason != BrowseEnd.Budget) || state.read == 0L then
+          Option.empty[String].pure[F]
         else
           Clock[F].realTimeInstant.flatMap { now =>
-            val cursor = request.direction match {
-              case Direction.Forward => BrowseCursor.afterForward(request, state.last, now, CursorTtl)
-              case Direction.Backward => BrowseCursor.beforeBackward(request, state.first, now, CursorTtl)
+            request.direction match {
+              case Direction.Forward =>
+                withUnseenPartitions(request, state.last, start => Offset.unsafe(start.value - 1L))
+                  .flatMap(last => cursors.encode(BrowseCursor.afterForward(request, last, now, CursorTtl)))
+                  .map(_.toOption)
+              case Direction.Backward =>
+                withUnseenPartitions(request, state.last, identity)
+                  .flatMap(oldest =>
+                    cursors.encode(BrowseCursor.beforeBackward(request, oldest, now, CursorTtl))
+                  )
+                  .map(_.toOption)
             }
-
-            cursors.encode(cursor).map(_.toOption)
           }
+
+      /** `seen`, with an entry added for every assigned partition that never yielded a raw record.
+        *
+        * A partition can be starved by an uneven poll before the global `limit` is reached; without this it
+        * is silently missing from `seen` and then from every `perPartitionNext` built from it, which drops it
+        * from every subsequent page (`partitions = Some(cursor.perPartitionNext.keySet)` in `requestOf`).
+        * Only the gap is filled — a partition already in `seen` keeps the boundary it actually observed.
+        */
+      private def withUnseenPartitions(
+          request: BrowseRequest,
+          seen: Map[PartitionId, Offset],
+          fallback: Offset => Offset
+      ): F[Map[PartitionId, Offset]] =
+        resolvedStarts(request).map {
+          case None => seen
+          case Some(starts) =>
+            starts.foldLeft(seen) { case (acc, (partition, start)) =>
+              if acc.contains(partition) then acc else acc.updated(partition, fallback(start))
+            }
+        }
+
+      /** The offset every assigned partition actually starts from.
+        *
+        * `AtOffsets`/`AtOffset` name one for every partition already, so the answer is resolved right here
+        * with no I/O. `Beginning`, `Latest` and `AtTimestamp` resolve to a per-partition offset only once a
+        * broker is asked — and so does a request that names its own `partitions` under one of those modes,
+        * since which offset each of them starts at is still unknown above [[RecordSource]] — so both fall
+        * back to [[RecordSource.assignedStarts]], the same resolution `browse` itself would seek to. A
+        * failure there is treated the same as "unknown": the page already shown is correct, and the honest
+        * consequence of not being able to ask is a starved partition staying omitted, not a guessed offset.
+        */
+      private def resolvedStarts(request: BrowseRequest): F[Option[Map[PartitionId, Offset]]] =
+        request.partitions.flatMap(startOffsets(request.seek, _)) match {
+          case resolved @ Some(_) => resolved.pure[F]
+          case None => source.assignedStarts(request).map(_.toOption)
+        }
+
+      /** The offset each named partition actually starts from, without asking anything — only possible when
+        * the seek already names one per partition.
+        */
+      private def startOffsets(
+          seek: SeekMode,
+          assigned: NonEmptySet[PartitionId]
+      ): Option[Map[PartitionId, Offset]] =
+        seek match {
+          case SeekMode.AtOffsets(perPartition) =>
+            Some(assigned.toSortedSet.toList.flatMap(p => perPartition.get(p).map(p -> _)).toMap)
+          case SeekMode.AtOffset(offset) =>
+            Some(assigned.toSortedSet.toList.map(_ -> offset).toMap)
+          case SeekMode.Beginning | SeekMode.Latest | SeekMode.AtTimestamp(_) => None
+        }
 
       /** The smart filter's answer about one record, or `Matched` when there is no smart filter.
         *
@@ -348,25 +432,35 @@ object BrowseUseCase {
       private def verdictOf(filter: Option[CompiledFilter[F]], record: DecodedRecord): F[FilterVerdict] =
         filter.fold(FilterVerdict.Matched.pure[F])(_.test(record))
 
-      private def decode(request: BrowseRequest, raw: RawRecord): F[DecodedRecord] =
+      /** Both halves of a record, read by a serde and then masked.
+        *
+        * The mask is applied here and nowhere else, which is what makes ADR-023's "before any DTO leaves the
+        * service" true for every consumer of this stream at once — the record event, the string filter, the
+        * smart filter and the cursor all see the same masked value, because there is only one. A mask applied
+        * at the API layer instead would leave the two filters reading the original, which turns a filter into
+        * a way of asking questions about a field nobody is allowed to see.
+        */
+      private def decode(request: BrowseRequest, raw: RawRecord, mask: RecordMask): F[DecodedRecord] =
         for {
           key <- serdes.decode(request.cluster, request.topic, Target.Key, request.keySerde, raw.key)
           value <- serdes.decode(request.cluster, request.topic, Target.Value, request.valueSerde, raw.value)
-        } yield DecodedRecord(
-          partition = raw.partition,
-          offset = raw.offset,
-          timestamp = raw.timestamp,
-          timestampType = raw.timestampType,
-          key = key._1,
-          value = value._1,
-          headers = raw.headers.map(render),
-          keySize = raw.keySize,
-          valueSize = raw.valueSize,
-          headersSize = raw.headersSize,
-          decodeErrors = List(
-            key._2.map(DecodeError(Target.Key, key._1.serde, _)),
-            value._2.map(DecodeError(Target.Value, value._1.serde, _))
-          ).flatten
+        } yield mask(
+          DecodedRecord(
+            partition = raw.partition,
+            offset = raw.offset,
+            timestamp = raw.timestamp,
+            timestampType = raw.timestampType,
+            key = key._1,
+            value = value._1,
+            headers = raw.headers.map(render),
+            keySize = raw.keySize,
+            valueSize = raw.valueSize,
+            headersSize = raw.headersSize,
+            decodeErrors = List(
+              key._2.map(DecodeError(Target.Key, key._1.serde, _)),
+              value._2.map(DecodeError(Target.Value, value._1.serde, _))
+            ).flatten
+          )
         )
     }
 
@@ -413,8 +507,9 @@ object BrowseUseCase {
 
   /** Everything a browse remembers, which is deliberately not the records themselves.
     *
-    * `first` and `last` are the boundary offsets per partition, and they are what a continuation cursor is
-    * built from: a forward browse resumes after `last`, a backward one before `first`.
+    * `last` is the final raw boundary offset processed per partition, and is what a continuation cursor is
+    * built from: a forward browse resumes after it, while a backward browse uses it as the next half-open
+    * window's upper bound.
     */
   /** True when the filter answered neither way about this record. */
   private def failed(verdict: FilterVerdict): Boolean = verdict match {
@@ -427,7 +522,6 @@ object BrowseUseCase {
       bytes: Long,
       delivered: Long,
       filterErrors: Long,
-      first: Map[PartitionId, Offset],
       last: Map[PartitionId, Offset],
       failure: Option[KuiError]
   ) {
@@ -438,12 +532,11 @@ object BrowseUseCase {
         bytes = bytes + raw.keySize.toLong + raw.valueSize.toLong + raw.headersSize.toLong,
         delivered = if matched then delivered + 1L else delivered,
         filterErrors = if filterFailed then filterErrors + 1L else filterErrors,
-        first = if first.contains(raw.partition) then first else first.updated(raw.partition, raw.offset),
         last = last.updated(raw.partition, raw.offset)
       )
   }
 
   private object State {
-    val empty: State = State(0L, 0L, 0L, 0L, Map.empty, Map.empty, None)
+    val empty: State = State(0L, 0L, 0L, 0L, Map.empty, None)
   }
 }

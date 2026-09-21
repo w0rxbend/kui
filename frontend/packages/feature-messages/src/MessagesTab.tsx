@@ -42,15 +42,18 @@
  */
 
 import type { JSX } from "@solidjs/web";
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import {
   Button,
   EmptyState,
+  Icon,
+  SegmentedControl,
   Spinner,
   RecordList,
   RecordRow,
   recordKey,
   type KafkaRecord,
+  type MessageViewMode,
 } from "@kui/kernel";
 import { userMessage } from "@kui/api";
 import {
@@ -59,12 +62,19 @@ import {
   type SmartFilterSlot,
 } from "./MessageFilterBar.jsx";
 import type { BrowseQuery, SeekMode } from "./browse.js";
-import type { BrowseSession } from "./session.js";
+import { isEmpty, type Predicates } from "./predicates.js";
+import type { FilterPreset } from "./presets.js";
+import { MAX_ROWS, type BrowseEndReason, type BrowseSession } from "./session.js";
 
 export interface MessagesTabProps {
   readonly topic: string;
-  /** How many partitions the topic has, for the selector and its summary. */
-  readonly partitionCount: number;
+  /**
+   * How many partitions the topic has, or `undefined` when KUI has not been told.
+   *
+   * Passed straight to the bar, which draws the difference. This screen never substitutes a number
+   * for the absence: a count is a measurement, and the one thing it must not become is a zero.
+   */
+  readonly partitionCount?: number | undefined;
   /** The browse the URL describes. This component never writes it; it asks. */
   readonly query: BrowseQuery;
   /**
@@ -73,6 +83,8 @@ export interface MessagesTabProps {
    */
   readonly onQueryChange: (query: BrowseQuery) => void;
   readonly session: BrowseSession;
+  /** Saved presentation used until this screen's operator chooses another one. */
+  readonly defaultView?: MessageViewMode | undefined;
   /** Whether this principal may publish into this topic. */
   readonly mayProduce?: boolean | undefined;
   /** Why not, when they may not. A disabled control without a reason is a control that looks broken. */
@@ -89,6 +101,51 @@ export interface MessagesTabProps {
    */
   readonly smartFilter?: SmartFilterSlot | undefined;
 
+  /**
+   * The typed predicates and the upper bounds, and the way to change them.
+   *
+   * Required rather than optional, unlike everything else on this component, because they are not a
+   * decoration: the bar draws two controls for them and a screen that rendered those controls with
+   * nowhere for their changes to go would be a screen whose filters silently do nothing.
+   */
+  readonly predicates: Predicates;
+  readonly onPredicatesChange: (predicates: Predicates) => void;
+
+  /**
+   * What Read does.
+   *
+   * The default is `session.start(query)` — which is right for a browse with nothing to compile, and
+   * wrong the moment there is: a predicate has to be registered with the service before a browse can
+   * quote it, and that is a request, which this component has no client for. The route supplies this
+   * and does the registration first.
+   */
+  readonly onRead?: (() => void) | undefined;
+
+  /**
+   * Why the last Read did not start a browse at all.
+   *
+   * Distinct from the session's own failure, which is a browse that started and went wrong. This one
+   * is shown *instead* of a browse — a filter the cluster's engine refused to compile, most often —
+   * and it must be said out loud, because the alternative is a Read button that appears to do
+   * nothing.
+   */
+  readonly refusal?: string | undefined;
+
+  /**
+   * Whether {@link MessagesTabProps.onRead} is still getting ready.
+   *
+   * A Read that has to register a filter first is a round trip before a single record can arrive,
+   * and a button that looked idle through it is a button somebody presses twice. The second press
+   * is refused by the mutation's own guard, so what they see is a control that does nothing.
+   */
+  readonly readBusy?: boolean | undefined;
+
+  /** The saved arrangements this browser holds, and what may be done with them. */
+  readonly presets?: readonly FilterPreset[] | undefined;
+  readonly onApplyPreset?: ((preset: FilterPreset) => void) | undefined;
+  readonly onRemovePreset?: ((preset: FilterPreset) => void) | undefined;
+  readonly onSavePreset?: (() => void) | undefined;
+
   /** Copy a range of these records into another topic. */
   readonly onResend?: (() => void) | undefined;
   readonly mayResend?: boolean | undefined;
@@ -100,11 +157,27 @@ export interface MessagesTabProps {
 
 export function MessagesTab(props: MessagesTabProps): JSX.Element {
   const session = props.session;
+  const [viewOverride, setViewOverride] = createSignal<MessageViewMode>();
+  const effectiveView = (): MessageViewMode =>
+    props.query.live ? "infinite" : (viewOverride() ?? props.defaultView ?? "pages");
 
   /* The filter box's own text, which is not the same thing as the browse's `contains`. The box
    * holds what has been typed; the query holds what has been asked for. Conflating them is what
-   * makes a filter field jump back to the last committed value mid-word. */
-  const [filterText, setFilterText] = createSignal(props.query.contains ?? "");
+   * makes a filter field jump back to the last committed value mid-word. The effect below re-seeds
+   * it only when `contains` changed for a reason other than the box's own commit — Back/Forward
+   * chief among them — mirroring `FieldPredicateControl` in MessageFilterBar.tsx. */
+  const [filterText, setFilterText] = createSignal(untrack(() => props.query.contains ?? ""));
+  let emittedContains = untrack(() => props.query.contains ?? "");
+
+  createEffect(
+    () => props.query.contains ?? "",
+    (incoming) => {
+      if (incoming !== emittedContains) {
+        emittedContains = incoming;
+        setFilterText(incoming);
+      }
+    },
+  );
 
   /* The clock, ticking, so "2s ago" becomes "3s ago" without every record row owning a timer. One
    * interval for the screen; five hundred rows read it. */
@@ -112,10 +185,48 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
   const ticking = setInterval(() => setNow(props.now ?? Date.now()), 1000);
   onCleanup(() => clearInterval(ticking));
 
-  const rows = (): readonly KafkaRecord[] => session.rows();
+  const rows = (): readonly KafkaRecord[] =>
+    effectiveView() === "pages" ? session.pageRows() : session.rows();
   const failure = createMemo(() => session.progress().failure);
 
+  const [preloadSentinel, setPreloadSentinel] = createSignal<HTMLDivElement>();
+  createEffect(
+    () => ({
+      view: effectiveView(),
+      canLoadMore: session.canLoadMore() && session.rows().length < MAX_ROWS,
+      sentinel: preloadSentinel(),
+    }),
+    ({ view: currentView, canLoadMore, sentinel }) => {
+      if (
+        currentView !== "infinite" ||
+        !canLoadMore ||
+        sentinel === undefined ||
+        typeof IntersectionObserver === "undefined"
+      ) return;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting) && session.canLoadMore()) {
+            session.loadMore();
+          }
+        },
+        /* Start the next cursor while the user is still roughly one screen away from the end. The
+         * visible fallback button below remains usable when observers are unavailable or disabled. */
+        { rootMargin: "720px 0px" },
+      );
+      observer.observe(sentinel);
+      onCleanup(() => observer.disconnect());
+    },
+  );
+
   function read(): void {
+    /* The route's Read, when there is one: it compiles and registers the typed predicates before a
+       browse quotes them. Falling back to starting the session directly keeps this component
+       usable on its own, which every story and every test in this package relies on. */
+    if (props.onRead !== undefined) {
+      props.onRead();
+      return;
+    }
     session.start(props.query);
   }
 
@@ -152,18 +263,39 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
         onPartitionsChange={(partitions) => change({ ...props.query, partitions })}
         filter={filterText()}
         onFilterChange={setFilterText}
-        onFilterCommit={(text) =>
-          change({ ...props.query, ...(text === "" ? { contains: undefined } : { contains: text }) })
-        }
+        onFilterCommit={(text) => {
+          emittedContains = text;
+          change({ ...props.query, ...(text === "" ? { contains: undefined } : { contains: text }) });
+        }}
         live={props.query.live}
         onLiveChange={setLive}
+        predicates={props.predicates}
+        /* Changing a predicate stops a running browse for exactly the reason changing the seek
+           does: the records still arriving were selected by the expression the browse was started
+           with, and mixing them with the ones the new predicate would keep is two answers in one
+           list with nothing on screen to say so. */
+        onPredicatesChange={(predicates) => {
+          session.stop();
+          props.onPredicatesChange(predicates);
+        }}
+        {...(props.now === undefined ? {} : { now: props.now })}
+        {...(props.presets === undefined ? {} : { presets: props.presets })}
+        {...(props.onApplyPreset === undefined ? {} : { onApplyPreset: props.onApplyPreset })}
+        {...(props.onRemovePreset === undefined ? {} : { onRemovePreset: props.onRemovePreset })}
+        {...(props.onSavePreset === undefined ? {} : { onSavePreset: props.onSavePreset })}
         {...(props.liveAvailability === undefined ? {} : { liveAvailability: props.liveAvailability })}
         {...(props.smartFilter === undefined ? {} : { smartFilter: props.smartFilter })}
       >
         <Show
           when={session.running()}
           fallback={
-            <Button variant="primary" size="sm" icon="refresh" onClick={read}>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="refresh"
+              busy={props.readBusy === true}
+              onClick={read}
+            >
               Read
             </Button>
           }
@@ -191,6 +323,32 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
 
       <BrowseStatus session={session} />
 
+      <div class="kui-browse__view-bar">
+        <SegmentedControl<"pages" | "infinite">
+          label="Message loading mode"
+          size="sm"
+          value={effectiveView()}
+          segments={[
+            { value: "pages", label: "Pages", icon: "table", disabled: props.query.live },
+            { value: "infinite", label: "Infinite scroll", icon: "chevron-down" },
+          ]}
+          onChange={setViewOverride}
+        />
+        <Show when={props.query.live}>
+          <span class="kui-browse__view-note">Live browsing follows new offsets continuously.</span>
+        </Show>
+      </div>
+
+      {/* A browse that never started. It sits above the failure, because it is about the request
+          the operator just made rather than about the one that is still running. */}
+      <Show when={props.refusal}>
+        {(refused) => (
+          <p class="kui-browse__failure" role="alert">
+            <span class="kui-browse__failure-text">{refused()}</span>
+          </p>
+        )}
+      </Show>
+
       {/* The failure sits beside the records rather than replacing them. The records that did
           arrive are still what the user asked for, and clearing the list to show an error would
           throw away the evidence they were reading. */}
@@ -208,8 +366,15 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
           <BrowseEmpty
             running={session.running()}
             everRan={session.progress().connection.phase !== "idle"}
-            filtered={props.query.contains !== undefined || props.query.filterId !== undefined}
+            filtered={
+              props.query.contains !== undefined ||
+              props.query.filterId !== undefined ||
+              !isEmpty(props.predicates)
+            }
             byExpression={props.query.filterSource}
+            filterErrors={session.progress().consumed?.filterErrors ?? 0}
+            endReason={session.progress().endReason}
+            canContinue={session.canNextPage()}
             onRead={read}
           />
         }
@@ -227,11 +392,40 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
         </RecordList>
       </Show>
 
-      <Show when={session.canLoadMore()}>
-        <div class="kui-browse__more">
-          <Button variant="secondary" size="sm" onClick={() => session.loadMore()}>
-            Load more
-          </Button>
+      <Show
+        when={
+          effectiveView() === "pages" &&
+          (rows().length > 0 ||
+            session.pageNumber() > 1 ||
+            session.canPreviousPage() ||
+            session.canNextPage())
+        }
+      >
+        <OffsetPagination session={session} rows={rows()} />
+      </Show>
+
+      <Show when={effectiveView() === "infinite" && (rows().length > 0 || session.canLoadMore())}>
+        <div
+          class="kui-browse__infinite-sentinel"
+          ref={setPreloadSentinel}
+          aria-live="polite"
+        >
+          <span class="kui-browse__offset-range">{offsetRangeLabel(rows())}</span>
+          <Show when={session.canLoadMore() && rows().length < MAX_ROWS}>
+            <Button variant="secondary" size="sm" onClick={() => session.loadMore()}>
+              Load next offsets
+            </Button>
+          </Show>
+          <Show when={session.canLoadMore() && rows().length >= MAX_ROWS}>
+            <span class="kui-browse__display-limit" role="status">
+              {MAX_ROWS.toLocaleString()}-record display limit reached. Switch to Pages to continue.
+            </span>
+          </Show>
+          <Show when={session.running() && rows().length > 0}>
+            <span class="kui-browse__preloading">
+              <Spinner size="16px" /> Preloading next offsets…
+            </span>
+          </Show>
         </div>
       </Show>
 
@@ -279,6 +473,72 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
   );
 }
 
+function OffsetPagination(props: {
+  readonly session: BrowseSession;
+  readonly rows: readonly KafkaRecord[];
+}): JSX.Element {
+  return (
+    <nav class="kui-browse__pagination" aria-label="Message offset pages">
+      <p class="kui-browse__offset-range" aria-live="polite">
+        Page {props.session.pageNumber().toLocaleString()} · {offsetRangeLabel(props.rows)} · {plural(props.rows.length, "record")}
+      </p>
+      <div class="kui-browse__page-actions">
+        <button
+          type="button"
+          class="kui-browse__page-button kui-focusable"
+          aria-label="Previous offset page"
+          disabled={!props.session.canPreviousPage()}
+          onClick={() => props.session.previousPage()}
+        >
+          <Icon name="chevron-left" />
+          <span>Previous</span>
+        </button>
+        <button
+          type="button"
+          class="kui-browse__page-button kui-focusable"
+          aria-label="Next offset page"
+          disabled={!props.session.canNextPage()}
+          onClick={() => props.session.nextPage()}
+        >
+          <span>Next</span>
+          <Icon name="chevron-right" />
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+/** A Kafka page has no stable global row number. Name the bounds the broker does have instead. */
+export function offsetRangeLabel(rows: readonly KafkaRecord[]): string {
+  const byPartition = new Map<number, string[]>();
+  for (const row of rows) {
+    const offsets = byPartition.get(row.partition) ?? [];
+    offsets.push(row.offset);
+    byPartition.set(row.partition, offsets);
+  }
+  if (byPartition.size === 0) return "No offsets loaded";
+
+  const ranges = [...byPartition.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([partition, offsets]) => {
+      const ordered = offsets.slice().sort(compareOffsets);
+      return `p${String(partition)} offsets ${ordered[0]}–${ordered[ordered.length - 1]}`;
+    });
+  const shown = ranges.slice(0, 3).join(" · ");
+  const remainder = ranges.length - 3;
+  return remainder > 0 ? `${shown} · +${String(remainder)} partitions` : shown;
+}
+
+function compareOffsets(left: string, right: string): number {
+  const a = left.replace(/^0+(?=\d)/, "");
+  const b = right.replace(/^0+(?=\d)/, "");
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) {
+    if (a.length !== b.length) return a.length - b.length;
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  return left.localeCompare(right);
+}
+
 /**
  * What the stream is doing, how many records arrived, and how much Kafka was read to find them.
  *
@@ -304,6 +564,11 @@ function BrowseStatus(props: { readonly session: BrowseSession }): JSX.Element {
           </span>
         )}
       </Show>
+      <Show when={(progress().consumed?.filterErrors ?? 0) > 0}>
+        <span class="kui-browse__figure kui-browse__figure--warning">
+          {plural(progress().consumed?.filterErrors ?? 0, "filter evaluation")} failed
+        </span>
+      </Show>
       <Show when={props.session.paused() && props.session.held() > 0}>
         <span class="kui-browse__figure kui-browse__figure--held">
           {plural(props.session.held(), "record")} held
@@ -324,7 +589,15 @@ function phaseSentence(session: BrowseSession): string {
     case "open":
       return progress.phase === undefined ? "Reading…" : `${capitalise(progress.phase)}…`;
     case "closed":
-      return progress.delivered === 0 ? "Finished — nothing matched." : "Finished.";
+      if (progress.endReason === "budget") {
+        return session.canNextPage()
+          ? "Scan paused at its safety budget — continue from the next offsets."
+          : "Stopped at the scan safety budget.";
+      }
+      if (progress.delivered > 0) return "Finished.";
+      return (progress.consumed?.filterErrors ?? 0) > 0
+        ? "Finished — some records could not be evaluated."
+        : "Finished — nothing matched.";
   }
 }
 
@@ -348,6 +621,9 @@ function BrowseEmpty(props: {
   readonly filtered: boolean;
   /** The smart-filter expression that was running, when one was. */
   readonly byExpression?: string | undefined;
+  readonly filterErrors: number;
+  readonly endReason?: BrowseEndReason | undefined;
+  readonly canContinue: boolean;
   readonly onRead: () => void;
 }): JSX.Element {
   return (
@@ -379,41 +655,94 @@ function BrowseEmpty(props: {
         }
       >
         <Show
-          when={props.filtered}
+          when={props.endReason !== "budget"}
           fallback={
-            <EmptyState
-              kind="empty"
-              title="No records in that range."
-              description="The partitions you chose hold nothing between where you started and where the read stopped."
-            />
+            <Show
+              when={props.filtered}
+              fallback={
+                <EmptyState
+                  kind="empty"
+                  title="No records found before the scan paused."
+                  description={
+                    "The server reached its scan safety budget before finding a record in the selected range. " +
+                    continuationSentence(props.canContinue)
+                  }
+                />
+              }
+            >
+              <Show
+                when={props.byExpression}
+                fallback={
+                  <EmptyState
+                    kind="filtered"
+                    title="No record matched that filter yet."
+                    description={
+                      "The server reached its scan safety budget before finding a match. " +
+                      continuationSentence(props.canContinue)
+                    }
+                  />
+                }
+              >
+                {(expression) => (
+                  <EmptyState
+                    kind="filtered"
+                    title="No record matched that expression yet."
+                    description={
+                      `The server reached its scan safety budget before finding a match for ${expression()}. ` +
+                      continuationSentence(props.canContinue)
+                    }
+                  />
+                )}
+              </Show>
+            </Show>
           }
         >
           <Show
-            when={props.byExpression}
+            when={props.filtered}
             fallback={
               <EmptyState
-                kind="filtered"
-                title="No record matched that filter."
-                description="Every record in the range was read; none contained that text. Clearing the filter shows them."
+                kind="empty"
+                title="No records in that range."
+                description="The partitions you chose hold nothing between where you started and where the read stopped."
               />
             }
           >
-            {(expression) => (
-              <EmptyState
-                kind="filtered"
-                title="No record matched that expression."
-                description={
-                  `Every record in the range was read and none of them satisfied ${expression()}. ` +
-                  "An expression that throws on every record produces this same empty list, so try " +
-                  "it against a single record before assuming the topic has nothing in it."
-                }
-              />
-            )}
+            <Show
+              when={props.byExpression}
+              fallback={
+                <EmptyState
+                  kind="filtered"
+                  title="No record matched that filter."
+                  description="Every record in the range was read; none contained that text. Clearing the filter shows them."
+                />
+              }
+            >
+              {(expression) => (
+                <EmptyState
+                  kind="filtered"
+                  title="No record matched that expression."
+                  description={
+                    props.filterErrors > 0
+                      ? `Some records could not be evaluated (${String(props.filterErrors)} failures), and no ` +
+                        `record that evaluated successfully satisfied ${expression()}. Try the expression ` +
+                        "against one record to see the server's exact error."
+                      : `Every record in the range was read and none of them satisfied ${expression()}. ` +
+                        "Try it against a single record before assuming the topic has nothing in it."
+                  }
+                />
+              )}
+            </Show>
           </Show>
         </Show>
       </Show>
     </Show>
   );
+}
+
+function continuationSentence(canContinue: boolean): string {
+  return canContinue
+    ? "Continue to scan later offsets."
+    : "The scan cannot be continued from this response.";
 }
 
 function describe(failure: NonNullable<ReturnType<BrowseSession["progress"]>["failure"]>): string {

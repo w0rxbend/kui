@@ -5,8 +5,8 @@ import cats.effect.{IO, Resource}
 
 import kui.cluster.domain.{ClusterAdmin as ClusterAdminPort, ClusterProfile, ControllerMode}
 import kui.kafka.admin as adm
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.BrokerId
+import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.observability.Telemetry
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -26,10 +26,31 @@ final class ClusterAdminAdapterSuite extends ClusterAdminContract {
       logger <- Resource.eval(FakeStructuredLogger[IO])
       clients <- ClusterAdminClients.resource[IO](pool, logger)
       adapter <- Resource.eval(
-        ClusterAdminAdapter.create[IO](stub, clients, Telemetry.noop[IO], logger)
+        ClusterAdminAdapter.create[IO](
+          stub,
+          // The recording pool opens no client, so the sweeper here can only fail — which is the one
+          // thing worth asserting about it at this level: a sweep that cannot run is a `Left`, not a
+          // raised exception. What it counts when it *can* run is `KafkaPartitionSweeperSuite`'s question.
+          new KafkaPartitionSweeper[IO](pool, logger),
+          clients,
+          Telemetry.noop[IO],
+          logger
+        )
       )
     } yield adapter
 
+  test("aSweepThatCannotOpenAClientIsALeftAndNeverARaisedException") {
+    // The port's totality, at the one method that does not go through `libs/kafka`'s own mapper. An
+    // exception escaping here would reach `SnapshotCell` as an unclassified `Throwable` and the cluster
+    // would go offline with no code on the screen saying why.
+    StubKafkaClusterAdmin()
+      .flatMap(stub => adapterFor(stub).use(_.sweepPartitions(profile).attempt))
+      .map {
+        case Left(raised) => fail(s"the adapter must not raise, it raised $raised")
+        case Right(Right(swept)) => fail(s"the recording pool opens nothing, so this cannot succeed: $swept")
+        case Right(Left(error)) => assertEquals(error.code, ErrorCode.UpstreamUnavailable)
+      }
+  }
 
   /** The adapter under test together with the pool it will ask to invalidate. */
   private def wired(
@@ -40,7 +61,13 @@ final class ClusterAdminAdapterSuite extends ClusterAdminContract {
       logger <- Resource.eval(FakeStructuredLogger[IO])
       clients <- ClusterAdminClients.resource[IO](pool, logger)
       adapter <- Resource.eval(
-        ClusterAdminAdapter.create[IO](stub, clients, Telemetry.noop[IO], logger)
+        ClusterAdminAdapter.create[IO](
+          stub,
+          new KafkaPartitionSweeper[IO](pool, logger),
+          clients,
+          Telemetry.noop[IO],
+          logger
+        )
       )
     } yield (adapter, pool)
 
@@ -52,7 +79,8 @@ final class ClusterAdminAdapterSuite extends ClusterAdminContract {
       .flatMap(stub => adapterFor(stub).use(_.describeCluster(profile)))
       .map {
         case Left(error) => fail(s"a cluster mid-failover must still describe: ${error.code.wire}")
-        case Right(description) => assertEquals(description.controller, Option.empty[kui.cluster.domain.Broker])
+        case Right(description) =>
+          assertEquals(description.controller, Option.empty[kui.cluster.domain.Broker])
       }
   }
 
@@ -166,9 +194,7 @@ final class ClusterAdminAdapterSuite extends ClusterAdminContract {
     val timedOut = Left(InfrastructureError.Timeout("describeLogDirs", 30000L))
 
     StubKafkaClusterAdmin(logDirs = timedOut)
-      .flatMap(stub =>
-        adapterFor(stub).use(_.describeLogDirs(profile, NonEmptyList.of(BrokerId.unsafe(1))))
-      )
+      .flatMap(stub => adapterFor(stub).use(_.describeLogDirs(profile, NonEmptyList.of(BrokerId.unsafe(1)))))
       .map {
         case Left(error) => assertEquals(error.code, ErrorCode.Timeout)
         case Right(result) => fail(s"a timeout is a retryable failure, not an empty disk: $result")

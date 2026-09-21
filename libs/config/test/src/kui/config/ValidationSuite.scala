@@ -7,11 +7,11 @@ import cats.effect.unsafe.implicits.global
 
 import kui.testkit.KuiSuite
 
-/** That a bad configuration fails at startup, says everything that is wrong, and never prints a
-  * secret while doing it.
+/** That a bad configuration fails at startup, says everything that is wrong, and never prints a secret while
+  * doing it.
   *
-  * The alternative — the one every operator has lived through — is a process that starts, ignores
-  * the key that was mistyped, and reveals the problem at three in the morning as a null pointer.
+  * The alternative — the one every operator has lived through — is a process that starts, ignores the key
+  * that was mistyped, and reveals the problem at three in the morning as a null pointer.
   */
 final class ValidationSuite extends KuiSuite {
 
@@ -45,7 +45,8 @@ final class ValidationSuite extends KuiSuite {
   }
 
   test("reportsEveryProblemNotJustTheFirst") {
-    val found = problems(load(List(ConfigFixtures.fixture("multiple-errors.yaml")), policy = UrlPolicy.Strict))
+    val found =
+      problems(load(List(ConfigFixtures.fixture("multiple-errors.yaml")), policy = UrlPolicy.Strict))
 
     assertEquals(
       found.map(_.key).sorted,
@@ -98,11 +99,10 @@ final class ValidationSuite extends KuiSuite {
     assertEquals(loaded.gateway.cors, CorsConfig(enabled = false, Nil))
   }
 
-  /** Empty sections, one per shape the model has: a map of services, a list of signing keys, and a
-    * whole block whose only key the operator commented out. None of them supplies a value, so none
-    * of them can be a wrong value -- and the shipped `deployment/compose/kui.yaml` tells the
-    * operator in a comment that `services` is empty in the all-in-one deployment, so this is not a
-    * hypothetical shape.
+  /** Empty sections, one per shape the model has: a map of services, a list of signing keys, and a whole
+    * block whose only key the operator commented out. None of them supplies a value, so none of them can be a
+    * wrong value -- and the shipped `deployment/compose/kui.yaml` tells the operator in a comment that
+    * `services` is empty in the all-in-one deployment, so this is not a hypothetical shape.
     */
   private val emptySections = Map(
     "an empty map of services" -> """kui:
@@ -318,8 +318,7 @@ final class ValidationSuite extends KuiSuite {
   }
 
   test("the rendered report is one line per problem, in key order") {
-    val rendered = load(List(ConfigFixtures.fixture("multiple-errors.yaml")), policy = UrlPolicy.Strict)
-      .swap
+    val rendered = load(List(ConfigFixtures.fixture("multiple-errors.yaml")), policy = UrlPolicy.Strict).swap
       .map(_.render)
       .getOrElse(fail("expected a failure"))
 

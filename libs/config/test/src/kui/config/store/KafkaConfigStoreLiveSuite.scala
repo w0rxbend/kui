@@ -1,14 +1,13 @@
 package kui.config.store
 
-import scala.concurrent.duration.{Duration, DurationInt}
-import scala.jdk.CollectionConverters.*
-
 import java.time.Duration as JavaDuration
 import java.util.Properties
 
+import scala.concurrent.duration.{Duration, DurationInt}
+import scala.jdk.CollectionConverters.*
+
 import cats.effect.{IO, Resource}
 import cats.syntax.all.*
-
 import io.circe.Json
 import munit.catseffect.IOFixture
 import org.apache.kafka.clients.consumer.KafkaConsumer
@@ -18,9 +17,9 @@ import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.noop.NoOpFactory
 
 import kui.config.{StoreConfig, StoreKafkaConfig}
+import kui.kernel.PositiveInt
 import kui.kernel.cluster.{BootstrapServers, ClusterSecurity}
 import kui.kernel.error.ErrorCode
-import kui.kernel.PositiveInt
 import kui.testkit.KuiIOSuite
 import kui.testkit.kafka.{KafkaFixture, KafkaTopology, RunningBroker}
 
@@ -28,8 +27,8 @@ import kui.testkit.kafka.{KafkaFixture, KafkaTopology, RunningBroker}
   *
   * Every claim below was previously proved against a driven in-memory log — `StoreStateSuite` for the fold,
   * `WriteWaiterSuite` for read-your-writes, `StoreReplaySuite` for the bounded replay. Those are the right
-  * place for the *logic*, and they stay. What none of them can answer is whether the thing works when the
-  * log is a compacted Kafka topic, a produce is a real network round trip and a second replica is a second
+  * place for the *logic*, and they stay. What none of them can answer is whether the thing works when the log
+  * is a compacted Kafka topic, a produce is a real network round trip and a second replica is a second
   * consumer: STORE-006's own deviation note said the answer was "yes against a driven log, not yet against a
   * broker". This is the broker.
   *
@@ -46,8 +45,8 @@ import kui.testkit.kafka.{KafkaFixture, KafkaTopology, RunningBroker}
   *     `__kui_config` contains no plaintext password and no JAAS string".
   *
   * The last of those is the reason this suite reads the topic with a plain `KafkaConsumer` and raw byte
-  * deserializers rather than through anything in `libs/config`. Asking KUI whether KUI encrypted something
-  * is not a check; the bytes on the partition are the only evidence that means anything, and they are what a
+  * deserializers rather than through anything in `libs/config`. Asking KUI whether KUI encrypted something is
+  * not a check; the bytes on the partition are the only evidence that means anything, and they are what a
   * `kafka-console-consumer` would print.
   */
 final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
@@ -83,9 +82,9 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
     FieldCrypto[IO](EncryptionKeyring.of(List(key), "k1").fold(e => fail(e.message), identity))
   }
 
-  /** A single-broker store configuration. Replication factor and in-sync replicas are one, which is the
-    * only thing a one-broker cluster can satisfy; the shipped defaults are three and two, and
-    * `StoreConfigSuite` asserts those separately so this suite cannot erode them.
+  /** A single-broker store configuration. Replication factor and in-sync replicas are one, which is the only
+    * thing a one-broker cluster can satisfy; the shipped defaults are three and two, and `StoreConfigSuite`
+    * asserts those separately so this suite cannot erode them.
     */
   private def storeConfig(prefix: String): StoreConfig =
     StoreConfig.Default.copy(
@@ -108,7 +107,12 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
       .admin[IO](kafkaConfig, "kui-store-live-bootstrap")
       .use(admin =>
         StoreBootstrap
-          .ensureTopics[IO](admin, StoreTopics.of(config), config.replicationFactor, broker().bootstrapServers)
+          .ensureTopics[IO](
+            admin,
+            StoreTopics.of(config),
+            config.replicationFactor,
+            broker().bootstrapServers
+          )
       )
       .flatMap {
         case Right(()) => IO.unit
@@ -116,7 +120,8 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
       }
 
   private def store(config: StoreConfig, clientId: String): Resource[IO, ConfigStore[IO]] =
-    Resource.eval(bootstrapped(config)) >> KafkaConfigStore.resource[IO](config, kafkaConfig, crypto, clientId)
+    Resource.eval(bootstrapped(config)) >> KafkaConfigStore
+      .resource[IO](config, kafkaConfig, crypto, clientId)
 
   private def clusterKey(id: String): StoreKey =
     StoreKey.cluster(id).fold(e => fail(e.message), identity)
@@ -136,8 +141,8 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
       )
     )
 
-  /** Every record on the topic's single partition, as raw bytes, read the way `kafka-console-consumer`
-    * reads them: no KUI code between the partition and the assertion.
+  /** Every record on the topic's single partition, as raw bytes, read the way `kafka-console-consumer` reads
+    * them: no KUI code between the partition and the assertion.
     */
   private def dump(topic: String): IO[List[(String, String)]] =
     IO.blocking {
@@ -292,8 +297,8 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
 
   /** One replica's view of a key, once it reports the version given, or after five seconds either way.
     *
-    * Returning the last value read rather than failing here, so the assertion that follows says which
-    * version was actually found instead of this helper saying only that something timed out.
+    * Returning the last value read rather than failing here, so the assertion that follows says which version
+    * was actually found instead of this helper saying only that something timed out.
     */
   private def converged(
       replica: ConfigStore[IO],
@@ -307,7 +312,10 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
       replica.get(key).flatMap {
         case found if found.map(_.version) == version => IO.pure(found)
         case found if waitedMs >= deadlineMs => IO.pure(found)
-        case _ => IO.sleep(scala.concurrent.duration.Duration(stepMs, java.util.concurrent.TimeUnit.MILLISECONDS)) *> attempt(waitedMs + stepMs)
+        case _ =>
+          IO.sleep(
+            scala.concurrent.duration.Duration(stepMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+          ) *> attempt(waitedMs + stepMs)
       }
 
     attempt(0L)
@@ -320,23 +328,21 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
     val config = storeConfig("liveryw_")
 
     store(config, "kui-live-ryw").use { configStore =>
-      (1 to 5).toList
-        .traverse { attempt =>
-          val key = clusterKey(s"ryw-$attempt")
+      (1 to 5).toList.traverse { attempt =>
+        val key = clusterKey(s"ryw-$attempt")
 
-          for {
-            written <- configStore.put(key, clusterWith(s"p$attempt"), None, "suite")
-            immediately <- configStore.get(key)
-          } yield {
-            val version = written.fold(error => fail(s"write $attempt failed: ${error.message}"), _.version)
-            assertEquals(
-              immediately.map(_.version),
-              Some(version),
-              s"write $attempt returned before its own record was readable"
-            )
-          }
+        for {
+          written <- configStore.put(key, clusterWith(s"p$attempt"), None, "suite")
+          immediately <- configStore.get(key)
+        } yield {
+          val version = written.fold(error => fail(s"write $attempt failed: ${error.message}"), _.version)
+          assertEquals(
+            immediately.map(_.version),
+            Some(version),
+            s"write $attempt returned before its own record was readable"
+          )
         }
-        .void
+      }.void
     }
   }
 

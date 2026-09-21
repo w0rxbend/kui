@@ -4,18 +4,19 @@ import java.time.Instant
 
 import scala.concurrent.duration.*
 
-import kui.consumer.domain.fixtures.GroupFixtures
-import kui.kernel.{GroupId, Offset, TopicPartition}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
+import kui.consumer.domain.fixtures.GroupFixtures
+import kui.kernel.{GroupId, Offset, TopicPartition}
+
 /** Where a running application will start reading next, decided by a pure function.
   *
   * Two properties carry most of the weight: no proposed offset is ever outside the range the partition holds,
-  * and every clamp is reported. A silent clamp is what Kafbat does, and it means an operator who typed
-  * 900 000 into a partition holding 400 records is shown a confirmation that agrees with them and a cluster
-  * that does something else.
+  * and every clamp is reported. A silent clamp is what Kafbat does, and it means an operator who typed 900
+  * 000 into a partition holding 400 records is shown a confirmation that agrees with them and a cluster that
+  * does something else.
   */
 final class ResetPlannerSuite extends ScalaCheckSuite {
 
@@ -44,11 +45,17 @@ final class ResetPlannerSuite extends ScalaCheckSuite {
     )
 
   test("earliest plans the beginning of each partition") {
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ToEarliest, window, now)), Map(0 -> 10L, 1 -> 0L))
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ToEarliest, window, now)),
+      Map(0 -> 10L, 1 -> 0L)
+    )
   }
 
   test("latest plans the end of each partition") {
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ToLatest, window, now)), Map(0 -> 100L, 1 -> 50L))
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ToLatest, window, now)),
+      Map(0 -> 100L, 1 -> 50L)
+    )
   }
 
   test("a timestamp plans the offset the cluster resolved for it") {
@@ -79,8 +86,14 @@ final class ResetPlannerSuite extends ScalaCheckSuite {
   }
 
   test("a shift moves from the committed offset") {
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(5L), window, now)), Map(0 -> 45L, 1 -> 30L))
-    assertEquals(planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(-5L), window, now)), Map(0 -> 35L, 1 -> 20L))
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(5L), window, now)),
+      Map(0 -> 45L, 1 -> 30L)
+    )
+    assertEquals(
+      planned(ResetPlanner.plan(group, scope, ResetSpec.ShiftBy(-5L), window, now)),
+      Map(0 -> 35L, 1 -> 20L)
+    )
   }
 
   test("a shift with no committed offset counts from the beginning, and says so") {
@@ -113,6 +126,31 @@ final class ResetPlannerSuite extends ScalaCheckSuite {
     ResetPlanner.plan(group, scope, ResetSpec.ToLatest, shrunk, now) match {
       case Left(ResetRefusal.UnknownPartition(partitions)) => assertEquals(partitions, Set(partition(1)))
       case other => fail(s"a vanished partition did not refuse the plan: $other")
+    }
+  }
+
+  test("the planned partitions come out in partition order, whatever order the scope iterated in") {
+    // W12-A1: `partitions.toList.sorted` in `ResetPlanner.plan` with the `.sorted` deleted left all
+    // **1,390** tasks of `./mill services.consumer.__.test` SUCCESS. Every existing case reads the plan
+    // through `planned`, which folds the list into a `Map[Int, Long]` and throws the order away, and the
+    // suites that do care about byte-stability read it through `PlanToken`, which sorts again on its own
+    // account — so the planner's own ordering had no reader at all.
+    //
+    // It is not only about the token. `ResetPlan.partitions` is the confirmation table an operator reads
+    // before pressing apply, and a table whose rows arrive in `Set` iteration order puts partition 7 above
+    // partition 2 on one plan and below it on the next, for the same reset.
+    val outOfOrder = scala.collection.immutable.ListSet(partition(1), partition(0))
+    val reversed = ResetScope(GroupFixtures.Orders, outOfOrder)
+
+    assertEquals(
+      outOfOrder.toList.map(_.partition.value),
+      List(1, 0),
+      "the fixture's set did not iterate out of order, so this case proves nothing"
+    )
+
+    ResetPlanner.plan(group, reversed, ResetSpec.ToEarliest, window, now) match {
+      case Right(plan) => assertEquals(plan.partitions.map(_.partition.partition.value), List(0, 1))
+      case Left(refusal) => fail(s"expected a plan, got a refusal: ${refusal.message}")
     }
   }
 

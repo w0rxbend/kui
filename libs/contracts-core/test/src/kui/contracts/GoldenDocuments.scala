@@ -2,14 +2,14 @@ package kui.contracts
 
 /** The committed sample documents, as text.
   *
-  * They are duplicated here as string constants for one reason: a browser has no filesystem, so a
-  * Scala.js suite cannot read the JSON files under `test/resources/golden`. Both platforms therefore assert against
-  * these constants, and a JVM-only suite (`GoldenFilesSuite`) asserts that each constant is exactly
-  * the file that is committed. Nothing can drift: if someone edits a golden file, the JVM suite
-  * fails, and if someone edits a constant without the file, the same suite fails.
+  * They are duplicated here as string constants for one reason: a browser has no filesystem, so a Scala.js
+  * suite cannot read the JSON files under `test/resources/golden`. Both platforms therefore assert against
+  * these constants, and a JVM-only suite (`GoldenFilesSuite`) asserts that each constant is exactly the file
+  * that is committed. Nothing can drift: if someone edits a golden file, the JVM suite fails, and if someone
+  * edits a constant without the file, the same suite fails.
   *
-  * KERN-007 gives `libs/testkit` a `Golden.assertJson` helper with a `KUI_UPDATE_GOLDEN=1` mode that
-  * rewrites the files; that helper is JVM-only for the same reason.
+  * KERN-007 gives `libs/testkit` a `Golden.assertJson` helper with a `KUI_UPDATE_GOLDEN=1` mode that rewrites
+  * the files; that helper is JVM-only for the same reason.
   */
 object GoldenDocuments {
 
@@ -157,13 +157,13 @@ object GoldenDocuments {
 
   /** Every constant above, by the file name it is committed under. */
   val all: List[(String, String)] = List(
-    "error-envelope-validation.json"        -> errorEnvelopeValidation,
-    "error-envelope-upstream.json"          -> errorEnvelopeUpstream,
-    "capabilities-snapshot.json"            -> capabilitiesSnapshot,
-    "capability-change-unavailable.json"    -> capabilityChangeUnavailable,
-    "service-capabilities.json"             -> serviceCapabilities,
-    "sse-done.json"                         -> sseDone,
-    "sse-error.json"                        -> sseError,
-    "readiness-report-degraded.json"        -> readinessReportDegraded
+    "error-envelope-validation.json" -> errorEnvelopeValidation,
+    "error-envelope-upstream.json" -> errorEnvelopeUpstream,
+    "capabilities-snapshot.json" -> capabilitiesSnapshot,
+    "capability-change-unavailable.json" -> capabilityChangeUnavailable,
+    "service-capabilities.json" -> serviceCapabilities,
+    "sse-done.json" -> sseDone,
+    "sse-error.json" -> sseError,
+    "readiness-report-degraded.json" -> readinessReportDegraded
   )
 }

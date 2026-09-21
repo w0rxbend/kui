@@ -11,9 +11,9 @@ import kui.testkit.KuiIOSuite
 
 /** That losing the store cluster degrades KUI rather than breaking it, and that recovering says so.
   *
-  * The rule most worth protecting here is that `since` is sticky. A `Degraded` whose timestamp every
-  * retry reset would make "this store has been unreachable for twenty minutes" impossible to say — and
-  * that sentence is the one an alert is written against.
+  * The rule most worth protecting here is that `since` is sticky. A `Degraded` whose timestamp every retry
+  * reset would make "this store has been unreachable for twenty minutes" impossible to say — and that
+  * sentence is the one an alert is written against.
   */
 final class StoreHealthSuite extends KuiIOSuite {
 
@@ -96,11 +96,15 @@ final class StoreHealthSuite extends KuiIOSuite {
     // The reason reaches a user through a capability banner, so it has to be short, stable and free of
     // hosts, ports and credentials — none of which a Kafka client's exception message is.
     val cases = List(
-      new org.apache.kafka.common.errors.SaslAuthenticationException("Authentication failed for user kui@broker-1:9093")
+      new org.apache.kafka.common.errors.SaslAuthenticationException(
+        "Authentication failed for user kui@broker-1:9093"
+      )
         -> "authentication failed",
       new org.apache.kafka.common.errors.TopicAuthorizationException("__kui_config") -> "not authorized",
       new org.apache.kafka.common.errors.UnknownTopicOrPartitionException("__kui_config") -> "topic deleted",
-      new org.apache.kafka.common.errors.TimeoutException("Timed out waiting for broker-1:9092") -> "connection timed out",
+      new org.apache.kafka.common.errors.TimeoutException(
+        "Timed out waiting for broker-1:9092"
+      ) -> "connection timed out",
       new java.net.ConnectException("Connection refused: broker-1/10.0.0.1:9092") -> "connection refused",
       new IllegalStateException("something nobody anticipated") -> "unknown"
     )

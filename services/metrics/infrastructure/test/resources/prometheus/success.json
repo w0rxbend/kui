@@ -1,0 +1,34 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "cluster_name": "production",
+          "group": "orders"
+        },
+        "value": [1725624000.123456789, "0"],
+        "futureSeriesField": {
+          "ignored": true
+        }
+      },
+      {
+        "metric": {
+          "cluster_name": "production",
+          "group": "payments"
+        },
+        "value": [1725624001, "1250.5"]
+      }
+    ],
+    "futureDataField": "ignored"
+  },
+  "warnings": [
+    "first sensitive warning text",
+    "second sensitive warning text"
+  ],
+  "infos": [
+    "sensitive informational text"
+  ],
+  "futureEnvelopeField": 42
+}

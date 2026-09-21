@@ -19,7 +19,7 @@
  *   starts at the minimum makes a 1ms wobble look like an incident; starting at zero keeps the
  *   shape honest, and since there is no y-axis to read, honesty is all the shape has.
  */
-import { For, Show, createSignal, createUniqueId, type Component } from "solid-js";
+import { For, Show, createMemo, createSignal, createUniqueId, type Component } from "solid-js";
 import { ChartDataTable } from "./ChartDataTable.jsx";
 import { useElementSize } from "./elementSize.js";
 import { ABSENT } from "./format.js";
@@ -89,9 +89,8 @@ export const LineChart: Component<LineChartProps> = props => {
     return `${linePath(run)} L ${last.x} ${plotHeight()} L ${first.x} ${plotHeight()} Z`;
   };
 
-  const lastPoint = (series: Series): Point | undefined => {
-    const all = runs(series);
-    const lastRun = all[all.length - 1];
+  const lastPoint = (seriesRuns: readonly Point[][]): Point | undefined => {
+    const lastRun = seriesRuns[seriesRuns.length - 1];
     return lastRun?.[lastRun.length - 1];
   };
 
@@ -163,36 +162,39 @@ export const LineChart: Component<LineChartProps> = props => {
         >
           <svg class="kui-plot__svg" width={width()} height={plotHeight()} aria-hidden="true">
             <For each={props.series}>
-              {series => (
-                <g>
-                  <For each={runs(series)}>
-                    {run => (
-                      <>
-                        {/* A single point has no line to draw, so it gets a dot instead of
-                            vanishing — one measurement between two outages is still a fact. */}
-                        <Show when={run.length > 1}>
-                          <path d={areaPath(run)} fill={toneAreaFill(series.tone)} />
-                          <path
-                            class="kui-plot__line"
-                            d={linePath(run)}
-                            fill="none"
-                            stroke={toneColor(series.tone)}
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          />
-                        </Show>
-                        <Show when={run.length === 1 && run[0]}>
-                          {point => <circle cx={point().x} cy={point().y} r="2.5" fill={toneColor(series.tone)} />}
-                        </Show>
-                      </>
-                    )}
-                  </For>
-                  <Show when={lastPoint(series)}>
-                    {point => <circle cx={point().x} cy={point().y} r="3.5" fill={toneColor(series.tone)} />}
-                  </Show>
-                </g>
-              )}
+              {series => {
+                const seriesRuns = createMemo(() => runs(series));
+                return (
+                  <g>
+                    <For each={seriesRuns()}>
+                      {run => (
+                        <>
+                          {/* A single point has no line to draw, so it gets a dot instead of
+                              vanishing — one measurement between two outages is still a fact. */}
+                          <Show when={run.length > 1}>
+                            <path d={areaPath(run)} fill={toneAreaFill(series.tone)} />
+                            <path
+                              class="kui-plot__line"
+                              d={linePath(run)}
+                              fill="none"
+                              stroke={toneColor(series.tone)}
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            />
+                          </Show>
+                          <Show when={run.length === 1 && run[0]}>
+                            {point => <circle cx={point().x} cy={point().y} r="2.5" fill={toneColor(series.tone)} />}
+                          </Show>
+                        </>
+                      )}
+                    </For>
+                    <Show when={lastPoint(seriesRuns())}>
+                      {point => <circle cx={point().x} cy={point().y} r="3.5" fill={toneColor(series.tone)} />}
+                    </Show>
+                  </g>
+                );
+              }}
             </For>
 
             <Show when={cursor() !== undefined}>

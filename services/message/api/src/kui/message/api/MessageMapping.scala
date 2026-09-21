@@ -86,6 +86,7 @@ object MessageMapping {
 
   def doneReason(reason: BrowseEnd): DoneReason = reason match {
     case BrowseEnd.Limit => DoneReason.Limit
+    case BrowseEnd.Budget => DoneReason.Budget
     case BrowseEnd.Exhausted => DoneReason.Exhausted
   }
 

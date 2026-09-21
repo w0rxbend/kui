@@ -10,8 +10,8 @@ import kui.kernel.Secret
 /** That a write carries what it must, prints what it must not, and never comes back.
   *
   * This is the only type in the cluster contract that holds a credential, so the two questions it has to
-  * answer are: does a caller's password survive the round trip in, and does it stay out of everything that
-  * is written down.
+  * answer are: does a caller's password survive the round trip in, and does it stay out of everything that is
+  * written down.
   */
 final class ClusterWriteDtosSuite extends FunSuite {
 

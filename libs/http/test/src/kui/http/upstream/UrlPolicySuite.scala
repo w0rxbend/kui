@@ -10,14 +10,14 @@ import sttp.model.StatusCode
 import kui.config.{SafeUrl, UrlPolicy}
 import kui.kernel.error.InfrastructureError
 
-/** That the outbound URL policy is enforced where it actually matters — on the address a request is
-  * about to be sent to, not only on the one an operator typed.
+/** That the outbound URL policy is enforced where it actually matters — on the address a request is about to
+  * be sent to, not only on the one an operator typed.
   *
-  * A configuration-time check alone is not enough. A redirect is chosen by the upstream, not by
-  * KUI, so an upstream that has been compromised (or merely misconfigured) could otherwise redirect
-  * KUI to `http://169.254.169.254/` and have it fetch the cloud instance's own credentials from a
-  * network position no outsider has. `libs/config`'s `UrlPolicySuite` covers the rules themselves;
-  * this covers them being applied per call.
+  * A configuration-time check alone is not enough. A redirect is chosen by the upstream, not by KUI, so an
+  * upstream that has been compromised (or merely misconfigured) could otherwise redirect KUI to
+  * `http://169.254.169.254/` and have it fetch the cloud instance's own credentials from a network position
+  * no outsider has. `libs/config`'s `UrlPolicySuite` covers the rules themselves; this covers them being
+  * applied per call.
   */
 final class UrlPolicySuite extends CatsEffectSuite {
 
@@ -62,11 +62,10 @@ final class UrlPolicySuite extends CatsEffectSuite {
 
   test("the same addresses are allowed under the development policy") {
     UpstreamFixture.recording(ResponseKind.Ok).flatMap { stub =>
-      UpstreamFixture.client(clientFor("http://127.0.0.1:8081", UrlPolicy.Dev), stub.backend).use {
-        client =>
-          basicRequest.get(uri"http://ignored/x").send(client.backend).map { response =>
-            assertEquals(response.code, StatusCode.Ok)
-          }
+      UpstreamFixture.client(clientFor("http://127.0.0.1:8081", UrlPolicy.Dev), stub.backend).use { client =>
+        basicRequest.get(uri"http://ignored/x").send(client.backend).map { response =>
+          assertEquals(response.code, StatusCode.Ok)
+        }
       }
     }
   }

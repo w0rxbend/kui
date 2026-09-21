@@ -43,6 +43,18 @@ final class LatencyWindowSuite extends KuiSuite {
     assertEquals(window.p95, Some(5.millis))
   }
 
+  test("theNearestRankIsRoundedUpWhenTheWindowDoesNotDivideEvenly") {
+    // W13-A1: every distribution above has a sample count that 95% divides exactly — 1, 50 after the
+    // window forgets, 100 — so `math.ceil` and `math.floor` pick the same sample and replacing one with
+    // the other left all 803 cases green. Ten samples is the smallest window where the two disagree: 95%
+    // of ten is 9.5, and the nearest rank is the tenth sample, not the ninth. Rounding down would report
+    // this service's p95 as 10ms while one call in ten takes eight seconds.
+    val window = windowOf(List.fill(9)(10.millis) ++ List(8.seconds), size = 10)
+
+    assertEquals(window.p95, Some(8.seconds))
+    assertEquals(window.percentile(90), Some(10.millis))
+  }
+
   private val samples: Gen[List[FiniteDuration]] =
     Gen.listOf(Gen.chooseNum(0L, 30000L).map(_.millis))
 

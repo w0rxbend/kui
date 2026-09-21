@@ -154,6 +154,34 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
    * number is no longer current. Without it, a stream that flaps twice inside one poll interval
    * leaves the first episode's pending callback alive alongside the second, and from then on two
    * independent chains poll and re-open the stream on their own timers.
+   *
+   * This is the *only* thing a pending callback reads, and that is deliberate. The guard used to be
+   * `!polling || current !== episode`, which is the same test written twice: `polling` is cleared
+   * in exactly two places and both of them raise the episode in the same breath, so a callback that
+   * failed one half always failed the other. Measured, on the tree this replaced: deleting the
+   * episode bump from `stop()` and deleting `polling = false` from `stop()` each left the whole
+   * suite green, one masked by the other. Two guards that mask each other are one guard nobody has
+   * checked. `polling` now answers only the question it is named for — whether a fallback chain is
+   * already running and a second must not be started.
+   *
+   * **Which of the three `current !== episode` lines is gated, measured rather than asserted.** The
+   * sentence that used to stand here claimed all three could be deleted one at a time and watched
+   * to fail. Two can:
+   *
+   * - the one inside `poll().then(…)` reddens *a poll answered after the episode moved is not
+   *   applied* and *a store that has been stopped does not start a poll chain*, both in
+   *   `store.test.ts`;
+   * - the one in the scheduled callback reddens *a stream that flaps twice inside one poll interval
+   *   leaves one poll chain*.
+   *
+   * The third — `tick`'s first line — cannot be reddened by anything, because every caller has just
+   * made the same test: `beginPollingFallback` raises the episode and passes it in the same
+   * statement, and the scheduled callback tests it one line above. Deleting it leaves the whole
+   * frontend suite green, re-measured for wave 6. It is kept as depth rather than as a gate, and
+   * that is the honest description of it: the day `connect()` grows a path that ends the episode
+   * synchronously between the callback's test and this one, this line is what stops an abandoned
+   * chain restarting. Saying so is the point — a line defended by a sentence claiming a test that
+   * does not exist is worse than an undefended line, because the next reader stops looking.
    */
   let episode = 0;
 
@@ -215,7 +243,10 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
   function applyConnection(current: SseConnection): void {
     switch (current.phase) {
       case "open":
-        // The stream is working again, so the poller stands down.
+        // The stream is working again, so the poller stands down — and the episode ends with it.
+        // A tick already scheduled would otherwise wake up an interval later, call `connect()`,
+        // and `connect()` releases the handle it is replacing: the stream that had just recovered
+        // is torn down by the chain that recovering onto it was supposed to end.
         polling = false;
         episode += 1;
         setConnection(current);
@@ -238,6 +269,13 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
    * per interval per open tab — so it is a fallback and never the normal path.
    */
   function beginPollingFallback(): void {
+    // `stopped` here is depth and not a gate, and it is disclosed rather than left to be found: it
+    // is unreachable through this store's own shutdown, so no case can redden it. `stop()` disposes
+    // the connection watcher before anything else, and a Solid effect that was already queued does
+    // not run after its root is disposed — measured directly, in this workspace, on Solid 2.0.0-rc.6.
+    // So the only caller of this function, `applyConnection`, cannot itself be reached once
+    // `stopped` is true. It is the exact twin of `connect()`'s `if (stopped) return;`, which *is*
+    // reachable, and it stays for the day the teardown order changes.
     if (polling || stopped) return;
     polling = true;
     episode += 1;
@@ -245,10 +283,10 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
   }
 
   function tick(current: number): void {
-    if (!polling || current !== episode) return;
+    if (current !== episode) return;
 
     void options.poll().then((outcome) => {
-      if (!polling || current !== episode) return;
+      if (current !== episode) return;
       if (outcome.ok) {
         const frame = decodeCapabilityFrame(JSON.stringify(outcome.value));
         if (frame.ok && frame.value.kind === "snapshot") applySnapshot(frame.value.entries);
@@ -261,7 +299,7 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
 
     options.schedule(pollIntervalMs, () => {
       // Each tick is also another go at the stream: recovering onto it is what stops the polling.
-      if (!polling || current !== episode) return;
+      if (current !== episode) return;
       connect();
       tick(current);
     });
@@ -373,10 +411,13 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
 
     stop(): void {
       stopped = true;
-      polling = false;
-      // Invalidates any callback already scheduled, so the store really does go quiet rather than
+      // Not the same fact as the line below, and both are load-bearing. Ending the episode is what
+      // silences the callbacks already scheduled, so the store really does go quiet rather than
       // keep polling and re-opening the stream against a gateway the user may no longer be
-      // authenticated to.
+      // authenticated to. Clearing `polling` is what lets a later `start()` fall back *again*:
+      // `beginPollingFallback` refuses to start a chain while one is running, so a flag left true
+      // here would mean a restarted store never polls after its stream drops.
+      polling = false;
       episode += 1;
       releaseHandle();
       setConnection({ phase: "closed", reason: "closed by the client" });

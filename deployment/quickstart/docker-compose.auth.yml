@@ -12,6 +12,14 @@
 # and sign in as `admin` / `quickstart-admin`, or as `viewer` / `quickstart-viewer` to see a role
 # with fewer permissions render fewer controls. ./kui-quickstart-auth.yaml has the accounts and the
 # roles, with the reasoning beside each.
+#
+# NO CI JOB RUNS THIS OVERLAY, and that is a decision rather than an omission. The reasoning and
+# what it costs are written out at the top of ./kui-quickstart-auth.yaml, under "WHAT CHECKS THIS
+# FILE, AND WHAT DOES NOT". Read that before adding a job here: half of what such a job would
+# assert is asserted more cheaply somewhere else, and the half that is not is the sign-in itself.
+# What did change in wave 5 is that the configuration this overlay mounts is now loaded by
+# `ShippedConfigurationSuite`, so a key spelled wrongly in it fails a unit test rather than a
+# demonstration in front of somebody.
 
 services:
   kui:
@@ -19,9 +27,9 @@ services:
     volumes:
       - ./kui-quickstart-auth.yaml:/etc/kui/kui-quickstart-auth.yaml:ro
 
-  # The Avro seed goes through KUI's produce API, which is a mutation, and a mutation now needs a
+  # The schema seed goes through KUI's produce API, which is a mutation, and a mutation now needs a
   # signed-in principal that may write to the topic. It signs in as `admin` first. Without this the
-  # seed would fail with a 401 and the Avro half of the demonstration would silently be missing from
+  # seed would fail with a 401 and the schema-aware demonstration would silently be missing from
   # exactly the run where authorization is being demonstrated.
   avro-seed:
     environment:

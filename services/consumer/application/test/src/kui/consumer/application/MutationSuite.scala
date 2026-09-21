@@ -3,7 +3,7 @@ package kui.consumer.application
 import java.time.Instant
 
 import cats.effect.IO
-import cats.effect.kernel.Ref
+import cats.effect.kernel.{Deferred, Ref}
 
 import kui.consumer.domain.*
 import kui.consumer.domain.fixtures.GroupFixtures
@@ -25,7 +25,11 @@ final class MutationSuite extends KuiIOSuite {
   private val group: GroupId = GroupId.unsafe("orders-consumer")
 
   private val emptyGroup: ConsumerGroup =
-    GroupFixtures.group(id = group.value, state = GroupState.Empty, partitions = List(GroupFixtures.state(0, Some(40L))))
+    GroupFixtures.group(
+      id = group.value,
+      state = GroupState.Empty,
+      partitions = List(GroupFixtures.state(0, Some(40L)))
+    )
 
   private val liveGroup: ConsumerGroup =
     GroupFixtures.group(
@@ -147,7 +151,10 @@ final class MutationSuite extends KuiIOSuite {
       invalidated <- invalidations.get
     } yield {
       assert(applied.isRight, s"apply failed: $applied")
-      assertEquals(state.applied.map((id, offsets) => id -> offsets.values.map(_.value).toList), List(group -> List(0L)))
+      assertEquals(
+        state.applied.map((id, offsets) => id -> offsets.values.map(_.value).toList),
+        List(group -> List(0L))
+      )
       assertEquals(records.size, 1)
       assertEquals(records.head.kind, MutationKind.ResetOffsets)
       assertEquals(records.head.outcome, MutationOutcome.Succeeded)
@@ -241,6 +248,41 @@ final class MutationSuite extends KuiIOSuite {
     } yield assertEquals(verified.left.map(_.code), Left(ErrorCode.Validation))
   }
 
+  test("a cluster whose id only appears inside the binding is not the cluster the token was minted for") {
+    // W12-A1. The case above proves the binding exists; it does not prove the binding is a *prefix*.
+    // `PlanToken.boundTo`'s `_.startsWith(s"${cluster.value}/")` rewritten to `_.contains(cluster.value)`
+    // left all **1,390** tasks of `./mill services.consumer.__.test` SUCCESS, and under it the binding
+    // stops being a cluster identity and becomes a substring search over `"<cluster>/<group>"`. A plan
+    // computed against `prod`'s `orders-consumer` would then apply to a cluster called `orders` — or to
+    // `pro`, or to `d/orders`, whichever a deployment happens to have — which is the exact failure ADR-045
+    // binds the token to a cluster to prevent: the offsets on the screen were read from a different
+    // cluster's log ends.
+    val plan = ResetPlan(
+      group,
+      scope,
+      ResetSpec.ToEarliest,
+      List(PlannedPartition(GroupFixtures.partition(0), None, Offset.unsafe(0L), None)),
+      Nil,
+      ConsumerRig.At
+    )
+    // `prod` + `orders-consumer` renders the binding `prod/orders-consumer`, which contains `orders`.
+    val neighbour = kui.kernel.ClusterId.unsafe("orders")
+
+    for {
+      token <- tokens.mint(ConsumerRig.Cluster, plan, ConsumerRig.At.plusSeconds(300))
+      verified <- tokens.verify(neighbour, group, token, ConsumerRig.At)
+      // The other direction, so a mutation that refuses everything fails here too.
+      mine <- tokens.verify(ConsumerRig.Cluster, group, token, ConsumerRig.At)
+    } yield {
+      assertEquals(
+        verified.left.map(_.code),
+        Left(ErrorCode.Validation),
+        s"a token minted for ${ConsumerRig.Cluster.value} applied on ${neighbour.value}"
+      )
+      assert(mine.isRight, "the cluster the token was minted for was refused its own token")
+    }
+  }
+
   test("a tampered token is refused rather than applied with the offsets somebody edited in") {
     val plan = ResetPlan(
       group,
@@ -302,7 +344,10 @@ final class MutationSuite extends KuiIOSuite {
       state <- port.state.get
     } yield {
       assertEquals(result.map(_.partitions), Right(Set(GroupFixtures.partition(0))))
-      assertEquals(state.deletedOffsets.map((_, partitions) => partitions), List(Set(GroupFixtures.partition(0))))
+      assertEquals(
+        state.deletedOffsets.map((_, partitions) => partitions),
+        List(Set(GroupFixtures.partition(0)))
+      )
     }
   }
 
@@ -312,7 +357,12 @@ final class MutationSuite extends KuiIOSuite {
       (port, _, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteOffsets = DeleteOffsetsUseCase.make[IO](_ => port, guard, logger)
-      result <- deleteOffsets.delete(Caller, ConsumerRig.Cluster, group, kui.kernel.TopicName.unsafe("untouched"))
+      result <- deleteOffsets.delete(
+        Caller,
+        ConsumerRig.Cluster,
+        group,
+        kui.kernel.TopicName.unsafe("untouched")
+      )
       state <- port.state.get
     } yield {
       assertEquals(result.map(_.partitions), Right(Set.empty[TopicPartition]))
@@ -343,6 +393,37 @@ final class MutationSuite extends KuiIOSuite {
       assertEquals(result.left.map(_.code), Left(ErrorCode.GroupNotEmpty))
       assertEquals(records.size, 1)
       assertEquals(records.head.outcome, MutationOutcome.Refused)
+    }
+  }
+
+  test("a cancelled mutation is recorded as unknown, and never as a success or a failure") {
+    // `MutationOutcome.Unknown`'s own scaladoc is the rule: Kafka gives no guarantee that a cancelled
+    // write was *not* applied, so a record claiming either would be a lie, and `Unknown` is what tells an
+    // operator to go and look. Nothing asserted it — turning this branch into `Succeeded` left
+    // `./mill libs.__.test + services.*` at 2633/2633, and the operator would then read that an offset
+    // reset they aborted had gone through.
+    for {
+      rigged <- rig(emptyGroup)
+      (_, audit, guard, invalidations) = rigged
+      started <- Deferred[IO, Unit]
+      running <- guard
+        .guard(Caller, ConsumerRig.Cluster, MutationKind.ResetOffsets, group.value, Map.empty, Map.empty)(
+          started.complete(()) >> IO.never[Either[KuiError, Unit]]
+        )
+        .start
+      _ <- started.get
+      _ <- running.cancel
+      records <- audit.written.get
+      invalidated <- invalidations.get
+    } yield {
+      assertEquals(records.map(_.outcome), List(MutationOutcome.Unknown))
+      assertEquals(
+        records.head.detail.get("reason"),
+        Some("the operation was cancelled after the request was sent")
+      )
+      // And the snapshot is not dropped: invalidation is the success path's, and doing it here would
+      // claim the same thing the outcome refuses to claim.
+      assertEquals(invalidated, Nil)
     }
   }
 

@@ -73,8 +73,23 @@ then be silently missing in production.
 ## The metrics
 
 Every metric KUI emits is in this table. The names are constants in
-`libs/observability`'s `MetricNames`, and `MetricNamesSuite` asserts the list against this
-document and `ARCHITECTURE.md` §13, so the code and the docs cannot drift apart.
+`libs/observability`'s `MetricNames`, and `MetricNamesSuite` pins that list two ways. Be precise
+about which is which, because the previous wording overstated one of them by a hop:
+
+* **Against a second hand-written copy of the list, inside the suite itself**, in full and in order.
+  That is the gate a rename hits: the name has to be changed in two places, and the second place is
+  a test whose diff a reviewer reads. `ARCHITECTURE.md` §13 is where that copy came *from*, and it
+  is named in a comment inside the suite; **the suite does not read that file**, so a §13 edit on
+  its own breaks nothing.
+* **Against the first column of the table below**, both directions, since wave 10. A name in this
+  table that the build does not declare is a panel that stays empty for ever; a name the build
+  declares that this table omits is a number no operator will ever look at. The reader that finds
+  those rows refuses to pass on fewer than twenty of them, so a table it stopped matching cannot go
+  green by matching nothing.
+
+This table was eleven rows short of `MetricNames.all` until wave 10, while the sentence above
+claimed otherwise and nothing compared the two. It is compared now. If you add a metric, add its
+row here — the build will tell you if you forget.
 
 "Live from" is when the metric starts being *emitted*. Every name is declared from M0, so a
 later milestone cannot accidentally reuse one for something else.
@@ -89,12 +104,35 @@ later milestone cannot accidentally reuse one for something else.
 | `kui.kafka.consume.bytes` | `cluster`, `topic` | M3 | Bytes read while browsing messages. |
 | `kui.cache.hits` | `cache` | M1 | Cache hits, by cache. |
 | `kui.cache.misses` | `cache` | M1 | Cache misses, by cache. |
+| `kui.prometheus.query.duration` | `source`, `query`, `operation`, `outcome` | M8 | End-to-end logical Prometheus query latency in seconds, including cache and coalescing. |
+| `kui.prometheus.query.requests` | `source`, `query`, `operation`, `outcome` | M8 | Logical Prometheus query calls, counted once per caller. |
+| `kui.prometheus.response.bytes` | `source`, `query`, `operation` | M8 | Bounded response bytes accepted from the Prometheus API. |
+| `kui.prometheus.response.series` | `source`, `query`, `operation` | M8 | Series returned by accepted Prometheus responses. |
+| `kui.prometheus.response.samples` | `source`, `query`, `operation` | M8 | Samples returned by accepted Prometheus responses. |
+| `kui.prometheus.query.inflight` | `source`, `query`, `operation` | M8 | Logical Prometheus callers currently in flight. |
+| `kui.prometheus.query.cache.access` | `source`, `query`, `operation`, `state` | M8 | Query cache access by its bounded loaded/hit/coalesced and fresh/stale state. |
+| `kui.prometheus.query.coalesced` | `source`, `query`, `operation` | M8 | Callers that joined an identical in-flight query. |
+| `kui.prometheus.query.limit.rejected` | `source`, `query`, `operation`, `limit` | M8 | Prometheus responses rejected at a named structural or byte limit. |
+| `kui.prometheus.query.diagnostics` | `source`, `query`, `operation`, `kind` | M8 | Warning and info entries reported by Prometheus, counted without retaining their text. |
 | `kui.capability.state` | `service`, `cluster`, `state` | M0 | What the UI is allowed to show, per service and cluster. |
 | `kui.stream.events` | `service`, `stream`, `event` | M0 | Events pushed down an open stream, by event name. |
 | `kui.stream.active` | `service`, `stream` | M0 | Open streams. A gauge that never returns to zero is a leak. |
 | `kui.cursor.rejected` | `reason` | M3 | Paging cursors refused, by why. |
 | `kui.principal.rejected` | `reason` | M0 | Signed principal headers refused, by why. |
 | `kui.config.version` | `section` | M1 | The version of each configuration section in use. |
+| `kui.gateway.aggregation.section` | `aggregation`, `section`, `status` | M2 | How often each section of an aggregated response is served in each state. It is the number that answers "how often do operators see a degraded topic page, and which part of it is degrading" — which no per-endpoint metric can, because an aggregation that answers 200 with four missing sections looks healthy to a status-code histogram. |
+| `kui.cluster.profile.fetch` | `outcome` | M2 | Cluster-profile fetches by a Kafka-facing service, by how they ended (ADR-046). |
+| `kui.cluster.profile.subscribed` | *(none)* | M2 | Whether that service's change subscription is open. With the counter above it answers the question asked when a cluster edit does not take effect: is this service being *told* about changes, or polling because the stream is broken? Those look identical in a latency graph. |
+| `kui.serde.deserialize.failures` | `serde`, `target`, `topic` | M3 | Records whose intended serde could not read them, so the fallback rendered them instead. The metric that says a default serde is wrong for a topic; without it that misconfiguration is visible only as a screen full of mojibake nobody reports. |
+| `kui.serde.autodetected` | `serde` | M3 | Payloads decoded by an auto-detected serde: what the topics nobody configured actually contain. |
+| `kui.serde.serialize.failures` | `serde`, `topic`, `reason` | M3 | Produce payloads that could not become bytes, split by whose problem it is. |
+| `kui.serde.registry.built` | `cluster`, `reason` | M3 | Serde registries built for a cluster. A number that climbs on a stable configuration means profile churn is rebuilding them, and each rebuild throws away every cached schema. |
+| `kui.serde.registry.requests` | `cluster`, `outcome` | M3 | Calls to a Schema Registry, by how they ended. |
+| `kui.serde.registry.up` | `cluster` | M3 | Whether a cluster's Schema Registry is answering: the number the capability fold reads (ADR-039). |
+| `kui.filter.compile` | `outcome` | M3 | Smart-filter compilations, by outcome (ADR-017). |
+| `kui.filter.evaluate.duration` | *(none)* | M3 | How long one record's filter evaluation took. Its p99 is what says a user's filter, and not Kafka, is why browsing is slow. |
+| `kui.filter.errors` | `kind` | M3 | Records a filter could not decide on, split into runtime errors and timeouts. The same number the `consumed` stream event reports as `filterErrors`. |
+| `kui.masking.applied` | `cluster`, `topic`, `target` | M3 | Reads on which a masking rule was in force, one per read per half of the record (DM-001, ADR-023). Deliberately **not** a count of fields or records masked: that number is a function of the payload, so a per-field series would publish the shape of protected data onto a dashboard that is routinely less protected than the data itself. A topic whose card-number field is present on 3% of records would say so. |
 
 ### Reading `outcome`
 
@@ -134,6 +172,11 @@ path. A label whose values multiply (a cluster id, a topic name, a URL) turns on
 thousands of time series, which is a well-known way to take a monitoring system down. A topic
 name is acceptable where it is deliberately chosen and bounded, such as
 `kui.kafka.consume.*`; a message payload never is.
+
+The Prometheus-query metrics use `source` only for the bounded configured cluster/source ID and `query`
+only for a validated, server-owned `QueryId`. Neither label is a source URL, PromQL expression, topic,
+consumer group, arbitrary Prometheus label, response text, or credential. Those values are intentionally
+absent even when a query fails.
 
 ## Every endpoint is traced, and nobody instruments one
 

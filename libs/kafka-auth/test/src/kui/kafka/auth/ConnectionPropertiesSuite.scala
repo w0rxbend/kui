@@ -13,13 +13,13 @@ import kui.kernel.cluster.*
 import kui.kernel.error.ErrorCode
 import kui.kernel.{ClusterId, Secret}
 import kui.testkit.KuiIOSuite
+import kui.testkit.fakes.FakeStructuredLogger
 
-/** The seam between the three pieces of this module: the classpath check, the materializer and the
-  * renderer.
+/** The seam between the three pieces of this module: the classpath check, the materializer and the renderer.
   *
-  * Each is tested on its own elsewhere. What is only testable here is the order they run in and the
-  * lifetime they share — that a misconfigured deployment fails before writing a private key, and
-  * that the path in the returned properties is gone when the properties are.
+  * Each is tested on its own elsewhere. What is only testable here is the order they run in and the lifetime
+  * they share — that a misconfigured deployment fails before writing a private key, and that the path in the
+  * returned properties is gone when the properties are.
   */
 final class ConnectionPropertiesSuite extends KuiIOSuite {
 
@@ -95,6 +95,42 @@ final class ConnectionPropertiesSuite extends KuiIOSuite {
     )
   }
 
+  test("turningHostnameVerificationOffIsWarnedAboutInTheLogOfTheProcessThatDidIt") {
+    // `report`'s own reason: "turning certificate hostname checking off is a decision that should
+    // appear in the log of every process that made it, not only in the configuration file of the
+    // person who made it". Deleting the warning left all 279 cases in this module and its two
+    // neighbours green — the one class of TLS downgrade KUI accepts became silent.
+    val insecure = ClusterSecurity.Ssl(TlsConfig.default.copy(verifyHostname = false))
+
+    FakeStructuredLogger[IO].flatMap { fake =>
+      ConnectionProperties
+        .resource[IO](connection(insecure), ClientPurpose.Admin, "kui-admin-prod-1", Some(fake))
+        .use(_ => fake.entries)
+        .map { entries =>
+          val warnings = entries.filter(_.level == "warn")
+          assertEquals(warnings.size, 1, clue = entries.toString)
+          assert(
+            warnings.head.message.contains("prod"),
+            clue = s"the warning does not say which cluster: ${warnings.head.message}"
+          )
+          assert(
+            warnings.head.message.contains("hostname verification"),
+            clue = warnings.head.message
+          )
+        }
+    }
+  }
+
+  test("a cluster that verifies hostnames is not warned about") {
+    // The other half, so the case above cannot be satisfied by warning on every TLS connection.
+    FakeStructuredLogger[IO].flatMap { fake =>
+      ConnectionProperties
+        .resource[IO](connection(inlineTls), ClientPurpose.Admin, "kui-admin-prod-1", Some(fake))
+        .use(_ => fake.entries)
+        .map(entries => assertEquals(entries.count(_.level == "warn"), 0, clue = entries.toString))
+    }
+  }
+
   test("aMissingCloudHandlerFailsBeforeAnyFileIsWritten") {
     // AWS MSK IAM's login module is not on this module's classpath and never will be — the
     // coordinate is deliberately optional. The check has to run before materialization, so a
@@ -123,7 +159,11 @@ final class ConnectionPropertiesSuite extends KuiIOSuite {
     val ours = KeyStoreMaterializer.directoryName(misconfigured, "")
 
     def materializedDirectories: IO[Long] =
-      IO(Using.resource(JFiles.list(temporaryDirectory))(_.filter(_.getFileName.toString.startsWith(ours)).count()))
+      IO(
+        Using.resource(JFiles.list(temporaryDirectory))(
+          _.filter(_.getFileName.toString.startsWith(ours)).count()
+        )
+      )
 
     for {
       before <- materializedDirectories

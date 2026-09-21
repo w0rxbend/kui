@@ -40,7 +40,8 @@ final class TopicSummarySuite extends KuiSuite {
   }
 
   test("sizeRefusesIndependentlyOfCount") {
-    val counted = validPartition(0, Some(1), List(1), List(1), earliest = Some(0L), latest = Some(5L), size = None)
+    val counted =
+      validPartition(0, Some(1), List(1), List(1), earliest = Some(0L), latest = Some(5L), size = None)
     val summary = TopicSummary.of(name, isInternal = false, List(counted))
 
     assertEquals(summary.messageCount, Some(5L))

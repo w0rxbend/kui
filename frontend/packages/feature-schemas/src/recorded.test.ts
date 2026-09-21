@@ -44,8 +44,70 @@ describe("the recorded subject list", () => {
     const answer = await fetchSubjects(client(subjectsDocument), "quickstart");
     expect(answer.kind).toBe("ready");
     if (answer.kind !== "ready") return;
-    expect(answer.value.subjects).toEqual(["orders.avro-value"]);
+    expect(answer.value.subjects.map((row) => row.subject)).toEqual(["orders.avro-value"]);
     expect(answer.value.page.totalItems).toBe(1);
+  });
+
+  it("keeps every fact the row carries, not only the name", async () => {
+    /*
+     * The defect this whole file exists to make impossible again. This endpoint used to answer
+     * `items: string[]`; it now answers a summary row, and for a day the screen put the *row* into a
+     * link href and rendered `[object Object]` — because the mapping threw four fields away one line
+     * after they arrived, and a field nothing reads is a field no test can be wrong about.
+     */
+    const answer = await fetchSubjects(client(subjectsDocument), "quickstart");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.subjects[0]).toEqual({
+      subject: "orders.avro-value",
+      format: "AVRO",
+      versionCount: 1,
+      compatibility: { level: "BACKWARD", inherited: true },
+    });
+  });
+
+  it("says a row's level is inherited when the wire says it is", async () => {
+    // The distinction the screen exists to make: this subject moves the next time anybody changes
+    // the registry's global level, and one flag on the wire is the only thing that says so.
+    const answer = await fetchSubjects(client(subjectsDocument), "quickstart");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.subjects[0]?.compatibility?.inherited).toBe(true);
+  });
+
+  it("leaves an unenriched row's three facts absent rather than defaulted", async () => {
+    /*
+     * The endpoint documents this case out loud: "a row's format, versionCount and compatibility are
+     * absent when the per-subject call that fills them did not answer; the row itself is still
+     * returned". `versionCount: 0` would claim a subject with no schemas, which cannot exist, and a
+     * defaulted `BACKWARD` would show Confluent's shipping default as this subject's setting.
+     */
+    const answer = await fetchSubjects(
+      client({ items: [{ subject: "orders.v1-value" }], page: { page: 1, pageSize: 25 } }),
+      "quickstart",
+    );
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.subjects[0]).toEqual({
+      subject: "orders.v1-value",
+      format: undefined,
+      versionCount: undefined,
+      compatibility: undefined,
+    });
+  });
+
+  it("refuses a level word it does not know without losing the row", async () => {
+    const answer = await fetchSubjects(
+      client({
+        items: [
+          {
+            subject: "orders.v1-value",
+            compatibility: { level: "SIDEWAYS", inheritedFromGlobal: false },
+          },
+        ],
+        page: { page: 1, pageSize: 25 },
+      }),
+      "quickstart",
+    );
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.subjects[0]?.compatibility).toEqual({ level: null, inherited: false });
   });
 });
 

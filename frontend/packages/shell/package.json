@@ -19,7 +19,10 @@
     "@kui/feature-topics": "workspace:*",
     "@kui/feature-messages": "workspace:*",
     "@kui/feature-consumers": "workspace:*",
-    "@kui/feature-schemas": "workspace:*"
+    "@kui/feature-schemas": "workspace:*",
+    "@kui/feature-alerts": "workspace:*",
+    "@kui/feature-connect": "workspace:*",
+    "@kui/feature-ksql": "workspace:*"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "10.6.0",

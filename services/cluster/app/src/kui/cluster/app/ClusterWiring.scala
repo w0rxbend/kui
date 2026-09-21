@@ -11,6 +11,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cluster.api.ClusterApi
+import kui.cluster.application.UiSettingsUseCase
 import kui.cluster.domain.ClockPort
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ProcessLoggerFactory
@@ -96,6 +97,10 @@ object ClusterWiring {
       interceptors <- Resource.eval(ClusterApi.interceptors[F](telemetry, rejections, logger))
       bootstrapped <- ClusterBootstrap.resource[F](config.clusters, config.store, telemetry, logger)
       readiness = ClusterBootstrap.readiness[F](bootstrapped)
+      uiSettings = new UiSettingsUseCase[F](
+        bootstrapped.registry,
+        new StoredUiSettings[F](bootstrapped.store)
+      )
 
       // The permission check this service runs for itself, over the same declaration on the same
       // endpoints the gateway read (ADR-021). Read-only comes from this process's own `kui.clusters[]`,
@@ -112,6 +117,7 @@ object ClusterWiring {
         bootstrapped.brokers,
         bootstrapped.write,
         bootstrapped.probe,
+        uiSettings,
         bootstrapped.capabilities,
         readiness,
         principals,

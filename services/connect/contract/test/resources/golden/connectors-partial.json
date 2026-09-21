@@ -1,0 +1,58 @@
+{
+  "connectors" : {
+    "status" : "ok",
+    "data" : {
+      "workers" : [
+        {
+          "connect" : "payments",
+          "connectors" : {
+            "status" : "ok",
+            "data" : {
+              "items" : [
+                {
+                  "connect" : "payments",
+                  "name" : "orders-source",
+                  "kind" : "source",
+                  "state" : "RUNNING",
+                  "workerId" : "10.0.0.1:8083",
+                  "reason" : null,
+                  "failed" : false,
+                  "runningTasks" : 3,
+                  "taskCount" : 3,
+                  "tasks" : [
+                    {
+                      "id" : 0,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.1:8083",
+                      "reason" : null,
+                      "trace" : null
+                    },
+                    {
+                      "id" : 1,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.2:8083",
+                      "reason" : null,
+                      "trace" : null
+                    },
+                    {
+                      "id" : 2,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.2:8083",
+                      "reason" : null,
+                      "trace" : null
+                    }
+                  ]
+                }
+              ],
+              "unreadable" : [
+                "elastic-sink"
+              ]
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

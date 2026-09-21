@@ -1,0 +1,4 @@
+interface:
+  display_name: "KUI Playwright"
+  short_description: "Run and debug KUI browser E2E tests"
+  default_prompt: "Test the KUI frontend end to end with Playwright, inspect service logs, and fix regressions."

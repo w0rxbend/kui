@@ -10,8 +10,8 @@ import kui.kernel.ClusterId
 import kui.kernel.error.{ErrorCode, KuiError}
 import kui.testkit.KuiIOSuite
 
-/** What a user is allowed to write, what happens when they write something wrong, and the two properties
-  * that make a filter safe to run against a million records.
+/** What a user is allowed to write, what happens when they write something wrong, and the two properties that
+  * make a filter safe to run against a million records.
   */
 final class CelFilterEngineSuite extends KuiIOSuite {
 
@@ -110,6 +110,74 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     evaluate("has(record.value)", numeric).assertEquals(Right(false))
   }
 
+  test("a JSON value over the node budget is treated as absent, not evaluated regardless") {
+    // The producer controls these bytes. A wide object with more entries than the budget allows must not
+    // reach the CEL evaluator at all, the same way a non-JSON payload does not — the alternative is a
+    // filter on `record.value` that quietly stops erroring only for the record that is trying to hurt it.
+    val wide = record.copy(valueAsText = (1 to 20).map(i => s""""f$i":$i""").mkString("{", ",", "}"))
+    val tight = generous.copy(maxJsonValueNodes = 5)
+
+    engine(tight).use { port =>
+      for {
+        id <- orFail(port.register("has(record.value)"))
+        predicate <- orFail(port.predicate(id, Some("has(record.value)")))
+        result <- predicate.test(wide)
+      } yield assertEquals(result, Right(false), "a payload well over the node budget was still parsed")
+    } >> // The same payload, under the production default, is nowhere near the budget and still parses.
+      evaluate("has(record.value)", wide).assertEquals(Right(true))
+  }
+
+  test("a decoded JSON value over the text limit is refused before parsing") {
+    val large = record.copy(valueAsText = s"""{"field":"${"x" * 100}"}""")
+    val tight = generous.copy(maxJsonValueChars = 32)
+
+    engine(tight).use { port =>
+      for {
+        id <- orFail(port.register("has(record.value)"))
+        predicate <- orFail(port.predicate(id, Some("has(record.value)")))
+        result <- predicate.test(large)
+      } yield assertEquals(result, Right(false), "an over-limit payload reached the JSON parser")
+    } >> evaluate("has(record.value)", large).assertEquals(Right(true))
+  }
+
+  test("a JSON value nested deeper than the walk allows is treated as absent, not a stack overflow") {
+    // Depth, not width: a producer can make `[[[[...]]]]` arbitrarily deep for very little wire size, which
+    // costs the walk one JVM stack frame per level rather than one unit of the node budget above.
+    val depth = 5000
+    val deeplyNested = record.copy(valueAsText = ("[" * depth) + "1" + ("]" * depth))
+    evaluate("has(record.value)", deeplyNested).assertEquals(Right(false))
+  }
+
+  test(
+    "referencedDynamicFields finds record.key/record.value however a filter spells them, and nothing" +
+      " when a filter never mentions either"
+  ) {
+    // The set this returns decides whether `recordFields` bothers parsing a record's key or value as JSON
+    // at all. Under-detecting is the dangerous direction — it would silently make a field a live filter
+    // reads disappear — so every shape a filter can use to reach `record.key`/`record.value` is asserted
+    // here on its own, not just exercised incidentally by some other test.
+    def fieldsOf(source: String): Set[String] =
+      CelEnvironment.referencedDynamicFields(CelEnvironment.compiler.compile(source).getAst)
+
+    assertEquals(fieldsOf("record.partition == 0"), Set.empty[String])
+    assertEquals(fieldsOf("record.keyAsText == 'x' && record.valueAsText == 'y'"), Set.empty[String])
+    assertEquals(fieldsOf("record.key == 'x'"), Set("key"))
+    assertEquals(fieldsOf("record.value.status == 'FAILED'"), Set("value"))
+    assertEquals(fieldsOf("has(record.value.status)"), Set("value"))
+    assertEquals(fieldsOf("record.value.items[0].price > 1.0"), Set("value"))
+    assertEquals(fieldsOf("record.value.items.exists(i, i.price > 1.0)"), Set("value"))
+    assertEquals(fieldsOf("record[\"value\"].status == 'x'"), Set("value"))
+    assertEquals(fieldsOf("record.key == 'a' && record.value.status == 'b'"), Set("key", "value"))
+  }
+
+  test("a filter that never mentions record.key/record.value still evaluates correctly end to end") {
+    // The optimisation `referencedDynamicFields` enables must not change what any filter answers, only how
+    // much work answering it costs. `record` here has a value that would fail to parse as JSON at all, and
+    // the filter below still has to see the correct verdict.
+    val textOnly = record.copy(valueAsText = "not json at all")
+    evaluate("record.partition == 3 && record.keyAsText == 'order-1'", textOnly).assertEquals(Right(true))
+  }
+
   // ------------------------------------------------------------------ compilation
 
   test("the three examples from the user-facing help compile") {
@@ -120,7 +188,9 @@ final class CelFilterEngineSuite extends KuiIOSuite {
       "record.keyAsText.startsWith('order')",
       "has(record.value.status) && record.value.status == 'FAILED'"
     )
-    engine().use(port => examples.traverse_(source => port.register(source).map(r => assert(r.isRight, source))))
+    engine().use(port =>
+      examples.traverse_(source => port.register(source).map(r => assert(r.isRight, source)))
+    )
   }
 
   test("a compile error carries a position, which is what the editor underlines") {
@@ -147,6 +217,38 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     }
   }
 
+  test("the size limit is exactly the size limit, in both directions") {
+    /*
+     * Ungated until now: widening the comparison to `bytes > limits.maxSourceBytes * 2` left
+     * `./mill libs.filter.test` green, because the case above sends 808 bytes against a limit of 64 — more
+     * than twelve times over, so any multiple of the limit short of twelve still refuses it. The boundary
+     * itself was asserted in neither direction.
+     *
+     * Both halves matter, and for different reasons. A limit that is quietly larger than it says is a
+     * denial of service the configuration cannot fix: the check exists *before* parsing precisely so that
+     * a megabyte of text is refused without being parsed. A limit that is quietly smaller refuses filters
+     * an operator has been told are legal.
+     */
+    val limits = generous.copy(maxSourceBytes = 64)
+
+    // `true && '<padding>' != ''` — a legal CEL boolean whose length is the padding plus sixteen.
+    def sourceOf(bytes: Int): String = s"true && '${"x" * (bytes - 16)}' != ''"
+
+    engine(limits).use { port =>
+      for {
+        exact <- port.register(sourceOf(64))
+        over <- port.register(sourceOf(65))
+      } yield {
+        assertEquals(sourceOf(64).getBytes("UTF-8").length, 64, clue = "the fixture's arithmetic is wrong")
+        assert(exact.isRight, s"a source of exactly the limit was refused: $exact")
+        assert(
+          over.swap.exists(_.message.contains("65 bytes")),
+          s"a source one byte over the limit was accepted: $over"
+        )
+      }
+    }
+  }
+
   test("an AST over the node limit is rejected") {
     val limits = FilterLimits.default.copy(maxAstNodes = 5)
     engine(limits).use { port =>
@@ -161,7 +263,7 @@ final class CelFilterEngineSuite extends KuiIOSuite {
   test("a missing field is a Left, not a thrown exception") {
     evaluate("record.value.nosuchfield == 'x'").map {
       case Left(FilterError.Runtime(_)) => ()
-      case other                        => fail(s"expected a runtime error, got $other")
+      case other => fail(s"expected a runtime error, got $other")
     }
   }
 
@@ -169,8 +271,9 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     // `1 + 1` is a perfectly good CEL expression and a nonsensical filter. Calling a non-zero number
     // "matched" is how a user ends up with a filter that appears to work and silently matches everything.
     evaluate("1 + 1").map {
-      case Left(FilterError.Runtime(message)) => assert(message.contains("rather than true or false"), message)
-      case other                              => fail(s"expected a runtime error, got $other")
+      case Left(FilterError.Runtime(message)) =>
+        assert(message.contains("rather than true or false"), message)
+      case other => fail(s"expected a runtime error, got $other")
     }
   }
 
@@ -180,22 +283,116 @@ final class CelFilterEngineSuite extends KuiIOSuite {
   }
 
   test("an evaluation that outruns the deadline is a Timeout, not a hang") {
-    // A one-nanosecond deadline is the honest way to assert the deadline exists without depending on how
-    // long a real program takes on the machine running the suite.
-    val limits = FilterLimits.default.copy(evaluationDeadline = 1.nanosecond)
-    engine(limits).use { port =>
+    // W11-A1: this case used to accept `Right(_)` as well as `Left(Timeout)` — "a trivial program can
+    // legitimately finish inside a one-nanosecond window" — which made it an assertion with no failing
+    // input at all. Deleting `.timeoutTo(limits.evaluationDeadline, ...)` from `CelFilterEngine` left both
+    // `libs.filter.test` (33 cases) and `services.message.__.test` (1,442 targets) green, and with it goes
+    // the whole per-record budget: `FilterError.Timeout` becomes unreachable, `consecutiveTimeoutLimit`
+    // becomes unreachable, and a browse spends its entire deadline inside one user's expression.
+    //
+    // The repair is to stop asking one evaluation to be slow and to ask a *population* instead. A
+    // one-nanosecond deadline cannot be met fifty times in a row by anything that has to cross the
+    // scheduler; a deadline that is not applied is met every time. Both directions are asserted, so a
+    // mutation that makes everything time out fails here too.
+    val instant = FilterLimits.default.copy(evaluationDeadline = 1.nanosecond)
+    val attempts = 50
+
+    def runAll(limits: FilterLimits): IO[List[Either[FilterError, Boolean]]] =
+      engine(limits).use { port =>
+        for {
+          id <- orFail(port.register("record.partition == 3"))
+          predicate <- orFail(port.predicate(id, None))
+          results <- List.fill(attempts)(()).traverse(_ => predicate.test(record))
+        } yield results
+      }
+
+    for {
+      impatient <- runAll(instant)
+      patient <- runAll(generous)
+    } yield {
+      val timedOut = impatient.collect { case Left(FilterError.Timeout(afterMs)) => afterMs }
+      assert(
+        timedOut.nonEmpty,
+        s"no evaluation of $attempts hit a one-nanosecond deadline, so no deadline is being applied"
+      )
+      // The reported figure is the deadline itself, in milliseconds, because that is what reaches the
+      // browse's `done` event and the user's screen.
+      assert(timedOut.forall(_ == 0L), timedOut.toString)
+      // Nothing escapes as an exception, and nothing times out when there is time.
+      assertEquals(patient, List.fill(attempts)(Right(true)), "a generous deadline still refused a record")
+    }
+  }
+
+  test("cancelling a browse cancels the evaluation in flight rather than waiting it out") {
+    // The rule is one word in `CelFilterEngine.program`: `Sync[F].interruptible`, not `Sync[F].blocking`.
+    // The comment beside it argues the case — twenty thousand records queued at ten milliseconds each is
+    // more than three minutes of work nobody is waiting for any more — and until this case existed,
+    // rewriting that word to `blocking` left all 548 of `libs.filter.test` green (W11-A1, wave 11).
+    //
+    // The difference is only observable when the evaluation is *in* an interruptible region and the work
+    // it is doing answers `Thread.interrupt`. So the record carries a header map whose iteration parks,
+    // which puts the stall exactly where a real CEL evaluation spends its time: inside `eval`, inside the
+    // region the rule is about. `blocking` is uncancelable, so the cancel would have to wait out the whole
+    // stall; `interruptible` interrupts the thread and the cancel completes at once.
+    val stall = 20.seconds
+    val cancelBudget = 5.seconds
+    val started = new java.util.concurrent.CountDownLatch(1)
+    val interrupted = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val stalling = record.copy(headers = new StallingHeaders(started, stall, interrupted))
+
+    engine().use { port =>
       for {
-        id <- orFail(port.register("record.partition == 3"))
+        id <- orFail(port.register("size(record.headers) > 0"))
         predicate <- orFail(port.predicate(id, None))
-        result <- predicate.test(record)
-      } yield result match {
-        case Left(FilterError.Timeout(afterMs)) => assertEquals(afterMs, 0L)
-        // A trivial program can legitimately finish inside a one-nanosecond window on a fast machine after
-        // the JIT has warmed up, so a success is accepted; what must never happen is an exception escaping.
-        case Right(_)                           => ()
-        case Left(other)                        => fail(s"expected a timeout or a result, got $other")
+        fiber <- predicate.test(stalling).start
+        // Not a sleep: the latch is counted down by the stalling map itself, so the cancel below is
+        // guaranteed to arrive while the evaluation is running rather than before it starts.
+        _ <- IO.interruptible(started.await())
+        before <- IO.monotonic
+        _ <- fiber.cancel
+        after <- IO.monotonic
+      } yield {
+        val took = after - before
+        assert(
+          took < cancelBudget,
+          s"cancelling took $took while the evaluation had ${stall} left to run, so the evaluation is " +
+            "not running in an interruptible region"
+        )
+        assert(
+          interrupted.get(),
+          "the evaluation was never interrupted, so cancelling a browse does not reach the CEL program"
+        )
       }
     }
+  }
+
+  /** A header map whose every read parks until it is interrupted, announcing that it has started.
+    *
+    * `FilterableRecord.headers` is a `Map[String, String]`, which is a trait, and `CelEnvironment.activation`
+    * is built *inside* the interruptible region — so a map that stalls on iteration stalls the CEL evaluation
+    * itself and nothing else. That is what makes the case above a statement about the product's region and
+    * not about the test's own arrangement.
+    */
+  final private class StallingHeaders(
+      started: java.util.concurrent.CountDownLatch,
+      held: FiniteDuration,
+      interrupted: java.util.concurrent.atomic.AtomicBoolean
+  ) extends Map[String, String] {
+
+    private def stall(): Unit = {
+      started.countDown()
+      try Thread.sleep(held.toMillis)
+      catch {
+        case _: InterruptedException =>
+          interrupted.set(true)
+          Thread.currentThread().interrupt()
+      }
+    }
+
+    def get(key: String): Option[String] = { stall(); None }
+    def iterator: Iterator[(String, String)] = { stall(); Iterator.empty }
+    def removed(key: String): Map[String, String] = this
+    def updated[V1 >: String](key: String, value: V1): Map[String, V1] = Map(key -> value)
   }
 
   // ------------------------------------------------------------------ identity and caching
@@ -207,7 +404,10 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     assertEquals(FilterId.of(source).value.length, 16)
     assertEquals(FilterId.of(source), FilterId.of(source))
     assertNotEquals(FilterId.of(source), FilterId.of("record.partition == 1"))
-    (engine().use(port => orFail(port.register(source))), engine().use(port => orFail(port.register(source)))).tupled
+    (
+      engine().use(port => orFail(port.register(source))),
+      engine().use(port => orFail(port.register(source)))
+    ).tupled
       .map((first, second) => assertEquals(first, second))
   }
 
@@ -222,7 +422,9 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     val source = "record.partition == 3"
     val id = FilterId.of(source)
     // A fresh engine: nothing in its cache, exactly like a pod that started thirty seconds ago.
-    engine().use(port => orFail(port.predicate(id, Some(source))).flatMap(_.test(record))).assertEquals(Right(true))
+    engine()
+      .use(port => orFail(port.predicate(id, Some(source))).flatMap(_.test(record)))
+      .assertEquals(Right(true))
   }
 
   test("an unknown id with no source is refused rather than silently matching everything") {
@@ -235,6 +437,21 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     engine()
       .use(_.predicate(FilterId.of("record.partition == 0"), Some("record.partition == 1")))
       .map(result => assert(result.swap.exists(_.message.contains("does not match"))))
+  }
+
+  test("a mismatched source is refused even when the requested id is already cached") {
+    val cachedSource = "record.partition == 3"
+    val mismatchedSource = "record.partition == 1"
+
+    engine().use { port =>
+      for {
+        cachedId <- orFail(port.register(cachedSource))
+        result <- port.predicate(cachedId, Some(mismatchedSource))
+      } yield assert(
+        result.swap.exists(_.message.contains("does not match")),
+        s"a warm cache bypassed source/id validation: $result"
+      )
+    }
   }
 
   // ------------------------------------------------------------------ the test endpoint

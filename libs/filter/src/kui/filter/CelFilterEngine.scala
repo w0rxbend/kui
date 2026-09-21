@@ -66,7 +66,17 @@ final case class FilterLimits(
       * its whole deadline on a program that cannot finish. Consecutive, not total: a filter that times out on
       * one record in a thousand is slow, and a filter that times out on every record is broken.
       */
-    consecutiveTimeoutLimit: Int
+    consecutiveTimeoutLimit: Int,
+    /** The node/depth budget `CelEnvironment.asDynamic` walks a record's decoded key or value under, so that
+      * a producer-controlled JSON payload cannot spend unbounded CPU converting `record.key`/`record.value`
+      * regardless of whether `evaluationDeadline`'s `Thread.interrupt()` is honored (see `CelEnvironment`'s
+      * `## The limits`).
+      */
+    maxJsonValueNodes: Int,
+    /** Refuses producer-controlled decoded JSON before Circe parses it. The node limit above only applies
+      * after parsing and therefore cannot bound the parser's initial allocation by itself.
+      */
+    maxJsonValueChars: Int
 )
 
 object FilterLimits {
@@ -78,7 +88,9 @@ object FilterLimits {
     evaluationDeadline = scala.concurrent.duration.DurationInt(10).millis,
     cacheSize = 10000L,
     cacheTtl = scala.concurrent.duration.DurationInt(1).hour,
-    consecutiveTimeoutLimit = 100
+    consecutiveTimeoutLimit = 100,
+    maxJsonValueNodes = CelEnvironment.DefaultMaxJsonNodes,
+    maxJsonValueChars = CelEnvironment.DefaultMaxJsonChars
   )
 
   given CanEqual[FilterLimits, FilterLimits] = CanEqual.derived
@@ -246,29 +258,32 @@ object CelFilterEngine {
       compiled(source).map(_.map(_ => FilterId.of(source)))
 
     def predicate(id: FilterId, source: Option[String]): F[Either[KuiError, MessagePredicate[F]]] =
-      cache.get(id.value).flatMap {
-        case Some(ast) => Sync[F].pure(Right(program(ast)))
-        case None =>
-          source match {
-            case Some(text) if FilterId.of(text) == id => compiled(text).map(_.map(program))
-            case Some(_) =>
-              // The source does not hash to the id it was sent with. Compiling it anyway would mean the
-              // browser and the server disagree about which filter is running, which is the one thing worse
-              // than refusing.
-              Sync[F].pure(
-                Left(
-                  ApplicationError.Invalid(
-                    "the filter source does not match the filter id it was sent with",
-                    List(FieldError.of("filterId", "must be sha256(filterSource) truncated to 16 characters"))
-                  )
-                )
+      source match {
+        case Some(text) if FilterId.of(text) != id =>
+          // Check this before consulting the cache. Otherwise a source/id mismatch is rejected on a cold
+          // replica but silently accepted on a warm one, so the same request runs different filters based
+          // only on which pod receives it.
+          Sync[F].pure(
+            Left(
+              ApplicationError.Invalid(
+                "the filter source does not match the filter id it was sent with",
+                List(FieldError.of("filterId", "must be sha256(filterSource) truncated to 16 characters"))
               )
+            )
+          )
+        case verifiedSource =>
+          cache.get(id.value).flatMap {
+            case Some(ast) => Sync[F].pure(Right(program(ast)))
             case None =>
-              Sync[F].pure(
-                Left(
-                  ApplicationError.NotFound("filter", id.value, ErrorCode.Validation)
-                )
-              )
+              verifiedSource match {
+                case Some(text) => compiled(text).map(_.map(program))
+                case None =>
+                  Sync[F].pure(
+                    Left(
+                      ApplicationError.NotFound("filter", id.value, ErrorCode.Validation)
+                    )
+                  )
+              }
           }
       }
 
@@ -315,13 +330,39 @@ object CelFilterEngine {
           .catchNonFatal(runtime.createProgram(ast))
           .leftMap(t => FilterError.Runtime(Option(t.getMessage).getOrElse(t.getClass.getSimpleName)))
 
+      /** Computed once per compiled program rather than once per record, so a filter that never mentions
+        * `record.key`/`record.value` — `record.partition == 0` being the obvious one — does not pay to parse
+        * and convert either payload as JSON on every record of the browse. Falls back to converting both, the
+        * pre-existing behaviour, if inspecting the AST itself ever fails; a failure here is a reason to do
+        * the extra work, never a reason to skip a field a filter might actually need.
+        */
+      private val neededDynamicFields: Set[String] =
+        Either
+          .catchNonFatal(CelEnvironment.referencedDynamicFields(ast))
+          .getOrElse(CelEnvironment.AllDynamicFields)
+
       def test(record: FilterableRecord): F[Either[FilterError, Boolean]] = {
         val evaluate = Sync[F]
           .interruptible {
             // `interruptible`, not `blocking`: cancelling a browse has to cancel the evaluation in flight
             // rather than wait out its deadline. With twenty thousand records queued behind it, ten
             // milliseconds each is more than three minutes of work nobody is waiting for any more.
-            prepared.map(_.eval(CelEnvironment.activation(record)))
+            //
+            // `interruptible` only requests `Thread.interrupt()`; it is best-effort, not a wall-clock
+            // guarantee, because CEL's own evaluation and the JSON conversion inside `activation` are not
+            // obligated to check for it. `maxJsonValueNodes` is what actually bounds the JSON half of this
+            // call regardless (see `CelEnvironment`'s `## The limits`); nothing bounds the CEL half beyond
+            // the AST node limit already applied at compile time.
+            prepared.map(
+              _.eval(
+                CelEnvironment.activation(
+                  record,
+                  limits.maxJsonValueNodes,
+                  limits.maxJsonValueChars,
+                  neededDynamicFields
+                )
+              )
+            )
           }
           .map(_.flatMap(asBoolean))
           .handleError(t =>

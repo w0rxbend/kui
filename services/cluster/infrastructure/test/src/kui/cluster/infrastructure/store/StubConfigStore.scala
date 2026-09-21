@@ -2,8 +2,8 @@ package kui.cluster.infrastructure.store
 
 import java.time.Instant
 
-import cats.effect.{IO, Ref}
 import cats.effect.std.Queue
+import cats.effect.{IO, Ref}
 import fs2.Stream
 import io.circe.Json
 

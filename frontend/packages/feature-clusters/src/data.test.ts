@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
-import { fetchBrokers, fetchClusters, healthOf } from "./data.js";
+import { fetchBrokers, fetchClusterDisks, fetchClusters, healthOf } from "./data.js";
 
 /**
  * The cluster feature's data layer.
@@ -137,6 +137,38 @@ describe("fetchClusters", () => {
     const answer = await fetchClusters(client({ clusters: { status: "something-new" } }));
     expect(answer.kind).toBe("failed");
   });
+
+  it("never turns a null scrape instant into the Unix epoch", async () => {
+    /*
+     * `new Date(null)` is 1970-01-01, and the row that draws this figure prints it as "Read 20702d
+     * ago" — a fabricated date in the one line whose own comment forbids inventing one, and a
+     * figure that says the cluster was last read half a century ago. `=== undefined` let it
+     * through; `== null` is the whole fix, and this is the case that holds it.
+     *
+     * Latent rather than live today, because `ClusterSummaryDto.scrapedAt` is non-optional. Every
+     * other absent figure on this row arrives as a wire `null`, so the field becoming optional is a
+     * server-side edit away and nothing else in this package would have noticed.
+     */
+    const answer = await fetchClusters(
+      client({
+        clusters: {
+          status: "ok",
+          fetchedAt: "2026-09-05T12:00:00Z",
+          data: [
+            row("silent-01", {
+              status: "ok",
+              fetchedAt: "2026-09-05T12:00:00Z",
+              data: { ...scrape, scrapedAt: null },
+            }),
+          ],
+        },
+      }),
+    );
+    expect(answer.kind).toBe("ready");
+    if (answer.kind === "ready") {
+      expect(answer.value[0]?.observedAt).toBeNull();
+    }
+  });
 });
 
 describe("fetchBrokers", () => {
@@ -172,14 +204,17 @@ describe("fetchBrokers", () => {
 
     expect(brokers[0]).toMatchObject({ id: 1, isController: true, leaderPartitions: 512, health: "healthy" });
     expect(brokers[0]?.replicaPartitions).toBe(1536);
-    expect(brokers[0]?.diskUsedBytes).toBe(100);
-    // Neither is on the wire at all: the endpoint carries no per-broker out-of-sync count and no
-    // disk total. `null` says so; a `0` would be a claim nobody made, and a total of `0` would make
-    // every disk bar read as full.
+    // `diskUsageBytes` is what Kafka's own replicas occupy, and it lands on `heldBytes`. It is not
+    // the disk's usage: the disk under it also carries whatever else the machine keeps there.
+    expect(brokers[0]?.heldBytes).toBe(100);
+    // None of these is on the wire at all: the endpoint carries no per-broker out-of-sync count and
+    // no disk capacity, so a percentage is not knowable from this document alone. `null` says so; a
+    // `0` would be a claim nobody made, and a total of `0` would make every disk bar read as full.
     expect(brokers[0]?.outOfSyncReplicas).toBeNull();
+    expect(brokers[0]?.diskUsedBytes).toBeNull();
     expect(brokers[0]?.diskTotalBytes).toBeNull();
 
-    expect(brokers[1]?.diskUsedBytes).toBeNull();
+    expect(brokers[1]?.heldBytes).toBeNull();
     expect(brokers[1]?.leaderPartitions).toBeNull();
     expect(brokers[1]?.isController).toBe(false);
     expect(brokers[1]?.health).toBe("unknown");
@@ -197,5 +232,44 @@ describe("healthOf", () => {
 
   it("says unknown when there was no scrape, rather than guessing", () => {
     expect(healthOf(undefined)).toBe("unknown");
+  });
+});
+
+describe("fetchClusterDisks", () => {
+  it("skips a directory that reported only half a capacity, rather than reading the gap as zero", async () => {
+    /*
+     * Closed by mutation: dropping either `continue` from `disksOf` leaves all 147 cases in this
+     * package green, and `dir.totalBytes - dir.usableBytes` over a pair of `null`s is `0` — so a
+     * directory that failed contributes a silent nothing, and a directory that reported a size and
+     * no free space contributes a disk that is exactly 100% full. The second one is the damaging
+     * shape: it draws a red bar on the card for a broker whose disk was never measured, which is
+     * the reading an operator acts on first.
+     *
+     * Kafka answers `describeLogDirs` per directory, so this is the ordinary partial answer and not
+     * a broken server.
+     */
+    const answer = await fetchClusterDisks(
+      client({
+        logDirs: {
+          status: "ok",
+          fetchedAt: "2026-09-05T12:00:00Z",
+          data: [
+            { brokerId: 1, path: "/data/a", error: null, totalBytes: 1_000, usableBytes: 400 },
+            // Answered with an error: neither half is known.
+            { brokerId: 1, path: "/data/b", error: "KafkaStorageException", totalBytes: null, usableBytes: null },
+            // A size with no free space beside it. Half a capacity is not a capacity.
+            { brokerId: 2, path: "/data/c", error: null, totalBytes: 2_000, usableBytes: null },
+          ],
+        },
+      }),
+      "prod",
+    );
+
+    expect(answer.kind).toBe("ready");
+    const disks = answer.kind === "ready" ? answer.value : [];
+    // Broker 2 contributes nothing at all: no entry, so its card keeps its `null`s and says so.
+    expect(disks.map((disk) => disk.brokerId)).toEqual([1]);
+    // And broker 1 is the sum of the one directory that answered both halves, not of both.
+    expect(disks[0]).toEqual({ brokerId: 1, usedBytes: 600, capacityBytes: 1_000 });
   });
 });

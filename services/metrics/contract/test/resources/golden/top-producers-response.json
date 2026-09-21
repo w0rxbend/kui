@@ -1,0 +1,24 @@
+{
+  "producers" : {
+    "status" : "ok",
+    "data" : {
+      "measuredBy" : "topic",
+      "topics" : [
+        {
+          "topic" : "orders.payments",
+          "bytesInPerSecond" : 5400000.0
+        },
+        {
+          "topic" : "analytics.clicks",
+          "bytesInPerSecond" : 3100000.0
+        },
+        {
+          "topic" : "audit.trail",
+          "bytesInPerSecond" : 0.0
+        }
+      ],
+      "internalTopicsExcluded" : 2
+    },
+    "fetchedAt" : "2026-09-06T12:00:00.000Z"
+  }
+}

@@ -6,6 +6,7 @@ import java.nio.file.{Files as JFiles, Path as JPath}
 import java.security.KeyStore
 import java.util.Base64
 
+import cats.effect.std.CountDownLatch
 import cats.effect.{IO, Ref, Resource}
 import cats.syntax.all.*
 import org.apache.kafka.clients.admin.{Admin, AdminClientConfig}
@@ -17,10 +18,10 @@ import kui.testkit.KuiIOSuite
 
 /** The pool's own behaviour, without a broker.
   *
-  * What is under test here is sharing, generations, invalidation and measurement — not whether
-  * `Admin.create` works, which is a different question answered against a real broker in KAFKA-007.
-  * So the client factory is a parameter and the client is a do-nothing proxy: a fake that can be
-  * counted, closed and handed out, which is everything the pool does with one.
+  * What is under test here is sharing, generations, invalidation and measurement — not whether `Admin.create`
+  * works, which is a different question answered against a real broker in KAFKA-007. So the client factory is
+  * a parameter and the client is a do-nothing proxy: a fake that can be counted, closed and handed out, which
+  * is everything the pool does with one.
   */
 final class AdminClientPoolSuite extends KuiIOSuite {
 
@@ -34,8 +35,37 @@ final class AdminClientPoolSuite extends KuiIOSuite {
     admin = AdminTuning.default
   )
 
-  /** An `Admin` that does nothing. `Admin` has some fifty methods and the pool calls none of them;
-    * a reflective proxy is a fake with no maintenance cost rather than fifty stubs.
+  /** An empty PKCS12 store, inline, so that a connection has something to materialize.
+    *
+    * Hoisted out of `invalidationRunsTheClientsFinalizer` because a second case needs the same connection:
+    * one asserts that the file is gone afterwards, the other that it was still there while the client that
+    * named it was being closed.
+    */
+  private lazy val inlineKeystore: String = {
+    val keystore = KeyStore.getInstance("PKCS12")
+    keystore.load(null, "changeit".toCharArray)
+
+    val bytes = new ByteArrayOutputStream()
+    keystore.store(bytes, "changeit".toCharArray)
+    Base64.getEncoder.encodeToString(bytes.toByteArray)
+  }
+
+  private lazy val withKeystore: ClusterConnection = plaintext.copy(
+    security = ClusterSecurity.Ssl(
+      TlsConfig.default.copy(
+        truststore = Some(
+          TrustStoreRef(
+            StoreSource.Inline(Secret(inlineKeystore)),
+            Some(Secret("changeit")),
+            StoreType.Pkcs12
+          )
+        )
+      )
+    )
+  )
+
+  /** An `Admin` that does nothing. `Admin` has some fifty methods and the pool calls none of them; a
+    * reflective proxy is a fake with no maintenance cost rather than fifty stubs.
     */
   private def fakeAdmin(): Admin = {
     val handler: InvocationHandler = (_: Any, method: Method, _: Array[Object]) =>
@@ -50,7 +80,7 @@ final class AdminClientPoolSuite extends KuiIOSuite {
   }
 
   /** What the factory did, so a test can assert on it. */
-  private final case class Tracker(
+  final private case class Tracker(
       created: Ref[IO, Int],
       closed: Ref[IO, Int],
       properties: Ref[IO, List[Map[String, String]]]
@@ -115,15 +145,22 @@ final class AdminClientPoolSuite extends KuiIOSuite {
   }
 
   test("aReconnectClassFailureReplacesTheClientExactlyOnce") {
-    val failing: Admin => IO[String] = _ => IO.raiseError(new TimeoutException("timed out"))
-
     for {
       t <- tracker
+      // The two failures have to be holding the *same* client before either of them fails, because
+      // that is the situation the generation check exists for. `parSequence` on its own does not
+      // establish it, it only makes it likely: a scheduler that runs the first call to completion
+      // before starting the second hands the second a client of its own, and three creations is the
+      // right answer to the question that was then asked. This case failed once under sixteen-way
+      // parallel load and passed alone, and inserting a 50ms delay before the second call reproduces
+      // that failure every time — so what was reported as a flake is this precondition being left to
+      // the scheduler. The latch makes it a fact: both calls arrive, then both fail.
+      arrived <- CountDownLatch[IO](2)
+      failing = (_: Admin) =>
+        arrived.release >> arrived.await >> IO.raiseError[String](new TimeoutException("timed out"))
       _ <- poolOf(t, AdminMetrics.noop[IO]).use { pool =>
         for {
           _ <- pool.run(plaintext, "describeCluster")(succeed)
-          // Two failures at once, on the same generation. Without the generation check the second
-          // would evict the replacement the first had just created — a reconnect storm.
           _ <- List
             .fill(2)(pool.run(plaintext, "describeCluster")(failing).attempt)
             .parSequence
@@ -171,25 +208,6 @@ final class AdminClientPoolSuite extends KuiIOSuite {
   test("invalidationRunsTheClientsFinalizer") {
     // The materialized keystore has to go with the client that used it: it is a private key on
     // disk, and the client that named it no longer exists.
-    val store = {
-      val keystore = KeyStore.getInstance("PKCS12")
-      keystore.load(null, "changeit".toCharArray)
-
-      val bytes = new ByteArrayOutputStream()
-      keystore.store(bytes, "changeit".toCharArray)
-      Base64.getEncoder.encodeToString(bytes.toByteArray)
-    }
-
-    val withKeystore = plaintext.copy(
-      security = ClusterSecurity.Ssl(
-        TlsConfig.default.copy(
-          truststore = Some(
-            TrustStoreRef(StoreSource.Inline(Secret(store)), Some(Secret("changeit")), StoreType.Pkcs12)
-          )
-        )
-      )
-    )
-
     for {
       t <- tracker
       location <- poolOf(t, AdminMetrics.noop[IO]).use { pool =>
@@ -207,6 +225,44 @@ final class AdminClientPoolSuite extends KuiIOSuite {
       closed <- t.closed.get
     } yield {
       assertEquals(closed, 1)
+      assert(!JFiles.exists(JPath.of(location)), s"$location outlived the client that used it")
+    }
+  }
+
+  test("the client is closed before the keystore it was using is deleted") {
+    // `Entry.release` is `releaseClient >> releaseProperties`, and the line above it says "Order
+    // matters: the client has to stop using the keystore before the keystore is deleted". Swapping the
+    // two left all 279 cases of this module, `libs/kafka-auth` and `libs/serde-confluent` green — a
+    // client with a live network thread would go on reading a truststore that had already been removed,
+    // and the failure it eventually produced would name a missing file rather than a shutdown.
+    for {
+      t <- tracker
+      atClose <- Ref.of[IO, Option[Boolean]](None)
+      factory = (
+          (_, _, rendered) =>
+            Resource.make(
+              t.properties.update(_ :+ rendered.unsafeValues) >> t.created.update(_ + 1) >> IO(fakeAdmin())
+            ) { _ =>
+              val named = rendered.unsafeValues.get("ssl.truststore.location")
+              IO(named.exists(path => JFiles.exists(JPath.of(path))))
+                .flatMap(present => atClose.set(Some(present))) >> t.closed.update(_ + 1)
+            }
+      ): AdminClientPool.Factory[IO]
+      location <- AdminClientPool.resourceWith[IO](AdminMetrics.noop[IO], factory).use { pool =>
+        for {
+          _ <- pool.run(withKeystore, "describeCluster")(succeed)
+          seen <- t.properties.get
+        } yield seen.headOption
+          .flatMap(_.get("ssl.truststore.location"))
+          .getOrElse(fail("no truststore was materialized"))
+      }
+      seenAtClose <- atClose.get
+    } yield {
+      assertEquals(
+        seenAtClose,
+        Some(true),
+        clue = "the keystore was deleted while the client that named it was still being closed"
+      )
       assert(!JFiles.exists(JPath.of(location)), s"$location outlived the client that used it")
     }
   }
@@ -301,9 +357,7 @@ final class AdminClientPoolSuite extends KuiIOSuite {
       t <- tracker
       started <- Ref.of[IO, Boolean](false)
       fiber <- poolOf(t, AdminMetrics.noop[IO])
-        .use(pool =>
-          pool.run(plaintext, "describeCluster")(succeed) >> started.set(true) >> IO.never[Unit]
-        )
+        .use(pool => pool.run(plaintext, "describeCluster")(succeed) >> started.set(true) >> IO.never[Unit])
         .start
       _ <- started.get.iterateUntil(identity)
       _ <- fiber.cancel

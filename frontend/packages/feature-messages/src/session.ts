@@ -46,7 +46,7 @@ import { createSignal, onCleanup, type Accessor } from "solid-js";
 import type { ApiError } from "@kui/api";
 import type { KafkaRecord } from "@kui/kernel";
 import { queryString, type BrowseQuery } from "./browse.js";
-import { toRecord, type MessageDto } from "./wire.js";
+import { decodeMessageRecord } from "./wire.js";
 
 /**
  * How many records one browse keeps on screen.
@@ -55,6 +55,22 @@ import { toRecord, type MessageDto } from "./wire.js";
  * unresponsive. It bounds a live tail, which is otherwise unbounded by definition.
  */
 export const MAX_ROWS = 500;
+
+/**
+ * Total decoded payload text a session may retain. Row count alone is not a memory bound when a
+ * live topic contains large records; values beyond this budget keep metadata but drop their text.
+ */
+export const MAX_RETAINED_PAYLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Cursor pages kept for zero-network Previous navigation.
+ *
+ * The record cap prevents an infinite browse from retaining every payload it has ever decoded;
+ * the page cap also bounds the overhead of many tiny pages. Kafka has no stable total page count,
+ * so evicting the oldest cached page is more honest than pretending the browser can retain an
+ * unbounded snapshot of a moving log.
+ */
+export const MAX_CACHED_PAGES = 10;
 
 /** Where a stream is in its life. Mirrors the kernel's `SseConnection`, which is what supplies it. */
 export type BrowseConnection =
@@ -104,8 +120,13 @@ export interface BrowseProgress {
   /** What the service says it is doing: `seeking`, `reading`, `filtering`. */
   readonly phase?: string | undefined;
   readonly connection: BrowseConnection;
+  /** The server's reason for the terminal `done` frame, when the stream ended normally. */
+  readonly endReason?: BrowseEndReason | undefined;
   readonly failure?: BrowseFailure | undefined;
 }
+
+/** The four terminal reasons in ADR-035's shared `done` event. */
+export type BrowseEndReason = "limit" | "exhausted" | "budget" | "cancelled";
 
 const IDLE: BrowseProgress = { delivered: 0, connection: { phase: "idle" } };
 
@@ -120,6 +141,8 @@ export interface BrowseHandle {
   readonly close: () => void;
   /** The `id:` on the terminal `done` event: the signed continuation, when the server sent one. */
   readonly endMarker: () => string | undefined;
+  /** Optional for source compatibility with transports that predate terminal-reason reporting. */
+  readonly endReason?: (() => BrowseEndReason | undefined) | undefined;
 }
 
 /** How the session reaches the network. Supplied by the shell; replaced wholesale by a test. */
@@ -138,23 +161,64 @@ export interface BrowseSessionOptions {
   /** `/api/v1/clusters/{id}/topics/{topic}/messages/stream`, already escaped. */
   readonly streamUrl: string;
   readonly transport: BrowseTransport;
+  /**
+   * Schedules continuation work after the browser has had an opportunity to paint.
+   * Tests may replace it with a deterministic scheduler.
+   */
+  readonly scheduleAfterPaint?: (resume: () => void) => () => void;
+}
+
+/** Records committed before the stream yields so the first useful rows can paint immediately. */
+export const INITIAL_RECORD_BATCH = 8;
+/** Records committed between subsequent paint opportunities. */
+export const STREAM_RECORD_BATCH = 24;
+const MAX_PENDING_RECORDS = MAX_ROWS + STREAM_RECORD_BATCH;
+
+function afterNextPaint(resume: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let frame: number | undefined;
+  const run = (): void => {
+    frame = undefined;
+    // A timer queued from rAF runs after the frame containing the rows already committed. Calling
+    // `resume` directly inside rAF would add the next batch before that frame was painted.
+    timer = setTimeout(resume, 0);
+  };
+  if (typeof requestAnimationFrame === "function") frame = requestAnimationFrame(run);
+  else timer = setTimeout(resume, 0);
+
+  return () => {
+    if (frame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(frame);
+    }
+    if (timer !== undefined) clearTimeout(timer);
+  };
 }
 
 export interface BrowseSession {
-  /** The records so far, **newest first**. */
+  /** The records so far, in the offset direction the backend delivered them. */
   readonly rows: Accessor<readonly KafkaRecord[]>;
+  /** The cached page currently selected by the offset paginator. */
+  readonly pageRows: Accessor<readonly KafkaRecord[]>;
+  /** One-based. Pages are cached client-side; Kafka does not provide a stable total page count. */
+  readonly pageNumber: Accessor<number>;
   readonly progress: Accessor<BrowseProgress>;
   readonly running: Accessor<boolean>;
   readonly paused: Accessor<boolean>;
   /** How many records are waiting behind a pause. Zero unless paused. */
   readonly held: Accessor<number>;
   readonly canLoadMore: Accessor<boolean>;
+  readonly canPreviousPage: Accessor<boolean>;
+  readonly canNextPage: Accessor<boolean>;
   /** Which records arrived in the last tick, so the list can wash them once. */
   readonly arrived: Accessor<ReadonlySet<string>>;
   /** Starts a browse, discarding whatever the previous one delivered. */
   readonly start: (query: BrowseQuery) => void;
   /** Reads the next page and **appends** it. Does nothing without a cursor. */
   readonly loadMore: () => void;
+  /** Selects a cached successor, or reads it through the terminal cursor. */
+  readonly nextPage: () => void;
+  /** Selects the cached predecessor without re-reading a moving Kafka log. */
+  readonly previousPage: () => void;
   readonly setPaused: (on: boolean) => void;
   readonly stop: () => void;
 }
@@ -163,8 +227,12 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
   /* Plain arrays are the source of truth; the signals mirror them. See the Solid 2 note above —
    * this is not a style choice, it is the only shape that survives two records in one tick. */
   let rowList: KafkaRecord[] = [];
+  let pageList: KafkaRecord[][] = [];
   let heldList: KafkaRecord[] = [];
   let pausedNow = false;
+  let liveNow = false;
+  let activePageNow = 0;
+  let firstPageNumberNow = 1;
   let handle: BrowseHandle | undefined;
   /* What the last browse was, so that "load more" reads the same range in the same direction with
    * the same decoding. Continuing with the parameters the *controls* currently hold would silently
@@ -172,8 +240,73 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
    * pressing Read. */
   let lastQuery: BrowseQuery | undefined;
   let cursorNow: string | undefined;
+  let arrivedResetQueued = false;
+  let immediatelyCommitted = 0;
+  type PendingWork =
+    | { readonly kind: "record"; readonly record: KafkaRecord }
+    | { readonly kind: "action"; readonly run: () => void };
+  let pendingWork: PendingWork[] = [];
+  let pendingRecordCount = 0;
+  let pendingPayloadBytes = 0;
+  let droppedPendingRecords = 0;
+  let cancelContinuation: (() => void) | undefined;
+  let draining = false;
+  /* Every transport callback belongs to the run that registered it. Closing an HTTP stream is an
+   * asynchronous cancellation, so callbacks already queued by an older run can arrive after a new
+   * one has started. The generation makes those callbacks inert before they touch shared state. */
+  let generation = 0;
+  const retainedByteSizes = new WeakMap<KafkaRecord, number>();
+  const utf8 = new TextEncoder();
+  let committedPayloadBytes = 0;
+
+  function retainedBytes(record: KafkaRecord): number {
+    const cached = retainedByteSizes.get(record);
+    if (cached !== undefined) return cached;
+    const value = record.value;
+    const text =
+      value.kind === "json" || value.kind === "text"
+        ? value.text
+        : value.kind === "large"
+          ? value.text
+          : undefined;
+    const bytes = text === undefined ? 0 : utf8.encode(text).length;
+    retainedByteSizes.set(record, bytes);
+    return bytes;
+  }
+
+  function measureCommittedPayloadBytes(): number {
+    const retainedRecords = new Set<KafkaRecord>([...rowList, ...heldList, ...pageList.flat()]);
+    return [...retainedRecords].reduce(
+      (total, existing) => total + retainedBytes(existing),
+      0,
+    );
+  }
+
+  function refreshCommittedPayloadBytes(): void {
+    committedPayloadBytes = measureCommittedPayloadBytes();
+  }
+
+  function withoutPayload(record: KafkaRecord, incoming = retainedBytes(record)): KafkaRecord {
+    const value = record.value;
+    const sourceKind =
+      value.kind === "json" ? "json" : value.kind === "large" ? (value.sourceKind ?? "text") : "text";
+    const bytes = value.kind === "large" ? Math.max(value.bytes, incoming) : incoming;
+    return { ...record, value: { kind: "large", bytes, sourceKind } };
+  }
+
+  function withinPayloadBudget(record: KafkaRecord, newlyCommitted = 0): KafkaRecord {
+    const incoming = retainedBytes(record);
+    if (incoming === 0) return record;
+    if (committedPayloadBytes + newlyCommitted + incoming <= MAX_RETAINED_PAYLOAD_BYTES) {
+      return record;
+    }
+    return withoutPayload(record, incoming);
+  }
 
   const [rows, setRows] = createSignal<readonly KafkaRecord[]>([], { ownedWrite: true });
+  const [pages, setPages] = createSignal<readonly (readonly KafkaRecord[])[]>([], { ownedWrite: true });
+  const [pageIndex, setPageIndex] = createSignal(0, { ownedWrite: true });
+  const [firstPageNumber, setFirstPageNumber] = createSignal(1, { ownedWrite: true });
   const [progress, setProgress] = createSignal<BrowseProgress>(IDLE, { ownedWrite: true });
   const [running, setRunning] = createSignal(false, { ownedWrite: true });
   const [paused, setPausedSignal] = createSignal(false, { ownedWrite: true });
@@ -186,16 +319,236 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
    * to "is there more" rather than the browser guessing from a full page — which is the guess that
    * puts a "Load more" button under the last page of every topic. */
   const canLoadMore = (): boolean => cursor() !== undefined && !running();
+  const pageRows = (): readonly KafkaRecord[] => pages()[pageIndex()] ?? [];
+  const pageNumber = (): number => firstPageNumber() + pageIndex();
+  const canPreviousPage = (): boolean => pageIndex() > 0 && !running();
+  const canNextPage = (): boolean =>
+    !running() && (pageIndex() < pages().length - 1 || cursor() !== undefined);
 
   function publishRows(): void {
     setRows(rowList.slice());
+    setPages(pageList.map((page) => page.slice()));
     setHeld(heldList.length);
   }
 
+  function commitRecords(records: readonly KafkaRecord[], omitted = 0): void {
+    if (records.length === 0 && omitted === 0) return;
+    const committed: KafkaRecord[] = [];
+    let newlyCommittedPayloadBytes = 0;
+    for (const incoming of records) {
+      const record = withinPayloadBudget(incoming, newlyCommittedPayloadBytes);
+      newlyCommittedPayloadBytes += retainedBytes(record);
+      committed.push(record);
+      if (pausedNow) {
+        if (liveNow) heldList.unshift(record);
+        else heldList.push(record);
+        if (heldList.length > MAX_ROWS) heldList.length = MAX_ROWS;
+        continue;
+      }
+
+      const page = pageList[activePageNow] ?? [];
+      pageList[activePageNow] = page;
+      if (liveNow) {
+        rowList.unshift(record);
+        page.unshift(record);
+        if (rowList.length > MAX_ROWS) rowList.length = MAX_ROWS;
+        if (page.length > MAX_ROWS) page.length = MAX_ROWS;
+      } else {
+        rowList.push(record);
+        if (rowList.length > MAX_ROWS) rowList.splice(0, rowList.length - MAX_ROWS);
+        page.push(record);
+        if (page.length > MAX_ROWS) page.length = MAX_ROWS;
+      }
+    }
+
+    refreshCommittedPayloadBytes();
+
+    setProgress((current) => ({
+      ...current,
+      delivered: current.delivered + committed.length + omitted,
+      phase: undefined,
+      failure: current.failure?.kind === "decode" ? undefined : current.failure,
+    }));
+    if (committed.length > 0) {
+      setArrived((current) => {
+        const next = new Set(current);
+        for (const record of committed) next.add(recordId(record));
+        return next;
+      });
+    }
+    if (committed.length > 0 && !arrivedResetQueued) {
+      arrivedResetQueued = true;
+      const arrivedGeneration = generation;
+      queueMicrotask(() => {
+        if (generation !== arrivedGeneration) return;
+        arrivedResetQueued = false;
+        setArrived(new Set<string>());
+      });
+    }
+    if (committed.length > 0) publishRows();
+  }
+
+  function drainPending(maxRecords = STREAM_RECORD_BATCH, scheduleRemainder = true): void {
+    if (draining) return;
+    draining = true;
+    let records: KafkaRecord[] = [];
+    let recordCount = 0;
+    const commitBuffered = (): void => {
+      const omitted = droppedPendingRecords;
+      droppedPendingRecords = 0;
+      commitRecords(records, omitted);
+      records = [];
+    };
+
+    while (pendingWork.length > 0) {
+      const pending = pendingWork[0];
+      if (pending?.kind === "record" && recordCount >= maxRecords) break;
+      const next = pendingWork.shift();
+      if (next === undefined) break;
+      if (next.kind === "record") {
+        pendingRecordCount -= 1;
+        pendingPayloadBytes = Math.max(0, pendingPayloadBytes - retainedBytes(next.record));
+        records.push(next.record);
+        recordCount += 1;
+      } else {
+        commitBuffered();
+        next.run();
+      }
+    }
+    commitBuffered();
+    draining = false;
+    if (scheduleRemainder && pendingWork.length > 0) scheduleContinuation();
+    else if (pendingWork.length === 0) immediatelyCommitted = 0;
+  }
+
+  function scheduleContinuation(): void {
+    if (cancelContinuation !== undefined || pendingWork.length === 0) return;
+    const scheduledGeneration = generation;
+    let invokedSynchronously = false;
+    const cancel = (options.scheduleAfterPaint ?? afterNextPaint)(() => {
+      invokedSynchronously = true;
+      cancelContinuation = undefined;
+      if (generation !== scheduledGeneration) return;
+      drainPending();
+    });
+    // A deterministic test scheduler may run the callback inline. Do not leave its already-spent
+    // cancellation handle installed, or later work would believe a continuation was pending.
+    if (!invokedSynchronously) cancelContinuation = cancel;
+  }
+
+  function enqueue(work: PendingWork): void {
+    pendingWork.push(work);
+    scheduleContinuation();
+  }
+
+  function dropOldestPendingRecords(count: number): void {
+    if (count <= 0) return;
+    let recordsLeft = count;
+    const kept: PendingWork[] = [];
+    for (const work of pendingWork) {
+      if (work.kind !== "record" || recordsLeft <= 0) {
+        kept.push(work);
+        continue;
+      }
+      const size = retainedBytes(work.record);
+      pendingRecordCount -= 1;
+      pendingPayloadBytes = Math.max(0, pendingPayloadBytes - size);
+      droppedPendingRecords += 1;
+      recordsLeft -= 1;
+    }
+    pendingWork = kept;
+  }
+
+  function stripOldestPendingPayloads(bytes: number): void {
+    if (bytes <= 0) return;
+    let bytesLeft = bytes;
+    pendingWork = pendingWork.map((work) => {
+      if (work.kind !== "record" || bytesLeft <= 0) return work;
+      const size = retainedBytes(work.record);
+      if (size === 0) return work;
+      bytesLeft -= size;
+      pendingPayloadBytes = Math.max(0, pendingPayloadBytes - size);
+      return { kind: "record", record: withoutPayload(work.record, size) };
+    });
+  }
+
+  function enqueueRecord(record: KafkaRecord): void {
+    if (liveNow && pendingRecordCount >= MAX_PENDING_RECORDS) {
+      dropOldestPendingRecords(STREAM_RECORD_BATCH);
+    }
+
+    const incoming = retainedBytes(record);
+    if (
+      liveNow &&
+      incoming > 0 &&
+      committedPayloadBytes + pendingPayloadBytes + incoming > MAX_RETAINED_PAYLOAD_BYTES
+    ) {
+      stripOldestPendingPayloads(
+        committedPayloadBytes + pendingPayloadBytes + incoming - MAX_RETAINED_PAYLOAD_BYTES,
+      );
+    }
+    const queued =
+      committedPayloadBytes + pendingPayloadBytes + incoming <= MAX_RETAINED_PAYLOAD_BYTES
+        ? record
+        : withoutPayload(record, incoming);
+    pendingWork.push({ kind: "record", record: queued });
+    pendingRecordCount += 1;
+    pendingPayloadBytes += retainedBytes(queued);
+    scheduleContinuation();
+  }
+
+  function enqueueOrRun(action: () => void): void {
+    if (pendingWork.length === 0 && cancelContinuation === undefined) action();
+    else enqueue({ kind: "action", run: action });
+  }
+
+  function flushPending(): void {
+    cancelContinuation?.();
+    cancelContinuation = undefined;
+    drainPending(Number.POSITIVE_INFINITY, false);
+  }
+
+  function detachPendingRecords(): { readonly records: KafkaRecord[]; readonly omitted: number } {
+    cancelContinuation?.();
+    cancelContinuation = undefined;
+    const records = pendingWork.flatMap((work) => (work.kind === "record" ? [work.record] : []));
+    const omitted = droppedPendingRecords;
+    pendingWork = [];
+    pendingRecordCount = 0;
+    pendingPayloadBytes = 0;
+    droppedPendingRecords = 0;
+    immediatelyCommitted = 0;
+    return { records, omitted };
+  }
+
+  function trimPageCache(): void {
+    let cachedRecords = pageList.reduce((total, page) => total + page.length, 0);
+    while (
+      pageList.length > 1 &&
+      (pageList.length > MAX_CACHED_PAGES || cachedRecords > MAX_ROWS)
+    ) {
+      const removed = pageList.shift();
+      cachedRecords -= removed?.length ?? 0;
+      firstPageNumberNow += 1;
+      setFirstPageNumber(firstPageNumberNow);
+      activePageNow = Math.max(0, activePageNow - 1);
+      setPageIndex((current) => Math.max(0, current - 1));
+    }
+    refreshCommittedPayloadBytes();
+  }
+
   function stop(): void {
-    handle?.close();
+    const stopped = handle;
+    const pending = detachPendingRecords();
     handle = undefined;
+    generation += 1;
+    /* Invalidate before closing: a transport is allowed to report `closed` synchronously from
+     * `close()`, and that callback belongs to the stream that has already been stopped. */
+    stopped?.close();
+    commitRecords(pending.records, pending.omitted);
     setRunning(false);
+    arrivedResetQueued = false;
+    setArrived(new Set<string>());
     /* Whatever was held is shown rather than discarded. Those records were delivered; throwing
      * them away because the user pressed Stop would lose evidence that arrived before the press,
      * and on a tail there is no second chance to read them. */
@@ -206,15 +559,38 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     pausedNow = false;
     setPausedSignal(false);
     if (heldList.length > 0) {
-      rowList = [...heldList, ...rowList].slice(0, MAX_ROWS);
+      const page = pageList[activePageNow] ?? [];
+      if (liveNow) {
+        rowList = [...heldList, ...rowList].slice(0, MAX_ROWS);
+        pageList[activePageNow] = [...heldList, ...page].slice(0, MAX_ROWS);
+      } else {
+        rowList = [...rowList, ...heldList].slice(-MAX_ROWS);
+        pageList[activePageNow] = [...page, ...heldList].slice(0, MAX_ROWS);
+      }
       heldList = [];
     }
+    refreshCommittedPayloadBytes();
     publishRows();
   }
 
-  function run(query: BrowseQuery, keepRows: boolean): void {
+  function run(query: BrowseQuery, keepRows: boolean, selectNewPage = false): void {
     stop();
-    if (!keepRows) rowList = [];
+    const runGeneration = generation;
+    const isCurrentRun = (): boolean => generation === runGeneration;
+    liveNow = query.live;
+    immediatelyCommitted = 0;
+    if (!keepRows) {
+      rowList = [];
+      pageList = [[]];
+      activePageNow = 0;
+      firstPageNumberNow = 1;
+      setFirstPageNumber(1);
+      setPageIndex(0);
+    } else {
+      activePageNow = pageList.length;
+      pageList = [...pageList, []];
+    }
+    refreshCommittedPayloadBytes();
     lastQuery = { ...query, cursor: undefined };
     /* The cursor from the *previous* page is spent the moment this one starts. Leaving it in place
      * would leave "Load more" offering the page that is already being read. */
@@ -244,54 +620,73 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     let closedBeforeOpenReturned = false;
 
     const finish = (which: BrowseHandle): void => {
+      if (!isCurrentRun() || handle !== which) return;
       cursorNow = which.endMarker();
       setCursor(cursorNow);
-      if (handle === which) {
-        handle = undefined;
-        setRunning(false);
-      }
+      setProgress((current) => ({ ...current, endReason: which.endReason?.() }));
+      handle = undefined;
+      setRunning(false);
+      trimPageCache();
+      /* Keep the completed page visible while its successor is in flight. A cursor page may take
+       * seconds when a selective filter scans deeply; replacing useful records with a blank
+       * loading panel for that whole interval makes paging feel broken. Switch only when the
+       * successor is complete, at which point even an empty page can still expose its cursor. */
+      if (selectNewPage) setPageIndex(activePageNow);
+      publishRows();
     };
 
     opened = options.transport.open(url, {
       onEvent: (event) => {
+        if (!isCurrentRun()) return;
         switch (event.kind) {
           case "record": {
-            /* The count moves even while paused, because it counts what the *stream* delivered. A
-             * paused screen that also stopped counting would be indistinguishable from a stream
-             * that had stalled, which is the one thing a pause must not be mistaken for. */
-            if (pausedNow) heldList = [event.record, ...heldList].slice(0, MAX_ROWS);
-            else rowList = [event.record, ...rowList].slice(0, MAX_ROWS);
-            setProgress((current) => ({ ...current, delivered: current.delivered + 1, phase: undefined }));
-            setArrived((current) => new Set(current).add(recordId(event.record)));
-            publishRows();
+            /* Commit only the first handful inline. Once those useful rows exist, hold subsequent
+             * records until after a paint so a fast 100-record SSE burst cannot monopolise the
+             * main thread and make the page look empty. */
+            if (
+              immediatelyCommitted < INITIAL_RECORD_BATCH &&
+              pendingWork.length === 0 &&
+              cancelContinuation === undefined
+            ) {
+              immediatelyCommitted += 1;
+              commitRecords([event.record]);
+            } else {
+              enqueueRecord(event.record);
+            }
             return;
           }
           case "phase":
-            setProgress((current) => ({ ...current, phase: event.name }));
+            enqueueOrRun(() => setProgress((current) => ({ ...current, phase: event.name })));
             return;
           case "consumed":
-            setProgress((current) => ({ ...current, consumed: event.consumed }));
+            enqueueOrRun(() => setProgress((current) => ({ ...current, consumed: event.consumed })));
             return;
         }
       },
       /* A failure is held beside the rows rather than replacing them: the records that did arrive
        * are still what the user asked for, and throwing them away to show an error would lose the
        * evidence. */
-      onFailure: (failure) => setProgress((current) => ({ ...current, failure })),
+      onFailure: (failure) => {
+        if (!isCurrentRun()) return;
+        enqueueOrRun(() => setProgress((current) => ({ ...current, failure })));
+      },
       onConnection: (connection) => {
-        setProgress((current) => ({ ...current, connection }));
-        if (connection.phase !== "closed") return;
-        /* A closed stream releases the handle. `running` is "is there a handle", and the control
-         * reads Stop while it is true — so without this a browse that ended by itself, which is
-         * what every bounded browse does the moment it has read its limit, left the button saying
-         * Stop for ever, beside a status line reading "finished", with no way back to Read short of
-         * reloading the page. The handle is already closed by then; dropping the reference is all
-         * that is left to do. */
-        if (opened === undefined) {
-          closedBeforeOpenReturned = true;
-          return;
-        }
-        finish(opened);
+        if (!isCurrentRun()) return;
+        enqueueOrRun(() => {
+          setProgress((current) => ({ ...current, connection }));
+          if (connection.phase !== "closed") return;
+          /* A closed stream releases the handle. `running` is "is there a handle", and the control
+           * reads Stop while it is true — so without this a browse that ended by itself, which is
+           * what every bounded browse does the moment it has read its limit, left the button saying
+           * Stop for ever, beside a status line reading "finished", with no way back to Read short of
+           * reloading the page. The handle is already closed by then; dropping the reference is all
+           * that is left to do. */
+          if (opened === undefined) {
+            closedBeforeOpenReturned = true;
+            return;
+          }
+          finish(opened);
+        });
       },
     });
 
@@ -310,11 +705,15 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
 
   return {
     rows,
+    pageRows,
+    pageNumber,
     progress,
     running,
     paused,
     held,
     canLoadMore,
+    canPreviousPage,
+    canNextPage,
     arrived,
     start: (query) => run(query, false),
     loadMore: () => {
@@ -328,7 +727,23 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
        * a second range mixed into the first. */
       run({ ...lastQuery, cursor: cursorNow }, true);
     },
+    nextPage: () => {
+      if (running()) return;
+      if (pageIndex() < pageList.length - 1) {
+        setPageIndex(pageIndex() + 1);
+        return;
+      }
+      if (lastQuery === undefined || cursorNow === undefined) return;
+      run({ ...lastQuery, cursor: cursorNow }, true, true);
+    },
+    previousPage: () => {
+      if (!canPreviousPage()) return;
+      setPageIndex(pageIndex() - 1);
+    },
     setPaused: (on) => {
+      /* Apply everything delivered before the click under the old pause state. Without this, a
+       * record already received by the transport could be hidden as though it arrived afterwards. */
+      flushPending();
       if (on) {
         pausedNow = true;
         setPausedSignal(true);
@@ -375,12 +790,12 @@ export function decodeBrowseEvent(
   const body = parsed as Record<string, unknown>;
 
   switch (event) {
-    case "message":
-      /* No structural validation beyond "it is an object". The DTO has eleven fields and this
-       * would be a second, weaker copy of the server's decoder — and a record that is missing one
-       * of them still tells the operator more than a stream that stopped. The mapping in `wire.ts`
-       * is total: every field it reads has a defined reading for a missing value. */
-      return { ok: true, value: { kind: "record", record: toRecord(body as unknown as MessageDto) } };
+    case "message": {
+      const decoded = decodeMessageRecord(body);
+      return decoded.ok
+        ? { ok: true, value: { kind: "record", record: decoded.value } }
+        : decoded;
+    }
     case "phase": {
       const name = body["phase"] ?? body["name"];
       return typeof name === "string"

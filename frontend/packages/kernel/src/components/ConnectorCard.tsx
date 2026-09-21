@@ -19,6 +19,21 @@
  * A connector whose state the cluster did not report draws its pill as unknown. Guessing `RUNNING`
  * would be this product telling somebody their pipeline is fine on no evidence, which is the single
  * worst thing a monitoring screen can do.
+ *
+ * ## The pill publishes the state word as well as the sentence
+ *
+ * `data-state` on the pill carries {@link ConnectorCardProps.state} verbatim — `RUNNING`,
+ * `UNASSIGNED`, `UNKNOWN` — beside the words {@link connectorChip} chose for it. It is there for
+ * `frontend/e2e/connect.spec.ts`, which until this attribute existed could only assert the drawing
+ * by transcribing all five labels into the spec, and could only assert it against the *card*: the
+ * panel around this component says "1 of 1 tasks running.", so `toContainText("running")` over the
+ * panel is satisfied by that sentence whatever the pill says, and a regression drawing an
+ * unreported state as `running` — or drawing no pill at all — passed it. With the attribute, a case
+ * compares this word to the one the Connect worker reported and transcribes nothing.
+ *
+ * It is the **drawn** state and not the raw wire word: a caller folding `RESTARTING` to `UNKNOWN`
+ * (`feature-connect`'s `pillState` does, deliberately) publishes `UNKNOWN` here, because what this
+ * attribute promises is that the machine word and the sentence beside it describe the same thing.
  */
 import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
@@ -84,7 +99,7 @@ export function ConnectorCard(props: ConnectorCardProps): JSX.Element {
           <h3 class="kui-connector__name">{props.name}</h3>
           <p class="kui-connector__kind">{props.kind}</p>
         </div>
-        <StatusPill tone={chip().tone} dot>
+        <StatusPill tone={chip().tone} dot dataState={props.state}>
           {chip().label}
         </StatusPill>
       </header>

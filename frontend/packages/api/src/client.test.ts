@@ -345,3 +345,24 @@ describe("a 401", () => {
     expect(lapsed).not.toHaveBeenCalled();
   });
 });
+
+describe("the request deadline", () => {
+  test("a request that never answers becomes a `timeout` failure, not a hang", async () => {
+    // The defect `errors.ts` documented but never triggered: `ApiError`'s `timeout` case was fully
+    // defined, yet nothing ever constructed one for a plain request, because no request-level
+    // deadline existed. A stalled backend left the caller's promise — and whatever "loading" state
+    // was waiting on it — unresolved for good.
+    const client = createApiClient({
+      bootstrap: FallbackBootstrap,
+      origin: "https://kui.example.com",
+      csrf: settledTokens(),
+      requestTimeoutMs: 20,
+      fetch: () => new Promise<Response>(() => {}),
+    });
+
+    const answer = await client.get("/api/v1/capabilities");
+
+    expect(answer.ok).toBe(false);
+    if (!answer.ok) expect(answer.error.kind).toBe("timeout");
+  });
+});

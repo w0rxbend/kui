@@ -1,6 +1,7 @@
 package kui.build
 
 import java.nio.file.{Files, Path}
+
 import scala.jdk.CollectionConverters.*
 
 import munit.FunSuite
@@ -9,9 +10,9 @@ import kui.build.design.DesignSources
 
 /** The replacement for `CssPipeline`'s discovery property (ADR-048 §5, decision D3).
   *
-  * Two halves. The first half checks the rules against made-up inputs, so that each way of getting
-  * it wrong is described once and cannot be argued about. The second half runs them over the real
-  * repository, which is the check that actually fails a build.
+  * Two halves. The first half checks the rules against made-up inputs, so that each way of getting it wrong
+  * is described once and cannot be argued about. The second half runs them over the real repository, which is
+  * the check that actually fails a build.
   */
 final class CssReferencesSuite extends FunSuite {
 
@@ -100,12 +101,11 @@ final class CssReferencesSuite extends FunSuite {
 
   /** Every stylesheet git is tracking in a package's `styles` directory, except `index.css` itself.
     *
-    * Tracked, and not merely present, for one reason: the property being checked is about what
-    * *ships*, and an untracked file ships nothing. A stylesheet someone is part-way through writing
-    * is not yet a promise to anybody, and failing the build over it would punish the wrong person at
-    * the wrong moment. It becomes subject to this check the instant it is committed — which is
-    * exactly the moment its author has to have added the `@import` — and until then the file is
-    * simply not part of the product.
+    * Tracked, and not merely present, for one reason: the property being checked is about what *ships*, and
+    * an untracked file ships nothing. A stylesheet someone is part-way through writing is not yet a promise
+    * to anybody, and failing the build over it would punish the wrong person at the wrong moment. It becomes
+    * subject to this check the instant it is committed — which is exactly the moment its author has to have
+    * added the `@import` — and until then the file is simply not part of the product.
     */
   private def discovered: Set[String] = {
     val listing = new ProcessBuilder("git", "ls-files", "--", "frontend/packages")
@@ -114,7 +114,7 @@ final class CssReferencesSuite extends FunSuite {
       .start()
 
     val tracked = scala.io.Source.fromInputStream(listing.getInputStream).getLines().toList
-    val status  = listing.waitFor()
+    val status = listing.waitFor()
     assertEquals(status, 0, s"git ls-files failed:\n${tracked.mkString("\n")}")
 
     tracked

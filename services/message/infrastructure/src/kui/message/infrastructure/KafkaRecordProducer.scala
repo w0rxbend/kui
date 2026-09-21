@@ -7,7 +7,7 @@ import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.Files
-import fs2.kafka.{Header, Headers, KafkaProducer, ProducerRecord}
+import fs2.kafka.{Header, HeaderSerializer, Headers, KafkaProducer, ProducerRecord}
 import org.apache.kafka.clients.producer.RecordMetadata
 import org.typelevel.log4cats.StructuredLogger
 
@@ -119,6 +119,13 @@ final class KafkaRecordProducer[F[_]: Async] private (
         ).asRight[KuiError]
     }
 
+  /** A header's value, serialised as Kafka wants it: `None` becomes a `null` array, not an empty one, so a
+    * header explicitly carrying no value stays distinguishable from one whose value merely happens to be
+    * empty — the same distinction `key` and `value` get below, and the one Spring's dead-letter machinery
+    * reads by.
+    */
+  private given HeaderSerializer[Option[Array[Byte]]] = HeaderSerializer.identity.option
+
   /** One record, as Kafka wants it.
     *
     * `key` and `value` are handed through as `null` when absent, because that is what Kafka's own record
@@ -129,12 +136,13 @@ final class KafkaRecordProducer[F[_]: Async] private (
   private def kafkaRecordOf(record: RawProducerRecord): ProducerRecord[Array[Byte], Array[Byte]] = {
     val base = ProducerRecord(record.topic.value, record.key.orNull, record.value.orNull)
       .withHeaders(
-        Headers.fromSeq(
-          record.headers.map(header => Header(header.key, header.value.getOrElse(Array.emptyByteArray)))
-        )
+        Headers.fromSeq(record.headers.map(header => Header(header.key, header.value)))
       )
 
-    record.partition.fold(base)(partition => base.withPartition(partition.value))
+    val timestamped =
+      record.timestamp.fold(base)(timestamp => base.withTimestamp(timestamp.toEpochMilli))
+
+    record.partition.fold(timestamped)(partition => timestamped.withPartition(partition.value))
   }
 }
 

@@ -1,6 +1,10 @@
 package kui.gateway.api.auth
 
-import cats.effect.kernel.{Clock, Sync}
+import java.util.Locale
+
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
+
+import cats.effect.kernel.{Clock, Ref, Sync}
 import cats.syntax.all.*
 import sttp.model.StatusCode
 import sttp.model.headers.CookieValueWithMeta
@@ -73,16 +77,22 @@ object AuthRoutes {
       identity: Option[ServiceClient[F]] = None,
       basePath: String = "",
       secureCookies: Boolean = true
-  ): List[ServerEndpoint[Any, F]] =
+  ): List[ServerEndpoint[Any, F]] = {
+    // One limiter for the whole gateway instance, shared by every request `apply` ever answers, because
+    // the point of throttling a login is to remember attempts *across* requests. See `RateLimiter` below:
+    // the identity service's own contract leans on the edge to do this, and until now nothing here did.
+    val loginLimiter: RateLimiter[F] = RateLimiter[F]
+
     List(
       me[F](policy, auth),
       settings[F](auth, policy),
-      login[F](store, identity, basePath, secureCookies),
-      changePassword[F](identity),
+      login[F](store, identity, basePath, secureCookies, loginLimiter),
+      changePassword[F](identity, loginLimiter),
       oidcStart[F](identity),
       oidcCallback[F](store, identity, basePath, secureCookies),
       logout[F](store)
     )
+  }
 
   // -----------------------------------------------------------------------------------------------
   // Reads, answered from this process alone
@@ -121,37 +131,56 @@ object AuthRoutes {
       store: SessionStore[F],
       identity: Option[ServiceClient[F]],
       basePath: String,
-      secureCookies: Boolean
+      secureCookies: Boolean,
+      limiter: RateLimiter[F]
   ): ServerEndpoint[Any, F] =
     AuthEndpoints.loginWithSession
       .in(request)
       .serverLogic[F] { (credentials, req) =>
-        answering[F, (LoginResponse, CookieValueWithMeta)](req) {
-          withIdentity(identity) { client =>
-            call(client, req)(IdentityEndpoints.login, credentials).flatMap {
-              case Left(error) => error.asLeft[(LoginResponse, CookieValueWithMeta)].pure[F]
+        withinRateLimit[F, (LoginResponse, CookieValueWithMeta)](
+          limiter,
+          req,
+          List(
+            s"login:ip:${remoteAddressOf(req)}" -> MaxLoginAttemptsPerIp,
+            s"login:user:${credentials.username.toLowerCase(Locale.ROOT)}" -> MaxLoginAttemptsPerUser
+          )
+        ) {
+          answering[F, (LoginResponse, CookieValueWithMeta)](req) {
+            withIdentity(identity) { client =>
+              call(client, req)(IdentityEndpoints.login, credentials).flatMap {
+                case Left(error) => error.asLeft[(LoginResponse, CookieValueWithMeta)].pure[F]
 
-              case Right(LoginResponse.SignedIn(who)) =>
-                signIn[F](store, req, principalOf(who), basePath, secureCookies)
-                  .map(cookie => (LoginResponse.SignedIn(who), cookie).asRight[KuiError])
+                case Right(LoginResponse.SignedIn(who)) =>
+                  signIn[F](store, req, principalOf(who), basePath, secureCookies)
+                    .map(cookie => (LoginResponse.SignedIn(who), cookie).asRight[KuiError])
 
-              // A required password change grants no session at all, so the session the request arrived
-              // on is left exactly as it was — anonymous. Handing out a cookie here would be handing out
-              // a session to somebody the server has just decided may not have one.
-              case Right(change @ LoginResponse.PasswordChangeRequired(_)) =>
-                currentCookie[F](req, basePath, secureCookies)
-                  .map(cookie => (change, cookie).asRight[KuiError])
+                // A required password change grants no session at all, so the session the request arrived
+                // on is left exactly as it was — anonymous. Handing out a cookie here would be handing out
+                // a session to somebody the server has just decided may not have one.
+                case Right(change @ LoginResponse.PasswordChangeRequired(_)) =>
+                  currentCookie[F](req, basePath, secureCookies)
+                    .map(cookie => (change, cookie).asRight[KuiError])
+              }
             }
           }
         }
       }
 
-  private def changePassword[F[_]: Sync](identity: Option[ServiceClient[F]]): ServerEndpoint[Any, F] =
+  private def changePassword[F[_]: Sync](
+      identity: Option[ServiceClient[F]],
+      limiter: RateLimiter[F]
+  ): ServerEndpoint[Any, F] =
     AuthEndpoints.changePassword
       .in(request)
       .serverLogic[F] { (change, req) =>
-        answering[F, Unit](req) {
-          withIdentity(identity)(client => call(client, req)(IdentityEndpoints.changePassword, change))
+        withinRateLimit[F, Unit](
+          limiter,
+          req,
+          List(s"password:ip:${remoteAddressOf(req)}" -> MaxPasswordChangeAttemptsPerIp)
+        ) {
+          answering[F, Unit](req) {
+            withIdentity(identity)(client => call(client, req)(IdentityEndpoints.changePassword, change))
+          }
         }
       }
 
@@ -218,6 +247,100 @@ object AuthRoutes {
         } yield (envelope, StatusCode(status)).asLeft[A]
     }
 
+  /** How many attempts a single window tolerates, and how long a window lasts, for each throttled key.
+    *
+    * Per-IP is the wider bucket, catching one caller trying many usernames; per-username is the narrower one,
+    * catching many callers guessing one account's password. Both cover PBKDF2's own cost: 210k iterations is
+    * expensive enough on its own, and unlimited attempts multiplies that cost by whatever an attacker is
+    * willing to spend.
+    */
+  private val RateLimitWindow: FiniteDuration = 1.minute
+  private val MaxLoginAttemptsPerIp: Int = 20
+  private val MaxLoginAttemptsPerUser: Int = 5
+  private val MaxPasswordChangeAttemptsPerIp: Int = 10
+
+  /** The caller's address, as far as this process can tell it. `"unknown"` rather than a raised error when
+    * the connection carries none — a test harness or an unusual transport — because a throttle that cannot
+    * name its caller should still throttle, not crash the request it was trying to protect.
+    */
+  private def remoteAddressOf(req: ServerRequest): String =
+    req.connectionInfo.remote.map(_.getAddress.getHostAddress).getOrElse("unknown")
+
+  /** Runs `action` only while every key in `limits` is still under its own budget for this window, and
+    * answers `429 KUI-AUTH-RATE-LIMITED` the moment one of them is not. Each key is charged in order and the
+    * chain stops at the first refusal, so a caller who is already over one budget does not also spend a token
+    * out of the other.
+    */
+  private def withinRateLimit[F[_]: Sync, A](
+      limiter: RateLimiter[F],
+      req: ServerRequest,
+      limits: List[(String, Int)]
+  )(action: => F[Either[(ErrorEnvelope, StatusCode), A]]): F[Either[(ErrorEnvelope, StatusCode), A]] =
+    limits
+      .foldLeft(true.pure[F]) { (acc, limit) =>
+        acc.flatMap {
+          case false => false.pure[F]
+          case true => limiter.tryAcquire(limit._1, limit._2, RateLimitWindow)
+        }
+      }
+      .flatMap {
+        case true => action
+        case false => tooManyRequests[F, A](req)
+      }
+
+  private def tooManyRequests[F[_]: Sync, A](req: ServerRequest): F[Either[(ErrorEnvelope, StatusCode), A]] =
+    for {
+      correlationId <- correlationOf[F](req)
+      now <- Clock[F].realTimeInstant
+    } yield (
+      ErrorEnvelope(
+        code = "KUI-AUTH-RATE-LIMITED",
+        message = "too many attempts; wait before trying again",
+        details = Nil,
+        correlationId = correlationId.value,
+        timestamp = now,
+        retryable = true
+      ),
+      StatusCode.TooManyRequests
+    ).asLeft[A]
+
+  /** An in-memory fixed-window counter, one per gateway process. It is not a `KuiError` case because it never
+    * reaches business logic — a refused request stops here, at the edge, exactly where the identity service's
+    * own contract says the throttle has to live.
+    *
+    * Fixed-window rather than a sliding one: a login screen does not need the precision, and a window that
+    * resets on a clean boundary is a counter and an instant, not a log of every attempt's timestamp. Expired
+    * windows are dropped on every call so that a process fielding attempts from many distinct addresses does
+    * not grow this map without bound.
+    */
+  final private[auth] class RateLimiter[F[_]: Sync] private (state: Ref[F, Map[String, RateLimiter.Window]]) {
+
+    /** `true` when `key` still had budget left in its current window, which this call then spends one unit
+      * of; `false` when it did not, in which case nothing is spent.
+      */
+    def tryAcquire(key: String, maxAttempts: Int, window: FiniteDuration): F[Boolean] =
+      Clock[F].realTimeInstant.flatMap { now =>
+        state.modify { attempts =>
+          val live = attempts.filterNot { case (_, w) => RateLimiter.expired(w, now, window) }
+          live.get(key) match {
+            case Some(RateLimiter.Window(count, _)) if count >= maxAttempts => (live, false)
+            case Some(w @ RateLimiter.Window(count, _)) =>
+              (live.updated(key, w.copy(count = count + 1)), true)
+            case None => (live.updated(key, RateLimiter.Window(1, now)), true)
+          }
+        }
+      }
+  }
+
+  private[auth] object RateLimiter {
+    final case class Window(count: Int, start: java.time.Instant)
+
+    private def expired(window: Window, now: java.time.Instant, ttl: FiniteDuration): Boolean =
+      java.time.Duration.between(window.start, now).toMillis >= ttl.toMillis
+
+    def apply[F[_]: Sync]: RateLimiter[F] = new RateLimiter[F](Ref.unsafe(Map.empty))
+  }
+
   /** Replaces the session with a new one for `principal`, and answers with the cookie for it.
     *
     * Delete then create, rather than editing the session in place: the id and the CSRF secret both have to
@@ -230,12 +353,29 @@ object AuthRoutes {
       basePath: String,
       secureCookies: Boolean
   ): F[CookieValueWithMeta] =
+    sessionOf[F](req)
+      .flatMap(previous => replaceSession[F](store, previous, principal))
+      .map(cookieOf(_, basePath, secureCookies))
+
+  /** Delete, then create. The id and the CSRF secret both have to change, because both are values an attacker
+    * may already hold — which is what makes a session id they planted on the victim worthless the moment that
+    * victim signs in.
+    *
+    * `private[auth]` rather than `private`, and separated from [[signIn]], so that the rule can be asserted
+    * against a real session store without a `ServerRequest` and without an identity service to sign in to:
+    * the whole sign-in path is unreachable in a deployment that has configured no identity service, which is
+    * every deployment this project's suites build.
+    */
+  private[auth] def replaceSession[F[_]: Sync](
+      store: SessionStore[F],
+      previous: Session,
+      principal: Principal
+  ): F[Session] =
     for {
-      previous <- sessionOf[F](req)
       _ <- store.delete(previous.id)
       now <- Clock[F].realTimeInstant
       session <- store.create(principal, now)
-    } yield cookieOf(session, basePath, secureCookies)
+    } yield session
 
   /** The cookie for the session the request already has, unchanged.
     *

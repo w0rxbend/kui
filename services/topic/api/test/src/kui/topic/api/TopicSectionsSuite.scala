@@ -36,7 +36,9 @@ final class TopicSectionsSuite extends FunSuite {
 
   test("a snapshot that could not be renewed is Stale, with its data and the real reason") {
     assertEquals(
-      sectionOf(Snapshot(Some("rows"), SnapshotStatus.Offline(TopicTestServer.Timeout, since), Some(scrapedAt))),
+      sectionOf(
+        Snapshot(Some("rows"), SnapshotStatus.Offline(TopicTestServer.Timeout, since), Some(scrapedAt))
+      ),
       Section.Stale("rows", scrapedAt, ReasonCode.UpstreamTimeout)
     )
   }
@@ -45,7 +47,8 @@ final class TopicSectionsSuite extends FunSuite {
     // M1's cluster service collapsed every failing scrape to UPSTREAM_UNAVAILABLE, because the type it read
     // freshness from had already flattened the error into a sentence (CLAPI-004 deviation 2). A slow
     // cluster and a gone cluster get different remedies and this is the field that tells them apart.
-    val timedOut = Snapshot(Some("rows"), SnapshotStatus.Offline(TopicTestServer.Timeout, since), Some(scrapedAt))
+    val timedOut =
+      Snapshot(Some("rows"), SnapshotStatus.Offline(TopicTestServer.Timeout, since), Some(scrapedAt))
     val gone = Snapshot(
       Some("rows"),
       SnapshotStatus.Offline(InfrastructureError.Unreachable("kafka", "connection refused"), since),

@@ -1,0 +1,120 @@
+/* ------------------------------------------------------------------------------------------------
+ * ksqlDB: the screen around the workspace
+ *
+ * `SCREENS-V4.md` §3.16 draws two panes, and both of them are the kernel's — `29-connect-ksql.css`
+ * styles `.kui-ksql*` and has done since before there was a service. This sheet styles only what
+ * §3.16 does **not** draw, which is the part §7.9 has been an open finding about since
+ * `SCREENS.md`: the result region, the running-query list, and the sentence a server that
+ * answered and is running nothing gets.
+ *
+ * Every class here is prefixed `.kui-ksql-result`, `.kui-ksql-queries` or `.kui-ksql-screen`, so
+ * nothing in it can restyle the kernel's `.kui-ksql__*` primitives or another screen. The
+ * separation is not cosmetic: the workspace is reviewed in Storybook against fixtures and has been
+ * since wave 3, and a screen sheet that reached into it would make those stories stop describing
+ * what the product draws.
+ *
+ * Numbered 82 because `feature-connect`'s sheet is 81 and the last group in
+ * `kernel/styles/index.css` is in the order the product shipped, with a new screen joining the end
+ * of it. The `@import` naming this file is in that index, which is `@kui/kernel`'s and not this
+ * package's: `build-tests`' `CssReferences` requires every stylesheet on disk to be named there
+ * exactly once, and the index is the only place that can name it. One file, one line, two packets.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-ksql-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+}
+
+/* The sentence for a ksqlDB that answered and has nothing in it. It sits under the workspace rather
+   than inside the objects pane, because the pane has its own empty state and two sentences saying
+   nearly the same thing in two places is worse than one saying it well. */
+.kui-ksql-screen__empty {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  max-width: 60ch;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The result region                                                                              */
+/* ---------------------------------------------------------------------------------------------- */
+
+/* It grows downwards from the footer and is bounded, because a push query is not. Without the
+   bound, a live query pushes the editor and the Run/Cancel control off the top of the window — and
+   Cancel is the only way to stop the query, so the one control the reader urgently needs is the one
+   the rows would have scrolled away. */
+.kui-ksql-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  margin-top: var(--kui-space-4);
+  border-top: 1px solid var(--kui-color-border);
+  padding-top: var(--kui-space-4);
+}
+
+.kui-ksql-result__status {
+  margin: 0;
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The sentence that says how many rows are held and whether that is all of them. Muted, because it
+   is a caption on the table rather than the answer — but never hidden: on a capped push query it is
+   the only thing that says rows have been dropped. */
+.kui-ksql-result__count {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  max-width: 80ch;
+}
+
+/* ksqlDB's own warnings, kept verbatim. They are the half of an answer that says the statement did
+   something other than what was asked — a headless server that did not persist it, a deprecated
+   syntax — and swallowing one is how a deployment looks like a different deployment. */
+.kui-ksql-result__warnings {
+  margin: 0;
+  padding-left: var(--kui-space-5);
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* A cap in `vh` rather than in rows: a row's height moves with the density setting, and a cap
+   counted in rows would be a different amount of screen on each of the three. The table brings its
+   own horizontal scroll box, so only the vertical bound belongs here. */
+.kui-ksql-result__table {
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The running queries                                                                            */
+/* ---------------------------------------------------------------------------------------------- */
+
+.kui-ksql-queries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-ksql-queries__title {
+  margin: 0;
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+}
+
+/* The statement, in the face it was written in. `pre-wrap` rather than a truncation: a persistent
+   query's SQL is the only description of what it does, and an ellipsis in the middle of a `GROUP
+   BY` tells the reader nothing they could have acted on. */
+.kui-ksql-queries__sql {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

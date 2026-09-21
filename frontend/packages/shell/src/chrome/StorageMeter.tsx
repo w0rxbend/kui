@@ -23,6 +23,12 @@
  * `SegmentBar` renders exactly this when given no segments, which is why it is used here rather
  * than a bar drawn locally.
  *
+ * **And a zero is not an unknown**, which is the same rule read the other way and the half this
+ * component got wrong. A cluster that has written nothing to a disk whose capacity was reported
+ * perfectly well has a known usage, and it is nought per cent. Drawing the em dash for it claims
+ * the disk could not be read, over a caption that names both figures — see the `percentText`
+ * accessor below.
+ *
  * ## It replaced the cluster status card
  *
  * The drawer's foot used to hold `ClusterStatusCard`, which said which cluster was selected and
@@ -72,6 +78,12 @@ const DEFAULT_DANGER = 0.9;
  * Exported because it is the arithmetic worth testing directly, and because a broker whose
  * `totalBytes` is zero — which is what an unconfigured log directory reports — must come back
  * `idle` rather than dividing by zero and painting the whole bar red.
+ *
+ * The guard is `<= 0` and not `< 0`, and the difference is a whole segment's colour. `0 / 0` is
+ * `NaN`, `NaN >= dangerAt` and `NaN >= warnAt` are both false, so the fall-through is `ok`: a
+ * broker about whose disk nothing is known would be drawn as a healthy green segment. That is the
+ * most reassuring possible reading of the least known state, which is the failure this whole
+ * component is built around.
  */
 export function brokerState(
   broker: BrokerStorage,
@@ -94,6 +106,21 @@ export function StorageMeter(props: StorageMeterProps) {
   const percent = (): number | undefined => {
     const capacity = total();
     return capacity > 0 ? Math.round((used() / capacity) * 100) : undefined;
+  };
+
+  /**
+   * The percentage as the head draws it, or `undefined` when there is none.
+   *
+   * A **string**, and that is the whole point of the accessor existing. `<Show when={percent()}>`
+   * is falsy at zero, so a cluster that had used none of a perfectly readable 500 GB drew the
+   * unknown track's em dash with `title="Disk usage could not be read"` — over a caption reading
+   * `0 B of 500.0 GB`, one line below. The card contradicted itself and the dash asserted an
+   * unreadable disk that had been read exactly. `"0%"` is truthy, so the same `Show` now separates
+   * *no figure* from *a figure of nothing*, which is the distinction this whole file is about.
+   */
+  const percentText = (): string | undefined => {
+    const value = percent();
+    return value === undefined ? undefined : `${value}%`;
   };
 
   /** The fullest broker, which is the one the caption names. */
@@ -135,14 +162,14 @@ export function StorageMeter(props: StorageMeterProps) {
         <Icon name="disk" size="14px" />
         <h2 class="kui-storage__title">STORAGE</h2>
         <Show
-          when={percent()}
+          when={percentText()}
           fallback={
             <span class="kui-storage__percent kui-storage__percent--unknown" title="Disk usage could not be read">
               —
             </span>
           }
         >
-          {(value) => <span class="kui-storage__percent">{value()}%</span>}
+          {(value) => <span class="kui-storage__percent">{value()}</span>}
         </Show>
       </div>
 

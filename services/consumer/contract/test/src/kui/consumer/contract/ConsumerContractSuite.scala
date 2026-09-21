@@ -85,7 +85,11 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
   }
 
   test("theResetPlanRequestMatchesItsGoldenFile") {
-    assertMatchesGolden("reset-plan-request", ConsumerSamples.resetPlanRequest, GoldenDocuments.resetPlanRequest)
+    assertMatchesGolden(
+      "reset-plan-request",
+      ConsumerSamples.resetPlanRequest,
+      GoldenDocuments.resetPlanRequest
+    )
   }
 
   test("theResetApplyRequestMatchesItsGoldenFile") {
@@ -121,6 +125,15 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     assert(decode[IncompleteDto](GoldenDocuments.incomplete).isRight)
   }
 
+  /** A coordinator, whole or absent — never half of one, which is the invariant the mapping keeps. */
+  private val coordinators: Gen[Option[(Int, String, Int)]] =
+    Gen.option(
+      for {
+        id <- Gen.chooseNum(0, 12)
+        port <- Gen.oneOf(9092, 9093, 29092)
+      } yield (id, s"broker-$id.kafka.svc", port)
+    )
+
   private val summaries: Gen[GroupSummaryDto] =
     for {
       id <- Gen.identifier.map(GroupId.unsafe)
@@ -129,10 +142,50 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
       members <- Gen.chooseNum(0, 50)
       topics <- Gen.chooseNum(0, 20)
       partitions <- Gen.chooseNum(0, 500)
+      coordinator <- coordinators
       lag <- Gen.option(Gen.chooseNum(0L, 1000000L))
       pace <- Gen.option(Gen.chooseNum(-1000.0d, 1000.0d))
       excluded <- Gen.chooseNum(0, partitions)
-    } yield GroupSummaryDto(id, state, protocol, false, members, topics, partitions, None, lag, pace, excluded, None)
+    } yield GroupSummaryDto(
+      id,
+      state,
+      protocol,
+      false,
+      members,
+      topics,
+      partitions,
+      coordinator.map(_._1),
+      coordinator.map(_._2),
+      coordinator.map(_._3),
+      lag,
+      pace,
+      excluded,
+      None
+    )
+
+  property("theCoordinatorsThreeFieldsAreOnTheWireTogetherOrNotAtAll") {
+    // An encoder that dropped the port while keeping the host would put `broker-2:undefined` on the screen.
+    // The round-trip property below does catch *that* — it compares whole records, so a dropped port fails
+    // it, which was checked by mutation. What it cannot catch is a rename: an encoder and a decoder that
+    // agreed on `coordinator_port` round-trip perfectly and put nothing on a screen expecting
+    // `coordinatorPort`. A rename is caught elsewhere too, and the earlier wording here denied it:
+    // `assertMatchesGolden` compares encodings against committed strings that spell the three keys out, so
+    // renaming the encoder and decoder keys together fails the golden cases as well as this one — checked by
+    // mutation (`coordinatorPort` -> `coordinator_port` fails five cases in this class). What this property
+    // adds is the part a golden cannot state: over every generated summary, and not over the handful of
+    // samples the goldens fix, the three keys are present or absent *together*.
+    forAll(summaries) { summary =>
+      val cursor = summary.asJson.hcursor
+      val present = List(
+        cursor.get[Option[Int]]("coordinatorId").toOption.flatten.isDefined,
+        cursor.get[Option[String]]("coordinatorHost").toOption.flatten.isDefined,
+        cursor.get[Option[Int]]("coordinatorPort").toOption.flatten.isDefined
+      )
+
+      assertEquals(present.distinct.size, 1, clue = summary.asJson.noSpaces)
+      true
+    }
+  }
 
   property("absentLagEncodesAsNullNotZero") {
     forAll(summaries) { summary =>
@@ -244,7 +297,10 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     // disagreeing about a timezone offset; a single wire format is where that stops.
     val rendered = ConsumerSamples.detail.asJson.hcursor.get[String]("observedAt")
     assertEquals(rendered, Right("2026-09-04T09:15:00.000Z"))
-    assertEquals(ConsumerSamples.resetPlan.asJson.hcursor.get[String]("expiresAt"), Right("2026-09-04T09:20:00.000Z"))
+    assertEquals(
+      ConsumerSamples.resetPlan.asJson.hcursor.get[String]("expiresAt"),
+      Right("2026-09-04T09:20:00.000Z")
+    )
   }
 
   test("theResetPlanRequestRejectsAModeWithoutItsParameter") {
@@ -273,7 +329,8 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     val page = ConsumerSamples.page.asJson.hcursor.downField("page")
     assertEquals(page.get[Int]("pageCount"), Right(1))
     assertEquals(page.get[Option[Long]]("totalItems"), Right(Some(2L)))
-    val lying = """{"items":[],"page":{"page":1,"pageSize":25,"totalItems":100,"pageCount":999,"nextPageToken":null}}"""
+    val lying =
+      """{"items":[],"page":{"page":1,"pageSize":25,"totalItems":100,"pageCount":999,"nextPageToken":null}}"""
     val decoded = decode[PageDto[GroupSummaryDto]](lying)
     assertEquals(decoded.map(_.page.pageCount), Right(Some(4)))
   }

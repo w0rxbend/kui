@@ -41,7 +41,11 @@ object TopicDetail {
     val ordered = partitions.sorted
 
     TopicDetail(
-      summary = TopicSummary.of(name, isInternal, ordered),
+      // The policy goes into the summary as well as onto the detail, because the row the list shows and the
+      // row embedded in this document are the same record and M5 put `cleanupPolicy` on it. Building both
+      // from the one argument is what stops the header's tag and the list's column disagreeing about a topic
+      // whose configuration was read once.
+      summary = TopicSummary.of(name, isInternal, ordered, cleanupPolicy),
       partitions = ordered,
       cleanupPolicy = cleanupPolicy,
       segmentCount = segmentCount

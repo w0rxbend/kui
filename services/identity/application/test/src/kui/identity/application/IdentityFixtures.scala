@@ -12,9 +12,9 @@ import kui.security.rbac.*
 
 /** The fakes the sign-in suites are written against.
   *
-  * Hand-written rather than mocked, for the reason this codebase gives everywhere else: a mock verifies that a
-  * method was called, and what these suites need to know is what the *system* did — which record reached the
-  * audit trail, whether the directory was written to, how many times the hasher was asked to work.
+  * Hand-written rather than mocked, for the reason this codebase gives everywhere else: a mock verifies that
+  * a method was called, and what these suites need to know is what the *system* did — which record reached
+  * the audit trail, whether the directory was written to, how many times the hasher was asked to work.
   */
 object IdentityFixtures {
 

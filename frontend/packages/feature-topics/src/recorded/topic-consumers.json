@@ -10,12 +10,14 @@
                 "topics": 1,
                 "partitions": 6,
                 "coordinatorId": 1,
-                "totalLag": 21,
+                "coordinatorHost": "kafka",
+                "coordinatorPort": 9092,
+                "totalLag": 9,
                 "pace": 0.0,
                 "excludedPartitions": 0,
                 "incomplete": null
             },
-            "topicLag": 21,
+            "topicLag": 9,
             "partitions": 6,
             "dormant": true
         }

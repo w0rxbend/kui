@@ -4,7 +4,7 @@ import { nameProblem } from "./CreateTopicDialog.jsx";
 import { describeDeletion, describePurge, toTopicQuery } from "./TopicsRoute.jsx";
 import { DEFAULT_TOPIC_QUERY } from "./TopicListPage.jsx";
 import { consequenceOf } from "./PlannedActionDialog.jsx";
-import { planPurge } from "./write.js";
+import { deleteTopics, planPurge } from "./write.js";
 
 function client(document: unknown): {
   api: KuiApiClient;
@@ -274,10 +274,97 @@ describe("the query the topic list sends", () => {
     expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, search: "orders" }).q).toBe("orders");
   });
 
-  it("always states showInternal, because the server's default is to exclude them", () => {
-    // The checkbox could not do anything while the page filtered locally: the server had already
-    // removed every internal topic before the page saw the list.
+  it("always states showInternal, and the Internal chip is what turns it on", () => {
+    // The old checkbox could not do anything while the page filtered locally: the server had
+    // already removed every internal topic before the page saw the list. The chip is now the only
+    // control that reaches this parameter, and this is the seam where it does.
     expect(toTopicQuery(DEFAULT_TOPIC_QUERY).showInternal).toBe(false);
-    expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, showInternal: true }).showInternal).toBe(true);
+    expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, facet: "internal" }).showInternal).toBe(true);
+    // And the two chips the cluster cannot apply do not quietly ask for internal topics either.
+    expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, facet: "compacted" }).showInternal).toBe(false);
+  });
+});
+
+/**
+ * The bulk paths, which are ADR-045's plan→token→confirm run once per topic.
+ *
+ * The rule worth a test is the one a loop makes easy to lose: a set can fail in the middle, and the
+ * failure of one topic must neither stop the rest nor be reported as the failure of all of them.
+ * The other is that a topic whose *plan* refuses is never confirmed — the token is the agreement,
+ * and a mutation without one is a different operation from the one anybody approved.
+ */
+describe("deleting a set of topics", () => {
+  /** A client that answers per path, and records the order it was asked in. */
+  function routed(answers: Readonly<Record<string, unknown>>): {
+    api: KuiApiClient;
+    calls: string[];
+  } {
+    const calls: string[] = [];
+    const call = async (path: string, init?: { params?: { path?: Record<string, string> } }) => {
+      const topic = init?.params?.path?.topicName ?? "";
+      const key = `${path}|${topic}`;
+      calls.push(key);
+      if (Object.hasOwn(answers, key)) return { ok: true, value: answers[key] };
+      return { ok: false, error: { kind: "unreachable", cause: `no answer for ${key}` } };
+    };
+    return {
+      api: { get: call, post: call, put: call, delete: call, patch: call, raw: {} } as unknown as KuiApiClient,
+      calls,
+    };
+  }
+
+  const plan = (topic: string, token: string | null) => ({
+    topic,
+    partitions: 3,
+    records: 10,
+    autoCreateEnabled: false,
+    warnings: [],
+    token,
+    expiresAt: "2026-09-06T00:05:00Z",
+  });
+
+  const PLAN = "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan";
+  const APPLY = "/api/v1/clusters/{clusterId}/topics/{topicName}";
+
+  it("names both halves when the set fails in the middle", async () => {
+    // `b` has no answer stubbed for its plan, so it refuses; `a` and `c` go through. "It failed"
+    // over three topics of which two were deleted is the least useful sentence this could produce.
+    const { api } = routed({
+      [`${PLAN}|a`]: plan("a", "tok-a"),
+      [`${APPLY}|a`]: plan("a", "tok-a"),
+      [`${PLAN}|c`]: plan("c", "tok-c"),
+      [`${APPLY}|c`]: plan("c", "tok-c"),
+    });
+    const outcome = await deleteTopics(api, "quickstart", ["a", "b", "c"]);
+    expect(outcome.done).toEqual(["a", "c"]);
+    expect(outcome.failed.map((one) => one.topic)).toEqual(["b"]);
+    expect(outcome.failed[0]?.reason).not.toBe("");
+  });
+
+  it("never confirms a topic whose plan withheld the token", async () => {
+    /*
+     * A read-only cluster answers exactly this way: it computes the plan so the operator can see
+     * what *would* happen, and issues no token. Sending the delete anyway would be applying an
+     * action the server declined to authorise, which is the property ADR-045's token exists for.
+     */
+    const { api, calls } = routed({ [`${PLAN}|a`]: plan("a", null) });
+    const outcome = await deleteTopics(api, "quickstart", ["a"]);
+    expect(outcome.done).toEqual([]);
+    expect(outcome.failed[0]?.reason).toMatch(/confirmation token/);
+    expect(calls).toEqual([`${PLAN}|a`]);
+  });
+
+  it("is two calls per topic and no more", async () => {
+    // Each of these reaches Kafka's controller. A selection fired at once is a page's worth of
+    // concurrent controller operations from a browser, which is how a bulk action becomes an
+    // outage — so the loop is sequential and this pins the shape of what it issues.
+    const { api, calls } = routed({
+      [`${PLAN}|a`]: plan("a", "tok-a"),
+      [`${APPLY}|a`]: plan("a", "tok-a"),
+      [`${PLAN}|b`]: plan("b", "tok-b"),
+      [`${APPLY}|b`]: plan("b", "tok-b"),
+    });
+    await deleteTopics(api, "quickstart", ["a", "b"]);
+    expect(calls).toEqual([`${PLAN}|a`, `${APPLY}|a`, `${PLAN}|b`, `${APPLY}|b`]);
   });
 });

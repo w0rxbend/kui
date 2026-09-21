@@ -8,9 +8,9 @@ import kui.testkit.KuiIOSuite
 
 /** That the key derivation function does what a password hash has to do.
   *
-  * Four properties, and each of them is a real failure that has shipped in real products: a hash that does not
-  * verify, a hash that verifies against the wrong password, a salt that is the same for everybody (which makes
-  * one cracked password crack every identical one), and a corrupt stored value that throws instead of
+  * Four properties, and each of them is a real failure that has shipped in real products: a hash that does
+  * not verify, a hash that verifies against the wrong password, a salt that is the same for everybody (which
+  * makes one cracked password crack every identical one), and a corrupt stored value that throws instead of
   * answering "no".
   */
 final class Pbkdf2PasswordHasherSuite extends KuiIOSuite {
@@ -44,6 +44,26 @@ final class Pbkdf2PasswordHasherSuite extends KuiIOSuite {
       assertNotEquals(first.hashBase64, second.hashBase64)
       // Both still verify: the salt is stored with the hash, so nothing depends on remembering it.
       assert(firstMatches)
+    }
+  }
+
+  test("the salt is as wide as the published parameter, not merely different every time") {
+    /*
+     * Ungated until now: `SaltBytes` 16 -> 1 left `./mill services.identity.__.test` at 79/79 green,
+     * because the case above only asks that two salts differ -- and a one-byte salt still differs about
+     * 255 times in 256. Width is the property that matters: it is what makes a precomputed table useless,
+     * and it is the parameter OWASP publishes alongside the iteration count this file already pins. A
+     * one-byte salt has 256 possible values, so one table per value cracks every password in the file.
+     */
+    for {
+      hasher <- Pbkdf2PasswordHasher.make[IO]
+      hashed <- hasher.hash(password)
+    } yield {
+      val salt = java.util.Base64.getUrlDecoder.decode(hashed.saltBase64)
+
+      assertEquals(salt.length, 16)
+      // The derived key too, so a suite that pins the salt cannot be read as pinning the whole shape.
+      assertEquals(java.util.Base64.getUrlDecoder.decode(hashed.hashBase64).length, 32)
     }
   }
 

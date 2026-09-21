@@ -1,0 +1,27 @@
+{
+  "events" : {
+    "status" : "ok",
+    "data" : {
+      "items" : [
+      ],
+      "total" : 0,
+      "openCount" : 0,
+      "unreadCount" : 0,
+      "lastReadAt" : null,
+      "evaluatedAt" : null,
+      "rules" : [
+        {
+          "rule" : "offline-partitions",
+          "category" : "partition",
+          "evaluation" : {
+            "status" : "unavailable",
+            "reason" : "STARTING",
+            "message" : "KUI has not finished reading this cluster yet",
+            "since" : null
+          }
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

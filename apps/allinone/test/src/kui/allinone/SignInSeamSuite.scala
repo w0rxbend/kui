@@ -27,8 +27,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   * The sign-in path crosses three seams, and every one of them has been a source of defects in this project:
   * the gateway's session middleware, the gateway-to-identity call with its signed, body-bound principal
   * (ADR-020 Amendment 1), and the identity service's own decision. Each half is unit-tested on its own and
-  * neither half's suite can see the seam. What is asserted below is only what a browser could observe:
-  * a status, a `Set-Cookie`, and what `GET /api/v1/auth/me` says afterwards.
+  * neither half's suite can see the seam. What is asserted below is only what a browser could observe: a
+  * status, a `Set-Cookie`, and what `GET /api/v1/auth/me` says afterwards.
   *
   * The all-in-one process is the right place for it because it is the shape that contains both sides
   * (ADR-005), and because the in-process transport is the one the gateway uses to reach the identity service
@@ -50,7 +50,8 @@ final class SignInSeamSuite extends KuiIOSuite {
           name = RoleName.unsafe("operators"),
           clusters = Set(ClusterId.unsafe("local")),
           subjects = List(Subject(Provider.Form, SubjectKind.Group, "platform", isRegex = false)),
-          permissions = List(RbacPolicy.allPermission(kui.security.rbac.Resource.Topic, Some(ResourcePattern.Everything)))
+          permissions =
+            List(RbacPolicy.allPermission(kui.security.rbac.Resource.Topic, Some(ResourcePattern.Everything)))
         )
       ),
       None

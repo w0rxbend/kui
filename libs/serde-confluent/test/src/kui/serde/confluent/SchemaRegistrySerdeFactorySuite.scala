@@ -55,7 +55,9 @@ final class SchemaRegistrySerdeFactorySuite extends KuiIOSuite {
 
   private val refusing: Backend[IO] =
     BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
-      .thenRespondF(_ => IO.raiseError[sttp.client4.Response[StubBody]](new java.net.ConnectException("refused")))
+      .thenRespondF(_ =>
+        IO.raiseError[sttp.client4.Response[StubBody]](new java.net.ConnectException("refused"))
+      )
 
   test("a registry that answers the probe with a 404 is a working registry") {
     // 404 for a subject nobody registered is the *healthy* answer: the registry replied.

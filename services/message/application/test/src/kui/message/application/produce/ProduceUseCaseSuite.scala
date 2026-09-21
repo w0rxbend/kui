@@ -12,13 +12,13 @@ import kui.security.audit.{MutationKind, MutationOutcome}
 
 /** Publishing a record: what lands, what is refused, and what is written down about both.
   *
-  * The cases that matter here are not "it produces a record" — that is the easy half and a broker test
-  * covers it. They are the three that quietly go wrong:
+  * The cases that matter here are not "it produces a record" — that is the easy half and a broker test covers
+  * it. They are the three that quietly go wrong:
   *
   *   - a tombstone must stay a tombstone all the way down, because turning one into an empty value breaks
   *     compaction for whoever relies on it and nothing on any screen would say so;
-  *   - a read-only cluster must be refused **before a producer exists**, which is only assertable because
-  *     the fake counts how many times one was asked for;
+  *   - a read-only cluster must be refused **before a producer exists**, which is only assertable because the
+  *     fake counts how many times one was asked for;
   *   - every attempt must leave exactly one audit record, refusals included, because a trail that only holds
   *     successes cannot answer the question it exists for.
   */
@@ -30,7 +30,8 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
       key: Option[String] = Some("k1"),
       value: Option[String] = Some("""{"id":1}"""),
       partition: Option[PartitionId] = None,
-      count: Option[Int] = None
+      count: Option[Int] = None,
+      headers: List[(String, Option[String])] = List("trace" -> Some("abc"))
   ): ProduceRequest =
     ProduceRequest
       .of(
@@ -39,7 +40,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
         partition = partition,
         key = key,
         value = value,
-        headers = List("trace" -> "abc"),
+        headers = headers,
         keySerde = None,
         valueSerde = None,
         keySerdeProperties = Map.empty,
@@ -90,6 +91,17 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
       assertEquals(written.head.value, None)
       assert(written.head.key.isDefined, "a tombstone still has a key; that is what it deletes")
     }
+  }
+
+  test("aHeaderWithNoValueIsProducedAsANullValueAndNotAsAnEmptyOne") {
+    // The same distinction as the tombstone test, one level down: a header explicitly marked "no value"
+    // must reach the producer as an absent payload, not `Array.emptyByteArray`, because that is what a
+    // consumer like Spring's dead-letter machinery checks for.
+    for {
+      (produce, producers, _, _) <- rig()
+      _ <- produce.produce(ProduceRig.Caller, requestOf(headers = List("trace" -> None)))
+      written <- producers.sent.get
+    } yield assertEquals(written.head.headers.map(_.value), List(None))
   }
 
   test("aRecordWithNoKeyIsNotARecordWithAnEmptyKey") {

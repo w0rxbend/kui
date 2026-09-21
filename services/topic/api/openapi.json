@@ -204,6 +204,128 @@
         }
       }
     },
+    "/internal/v1/clusters/{clusterId}/topics/statistics" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Cluster-wide topic totals: how many topics, partitions and bytes",
+        "description" : "Cluster-wide and unaffected by any list filter: the totals keep reading the whole cluster while the table below them shows a search result. Each sum is absent rather than partial — a scrape that could not describe a topic knows how many topics exist and not how many partitions they hold — and incompleteTopics says how many topics that was, so the screen can explain the gap.",
+        "operationId" : "topic.statistics",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicStatisticsResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/topics/names" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Every topic name on the cluster, unpaged",
+        "description" : "The drawer's topic tree is a fold over names, so it needs the names and none of the figures. Unpaged on purpose: a page of names would make the tree's counts depend on how far something had scrolled a list it never shows. Topics the scrape could not describe are included — they have no list row, they do exist, and a tree that omitted them would say a topic is gone.",
+        "operationId" : "topic.names",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicNamesResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/clusters/{clusterId}/topics/{topicName}" : {
       "get" : {
         "tags" : [
@@ -1405,6 +1527,32 @@
           },
           "partitionsTruncated" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "TopicNamesResponse" : {
+        "title" : "TopicNamesResponse",
+        "description" : "Every topic name on the cluster, for the drawer's tree; no counts and no paging",
+        "type" : "object",
+        "required" : [
+          "names"
+        ],
+        "properties" : {
+          "names" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "TopicStatisticsResponse" : {
+        "title" : "TopicStatisticsResponse",
+        "description" : "The topics list's cluster-wide statistics region",
+        "type" : "object",
+        "required" : [
+          "statistics"
+        ],
+        "properties" : {
+          "statistics" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },

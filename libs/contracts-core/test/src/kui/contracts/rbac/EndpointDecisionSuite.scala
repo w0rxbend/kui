@@ -74,8 +74,14 @@ final class EndpointDecisionSuite extends FunSuite {
     val fromGateway = List("api", "v1", "clusters", "local", "topics", "payments.orders")
     val fromService = List("internal", "v1", "clusters", "local", "topics", "payments.orders")
 
-    assertEquals(EndpointAuthorization.pathValue(readTopic, "topicName", fromGateway), Some("payments.orders"))
-    assertEquals(EndpointAuthorization.pathValue(readTopic, "topicName", fromService), Some("payments.orders"))
+    assertEquals(
+      EndpointAuthorization.pathValue(readTopic, "topicName", fromGateway),
+      Some("payments.orders")
+    )
+    assertEquals(
+      EndpointAuthorization.pathValue(readTopic, "topicName", fromService),
+      Some("payments.orders")
+    )
   }
 
   test("a base path in front of the public prefix does not shift the parameter either") {
@@ -89,6 +95,17 @@ final class EndpointDecisionSuite extends FunSuite {
 
   test("a request shorter than the endpoint's own path yields no name, and never a wrong one") {
     assertEquals(EndpointAuthorization.pathValue(readTopic, "topicName", List("topics")), None)
+  }
+
+  test("a short request that would still index into something yields no name rather than the wrong one") {
+    // The alignment is from the end, so a request one segment short slides every parameter left by one.
+    // `readTopic` declares six slots and this request carries five; aligning them anyway would read the
+    // topic name out of the slot the *cluster* id is in and authorize a call about `local` against a
+    // pattern for a topic. `None` is the only safe answer, and the caller treats it as a refusal.
+    val short = List("v1", "clusters", "local", "topics", "orders")
+
+    assertEquals(EndpointAuthorization.pathValue(readTopic, "topicName", short), None)
+    assertEquals(EndpointAuthorization.pathValue(readTopic, "clusterId", short), None)
   }
 
   // -- the decision -------------------------------------------------------------------------------
@@ -210,7 +227,8 @@ final class EndpointDecisionSuite extends FunSuite {
   }
 
   test("a list endpoint declares cluster scope, which is a declaration and not an absence") {
-    val list = undeclared.attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("topic.list"))
+    val list =
+      undeclared.attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("topic.list"))
 
     assertEquals(
       EndpointDecision.decide(

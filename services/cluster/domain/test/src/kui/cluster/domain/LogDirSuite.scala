@@ -81,7 +81,7 @@ final class LogDirSuite extends KuiSuite {
 
   test("totalBytesIsNoneWhenNoDirectoryReportedOne") {
     // The pre-3.3 broker case: KIP-827's size fields simply are not there.
-    val load = BrokerLoad(1, None, None, List(logDir("/data", totalBytes = None, usableBytes = None)))
+    val load = BrokerLoad(1, None, List(logDir("/data", totalBytes = None, usableBytes = None)))
 
     assertEquals(load.totalBytes, None)
     assertEquals(load.usableBytes, None)

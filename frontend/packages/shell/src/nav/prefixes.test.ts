@@ -1,0 +1,112 @@
+/**
+ * The fold from a topic name list to the drawer's tree.
+ *
+ * The interesting cases are all about size. The captures were taken against a cluster with 128
+ * topics; the clusters this product is installed on have thousands, and every rule here exists to
+ * keep the drawer the same shape on both.
+ */
+import { describe, expect, it } from "vitest";
+
+import { MAX_PREFIX_GROUPS, isInternalTopic, prefixes } from "./prefixes.js";
+
+describe("the topic tree's prefix groups", () => {
+  it("groups by the first segment and files the bookkeeping topics apart", () => {
+    expect(prefixes(["orders.a", "orders.b", "__consumer_offsets"])).toEqual([
+      { prefix: "orders.*", count: 2 },
+      { prefix: "internal", count: 1 },
+    ]);
+  });
+
+  it("puts every internal topic under one row, whatever its own prefix is", () => {
+    /* Otherwise `__consumer_offsets` and `__transaction_state` each claim a row above `orders.*`,
+     * which is two rows spent on the two topics an operator is least likely to want. */
+    expect(prefixes(["__consumer_offsets", "__transaction_state", "_schemas"])).toEqual([
+      { prefix: "internal", count: 3 },
+    ]);
+    expect(isInternalTopic("_schemas")).toBe(true);
+    expect(isInternalTopic("orders.payments")).toBe(false);
+  });
+
+  it("writes a topic with no prefix as itself rather than claiming children", () => {
+    /* `heartbeats.*` over a single topic called `heartbeats` sends whoever expands it looking for
+     * children that do not exist. */
+    expect(prefixes(["heartbeats"])).toEqual([{ prefix: "heartbeats", count: 1 }]);
+  });
+
+  it("splits on the dot alone", () => {
+    /* `orders-eu.payments` and `orders-us.payments` share three letters and nothing else, and a
+     * hyphen-splitting fold would file them together and claim a relationship between them. */
+    expect(prefixes(["orders-eu.payments", "orders-us.payments"])).toEqual([
+      { prefix: "orders-eu.*", count: 1 },
+      { prefix: "orders-us.*", count: 1 },
+    ]);
+  });
+
+  it("caps the rows and still counts everything that did not fit", () => {
+    /* The failure this module exists to prevent: four thousand topics that share no prefix must not
+     * become four thousand rows. They become the cap plus one `other` row, and the figures still
+     * add up — a tree whose children sum to less than the number on its parent is one somebody
+     * spends an afternoon reconciling. */
+    const names = Array.from({ length: 4000 }, (_, index) => `topic-${index}`);
+    const rows = prefixes(names);
+
+    expect(rows.length).toBe(MAX_PREFIX_GROUPS + 1);
+    expect(rows.at(-1)?.prefix).toBe("other");
+    expect(rows.reduce((sum, row) => sum + row.count, 0)).toBe(4000);
+  });
+
+  it("caps at the eight rows the drawer has room for, not at whatever the constant says", () => {
+    /* The case above is written `MAX_PREFIX_GROUPS + 1`, so it holds for any cap at all: the
+     * constant can be 800 and the whole package stays green, over a drawer eight hundred rows deep.
+     * Eight is a product decision — `SCREENS-V4.md` §2.2 draws eight, and the tree sits between the
+     * Topics row and the Consumers row with the storage meter still visible at the foot of a laptop
+     * screen — so the figure is asserted rather than rescaled. */
+    const names = Array.from({ length: 4000 }, (_, index) => `topic-${index}`);
+    const rows = prefixes(names);
+    expect(rows.length).toBe(9);
+    expect(rows.filter((row) => row.prefix !== "other").length).toBe(8);
+  });
+
+  it("keeps the largest groups, and orders ties the same way every time", () => {
+    /* A refetch that returns the names in another order must not reshuffle the rows under the
+     * reader's cursor — the same argument `navigation.ts` makes about entries that move. */
+    const names = ["b.1", "b.2", "b.3", "a.1", "a.2", "c.1"];
+    expect(prefixes(names, 2)).toEqual([
+      { prefix: "b.*", count: 3 },
+      { prefix: "a.*", count: 2 },
+      { prefix: "other", count: 1 },
+    ]);
+    expect(prefixes([...names].reverse(), 2)).toEqual(prefixes(names, 2));
+  });
+
+  /**
+   * The tie-break itself, which the case above cannot reach.
+   *
+   * Its three groups have counts 3, 2 and 1, so the comparator never gets as far as its second
+   * clause — deleting `|| a.prefix.localeCompare(b.prefix)` left all 497 cases
+   * `pnpm -C frontend test packages/shell` runs green, measured here. What it costs is the failure
+   * the fold's own header names: `Array.prototype.sort` is stable, so without the tie-break two
+   * groups of equal size keep the order their *first member* happened to arrive in, and the topic
+   * name index is a server-side listing with no ordering guarantee across refetches. The drawer
+   * would then reshuffle its own rows every thirty seconds, under the cursor of somebody reaching
+   * for one — which is the same failure `navigation.ts` sorts its entries to prevent one level up.
+   *
+   * So the fixture ties: two prefixes of two, arriving in the order that disagrees with the
+   * alphabet, and the same names reversed. Both must draw `a.*` first.
+   */
+  it("breaks a tie alphabetically, not by whichever name the server listed first", () => {
+    const zFirst = ["z.1", "z.2", "a.1", "a.2"];
+    const aFirst = ["a.1", "a.2", "z.1", "z.2"];
+    const expected = [
+      { prefix: "a.*", count: 2 },
+      { prefix: "z.*", count: 2 },
+    ];
+    expect(prefixes(zFirst)).toEqual(expected);
+    expect(prefixes(aFirst)).toEqual(expected);
+  });
+
+  it("has nothing to say about a cluster with no topics", () => {
+    /* No rows, and in particular no `other 0`: a group of nothing is not a summary of anything. */
+    expect(prefixes([])).toEqual([]);
+  });
+});

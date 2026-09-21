@@ -21,7 +21,8 @@ import kui.cluster.application.{
   ClusterRegistry,
   ClusterService,
   ClusterTopologyUseCase,
-  ClusterWriteUseCase
+  ClusterWriteUseCase,
+  UiSettingsUseCase
 }
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
 import kui.contracts.capability.ServiceCapabilities
@@ -91,6 +92,7 @@ object ClusterApi {
       brokers: BrokerDetailUseCase[F],
       write: ClusterWriteUseCase[F],
       probe: ClusterProbeUseCase[F],
+      uiSettings: UiSettingsUseCase[F],
       capabilities: CapabilityReportUseCase[F],
       readiness: List[ReadinessCheck[F]],
       principals: PrincipalCodec[F],
@@ -124,6 +126,7 @@ object ClusterApi {
         guard,
         ClusterWriteRoutes.permissionFrom(rbac)
       ) ++
+      UiSettingsRoutes[F](uiSettings, principals, rejections, logger, guard) ++
       ProfileRoutes[F](registry, principals, rejections, telemetry, logger, guard)
 
   /** The cross-cutting chain, outermost first, exactly as `libs/http`'s server wants it.

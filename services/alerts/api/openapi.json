@@ -1,0 +1,589 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI Alerts service",
+    "version" : "1.0.0"
+  },
+  "paths" : {
+    "/internal/v1/clusters/{clusterId}/alerts/events" : {
+      "get" : {
+        "tags" : [
+          "alerts"
+        ],
+        "summary" : "What KUI has noticed about this cluster",
+        "description" : "Newest first, resolved events included: the design's card draws five rows of which two are resolved. openCount and unreadCount are counted over the whole store rather than over the page. Each rule carries its own section, so a rule whose facts could not be read says so instead of contributing a zero, and one dead rule costs one row rather than the document.",
+        "operationId" : "alerts.events",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "limit",
+            "in" : "query",
+            "description" : "How many events to return, 1 to 200",
+            "required" : false,
+            "schema" : {
+              "default" : 50,
+              "type" : "integer",
+              "format" : "int32",
+              "minimum" : 1,
+              "maximum" : 200
+            }
+          },
+          {
+            "name" : "markRead",
+            "in" : "query",
+            "description" : "When true, this principal's read marker moves to now after unreadCount has been computed, so the caller still learns how many it had not seen. Default false, so a card polling the feed does not clear somebody's bell",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AlertFeedResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: query parameter limit, Invalid value for: query parameter markRead",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/alerts/events/{eventId}/acknowledgement" : {
+      "post" : {
+        "tags" : [
+          "alerts"
+        ],
+        "summary" : "Mark one alert event acknowledged",
+        "description" : "Part of the alerts.event.acknowledge flow. This call changes nothing. The event stays in the feed with the name of whoever acknowledged it, which is what an incident review reads. An event that is already closed, and an id that names no event, both answer 409 KUI-INVALID-STATE: from the caller's side they are one fact, and neither message says whether the id ever existed.",
+        "operationId" : "alerts.acknowledge",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "eventId",
+            "in" : "path",
+            "description" : "The alert event's id, as the feed reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/alerts/stream" : {
+      "get" : {
+        "tags" : [
+          "alerts"
+        ],
+        "summary" : "One event whenever this cluster's alert feed changes",
+        "description" : "Named events: 'alerts' carries {cluster, openCount, at}; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope. A frame carries the open count and not the events, so one subscriber's unread count never reaches another's socket and a dropped frame costs a fetch rather than a stale screen.",
+        "operationId" : "alerts.stream",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live" : {
+      "get" : {
+        "description" : "Whether the process should be restarted. Never depends on an upstream.",
+        "operationId" : "health.live",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LivenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready" : {
+      "get" : {
+        "description" : "Whether the service can serve requests now, and which checks say otherwise.",
+        "operationId" : "health.ready",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities" : {
+      "get" : {
+        "description" : "What this service can currently do, per cluster.",
+        "operationId" : "capabilities",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceCapabilities"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AcknowledgementDto" : {
+        "title" : "AcknowledgementDto",
+        "description" : "The event as it now stands, and the cluster's open count after the acknowledgement",
+        "type" : "object",
+        "required" : [
+          "event",
+          "openCount"
+        ],
+        "properties" : {
+          "event" : {
+            "$ref" : "#/components/schemas/AlertEventDto"
+          },
+          "openCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "AlertEventDto" : {
+        "title" : "AlertEventDto",
+        "description" : "One row of the alerts feed. `severity` chooses the tone and `category` chooses the glyph; both derived values travel so the bell, the card and the panel cannot map them differently. `openedAt` is when KUI noticed, not when the cluster changed",
+        "type" : "object",
+        "required" : [
+          "id",
+          "severity",
+          "tone",
+          "category",
+          "glyph",
+          "openedAt",
+          "lastSeenAt",
+          "title",
+          "detail"
+        ],
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "tone" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "glyph" : {
+            "type" : "string"
+          },
+          "openedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastSeenAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "resolution" : {
+            "$ref" : "#/components/schemas/AlertResolutionDto"
+          }
+        }
+      },
+      "AlertFeedResponse" : {
+        "title" : "AlertFeedResponse",
+        "description" : "What KUI has noticed about this cluster, or the reason it cannot say",
+        "type" : "object",
+        "required" : [
+          "events"
+        ],
+        "properties" : {
+          "events" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "AlertResolutionDto" : {
+        "title" : "AlertResolutionDto",
+        "description" : "How an event closed: `cleared` means the condition stopped, `acknowledged` means a person said they know. `by` is set only for an acknowledgement",
+        "type" : "object",
+        "required" : [
+          "at",
+          "kind"
+        ],
+        "properties" : {
+          "at" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "by" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CheckResult" : {
+        "title" : "CheckResult",
+        "description" : "One readiness check and its result",
+        "type" : "object",
+        "required" : [
+          "name",
+          "healthy"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "healthy" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterCapability" : {
+        "title" : "ClusterCapability",
+        "type" : "object",
+        "required" : [
+          "configured",
+          "status"
+        ],
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "features" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "LivenessReport" : {
+        "title" : "LivenessReport",
+        "description" : "Whether the process should be restarted",
+        "type" : "object",
+        "required" : [
+          "alive",
+          "at"
+        ],
+        "properties" : {
+          "alive" : {
+            "type" : "boolean"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "Map_ClusterId_ClusterCapability" : {
+        "title" : "Map_ClusterId_ClusterCapability",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/ClusterCapability"
+        }
+      },
+      "ReadinessReport" : {
+        "title" : "ReadinessReport",
+        "description" : "Whether the service can serve requests now",
+        "type" : "object",
+        "required" : [
+          "ready",
+          "at"
+        ],
+        "properties" : {
+          "ready" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            }
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ServiceCapabilities" : {
+        "title" : "ServiceCapabilities",
+        "type" : "object",
+        "required" : [
+          "service",
+          "clusters"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "clusters" : {
+            "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      }
+    }
+  }
+}

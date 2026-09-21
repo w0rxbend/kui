@@ -16,12 +16,11 @@ import sttp.tapir.server.stub4.TapirStubInterpreter
 
 import kui.cache.{Snapshot, SnapshotCell, SnapshotStatus}
 import kui.http.principal.{PrincipalVerification, RbacGuard}
-import kui.security.Principal
 import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, RoleName, Secret, ServiceId, TopicName, UserName}
 import kui.observability.Telemetry
-import kui.security.*
 import kui.security.rbac.{ClusterFlags, RbacPolicy}
+import kui.security.{Principal, *}
 import kui.testkit.fakes.FakeStructuredLogger
 import kui.topic.application.*
 import kui.topic.domain.{
@@ -71,8 +70,8 @@ object TopicTestServer {
   /** `notBefore` is the epoch, not a plausible date.
     *
     * One suite runs its case under `TestControl`, whose virtual clock starts at the epoch, and a key that
-    * became active in 2020 is a key with a `notBefore` in the future when "now" is 1970 — which fails
-    * signing with a message about key rotation that has nothing to do with what is being tested.
+    * became active in 2020 is a key with a `notBefore` in the future when "now" is 1970 — which fails signing
+    * with a message about key rotation that has nothing to do with what is being tested.
     */
   private val Key: SigningKey = SigningKey("test-1", Secret(KeyMaterial), Instant.EPOCH)
 
@@ -173,8 +172,8 @@ object TopicTestServer {
   /** Every administration route, answering whatever the fixture was built with.
     *
     * One stub for all six because they share a use case, and because what these suites assert about them is
-    * routing, decoding and the error envelope — not the Kafka behaviour, which is the application layer's
-    * own suites' subject.
+    * routing, decoding and the error envelope — not the Kafka behaviour, which is the application layer's own
+    * suites' subject.
     */
   final class StubAdmin(
       created: Either[KuiError, CreatedTopic],
@@ -231,8 +230,9 @@ object TopicTestServer {
   /** The whole service, ready to be spoken to. */
   def resource(
       snapshot: Snapshot[TopicSnapshot],
-      detail: Either[TopicError, Fresh[TopicDetail]] =
-        Left(TopicError.Unreachable("no detail configured in this fixture", retryable = false)),
+      detail: Either[TopicError, Fresh[TopicDetail]] = Left(
+        TopicError.Unreachable("no detail configured in this fixture", retryable = false)
+      ),
       config: Either[TopicError, TopicConfigView] = Right(TopicConfigView.of(Nil)),
       capabilities: List[(ClusterId, TopicCapability)] = Nil,
       refreshBlocks: Option[Deferred[IO, Unit]] = None,

@@ -16,8 +16,8 @@ import kui.cluster.application.{
 import kui.cluster.domain.StoreHealth
 import kui.contracts.capability.{CapabilityState, ServiceCapabilities}
 import kui.gateway.application.capability.{CapabilityFold, CapabilityInputs, ReadinessSignal}
-import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.ClusterId
+import kui.kernel.error.{InfrastructureError, KuiError}
 
 /** The capability seam: what the cluster service says about a cluster, and what the gateway makes of it.
   *

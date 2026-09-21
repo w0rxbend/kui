@@ -141,7 +141,19 @@ object SessionMiddleware {
     * prefix: they are called by an orchestrator on a timer, forever, and have no user behind them.
     */
   def needsSession(request: ServerRequest, basePath: String): Boolean =
-    request.uri.path.toList.filter(_.nonEmpty).drop(BasePath.segments(basePath).size) match {
+    needsSession(request.uri.path.toList.filter(_.nonEmpty), basePath)
+
+  /** The same decision over a path that has already been split into segments.
+    *
+    * It exists so that the rule can be checked against the *route table* rather than against one request at a
+    * time, which is what makes the CSRF check's `session.fold(PrincipalKind.Anonymous)(...)` safe: that fold
+    * is a fail-open the moment the gateway serves a non-safe method outside the set of paths that mint a
+    * session, and whether it does is a property of the endpoint list. `EveryMutatingRouteMintsASession` in
+    * `SessionMiddlewareSuite` is the case, and it needs this shape because a `ServerRequest` cannot be
+    * conjured out of an endpoint's path template.
+    */
+  def needsSession(pathSegments: List[String], basePath: String): Boolean =
+    pathSegments.drop(BasePath.segments(basePath).size) match {
       case api if api.startsWith(ApiSegments) => !api.drop(ApiSegments.size).startsWith(List("health"))
       case _ => false
     }
@@ -323,7 +335,13 @@ object SessionMiddleware {
         response.headers :+ Header("Set-Cookie", setCookie(session, basePath, secure).toString)
       )
 
-  private def alreadyCarriesSessionCookie[B](
+  /** Whether the route already put a session cookie on this response.
+    *
+    * `private[auth]` rather than `private` so that the rule above it can be asserted directly: this is the
+    * whole session-fixation defence on the login path, and the only route that sets its own cookie is one
+    * that needs an identity service to reach, so a case going through a server could not exercise it.
+    */
+  private[auth] def alreadyCarriesSessionCookie[B](
       response: sttp.tapir.server.model.ServerResponse[B]
   ): Boolean =
     response.headers.exists(header =>
