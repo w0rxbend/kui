@@ -22,6 +22,14 @@
  * make the seam between them a matter of padding rather than of layout. */
 
 .kui-frame {
+  /* Pin the viewport frame to the viewport. The content column below is the one intentional
+   * scroller; without a fixed containing block, Chromium still includes a long descendant's
+   * visual overflow in the root document even though both the frame and content column clip it.
+   * A 100-record message page then leaves a second, blank document scrollbar after the pager.
+   * Fixing the frame also makes scroll chaining stop here instead of moving the whole application
+   * into that invisible tail. */
+  position: fixed;
+  inset: 0;
   display: grid;
   /* Each column is sized from the token that column's own component reads, so there is exactly one
    * number per measurement. A literal `182px` here would be a second copy that drifts the first

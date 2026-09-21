@@ -203,6 +203,42 @@ test.describe("the typed predicates", () => {
 });
 
 test.describe("offset cursor pagination", () => {
+  test("a full message page scrolls inside the frame without creating a blank document tail", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1760, height: 900 });
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/connect.file.lines/messages?seekTo=beginning&limit=100`,
+    );
+
+    const browse = page.waitForResponse((response) =>
+      response.url().includes("/messages/stream"),
+    );
+    await page.getByRole("button", { name: /^read$/i }).first().click();
+    expect((await browse).ok()).toBe(true);
+    await expect(page.locator(".kui-record")).toHaveCount(100, { timeout: 30_000 });
+
+    const geometry = await page.evaluate(() => {
+      const content = document.querySelector<HTMLElement>(".kui-frame__content");
+      if (content === null) throw new Error("the application frame has no content scroller");
+      content.scrollTop = content.scrollHeight;
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+      return {
+        rootScrollTop: window.scrollY,
+        rootHeight: document.documentElement.scrollHeight,
+        viewportHeight: window.innerHeight,
+        contentScrollTop: content.scrollTop,
+        contentMaximum: content.scrollHeight - content.clientHeight,
+      };
+    });
+
+    expect(geometry.rootScrollTop).toBe(0);
+    expect(geometry.rootHeight).toBe(geometry.viewportHeight);
+    expect(geometry.contentScrollTop).toBe(geometry.contentMaximum);
+    await expect(page.getByRole("navigation", { name: "Message offset pages" })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Produce message" })).toBeInViewport();
+  });
+
   test("pages cache backwards navigation and infinite scroll preloads one continuation at a time", async ({
     page,
   }) => {
