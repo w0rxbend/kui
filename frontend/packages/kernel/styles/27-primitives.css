@@ -594,6 +594,9 @@
   border-radius: var(--kui-radius-xs);
   background-color: transparent;
   color: transparent;
+  /* The native input occupies this same hit area. This span is only its drawing, so allowing it to
+   * receive pointer events makes the visible box intercept clicks intended for the real control. */
+  pointer-events: none;
   transition:
     background-color var(--kui-duration-fast) ease,
     border-color var(--kui-duration-fast) ease;
