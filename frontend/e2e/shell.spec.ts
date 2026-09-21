@@ -99,7 +99,7 @@ test.describe("the shell", () => {
     await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
     await page.goto("/ui/settings");
 
-    const card = page.locator(".kui-card").filter({ hasText: "Message browsing" });
+    const card = page.locator(".kui-panel").filter({ hasText: "Message browsing" });
     const pageSize = card.getByRole("combobox", { name: "Default page size" });
     const mode = card.getByRole("combobox", { name: "Default mode" });
     await expect(pageSize).toBeVisible();
@@ -148,13 +148,16 @@ test.describe("the shell", () => {
         request.url().includes(`/topics/connect.file.lines/messages/stream`) &&
         request.method() === "GET",
     );
-    await page.getByRole("button", { name: "Read", exact: true }).click();
+    await page
+      .locator(".kui-browse-bar")
+      .getByRole("button", { name: "Read", exact: true })
+      .click();
     const request = await browse;
     expect(new URL(request.url()).searchParams.get("limit")).toBe(targetSize.split(" ")[0]);
 
     /* Restore the operator's settings so this verification leaves the manual stack as it found it. */
     await page.goto("/ui/settings");
-    const restoredCard = page.locator(".kui-card").filter({ hasText: "Message browsing" });
+    const restoredCard = page.locator(".kui-panel").filter({ hasText: "Message browsing" });
     const restoredSize = restoredCard.getByRole("combobox", { name: "Default page size" });
     const restoreSize = page.waitForResponse(
       (response) =>
