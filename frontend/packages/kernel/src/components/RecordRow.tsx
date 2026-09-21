@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
+import { createSignal, createUniqueId, For, lazy, Loading, onCleanup, Show } from "solid-js";
 import { Button } from "./Button.jsx";
 import { HeaderChip } from "./HeaderChip.jsx";
 import { Icon } from "./Icon.jsx";
@@ -10,6 +10,14 @@ import {
   relativeTime,
   type KafkaRecord,
 } from "./record.js";
+import {
+  recordHeadersText,
+  recordKeyText,
+  recordMessageText,
+  recordValueText,
+} from "./recordClipboard.js";
+
+const JsonTree = lazy(() => import("./JsonTree.jsx"));
 
 /**
  * One Kafka record in the message list, and its expansion.
@@ -28,11 +36,12 @@ import {
  * Building this on `DataTable` would have made an expanding row into a `<tr>` that grows, which is
  * where the layout fights start.
  *
- * ## The whole row is the control
+ * ## The summary is the expansion control
  *
- * Not the chevron, and not the offset. The summary is a real `<button>` spanning the card, with
- * `aria-expanded` and `aria-controls`, so it is in the tab order, answers to Enter and Space, and
- * announces its state — none of which has to be written here because it is a button.
+ * Not the chevron, and not the offset. The summary is a real `<button>` spanning all record
+ * content, with `aria-expanded` and `aria-controls`, so it is in the tab order, answers to Enter
+ * and Space, and announces its state. The copy action is its sibling rather than a button nested
+ * inside it: copying a collapsed message must not also open it, and nested buttons are invalid.
  *
  * A **visible chevron is required as well**. The two halves are separate requirements and this
  * project has shipped each without the other: a row that expands with no affordance is a row
@@ -68,11 +77,45 @@ export interface RecordRowProps {
 
 export function RecordRow(props: RecordRowProps): JSX.Element {
   const [expanded, setExpanded] = createSignal(props.initiallyExpanded === true);
+  const [copyStatus, setCopyStatus] = createSignal("");
   const bodyId = createUniqueId();
+  let clearStatusTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
 
-  const isTombstone = () => props.record.value.kind === "tombstone" || props.record.key === null;
+  onCleanup(() => {
+    if (clearStatusTimer !== undefined) globalThis.clearTimeout(clearStatusTimer);
+  });
+
   const isJson = () => props.record.value.kind === "json";
   const failed = () => props.record.value.kind === "undecodable";
+  const valueUnavailable = () =>
+    props.record.value.kind === "large" && props.record.value.text === undefined;
+
+  async function copy(text: string, successMessage: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(successMessage);
+    } catch {
+      setCopyStatus("Copy failed — clipboard permission was denied");
+    }
+    if (clearStatusTimer !== undefined) globalThis.clearTimeout(clearStatusTimer);
+    clearStatusTimer = globalThis.setTimeout(() => setCopyStatus(""), 2000);
+  }
+
+  const copyPrimary = (): void => {
+    try {
+      if (expanded()) {
+        if (valueUnavailable()) return;
+        void copy(recordValueText(props.record.value), "Value copied");
+      } else {
+        void copy(
+          recordMessageText(props.record),
+          valueUnavailable() ? "Message metadata copied" : "Message copied",
+        );
+      }
+    } catch {
+      setCopyStatus("Copy failed — the message could not be prepared");
+    }
+  };
 
   return (
     <li
@@ -86,15 +129,16 @@ export function RecordRow(props: RecordRowProps): JSX.Element {
       ]}
       data-testid={props.testId}
     >
-      <button
-        type="button"
-        class="kui-record__summary"
-        // The string, not the boolean: see the note in DataTable. `aria-expanded` absent means
-        // "this is not an expandable thing at all", which is the opposite of what a closed row is.
-        aria-expanded={expanded() ? "true" : "false"}
-        aria-controls={bodyId}
-        onClick={() => void setExpanded((open) => !open)}
-      >
+      <div class="kui-record__head">
+        <button
+          type="button"
+          class="kui-record__summary"
+          // The string, not the boolean: see the note in DataTable. `aria-expanded` absent means
+          // "this is not an expandable thing at all", which is the opposite of what a closed row is.
+          aria-expanded={expanded() ? "true" : "false"}
+          aria-controls={bodyId}
+          onClick={() => void setExpanded((open) => !open)}
+        >
         <span class="kui-record__offset">
           <span class="kui-record__hash" aria-hidden="true">
             #
@@ -146,11 +190,41 @@ export function RecordRow(props: RecordRowProps): JSX.Element {
 
         {/* Decoration. The button above it already announces expanded or collapsed; a chevron that
             was also in the accessibility tree would say it twice, in pictures. */}
-        <Icon name="chevron-down" class="kui-record__chevron" />
-      </button>
+          <Icon name="chevron-down" class="kui-record__chevron" />
+        </button>
+
+        <span class="kui-record__copy-status" role="status" aria-live="polite">
+          {copyStatus()}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="copy"
+          class="kui-record__copy-primary"
+          onClick={copyPrimary}
+          {...(expanded() && valueUnavailable()
+            ? {
+                disabled: true,
+                disabledReason: "Value was not retained because the session reached its memory limit.",
+              }
+            : {})}
+        >
+          {expanded()
+            ? valueUnavailable()
+              ? "Value not retained"
+              : "Copy value"
+            : valueUnavailable()
+              ? "Copy message metadata"
+              : "Copy message"}
+        </Button>
+      </div>
 
       <Show when={expanded()}>
-        <RecordExpansion id={bodyId} record={props.record} tombstone={isTombstone()} />
+        <RecordExpansion
+          id={bodyId}
+          record={props.record}
+          onCopy={(text, successMessage) => void copy(text, successMessage)}
+        />
       </Show>
     </li>
   );
@@ -166,98 +240,29 @@ export function RecordRow(props: RecordRowProps): JSX.Element {
 function RecordExpansion(props: {
   readonly id: string;
   readonly record: KafkaRecord;
-  readonly tombstone: boolean;
+  readonly onCopy: (text: string, successMessage: string) => void;
 }): JSX.Element {
-  const [copyStatus, setCopyStatus] = createSignal("");
-  let clearStatusTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
-
-  onCleanup(() => {
-    if (clearStatusTimer !== undefined) globalThis.clearTimeout(clearStatusTimer);
-  });
-
-  const headerData = () => props.record.headers.map((header) => ({ ...header }));
-
-  const valueData = (): unknown => {
-    const value = props.record.value;
-    if (value.kind === "json") {
-      try {
-        return JSON.parse(value.text) as unknown;
-      } catch {
-        return value.text;
-      }
-    }
-    if (value.kind === "text") return value.text;
-    if (value.kind === "tombstone") return null;
-    if (value.kind === "large") return { unavailable: true, bytes: value.bytes };
-    return {
-      undecodable: true,
-      reason: value.reason,
-      ...(value.hex === undefined ? {} : { hex: value.hex }),
-    };
-  };
-
-  const completeRecord = () => ({
-    offset: props.record.offset,
-    partition: props.record.partition,
-    key: props.record.key,
-    timestamp: props.record.timestamp,
-    ...(props.record.timestampType === undefined
-      ? {}
-      : { timestampType: props.record.timestampType }),
-    headers: headerData(),
-    value: valueData(),
-    ...(props.record.schema === undefined ? {} : { schema: props.record.schema }),
-  });
-
-  async function copy(text: string, successMessage: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyStatus(successMessage);
-    } catch {
-      setCopyStatus("Copy failed — clipboard permission was denied");
-    }
-    if (clearStatusTimer !== undefined) globalThis.clearTimeout(clearStatusTimer);
-    clearStatusTimer = globalThis.setTimeout(() => setCopyStatus(""), 2000);
-  }
-
   return (
     <div id={props.id} class="kui-record__body">
-      <div class="kui-record__copy-toolbar" aria-label="Copy record data">
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="copy"
-          onClick={() => void copy(JSON.stringify(headerData(), null, 2), "Headers copied")}
-        >
-          Copy headers
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="copy"
-          onClick={() => void copy(prettyValue(props.record.value), "Value copied")}
-        >
-          Copy value
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="copy"
-          onClick={() => void copy(JSON.stringify(completeRecord(), null, 2), "Record copied")}
-        >
-          Copy all
-        </Button>
-        <span class="kui-record__copy-status" role="status" aria-live="polite">
-          {copyStatus()}
-        </span>
-      </div>
-
       <dl class="kui-record__facts">
         <Fact label="OFFSET" mono>
           {formatOffset(props.record.offset)}
         </Fact>
         <Fact label="PARTITION">{String(props.record.partition)}</Fact>
-        <Fact label="KEY" mono>
+        <Fact
+          label="KEY"
+          mono
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="copy"
+              onClick={() => props.onCopy(recordKeyText(props.record), "Key copied")}
+            >
+              Copy key
+            </Button>
+          }
+        >
           {props.record.key ?? "— (tombstone)"}
         </Fact>
         <Fact label="TIMESTAMP">
@@ -281,7 +286,17 @@ function RecordExpansion(props: {
       <section class="kui-record__section">
         {/* The label stays even when there are no headers. Dropping it entirely makes the reader
             wonder whether the product looked. */}
-        <h4 class="kui-record__section-label">HEADERS</h4>
+        <div class="kui-record__section-head">
+          <h4 class="kui-record__section-label">HEADERS</h4>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="copy"
+            onClick={() => props.onCopy(recordHeadersText(props.record), "Headers copied")}
+          >
+            Copy headers
+          </Button>
+        </div>
         <Show
           when={props.record.headers.length > 0}
           fallback={<p class="kui-record__none">— none</p>}
@@ -305,32 +320,49 @@ function RecordExpansion(props: {
       <section class="kui-record__section">
         <h4 class="kui-record__section-label">VALUE</h4>
         <Show
-          when={props.record.value.kind === "undecodable" ? props.record.value : null}
+          when={props.record.value.kind === "json" ? props.record.value.text : null}
           fallback={
-            // Scrolls vertically inside itself past its maximum height, and never horizontally:
-            // long strings wrap. A horizontal scrollbar inside a vertical list means the reader
-            // has to scroll two axes to read one payload.
-            <pre class="kui-record__payload" tabindex="0">
-              {prettyValue(props.record.value)}
-            </pre>
+            <Show
+              when={props.record.value.kind === "undecodable" ? props.record.value : null}
+              fallback={
+                // Scrolls vertically inside itself past its maximum height, and never horizontally:
+                // long strings wrap. A horizontal scrollbar inside a vertical list means the reader
+                // has to scroll two axes to read one payload.
+                <pre class="kui-record__payload" tabindex="0">
+                  {prettyValue(props.record.value)}
+                </pre>
+              }
+            >
+              {(value) => (
+                <div class="kui-record__decode-error">
+                  <p class="kui-record__decode-reason">{value().reason}</p>
+                  <Show when={value().hex}>
+                    {(hex) => (
+                      <>
+                        {/* The raw bytes are the only thing left that is definitely true, so they are
+                            offered rather than hidden behind the error. */}
+                        <p class="kui-record__section-label">RAW BYTES</p>
+                        <pre class="kui-record__payload" tabindex="0">
+                          {hex()}
+                        </pre>
+                      </>
+                    )}
+                  </Show>
+                </div>
+              )}
+            </Show>
           }
         >
-          {(value) => (
-            <div class="kui-record__decode-error">
-              <p class="kui-record__decode-reason">{value().reason}</p>
-              <Show when={value().hex}>
-                {(hex) => (
-                  <>
-                    {/* The raw bytes are the only thing left that is definitely true, so they are
-                        offered rather than hidden behind the error. */}
-                    <p class="kui-record__section-label">RAW BYTES</p>
-                    <pre class="kui-record__payload" tabindex="0">
-                      {hex()}
-                    </pre>
-                  </>
-                )}
-              </Show>
-            </div>
+          {(text) => (
+            <Loading
+              fallback={
+                <div class="kui-record__payload kui-record__payload--loading" aria-busy="true">
+                  Loading JSON viewer…
+                </div>
+              }
+            >
+              <JsonTree text={text()} />
+            </Loading>
           )}
         </Show>
       </section>
@@ -343,6 +375,7 @@ function RecordExpansion(props: {
 function Fact(props: {
   readonly label: string;
   readonly mono?: boolean;
+  readonly action?: JSX.Element;
   readonly children: JSX.Element;
 }): JSX.Element {
   return (
@@ -350,8 +383,17 @@ function Fact(props: {
       {/* Written upper-case in the source rather than transformed from mixed case, so a screen
           reader is not handed a string it may choose to spell out letter by letter. */}
       <dt class="kui-record__fact-label">{props.label}</dt>
-      <dd class={["kui-record__fact-value", { "kui-record__fact-value--mono": props.mono === true }]}>
-        {props.children}
+      <dd
+        class={[
+          "kui-record__fact-value",
+          {
+            "kui-record__fact-value--mono": props.mono === true,
+            "kui-record__fact-value--action": props.action !== undefined,
+          },
+        ]}
+      >
+        <span class="kui-record__fact-content">{props.children}</span>
+        {props.action}
       </dd>
     </div>
   );

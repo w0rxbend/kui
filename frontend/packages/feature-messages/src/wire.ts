@@ -45,6 +45,12 @@ const PAYLOAD_KIND = {
 export const LARGE_VALUE_BYTES = 256 * 1024;
 
 /**
+ * Largest value kept solely for an explicit copy action. The session applies a second aggregate
+ * budget; this per-record ceiling prevents one dishonest or unusually large frame owning it all.
+ */
+export const MAX_RETAINED_VALUE_BYTES = 1024 * 1024;
+
+/**
  * Validates one parsed `message` frame before the typed mapper sees it.
  *
  * OpenAPI types describe trusted callers at compile time; an SSE frame is untrusted runtime data.
@@ -222,7 +228,16 @@ function valueOf(dto: MessageDto): RecordValue {
   }
 
   if (dto.value.kind === PAYLOAD_KIND.absent) return { kind: "tombstone" };
-  if (dto.valueSize > LARGE_VALUE_BYTES) return { kind: "large", bytes: dto.valueSize };
+  const actualBytes = byteLength(dto.value.text);
+  const effectiveBytes = Math.max(dto.valueSize, actualBytes);
+  if (effectiveBytes > LARGE_VALUE_BYTES) {
+    return {
+      kind: "large",
+      bytes: effectiveBytes,
+      ...(actualBytes <= MAX_RETAINED_VALUE_BYTES ? { text: dto.value.text } : {}),
+      sourceKind: dto.value.kind === PAYLOAD_KIND.json ? "json" : "text",
+    };
+  }
   if (dto.value.kind === PAYLOAD_KIND.json) return { kind: "json", text: dto.value.text };
   // Binary and every kind this build does not know: plain text. See PAYLOAD_KIND.
   return { kind: "text", text: dto.value.text };
@@ -317,10 +332,8 @@ function schemaOf(
  * operator pointed at — a filter checking `record.keyAsText == ""` would come back matched for a
  * record whose key is genuinely absent.
  *
- * A value the browser declined to preview (`large`) or could not decode (`undecodable`) has no text
- * to give, and the preview is honest about that by sending an empty string with the *real* declared
- * size where one is known. A filter tried against such a record answers about the record as the
- * browser has it, which is the only thing anybody here can promise.
+ * A value the browser declined to preview (`large`) retains its text for copy and filter preview;
+ * not handing it to layout is the performance boundary. An undecodable value has no text to give.
  */
 export function toDto(record: KafkaRecord): MessageDto {
   const value = valueTextOf(record.value);
@@ -365,8 +378,8 @@ export function toDto(record: KafkaRecord): MessageDto {
  * The value as the filter will see it, and the size to declare for it.
  *
  * A tombstone is `null` and not `""` — the whole point of the kind. A payload that was too large to
- * preview or failed to decode has no text on this side, so it is sent as an empty string with its
- * true size, which is the honest statement of "the browser is holding no text for this".
+ * preview keeps its text but not a rendered DOM representation. A payload that failed to decode
+ * has no text on this side, so it is sent as an empty string.
  */
 function valueTextOf(value: RecordValue): {
   readonly kind: string;
@@ -381,7 +394,11 @@ function valueTextOf(value: RecordValue): {
     case "tombstone":
       return { kind: PAYLOAD_KIND.absent, text: "" };
     case "large":
-      return { kind: PAYLOAD_KIND.text, text: "", bytes: value.bytes };
+      return {
+        kind: value.sourceKind === "json" ? PAYLOAD_KIND.json : PAYLOAD_KIND.text,
+        text: value.text ?? "",
+        bytes: value.bytes,
+      };
     case "undecodable":
       return { kind: PAYLOAD_KIND.binary, text: value.hex ?? "" };
   }

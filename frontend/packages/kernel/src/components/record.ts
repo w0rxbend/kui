@@ -28,8 +28,16 @@ export type RecordValue =
    * compacted topic records a deletion — and it is not an error.
    */
   | { readonly kind: "tombstone" }
-  /** Too large to preview inline. The size is shown; the payload is fetched on demand. */
-  | { readonly kind: "large"; readonly bytes: number }
+  /**
+   * Too large to preview inline. The wire has already delivered the payload, so it is retained for
+   * an explicit copy action without being handed to layout. Older fixtures may omit it.
+   */
+  | {
+      readonly kind: "large";
+      readonly bytes: number;
+      readonly text?: string;
+      readonly sourceKind?: "json" | "text";
+    }
   /**
    * The deserializer failed. The reason is shown in full, because "Avro schema 42 not found" is
    * the whole diagnosis, and the expansion offers the raw bytes as hex.
@@ -206,7 +214,9 @@ export function previewValue(value: RecordValue): string {
     case "tombstone":
       return "null";
     case "large":
-      return `${formatBytes(value.bytes)} — open to view`;
+      return value.text === undefined
+        ? `${formatBytes(value.bytes)} — value not retained`
+        : `${formatBytes(value.bytes)} — preview disabled`;
     case "undecodable":
       return `could not deserialize (${value.reason})`;
   }
@@ -226,7 +236,9 @@ export function prettyValue(value: RecordValue): string {
       : value.kind === "tombstone"
         ? "null"
         : value.kind === "large"
-          ? `${formatBytes(value.bytes)} — not loaded`
+          ? value.text === undefined
+            ? `${formatBytes(value.bytes)} — value not retained (session memory limit)`
+            : `${formatBytes(value.bytes)} — preview disabled; use Copy value`
           : (value.hex ?? value.reason);
   }
   try {

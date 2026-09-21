@@ -17,6 +17,7 @@ import {
   createBrowseSession,
   decodeBrowseEvent,
   MAX_CACHED_PAGES,
+  MAX_RETAINED_PAYLOAD_BYTES,
   MAX_ROWS,
   type BrowseHandle,
   type BrowseSession,
@@ -140,6 +141,58 @@ describe("a browse session", () => {
       expect(session.rows()).toHaveLength(MAX_ROWS);
       // The newest end is the one kept: that is what following live means.
       expect(session.rows()[0]?.offset).toBe(String(MAX_ROWS + 24));
+    });
+  });
+
+  test("caps retained payload bytes across a live tail, not only its row count", () => {
+    withSession((session, fake) => {
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      const text = `{"padding":"${"x".repeat(300_000)}"}`;
+      for (let index = 0; index < 40; index += 1) {
+        fake.emit({ ...record(String(index)), value: { kind: "json", text } });
+      }
+      void flush();
+
+      const retainedBytes = session.rows().reduce((total, row) => {
+        const value = row.value;
+        return total +
+          (value.kind === "json" || value.kind === "text"
+            ? new TextEncoder().encode(value.text).length
+            : value.kind === "large" && value.text !== undefined
+              ? new TextEncoder().encode(value.text).length
+              : 0);
+      }, 0);
+      expect(retainedBytes).toBeLessThanOrEqual(MAX_RETAINED_PAYLOAD_BYTES);
+      expect(session.rows().some((row) => row.value.kind === "large" && row.value.text === undefined)).toBe(true);
+    });
+  });
+
+  test("counts cached previous pages in the retained payload budget", () => {
+    withSession((session, fake) => {
+      session.start(DEFAULT_BROWSE);
+      const text = `{"padding":"${"x".repeat(300_000)}"}`;
+      for (let index = 0; index < 27; index += 1) {
+        fake.emit({ ...record(`large-${String(index)}`), value: { kind: "json", text } });
+      }
+      for (let index = 0; index < MAX_ROWS - 27; index += 1) {
+        fake.emit(record(`small-${String(index)}`));
+      }
+      fake.close("cursor-1");
+      void flush();
+
+      session.nextPage();
+      for (let index = 0; index < 27; index += 1) {
+        fake.emit({ ...record(`next-${String(index)}`), value: { kind: "json", text } });
+      }
+      void flush();
+
+      const successor = session.rows().filter((row) => row.offset.startsWith("next-"));
+      expect(successor).toHaveLength(27);
+      expect(
+        successor.every(
+          (row) => row.value.kind === "large" && row.value.text === undefined,
+        ),
+      ).toBe(true);
     });
   });
 

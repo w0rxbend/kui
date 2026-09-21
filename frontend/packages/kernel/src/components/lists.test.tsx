@@ -13,6 +13,7 @@
  * measuring half is covered by the `GrowsWithItsContainer` story, which runs in one.
  */
 
+import { waitFor } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { createSignal, flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -505,6 +506,35 @@ describe("RecordRow", () => {
     }
   });
 
+  it("copies only metadata and disables value copy when a large payload was not retained", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={TOO_LARGE} now={NOW} />
+      </RecordList>
+    ));
+    const action = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.trim() === label,
+      ) as HTMLButtonElement;
+
+    await userEvent.click(action("Copy message metadata"));
+    expect(JSON.parse(writeText.mock.calls.at(-1)?.[0] ?? "{}")).toMatchObject({
+      key: TOO_LARGE.key,
+      value: { unavailable: true, bytes: 4_200_000 },
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      "Message metadata copied",
+    );
+
+    await userEvent.click(container.querySelector(".kui-record__summary") as HTMLButtonElement);
+    expect(action("Value not retained").getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("says why a payload would not deserialize, and offers the bytes", () => {
     const container = render(() => (
       <RecordList label="Records">
@@ -548,9 +578,46 @@ describe("RecordRow", () => {
     expect(container.querySelectorAll(".kui-record__fact")).toHaveLength(5);
   });
 
-  it("copies headers, value, or the complete record without losing header order", async () => {
+  it("copies the message without expanding a collapsed row", async () => {
     if (first.value.kind !== "json") throw new Error("the first record fixture must remain JSON");
     const expectedValue = JSON.parse(first.value.text) as unknown;
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const record = {
+      ...first,
+      headers: [
+        { name: "trace-id", value: "first" },
+        { name: "trace-id", value: "0xff", binary: true },
+      ],
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} />
+      </RecordList>
+    ));
+
+    const action = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.trim() === label,
+      ) as HTMLButtonElement;
+
+    await userEvent.click(action("Copy message"));
+    expect(JSON.parse(writeText.mock.calls.at(-1)?.[0] ?? "{}")).toEqual({
+      headers: record.headers,
+      key: record.key,
+      value: expectedValue,
+    });
+    expect(container.querySelector(".kui-record__summary")?.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Message copied");
+  });
+
+  it("copies value from the expanded row and offers separate key and header actions", async () => {
+    if (first.value.kind !== "json") throw new Error("the first record fixture must remain JSON");
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -571,29 +638,197 @@ describe("RecordRow", () => {
 
     const action = (label: string) =>
       Array.from(container.querySelectorAll("button")).find((button) =>
-        button.textContent?.includes(label),
+        button.textContent?.trim() === label,
       ) as HTMLButtonElement;
 
+    await userEvent.click(action("Copy value"));
+    expect(writeText).toHaveBeenLastCalledWith(first.value.text);
+
+    await userEvent.click(action("Copy key"));
+    expect(writeText).toHaveBeenLastCalledWith(record.key);
+
     await userEvent.click(action("Copy headers"));
-    expect(writeText).toHaveBeenLastCalledWith(
-      JSON.stringify(record.headers, null, 2),
+    expect(writeText).toHaveBeenLastCalledWith(JSON.stringify(record.headers, null, 2));
+    expect(action("Copy message")).toBeUndefined();
+  });
+
+  it("syntax-highlights JSON and lets nested objects and arrays collapse", async () => {
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={first} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    await waitFor(() => expect(container.querySelector(".kui-json-tree")).not.toBeNull());
+    const tree = container.querySelector(".kui-json-tree");
+    expect(tree?.querySelector('.kui-json-tree__key')?.textContent).toContain('"orderId"');
+    expect(tree?.querySelector('.kui-json-tree__string')?.textContent).toContain('"ord_9f21ac"');
+    expect(tree?.querySelector('.kui-json-tree__number')?.textContent).toBe("149.99");
+
+    const items = tree?.querySelector('details[data-json-path="$.items"]') as HTMLDetailsElement;
+    expect(items.open).toBe(false);
+    await userEvent.click(items.querySelector("summary") as HTMLElement);
+    expect(items.open).toBe(true);
+    await userEvent.click(items.querySelector("summary") as HTMLElement);
+    expect(items.open).toBe(false);
+  });
+
+  it("keeps non-JSON values in the plain-text payload viewer", () => {
+    const textRecord = RECORDS[2] as (typeof RECORDS)[number];
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={textRecord} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    expect(container.querySelector(".kui-json-tree")).toBeNull();
+    expect(container.querySelector(".kui-record__payload")?.textContent).toBe(
+      "plain,csv,row,not,json",
     );
+  });
+
+  it("renders JSON-looking markup as highlighted text, never as DOM", async () => {
+    const record = {
+      ...first,
+      value: {
+        kind: "json",
+        text: JSON.stringify({ enabled: true, missing: null, html: '<img src=x onerror="alert(1)">' }),
+      },
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    await waitFor(() => expect(container.querySelector(".kui-json-tree")).not.toBeNull());
+    expect(container.querySelector(".kui-json-tree__boolean")?.textContent).toBe("true");
+    expect(container.querySelector(".kui-json-tree__null")?.textContent).toBe("null");
+    expect(container.querySelector(".kui-json-tree__string")?.textContent).toContain("<img");
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("copies malformed JSON exactly and copies a null key as the JSON literal", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const malformed = {
+      ...TOMBSTONE,
+      value: { kind: "json", text: '{"unfinished":' },
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={malformed} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+    const action = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.trim() === label,
+      ) as HTMLButtonElement;
 
     await userEvent.click(action("Copy value"));
-    expect(writeText).toHaveBeenLastCalledWith(JSON.stringify(expectedValue, null, 2));
+    expect(writeText).toHaveBeenLastCalledWith('{"unfinished":');
+    await userEvent.click(action("Copy key"));
+    expect(writeText).toHaveBeenLastCalledWith("null");
+  });
 
-    await userEvent.click(action("Copy all"));
-    const copiedRecord = JSON.parse(writeText.mock.calls.at(-1)?.[0] ?? "{}") as Record<string, unknown>;
-    expect(copiedRecord).toMatchObject({
-      offset: record.offset,
-      partition: record.partition,
-      key: record.key,
-      timestamp: record.timestamp,
-      timestampType: record.timestampType,
-      headers: record.headers,
-      value: expectedValue,
+  it("preserves 64-bit JSON integers in the tree and every clipboard representation", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
     });
-    expect(container.querySelector('[role="status"]')?.textContent).toContain("Record copied");
+    const exactInteger = "9223372036854775807";
+    const record = {
+      ...first,
+      value: { kind: "json", text: `{"sequence":${exactInteger}}` },
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} />
+      </RecordList>
+    ));
+    const action = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.trim() === label,
+      ) as HTMLButtonElement;
+
+    await userEvent.click(action("Copy message"));
+    expect(writeText.mock.calls.at(-1)?.[0]).toContain(`"sequence":${exactInteger}`);
+    await userEvent.click(container.querySelector(".kui-record__summary") as HTMLButtonElement);
+    await waitFor(() => expect(container.querySelector(".kui-json-tree__number")).not.toBeNull());
+    expect(container.querySelector(".kui-json-tree__number")?.textContent).toBe(exactInteger);
+    await userEvent.click(action("Copy value"));
+    expect(writeText).toHaveBeenLastCalledWith(`{"sequence":${exactInteger}}`);
+  });
+
+  it("copies deeply nested JSON without overflowing before clipboard error handling", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const text = `${"[".repeat(10_000)}0${"]".repeat(10_000)}`;
+    const record = { ...first, value: { kind: "json", text } } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} />
+      </RecordList>
+    ));
+
+    const copyMessage = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Copy message",
+    ) as HTMLButtonElement;
+    await userEvent.click(copyMessage);
+    expect(writeText.mock.calls.at(-1)?.[0]).toContain(text);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Message copied");
+  });
+
+  it("copies a retained large value even though its DOM preview stays disabled", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const text = `{"sequence":9223372036854775807,"padding":"${"x".repeat(270_000)}"}`;
+    const record = {
+      ...first,
+      value: { kind: "large", bytes: text.length, text, sourceKind: "json" },
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    expect(container.textContent).toContain("preview disabled; use Copy value");
+    expect(container.querySelector(".kui-json-tree")).toBeNull();
+    const copyValue = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Copy value",
+    ) as HTMLButtonElement;
+    await userEvent.click(copyValue);
+    expect(writeText).toHaveBeenLastCalledWith(text);
+  });
+
+  it("mounts wide JSON arrays in bounded batches", async () => {
+    const record = {
+      ...first,
+      value: { kind: "json", text: `[${Array.from({ length: 500 }, (_, index) => index).join(",")}]` },
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    await waitFor(() => expect(container.querySelectorAll(".kui-json-tree__leaf")).toHaveLength(200));
+    const more = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Show 200 more"),
+    ) as HTMLButtonElement;
+    await userEvent.click(more);
+    expect(container.querySelectorAll(".kui-json-tree__leaf")).toHaveLength(400);
   });
 
   it("reports a refused clipboard write instead of claiming success", async () => {

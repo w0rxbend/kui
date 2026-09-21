@@ -57,6 +57,12 @@ import { decodeMessageRecord } from "./wire.js";
 export const MAX_ROWS = 500;
 
 /**
+ * Total decoded payload text a session may retain. Row count alone is not a memory bound when a
+ * live topic contains large records; values beyond this budget keep metadata but drop their text.
+ */
+export const MAX_RETAINED_PAYLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
  * Cursor pages kept for zero-network Previous navigation.
  *
  * The record cap prevents an infinite browse from retaining every payload it has ever decoded;
@@ -208,6 +214,43 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
    * asynchronous cancellation, so callbacks already queued by an older run can arrive after a new
    * one has started. The generation makes those callbacks inert before they touch shared state. */
   let generation = 0;
+  const retainedByteSizes = new WeakMap<KafkaRecord, number>();
+  const utf8 = new TextEncoder();
+
+  function retainedBytes(record: KafkaRecord): number {
+    const cached = retainedByteSizes.get(record);
+    if (cached !== undefined) return cached;
+    const value = record.value;
+    const text =
+      value.kind === "json" || value.kind === "text"
+        ? value.text
+        : value.kind === "large"
+          ? value.text
+          : undefined;
+    const bytes = text === undefined ? 0 : utf8.encode(text).length;
+    retainedByteSizes.set(record, bytes);
+    return bytes;
+  }
+
+  function withinPayloadBudget(record: KafkaRecord): KafkaRecord {
+    const incoming = retainedBytes(record);
+    if (incoming === 0) return record;
+    // A record is normally referenced by both `rowList` and its cached page. Count the object once,
+    // but include every owner: while a successor page is in flight, `rowList` can evict records
+    // that its predecessor page still retains until terminal cursor processing trims the cache.
+    const retainedRecords = new Set<KafkaRecord>([...rowList, ...heldList, ...pageList.flat()]);
+    const retained = [...retainedRecords].reduce(
+      (total, existing) => total + retainedBytes(existing),
+      0,
+    );
+    if (retained + incoming <= MAX_RETAINED_PAYLOAD_BYTES) return record;
+
+    const value = record.value;
+    const sourceKind =
+      value.kind === "json" ? "json" : value.kind === "large" ? (value.sourceKind ?? "text") : "text";
+    const bytes = value.kind === "large" ? Math.max(value.bytes, incoming) : incoming;
+    return { ...record, value: { kind: "large", bytes, sourceKind } };
+  }
 
   const [rows, setRows] = createSignal<readonly KafkaRecord[]>([], { ownedWrite: true });
   const [pages, setPages] = createSignal<readonly (readonly KafkaRecord[])[]>([], { ownedWrite: true });
@@ -350,25 +393,26 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
         if (!isCurrentRun()) return;
         switch (event.kind) {
           case "record": {
+            const record = withinPayloadBudget(event.record);
             /* The count moves even while paused, because it counts what the *stream* delivered. A
              * paused screen that also stopped counting would be indistinguishable from a stream
              * that had stalled, which is the one thing a pause must not be mistaken for. */
             if (pausedNow) {
               heldList = liveNow
-                ? [event.record, ...heldList].slice(0, MAX_ROWS)
-                : [...heldList, event.record].slice(0, MAX_ROWS);
+                ? [record, ...heldList].slice(0, MAX_ROWS)
+                : [...heldList, record].slice(0, MAX_ROWS);
             } else {
               const page = pageList[activePageNow] ?? [];
               if (liveNow) {
-                rowList = [event.record, ...rowList].slice(0, MAX_ROWS);
-                pageList[activePageNow] = [event.record, ...page].slice(0, MAX_ROWS);
+                rowList = [record, ...rowList].slice(0, MAX_ROWS);
+                pageList[activePageNow] = [record, ...page].slice(0, MAX_ROWS);
               } else {
                 /* The source already orders a bounded page relative to its offsets: forward
                  * browses arrive low-to-high and backward browses high-to-low. Preserve that
                  * order, including across continuation pages, instead of reversing every page as
                  * records happen to reach the browser. */
-                rowList = [...rowList, event.record].slice(-MAX_ROWS);
-                pageList[activePageNow] = [...page, event.record].slice(0, MAX_ROWS);
+                rowList = [...rowList, record].slice(-MAX_ROWS);
+                pageList[activePageNow] = [...page, record].slice(0, MAX_ROWS);
               }
             }
             setProgress((current) => ({
@@ -377,7 +421,7 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
               phase: undefined,
               failure: current.failure?.kind === "decode" ? undefined : current.failure,
             }));
-            setArrived((current) => new Set(current).add(recordId(event.record)));
+            setArrived((current) => new Set(current).add(recordId(record)));
             if (!arrivedResetQueued) {
               arrivedResetQueued = true;
               queueMicrotask(() => {

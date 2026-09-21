@@ -72,7 +72,7 @@ describe("previewValue", () => {
     // An empty preview is indistinguishable from a record holding the empty string, which is how
     // three of these were shipped as blank rows.
     expect(previewValue({ kind: "tombstone" })).toBe("null");
-    expect(previewValue({ kind: "large", bytes: 4_200_000 })).toBe("4.2 MB — open to view");
+    expect(previewValue({ kind: "large", bytes: 4_200_000 })).toBe("4.2 MB — value not retained");
     expect(previewValue({ kind: "undecodable", reason: "Avro schema 42 not found" })).toBe(
       "could not deserialize (Avro schema 42 not found)",
     );

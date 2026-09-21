@@ -381,8 +381,8 @@ test.describe("field filtering over decoded records", () => {
   });
 });
 
-test.describe("expanded record copy actions", () => {
-  test("copies headers, value, and a complete structured record", async ({ page }) => {
+test.describe("record copy actions and JSON tree", () => {
+  test("copies a collapsed message, then exposes value, key, headers, and JSON nodes", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto(
       `/ui/clusters/${CLUSTER}/topics/inventory.stock-levels/messages?seekTo=beginning`,
@@ -395,12 +395,22 @@ test.describe("expanded record copy actions", () => {
     });
 
     const row = page.locator(".kui-record").first();
-    await row.locator(".kui-record__summary").click();
+    const summary = row.locator(".kui-record__summary");
+    await expect(summary).toHaveAttribute("aria-expanded", "false");
 
-    await row.getByRole("button", { name: "Copy headers", exact: true }).click();
-    const headers = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as unknown[];
-    expect(headers.length).toBeGreaterThan(0);
-    await expect(row.getByRole("status")).toContainText("Headers copied");
+    await row.getByRole("button", { name: "Copy message", exact: true }).click();
+    const message = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as {
+      headers?: unknown[];
+      key?: unknown;
+      value?: { sku?: unknown };
+    };
+    expect(message.headers?.length).toBeGreaterThan(0);
+    expect(typeof message.key).toBe("string");
+    expect(typeof message.value?.sku).toBe("string");
+    await expect(summary).toHaveAttribute("aria-expanded", "false");
+    await expect(row.getByRole("status")).toContainText("Message copied");
+
+    await row.locator(".kui-record__summary").click();
 
     await row.getByRole("button", { name: "Copy value", exact: true }).click();
     const value = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as {
@@ -408,16 +418,53 @@ test.describe("expanded record copy actions", () => {
     };
     expect(typeof value.sku).toBe("string");
 
-    await row.getByRole("button", { name: "Copy all", exact: true }).click();
-    const record = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as {
-      offset?: unknown;
-      headers?: unknown[];
-      value?: { sku?: unknown };
-    };
-    expect(typeof record.offset).toBe("string");
-    expect(record.headers?.length).toBeGreaterThan(0);
-    expect(record.value?.sku).toBe(value.sku);
-    await expect(row.getByRole("status")).toContainText("Record copied");
+    await row.getByRole("button", { name: "Copy key", exact: true }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(message.key);
+
+    await row.getByRole("button", { name: "Copy headers", exact: true }).click();
+    const headers = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as unknown[];
+    expect(headers).toEqual(message.headers);
+    await expect(row.getByRole("status")).toContainText("Headers copied");
+
+    const root = row.locator('details[data-json-path="$"]');
+    await expect(root).toHaveAttribute("open", "");
+    await root.locator(":scope > summary").click();
+    await expect(root).not.toHaveAttribute("open", "");
+  });
+
+  test("keeps the copy actions and JSON tree inside a narrow record", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/inventory.stock-levels/messages?seekTo=beginning`,
+    );
+    const browse = page.waitForRequest((request) => request.url().includes("/messages/stream"));
+    await page.getByRole("button", { name: /^read$/i }).first().click();
+    await browse;
+    await expect(page.locator(".kui-browse__phase")).toContainText("Finished", {
+      timeout: 30_000,
+    });
+
+    const row = page.locator(".kui-record").first();
+    const copyMessage = row.getByRole("button", { name: "Copy message", exact: true });
+    await expect(copyMessage).toBeVisible();
+    expect(await copyMessage.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(
+      48,
+    );
+    await expect(row.locator(".kui-record__value")).toBeHidden();
+    await expect(row.locator(".kui-record__time")).toBeHidden();
+    expect(
+      await row.locator(".kui-record__head").evaluate((element) =>
+        element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+
+    await row.locator(".kui-record__summary").click();
+    await expect(row.locator(".kui-json-tree")).toBeVisible();
+    expect(
+      await row.locator(".kui-record__body").evaluate((element) =>
+        element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
   });
 });
 

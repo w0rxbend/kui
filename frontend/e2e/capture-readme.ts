@@ -319,7 +319,7 @@ async function applyFieldFilter(
 async function expandFirstRecord(page: Page): Promise<void> {
   const row = page.locator(".kui-record").first();
   await row.locator(".kui-record__summary").click();
-  await row.getByRole("button", { name: "Copy all", exact: true }).waitFor({ state: "visible" });
+  await row.getByRole("button", { name: "Copy value", exact: true }).waitFor({ state: "visible" });
 }
 
 async function captureMessageStates(page: Page): Promise<void> {
@@ -373,7 +373,7 @@ async function captureMessageStates(page: Page): Promise<void> {
   );
   await readMessages(page);
   await expandFirstRecord(page);
-  for (const label of ["Copy headers", "Copy value", "Copy all"]) {
+  for (const label of ["Copy value", "Copy key", "Copy headers"]) {
     await page.getByRole("button", { name: label, exact: true }).first().waitFor({ state: "visible" });
   }
   await shot(page, "31-copy-controls.png");

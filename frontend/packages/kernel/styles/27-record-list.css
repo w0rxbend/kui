@@ -49,6 +49,7 @@
    * preference guarded so an explicit light choice still wins, and the explicit dark attribute
    * last so the toggle wins in both directions. */
   box-shadow: inset 0 0 0 1px var(--kui-color-border);
+  container-type: inline-size;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -63,7 +64,8 @@
 
 /* --- The collapsed row ------------------------------------------------------------------------
  *
- * The whole row is the button. Not the chevron — a 16px target in a 36px row — and not the offset.
+ * The whole record summary is the expansion button. The trailing copy action is a sibling, since
+ * copying must not toggle the row and an interactive control cannot be nested inside a button.
  *
  * `display: grid` rather than flex, so each field has a declared minimum and only the value column
  * gives way. Note what this does *not* buy: every row is its own grid, so the tracks are sized per
@@ -77,6 +79,26 @@
  * `subgrid` would give real alignment without either cost, and is deliberately not used: it landed
  * in Chrome 117 and this product supports Chrome 111 (`vite.config.ts`).
  */
+
+.kui-record__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding-inline-end: var(--kui-space-2);
+}
+
+.kui-record__head > .kui-record__summary {
+  grid-column: 1;
+}
+
+.kui-record__head > .kui-record__copy-status {
+  grid-column: 2;
+}
+
+.kui-record__head > .kui-tooltip-anchor {
+  grid-column: 3;
+}
 
 .kui-record__summary {
   display: grid;
@@ -256,19 +278,81 @@
   background-color: var(--kui-color-surface-raised);
 }
 
-.kui-record__copy-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
 .kui-record__copy-status {
-  min-width: 8rem;
-  margin-inline-start: var(--kui-space-2);
   color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-xs);
+  white-space: nowrap;
+}
+
+.kui-record__copy-status:empty {
+  display: none;
+}
+
+.kui-record__copy-primary {
+  white-space: nowrap;
+}
+
+@container (max-width: 32rem) {
+  .kui-record__head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .kui-record__head > .kui-record__copy-status {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    justify-self: end;
+    padding-block-end: var(--kui-space-1);
+  }
+
+  .kui-record__head > .kui-tooltip-anchor {
+    grid-column: 2;
+  }
+
+  .kui-record__summary {
+    grid-template-columns: minmax(7ch, auto) auto minmax(0, 1fr) auto;
+    gap: var(--kui-space-2);
+    padding-inline: var(--kui-space-3);
+  }
+
+  .kui-record__value,
+  .kui-record__time {
+    display: none;
+  }
+
+  /* Keep the action's name in the accessibility tree while reducing its visual footprint to the
+   * copy glyph. At this width the same words beside the icon consume a third of the whole card. */
+  .kui-record__copy-primary .kui-btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .kui-json-tree {
+    /* Long scalar values still wrap. Horizontal scrolling is only the escape hatch for structural
+     * indentation in unusually deep payloads, whose left edge must remain reachable. */
+    overflow-x: auto;
+  }
+
+  .kui-json-tree__children {
+    margin-inline-start: var(--kui-space-2);
+    padding-inline-start: var(--kui-space-1);
+  }
+}
+
+@container (max-width: 22rem) {
+  .kui-record__summary {
+    grid-template-columns: minmax(7ch, auto) auto auto;
+  }
+
+  .kui-record__key {
+    display: none;
+  }
 }
 
 /* `auto-fit` with a floor, not four fixed columns: a schema adds a fifth box, and five boxes in a
@@ -288,6 +372,26 @@
   border-radius: var(--kui-radius-md);
   background-color: var(--kui-color-surface-hover);
   min-width: 0;
+}
+
+.kui-record__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-record__fact-value--action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-2);
+}
+
+.kui-record__fact-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Real upper-case text with tracking, not `text-transform` over a mixed-case string: a screen
@@ -371,6 +475,105 @@
 .kui-record__payload:focus-visible {
   outline: 2px solid var(--kui-color-focus);
   outline-offset: 2px;
+}
+
+/* JSON stays text — never HTML assembled from a payload — but receives typed token colours and
+ * native disclosure controls. Descendants are mounted only while their branch is open, so a deep
+ * schema-registry value does not turn one expanded message into thousands of resting DOM nodes. */
+.kui-json-tree {
+  max-height: 400px;
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-raised);
+  box-shadow: inset 0 0 0 1px var(--kui-color-border);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+
+.kui-json-tree:focus-visible,
+.kui-json-tree__summary:focus-visible,
+.kui-json-tree__more:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-json-tree__branch {
+  min-width: 0;
+}
+
+.kui-json-tree__summary {
+  padding-block: 1px;
+  cursor: pointer;
+}
+
+.kui-json-tree__summary:hover {
+  background-color: var(--kui-color-state-layer);
+}
+
+.kui-json-tree__summary::marker {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-json-tree__children {
+  margin-inline-start: var(--kui-space-4);
+  padding-inline-start: var(--kui-space-2);
+  border-inline-start: 1px solid var(--kui-color-border);
+}
+
+.kui-json-tree__leaf,
+.kui-json-tree__closing {
+  min-width: 0;
+  padding-block: 1px;
+}
+
+.kui-json-tree__key {
+  color: var(--kui-color-primary);
+}
+
+.kui-json-tree__string {
+  color: var(--kui-color-success);
+}
+
+.kui-json-tree__number {
+  color: var(--kui-color-warning);
+}
+
+.kui-json-tree__boolean {
+  color: var(--kui-color-info);
+}
+
+.kui-json-tree__null,
+.kui-json-tree__punctuation,
+.kui-json-tree__preview,
+.kui-json-tree__count,
+.kui-json-tree__limit {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-json-tree__count {
+  margin-inline-start: var(--kui-space-2);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-json-tree__more {
+  margin-block: var(--kui-space-1);
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border: 0;
+  border-radius: var(--kui-radius-sm);
+  background: transparent;
+  color: var(--kui-color-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kui-json-tree__more:hover {
+  background-color: var(--kui-color-state-layer);
 }
 
 .kui-record__decode-error {

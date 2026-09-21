@@ -17,7 +17,7 @@ import {
   readingOf,
   resendDraftProblem,
 } from "./resend.js";
-import { toDto, toRecord } from "./wire.js";
+import { MAX_RETAINED_VALUE_BYTES, toDto, toRecord } from "./wire.js";
 
 describe("what the filter editor refuses to send", () => {
   it("will not send an empty expression", () => {
@@ -156,9 +156,8 @@ describe("a record on its way into the preview", () => {
     expect(back.timestampType).toBe("LogAppendTime");
   });
 
-  it("declares the real size of a payload it is not holding the text of", () => {
-    /* A value too large to preview has no text on this side. Sending an empty string with a size of
-     * nought would tell the filter the record is empty; the size is what says otherwise. */
+  it("declares the real size of a legacy large payload without retained text", () => {
+    /* Older fixtures can still lack text. Its declared size must not collapse to zero. */
     const dto = round({
       offset: "1",
       partition: 0,
@@ -169,6 +168,48 @@ describe("a record on its way into the preview", () => {
     });
     expect(dto.value.text).toBe("");
     expect(dto.valueSize).toBe(900_000);
+  });
+
+  it("retains a large wire payload for an explicit clipboard action without previewing it", () => {
+    const text = `{"sequence":9223372036854775807,"padding":"${"x".repeat(300_000)}"}`;
+    const record = toRecord({
+      partition: 0,
+      offset: 1,
+      timestamp: "2026-09-05T10:00:00Z",
+      timestampType: "CreateTime",
+      key: { kind: "string", text: "k", serde: "String", properties: {} },
+      value: { kind: "json", text, serde: "JSON", properties: {} },
+      headers: {},
+      keySize: 1,
+      valueSize: text.length,
+      headersSize: 0,
+      deserializeErrors: [],
+    });
+
+    expect(record.value).toEqual({ kind: "large", bytes: text.length, text, sourceKind: "json" });
+  });
+
+  it("uses actual UTF-8 bytes and refuses to retain a payload that under-reports its size", () => {
+    const text = `{"padding":"${"é".repeat(MAX_RETAINED_VALUE_BYTES)}"}`;
+    const record = toRecord({
+      partition: 0,
+      offset: 1,
+      timestamp: "2026-09-05T10:00:00Z",
+      timestampType: "CreateTime",
+      key: { kind: "string", text: "k", serde: "String", properties: {} },
+      value: { kind: "json", text, serde: "JSON", properties: {} },
+      headers: {},
+      keySize: 1,
+      valueSize: 1,
+      headersSize: 0,
+      deserializeErrors: [],
+    });
+
+    expect(record.value).toEqual({
+      kind: "large",
+      bytes: new TextEncoder().encode(text).length,
+      sourceKind: "json",
+    });
   });
 });
 
