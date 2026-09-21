@@ -19,7 +19,12 @@ import { ErrorCodes, type ApiResult } from "@kui/api";
 import { createRoot, createSignal, flush } from "solid-js";
 
 import type { SseConnection, SseHandle, SseSubscriber } from "../sse/stream.js";
-import { createAlerts, ALERTS_EVENT_NAME, ALERTS_SECTION_KEY } from "./store.js";
+import {
+  createAlerts,
+  ALERTS_EVENT_NAME,
+  ALERTS_SECTION_KEY,
+  type AlertFeedCache,
+} from "./store.js";
 import { decodeAlertFeed, type AlertChange } from "./events.js";
 
 /** One event, as `AlertEventDto`'s encoder writes it. Overridable field by field. */
@@ -154,6 +159,7 @@ function harness(
   options: {
     load?: (markRead: boolean) => Promise<ApiResult<unknown>>;
     cluster?: () => string | undefined;
+    cache?: AlertFeedCache;
   } = {},
 ) {
   const stream = fakeStream();
@@ -167,6 +173,7 @@ function harness(
       return options.load?.(markRead) ?? answering(body(wireFeed()));
     },
     cluster: options.cluster ?? (() => "quickstart"),
+    cache: options.cache,
     warn: (message) => warnings.push(message),
   });
 
@@ -185,6 +192,119 @@ function harness(
 }
 
 describe("the alert feed store", () => {
+  it("shows a validated saved feed while the backend refreshes, then replaces and updates it", async () => {
+    await createRoot(async (dispose) => {
+      let answer: (result: ApiResult<unknown>) => void = () => {};
+      const writes: unknown[] = [];
+      const world = harness({
+        load: () => new Promise<ApiResult<unknown>>((resolve) => (answer = resolve)),
+        cache: {
+          read: () => Promise.resolve(wireFeed({ openCount: 7, unreadCount: 4 })),
+          write: (value) => {
+            writes.push(value);
+            return Promise.resolve();
+          },
+          remove: () => Promise.resolve(),
+        },
+      });
+
+      world.alerts.start();
+      await world.settle();
+
+      const warmed = world.alerts.feed();
+      expect(warmed.kind).toBe("stale");
+      expect(warmed.kind === "stale" && warmed.reason).toBe(
+        "Showing saved alerts while KUI refreshes.",
+      );
+      expect(world.alerts.openCount()).toBe(7);
+      expect(writes).toEqual([]);
+
+      answer({ ok: true, value: body(wireFeed({ openCount: 9, unreadCount: 1 })) });
+      await world.settle();
+
+      expect(world.alerts.feed().kind).toBe("ready");
+      expect(world.alerts.openCount()).toBe(9);
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({ openCount: 9, unreadCount: 1 });
+      dispose();
+    });
+  });
+
+  it("ignores an unreadable saved feed", async () => {
+    await createRoot(async (dispose) => {
+      const world = harness({
+        load: () => new Promise<ApiResult<unknown>>(() => {}),
+        cache: {
+          read: () => Promise.resolve({ entries: [wireEvent()], openCount: 99 }),
+          write: () => Promise.resolve(),
+          remove: () => Promise.resolve(),
+        },
+      });
+
+      world.alerts.start();
+      await world.settle();
+
+      expect(world.alerts.feed()).toEqual({ kind: "loading" });
+      expect(world.alerts.openCount()).toBeNull();
+      dispose();
+    });
+  });
+
+  it("does not apply a saved feed from an earlier start", async () => {
+    await createRoot(async (dispose) => {
+      const cacheReads: Array<(value: unknown) => void> = [];
+      const world = harness({
+        load: () => new Promise<ApiResult<unknown>>(() => {}),
+        cache: {
+          read: () => new Promise<unknown>((resolve) => cacheReads.push(resolve)),
+          write: () => Promise.resolve(),
+          remove: () => Promise.resolve(),
+        },
+      });
+
+      world.alerts.start();
+      world.alerts.stop();
+      world.alerts.start();
+      expect(cacheReads).toHaveLength(2);
+
+      cacheReads[0]?.(wireFeed({ openCount: 41 }));
+      await world.settle();
+
+      expect(world.alerts.feed()).toEqual({ kind: "loading" });
+      expect(world.alerts.openCount()).toBeNull();
+      dispose();
+    });
+  });
+
+  it("clears the previous cluster's rows as soon as a new start begins", async () => {
+    await createRoot(async (dispose) => {
+      let first = true;
+      const world = harness({
+        load: () => {
+          if (first) {
+            first = false;
+            return answering(body(wireFeed({ openCount: 8 })));
+          }
+          return new Promise<ApiResult<unknown>>(() => {});
+        },
+      });
+
+      world.alerts.start();
+      await world.settle();
+      expect(world.alerts.events()).toHaveLength(1);
+      expect(world.alerts.openCount()).toBe(8);
+
+      world.alerts.stop();
+      world.alerts.start();
+      flush();
+
+      expect(world.alerts.feed()).toEqual({ kind: "loading" });
+      expect(world.alerts.events()).toEqual([]);
+      expect(world.alerts.openCount()).toBeNull();
+      dispose();
+    });
+  });
+
   it("the alerts store answers one open count to two subscribers", async () => {
     await createRoot(async (dispose) => {
       const world = harness();
@@ -646,6 +766,7 @@ describe("the alert feed store", () => {
   it("blanks the feed when the server answers with a refusal rather than not answering at all", async () => {
     await createRoot(async (dispose) => {
       let refuse = false;
+      let removals = 0;
       const world = harness({
         load: () =>
           refuse
@@ -661,6 +782,14 @@ describe("the alert feed store", () => {
                 },
               })
             : answering(body(wireFeed())),
+        cache: {
+          read: () => Promise.resolve(undefined),
+          write: () => Promise.resolve(),
+          remove: () => {
+            removals += 1;
+            return Promise.resolve();
+          },
+        },
       });
       world.alerts.start();
       await world.settle();
@@ -677,6 +806,7 @@ describe("the alert feed store", () => {
       expect(world.alerts.feed().kind).toBe("failed");
       expect(world.alerts.events()).toEqual([]);
       expect(world.alerts.openCount()).toBeNull();
+      expect(removals).toBe(1);
       dispose();
     });
   });
@@ -853,11 +983,20 @@ describe("the alert feed store", () => {
   it("the bell goes quiet because the server said so, not because the browser zeroed it", async () => {
     await createRoot(async (dispose) => {
       let unreadCount = 2;
+      let cacheRemovals = 0;
       const world = harness({
         load: (markRead) => {
           if (markRead) unreadCount = 0;
           const lastReadAt = markRead ? "2026-09-06T09:07:00Z" : null;
           return answering(body(wireFeed({ unreadCount, lastReadAt })));
+        },
+        cache: {
+          read: () => Promise.resolve(undefined),
+          write: () => Promise.resolve(),
+          remove: () => {
+            cacheRemovals += 1;
+            return Promise.resolve();
+          },
         },
       });
       world.alerts.start();
@@ -865,6 +1004,7 @@ describe("the alert feed store", () => {
       expect(world.alerts.unread()).toBe(true);
 
       world.alerts.markAllRead();
+      expect(cacheRemovals).toBe(1);
       await world.settle();
 
       // `markAllRead` is the endpoint's own `markRead` query and the answer is the server's new

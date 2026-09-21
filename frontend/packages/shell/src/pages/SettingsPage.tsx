@@ -36,6 +36,7 @@ import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Card, Select } from "@kui/kernel";
 import type { AccentChoice, DensityChoice, RootPreference, ThemeChoice } from "@kui/kernel";
+import type { AppearanceSyncStatus } from "../data/appearance.js";
 
 import {
   ACCENT_OPTIONS,
@@ -54,6 +55,8 @@ export interface SettingsPageProps {
   readonly theme: Preference<ThemeChoice>;
   readonly accent: Preference<AccentChoice>;
   readonly density: Preference<DensityChoice>;
+  /** Whether the current cluster's choices have reached durable server storage. */
+  readonly persistence?: AppearanceSyncStatus | undefined;
   /** The build, for a bug report. `undefined` when the shell was not told. */
   readonly version?: string | undefined;
   /** Which gateway this browser is talking to, for the same reason. */
@@ -96,6 +99,9 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
             onChange={(value) => props.density.select(value as DensityChoice)}
           />
           <Help of={appearanceHelp(DENSITY_OPTIONS)} />
+          <Show when={props.persistence}>
+            {(persistence) => <PersistenceStatus status={persistence()} />}
+          </Show>
         </div>
       </Card>
 
@@ -126,6 +132,34 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
         </dl>
       </Card>
     </div>
+  );
+}
+
+function PersistenceStatus(props: { readonly status: AppearanceSyncStatus }): JSX.Element {
+  const copy = (): string => {
+    switch (props.status.kind) {
+      case "idle":
+        return "Choose a cluster to sync appearance settings.";
+      case "loading":
+        return "Loading this cluster's saved appearance…";
+      case "saving":
+        return "Saving appearance…";
+      case "saved":
+        return "Saved for this cluster.";
+      case "local-only":
+        return props.status.message;
+    }
+  };
+
+  return (
+    <p
+      class="kui-settings__persistence"
+      data-state={props.status.kind}
+      role={props.status.kind === "local-only" ? "alert" : "status"}
+      aria-live="polite"
+    >
+      {copy()}
+    </p>
   );
 }
 

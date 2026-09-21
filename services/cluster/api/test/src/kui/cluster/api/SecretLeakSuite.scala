@@ -1,5 +1,7 @@
 package kui.cluster.api
 
+import java.nio.charset.StandardCharsets
+
 import cats.effect.IO
 import cats.effect.kernel.Resource
 import cats.syntax.all.*
@@ -19,14 +21,17 @@ import kui.cluster.application.{
   BrokerLogDirs,
   ClusterService,
   SnapshotFreshness,
-  TopologyView
+  TopologyView,
+  UiAppearance,
+  UiSettingsStore,
+  UiSettingsUseCase
 }
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
 import kui.contracts.KuiEndpoint
 import kui.http.principal.RbacGuard
 import kui.kernel.BrokerId
 import kui.observability.Telemetry
-import kui.security.{PrincipalClaims, PrincipalKind, RequestDigest}
+import kui.security.{Principal, PrincipalClaims, PrincipalKind, RequestDigest, RequestDigests}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** One endpoint of this service can emit a credential, and it is the profile.
@@ -68,14 +73,18 @@ final class SecretLeakSuite extends CatsEffectSuite {
     * that has drifted from its endpoint answers 404, which `everyResponseIsAnAnswerAndNotARoutingMiss`
     * catches.
     */
-  private val requests: List[(AnyEndpoint, String, String)] = List(
-    (ClusterEndpoints.listClusters, "GET", "/internal/v1/clusters"),
-    (ClusterEndpoints.getCluster, "GET", "/internal/v1/clusters/prod-eu"),
-    (ClusterEndpoints.listBrokers, "GET", "/internal/v1/clusters/prod-eu/brokers"),
-    (ClusterEndpoints.brokerConfigs, "GET", "/internal/v1/clusters/prod-eu/brokers/1/configs"),
-    (ClusterEndpoints.logDirs, "GET", "/internal/v1/clusters/prod-eu/log-dirs"),
-    (ClusterEndpoints.refresh, "POST", "/internal/v1/clusters/prod-eu/refresh"),
-    (ProfileEndpoints.profile, "GET", "/internal/v1/clusters/prod-eu/profile")
+  private val settingsBody = """{"theme":"dark","accent":"teal","density":"compact"}"""
+
+  private val requests: List[(AnyEndpoint, String, String, Option[String])] = List(
+    (ClusterEndpoints.listClusters, "GET", "/internal/v1/clusters", None),
+    (ClusterEndpoints.getCluster, "GET", "/internal/v1/clusters/prod-eu", None),
+    (ClusterEndpoints.listBrokers, "GET", "/internal/v1/clusters/prod-eu/brokers", None),
+    (ClusterEndpoints.brokerConfigs, "GET", "/internal/v1/clusters/prod-eu/brokers/1/configs", None),
+    (ClusterEndpoints.logDirs, "GET", "/internal/v1/clusters/prod-eu/log-dirs", None),
+    (ClusterEndpoints.refresh, "POST", "/internal/v1/clusters/prod-eu/refresh", None),
+    (ClusterEndpoints.getUiSettings, "GET", "/internal/v1/clusters/prod-eu/settings/ui", None),
+    (ClusterEndpoints.putUiSettings, "PUT", "/internal/v1/clusters/prod-eu/settings/ui", Some(settingsBody)),
+    (ProfileEndpoints.profile, "GET", "/internal/v1/clusters/prod-eu/profile", None)
   )
 
   /** Answering stubs, not refusing ones: a 404 body carries no secret either, so a walk over routes that all
@@ -93,6 +102,14 @@ final class SecretLeakSuite extends CatsEffectSuite {
       val telemetry = Telemetry.fromProviders(testkit.tracerProvider, testkit.meterProvider)
       val codec = ClusterTestServer.codec
       val registry = new ClusterFixtures.StubRegistry(List(profile))
+      val settings = new UiSettingsUseCase[IO](
+        registry,
+        new UiSettingsStore[IO] {
+          def get(cluster: kui.kernel.ClusterId, principal: Principal) = IO.pure(Right(None))
+          def put(cluster: kui.kernel.ClusterId, principal: Principal, appearance: UiAppearance) =
+            IO.pure(Right(appearance))
+        }
+      )
 
       for {
         logger <- FakeStructuredLogger[IO]
@@ -109,7 +126,9 @@ final class SecretLeakSuite extends CatsEffectSuite {
               rejections,
               logger,
               RbacGuard.allowAll[IO]
-            ) ++ ProfileRoutes[IO](registry, codec, rejections, telemetry, logger, RbacGuard.allowAll[IO])
+            ) ++
+              UiSettingsRoutes[IO](settings, codec, rejections, logger, RbacGuard.allowAll[IO]) ++
+              ProfileRoutes[IO](registry, codec, rejections, telemetry, logger, RbacGuard.allowAll[IO])
           )
           .backend(),
         logger,
@@ -118,7 +137,12 @@ final class SecretLeakSuite extends CatsEffectSuite {
       )
     }
 
-  private def call(service: ClusterTestServer, method: String, path: String): IO[Response[String]] =
+  private def call(
+      service: ClusterTestServer,
+      method: String,
+      path: String,
+      body: Option[String]
+  ): IO[Response[String]] =
     IO.realTimeInstant
       .flatMap(now =>
         service.principals.sign(
@@ -130,15 +154,23 @@ final class SecretLeakSuite extends CatsEffectSuite {
             issuedAt = now,
             expiresAt = now.plusSeconds(60L),
             audience = ClusterService.Id,
-            requestDigest = RequestDigest.ofRequestLine(method, path.takeWhile(_ != '?'))
+            requestDigest = body.fold(RequestDigest.ofRequestLine(method, path.takeWhile(_ != '?')))(value =>
+              RequestDigests.of(method, path.takeWhile(_ != '?'), value.getBytes(StandardCharsets.UTF_8))
+            )
           )
         )
       )
       .flatMap { token =>
         val uri = Uri.unsafeParse(s"http://cluster$path")
-        val request = if method == "POST" then basicRequest.post(uri) else basicRequest.get(uri)
-        request
+        val request = method match {
+          case "POST" => basicRequest.post(uri)
+          case "PUT" => basicRequest.put(uri)
+          case _ => basicRequest.get(uri)
+        }
+        val withBody = body.fold(request)(value => request.contentType("application/json").body(value))
+        withBody
           .header(KuiEndpoint.PrincipalHeader, token.value)
+          .header(kui.contracts.HttpHeaders.Csrf, "test-csrf")
           .response(asStringAlways)
           .send(service.backend)
       }
@@ -146,19 +178,27 @@ final class SecretLeakSuite extends CatsEffectSuite {
   private def responses: IO[(ClusterTestServer, List[(String, Response[String])])] =
     server.use { service =>
       requests
-        .traverse((_, method, path) => call(service, method, path).map(path -> _))
+        .traverse((_, method, path, body) => call(service, method, path, body).map(s"$method $path" -> _))
         .map(service -> _)
     }
 
   test("everyDeclaredEndpointIsExercised") {
     // Without this the walk is only as good as whoever last remembered to extend the list. A new
     // endpoint added to `ClusterEndpoints.all` fails here before it can fail silently below.
-    val exercised = requests.map(_._1.showPathTemplate().takeWhile(_ != '?')).toSet
+    val exercised = requests.map { (endpoint, _, _, _) =>
+      endpoint.method.map(_.method).getOrElse("GET") -> endpoint.showPathTemplate().takeWhile(_ != '?')
+    }.toSet
     val declared = (ClusterEndpoints.all ++ ProfileEndpoints.all)
-      .map(_.showPathTemplate().takeWhile(_ != '?'))
+      .map(endpoint =>
+        endpoint.method.map(_.method).getOrElse("GET") -> endpoint.showPathTemplate().takeWhile(_ != '?')
+      )
       .toSet
 
-    assertEquals(declared.diff(exercised), Set.empty[String], "an endpoint this suite does not drive")
+    assertEquals(
+      declared.diff(exercised),
+      Set.empty[(String, String)],
+      "an endpoint this suite does not drive"
+    )
   }
 
   test("everyEndpointOfThisServiceIsOnTheInternalChannel") {
@@ -174,10 +214,10 @@ final class SecretLeakSuite extends CatsEffectSuite {
 
   test("onlyTheProfileEndpointEmitsASecret") {
     responses.map { (_, answers) =>
-      val leaking = answers.collect { case (path, response) if response.body.contains(canary) => path }
+      val leaking = answers.collect { case (request, response) if response.body.contains(canary) => request }
       assertEquals(
         leaking,
-        List("/internal/v1/clusters/prod-eu/profile"),
+        List("GET /internal/v1/clusters/prod-eu/profile"),
         answers.map(_._2.body).mkString("\n")
       )
     }
@@ -187,7 +227,7 @@ final class SecretLeakSuite extends CatsEffectSuite {
     // A 404 body contains no secret either, so without this the assertion above would pass just as well
     // against a suite whose paths had all drifted.
     responses.map { (_, answers) =>
-      val missed = answers.collect { case (path, response) if response.code.code == 404 => path }
+      val missed = answers.collect { case (request, response) if response.code.code == 404 => request }
       assertEquals(missed, Nil)
     }
   }
@@ -198,7 +238,7 @@ final class SecretLeakSuite extends CatsEffectSuite {
     server
       .use { service =>
         for {
-          _ <- requests.traverse_((_, method, path) => call(service, method, path))
+          _ <- requests.traverse_((_, method, path, body) => call(service, method, path, body))
           entries <- service.logger.entries
           spans <- service.telemetry.finishedSpans
         } yield {
@@ -218,7 +258,7 @@ final class SecretLeakSuite extends CatsEffectSuite {
     // M1's assertion, re-run here so that widening the profile cannot weaken it by accident.
     responses.map { (_, answers) =>
       val rows = answers.collectFirst {
-        case (path, response) if path == "/internal/v1/clusters" => response.body
+        case (request, response) if request == "GET /internal/v1/clusters" => response.body
       }
       assert(rows.exists(body => !body.contains(canary)), rows.toString)
       assert(rows.exists(_.contains("SASL_SSL")), rows.toString)

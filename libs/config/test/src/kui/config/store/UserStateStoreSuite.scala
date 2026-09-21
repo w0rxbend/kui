@@ -7,15 +7,16 @@ import fs2.Stream
 import io.circe.Json
 import io.circe.syntax.*
 
-import kui.kernel.{ClusterId, RoleName, UserName}
 import kui.kernel.error.KuiError
+import kui.kernel.{ClusterId, RoleName, UserName}
 import kui.security.{Principal, PrincipalKind}
 import kui.testkit.KuiIOSuite
 
 final class UserStateStoreSuite extends KuiIOSuite {
 
   private val cluster = ClusterId.unsafe("prod-eu")
-  private val alice = Principal(UserName.unsafe("alice@example.com"), Set(RoleName.unsafe("ops")), PrincipalKind.Session)
+  private val alice =
+    Principal(UserName.unsafe("alice@example.com"), Set(RoleName.unsafe("ops")), PrincipalKind.Session)
   private val appearance = UiAppearance(UiTheme.Dark, UiAccent.Teal, UiDensity.Compact)
   private val readAt = Instant.parse("2026-09-21T12:00:00Z")
 
@@ -97,11 +98,16 @@ final class UserStateStoreSuite extends KuiIOSuite {
   }
 }
 
-private final class RefStore private (records: Ref[IO, Map[StoreKey, StoreRecord]]) extends ConfigStore[IO] {
+final private class RefStore private (records: Ref[IO, Map[StoreKey, StoreRecord]]) extends ConfigStore[IO] {
   def get(key: StoreKey): IO[Option[StoreRecord]] = records.get.map(_.get(key))
   def list(section: StoreSection): IO[List[StoreRecord]] =
     records.get.map(_.values.filter(_.key.section == section).toList.sortBy(_.key.render))
-  def put(key: StoreKey, payload: Json, baseVersion: Option[Long], updatedBy: String): IO[Either[KuiError, StoreRecord]] =
+  def put(
+      key: StoreKey,
+      payload: Json,
+      baseVersion: Option[Long],
+      updatedBy: String
+  ): IO[Either[KuiError, StoreRecord]] =
     records.modify { held =>
       val current = held.get(key)
       if current.map(_.version) != baseVersion then held -> Left(RefStore.conflict)
@@ -128,7 +134,7 @@ private object RefStore {
   def create: IO[RefStore] = Ref.of[IO, Map[StoreKey, StoreRecord]](Map.empty).map(new RefStore(_))
 }
 
-private final class ConflictOnceStore private (
+final private class ConflictOnceStore private (
     delegate: RefStore,
     target: StoreKey,
     marker: Instant,
@@ -136,7 +142,12 @@ private final class ConflictOnceStore private (
 ) extends ConfigStore[IO] {
   def get(key: StoreKey): IO[Option[StoreRecord]] = delegate.get(key)
   def list(section: StoreSection): IO[List[StoreRecord]] = delegate.list(section)
-  def put(key: StoreKey, payload: Json, baseVersion: Option[Long], updatedBy: String): IO[Either[KuiError, StoreRecord]] =
+  def put(
+      key: StoreKey,
+      payload: Json,
+      baseVersion: Option[Long],
+      updatedBy: String
+  ): IO[Either[KuiError, StoreRecord]] =
     first.getAndSet(false).flatMap {
       case true if key == target =>
         val winner = UserState(None, Some(marker)).asJson

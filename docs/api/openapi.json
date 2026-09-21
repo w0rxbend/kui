@@ -575,6 +575,125 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/settings/ui" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Read this principal's appearance settings for one cluster",
+        "description" : "Returns the server-side value, or the product defaults when this principal has not saved one.",
+        "operationId" : "cluster.uiSettings.get",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UiAppearanceDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Persist this principal's appearance settings for one cluster",
+        "description" : "Mutation (cluster.uiSettings.put). Replaces theme, accent and density atomically in KUI's metadata store; it does not alter the Kafka cluster itself.",
+        "operationId" : "cluster.uiSettings.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UiAppearanceDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UiAppearanceDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/connection-test" : {
       "post" : {
         "tags" : [
@@ -8372,6 +8491,27 @@
           },
           "storeType" : {
             "description" : "JKS, PKCS12 or PEM",
+            "type" : "string"
+          }
+        }
+      },
+      "UiAppearanceDto" : {
+        "title" : "UiAppearanceDto",
+        "description" : "The complete appearance snapshot for this principal and cluster",
+        "type" : "object",
+        "required" : [
+          "theme",
+          "accent",
+          "density"
+        ],
+        "properties" : {
+          "theme" : {
+            "type" : "string"
+          },
+          "accent" : {
+            "type" : "string"
+          },
+          "density" : {
             "type" : "string"
           }
         }

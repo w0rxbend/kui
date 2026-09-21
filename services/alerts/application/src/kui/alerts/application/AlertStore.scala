@@ -56,12 +56,12 @@ object AlertFeed {
   * a fact with a beginning, and a cell that holds the current answer can only ever say that it is above the
   * threshold *now*. The age in every row of `M01` is the thing a snapshot cannot produce.
   *
-  * ==What it is not==
+  * ==Durability belongs to the adapter==
   *
-  * It is not durable. A restart loses the open events and the read markers, and the next pass re-opens
-  * whatever is still true with a new `openedAt` — so an age is an age since KUI last started, at worst. That
-  * is stated in ADR-053 rather than hidden: making it durable means a Kafka topic and a replay, which is
-  * `libs/config`'s metadata store and a milestone of its own.
+  * Deployments with a Kafka metadata store use a compacted durable projection for events, rule state and
+  * per-principal read markers. Deployments without one use the bounded in-memory adapter and deliberately
+  * lose that state on restart. Keeping the choice outside this port lets the application retain one set of
+  * event semantics while the composition root makes the operational trade-off explicit in its logs.
   */
 trait AlertStore[F[_]] {
 

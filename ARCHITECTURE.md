@@ -793,6 +793,7 @@ loops run under a `Supervisor`, are cancellable and emit `kui.cache.*` and
 | ksql | query pipes (TTL 1 min, single use) | — | — | — |
 | metrics | scraped broker metrics, inferred metrics from topic/consumer snapshot endpoints | every 30 s | — | `/metrics` exposition is the last scrape |
 | metrics | per-(cluster, metric) `SeriesWindow` ring (`libs/cache`), one bucket per `step`, bounded by `maxAge` and by `maxSamples` | the newest scrape of each `step`-wide bucket; every read evicts first, against an `Instant` the caller supplies | `clear` on a cluster-profile change, which restarts the coverage clock | a never-sampled bucket is absent, never `0`; a window collecting for less than the period asked for answers `None` rather than four minutes labelled "the last 24h"; a window whose samples have all been evicted counts a `miss`, so a dead collector shows on `kui.cache.misses` |
+| alerts | per-cluster durable event/rule projection in `alerts/<clusterId>` plus per-principal read watermark in `settings/<clusterId>-<principal digest>`; bounded in-memory fallback only when no metadata store is configured | evaluation interval and store tail | rule evaluation, acknowledgement, mark-read | with a Kafka store, restarts preserve event identity, acknowledgement and unread state; without one startup logs the explicit in-memory degradation |
 | identity | `RbacPolicy` (compiled once, hot-reloaded from the `rbac/roles` key of `__kui_config` or from a file watcher), sessions, OIDC state entries (5 min, single use) | on change | new store record, file change, session expiry | store unreachable means last known policy plus `Degraded`; writes rejected |
 | gateway | capability registry; `sessionId → Principal` (TTL 30 s); OpenAPI merge | readiness every 10 s | logout, role reload event | — |
 
@@ -803,6 +804,18 @@ cached. Small caches use `Ref` + TTL (`libs/cache.SnapshotCell`); bounded large 
 of one value over time — every chart and sparkline this product draws — uses
 `libs/cache.SeriesWindowCell`, which refuses on each of the three counts its row states
 rather than interpolating across them.
+
+The browser has a narrower cache tier. Non-sensitive appearance preferences use `localStorage`
+for synchronous first paint and reconcile with the principal-scoped backend record. Unsynced
+appearance snapshots use opaque principal-and-cluster-scoped keys, so one operator's retry cannot
+be uploaded into another operator's settings after a shared-browser session change. The alert feed
+may warm from IndexedDB only after `/auth/me` has established a principal: its key is a SHA-256
+digest of cluster, principal and the current authorization grants; entries expire after five
+minutes, are capped at sixteen, are decoded through the network decoder, and are always labelled
+stale until the backend replaces them. A refusal removes that scope and sign-out/session expiry
+clears the store. Authentication material, mutation responses and message payloads are never put in
+browser storage. Hashed frontend assets use the ordinary immutable HTTP cache; `index.html` is
+`no-store`, and API/SSE responses are never proxy-cached.
 
 Search: an in-memory prefix/substring/trigram index inside each snapshot (`libs/kernel`
 `NameIndex`); Lucene only if a benchmark on ≥ 50 k names shows p95 > 50 ms (ADR-038).
@@ -885,7 +898,7 @@ static config (Ciris: CLI -> env -> YAML -> defaults)
 
 | Topic | Shape | Key | Value |
 | --- | --- | --- | --- |
-| `__kui_config` | compacted, **single partition**, RF `kui.store.replicationFactor` (default 3; 1 in dev) | section path: `cluster/<clusterId>`, `settings/global`, `rbac/roles`, `masking/<clusterId>` | `StoreRecord` JSON (Circe, ADR-007) |
+| `__kui_config` | compacted, **single partition**, RF `kui.store.replicationFactor` (default 3; 1 in dev) | section path: `cluster/<clusterId>`, `settings/<clusterId>-<principal digest>`, `alerts/<clusterId>`, `rbac/roles`, `masking/<clusterId>` | `StoreRecord` JSON (Circe, ADR-007); principal names never appear in settings keys |
 | `__kui_files` | compacted, single partition, same RF | file id | binary payload in the same envelope, capped by `kui.store.maxFileBytes` (default 4 MiB) |
 | `__kui_audit` | **not** compacted, retention-based, partitioned by cluster id | cluster id | `AuditRecord` JSON (ADR-023) |
 

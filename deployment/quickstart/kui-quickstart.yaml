@@ -39,6 +39,19 @@ kui:
     # being treated as an unknown word.
     type: disabled
 
+  # KUI's own durable metadata lives beside the demo data in compacted `__kui_*` topics. This is
+  # what makes appearance settings and alert read state survive a KUI container restart. A real
+  # deployment should normally use a dedicated, replicated metadata cluster; this one-broker
+  # quickstart deliberately uses replication and ISR values of one.
+  store:
+    topicPrefix: "__kui_"
+    replicationFactor: 1
+    minInSyncReplicas: 1
+    encryptionKey: "env:KUI_STORE_ENCRYPTION_KEY"
+    kafka:
+      bootstrapServers:
+        - "kafka:9092"
+
   topics:
     # A topic is internal when Kafka says so OR when its name starts with this prefix. The default is
     # `__`, which catches Kafka's own `__consumer_offsets`. The quickstart lowers it to a single

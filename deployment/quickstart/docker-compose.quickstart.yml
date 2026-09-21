@@ -475,6 +475,12 @@ services:
       # for a log collector and unreadable for the person who just ran the quickstart.
       KUI_TELEMETRY_LOGFORMAT: text
 
+      # Demo-only deterministic AES-256 key for KUI's compacted metadata topics. Keeping it stable
+      # across container recreation is the feature under demonstration. Override it with 32 random
+      # bytes encoded as base64 when retaining this broker; never reuse this public default outside
+      # the quickstart.
+      KUI_STORE_ENCRYPTION_KEY: ${KUI_STORE_ENCRYPTION_KEY:-a3VpLXF1aWNrc3RhcnQtZGVtby1rZXktMDAwMDAwMDE=}
+
       # The schema registry below lives on this Compose network, which is a private address, and
       # KUI refuses to call a private or loopback address unless this is set (ARCHITECTURE.md §14:
       # the address rule exists to stop KUI being pointed at a cloud metadata service). A

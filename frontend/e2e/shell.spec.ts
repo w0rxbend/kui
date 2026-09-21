@@ -270,6 +270,134 @@ test.describe("the shell", () => {
     await expect(control).toBeFocused();
   });
 
+  test("appearance returns from the backend after this cluster's browser cache is removed", async ({
+    page,
+  }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    await page.getByTestId("appearance-control").click();
+
+    let popover = page.getByRole("dialog", { name: "Appearance" });
+    const original = await popover
+      .getByRole("radiogroup", { name: "Theme" })
+      .getByRole("radio", { checked: true })
+      .inputValue();
+    const target = original === "dark" ? "light" : "dark";
+    const label = target === "dark" ? "Dark" : "Light";
+
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/api/v1/clusters/${CLUSTER}/settings/ui`),
+    );
+    await popover.getByRole("radio", { name: label, exact: true }).check();
+    expect((await saved).status()).toBe(200);
+    await expect(popover).toContainText("Saved for this cluster");
+
+    /* Removing the cache turns the reload into a backend-hydration test. A localStorage-only
+       implementation repaints with the default and fails here, even though an ordinary reload
+       would have hidden the bug. Only this cluster's non-sensitive appearance cache is touched. */
+    await page.evaluate((cluster) => {
+      window.localStorage.removeItem(`kui.appearance.${cluster}`);
+    }, CLUSTER);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", target);
+
+    await page.getByTestId("appearance-control").click();
+    popover = page.getByRole("dialog", { name: "Appearance" });
+    await expect(popover.getByRole("radio", { name: label, exact: true })).toBeChecked();
+    await expect(popover).toContainText("Saved for this cluster");
+
+    /* Leave the operator's pre-test setting in place. The restore is itself a real durable write,
+       so a green run never changes the manual-QA environment merely by observing it. */
+    const originalLabel = original === "auto" ? "Auto" : original === "dark" ? "Dark" : "Light";
+    const restored = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/api/v1/clusters/${CLUSTER}/settings/ui`),
+    );
+    await popover.getByRole("radio", { name: originalLabel, exact: true }).check();
+    expect((await restored).status()).toBe(200);
+    await expect(popover).toContainText("Saved for this cluster");
+  });
+
+  test("a principal-scoped IndexedDB snapshot warms alerts while the backend reconnects", async ({
+    page,
+  }) => {
+    const feedPattern = `**/api/v1/clusters/${CLUSTER}/alerts/events*`;
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    await expect(page.getByTestId("notifications")).toBeVisible();
+
+    /* The network answer is cached asynchronously after it is decoded. Wait on the browser's real
+       database rather than on a UI side effect so this proves the IndexedDB adapter itself ran. */
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open("kui-shell-cache", 1);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          if (!database.objectStoreNames.contains("alert-feeds")) {
+            database.close();
+            return [];
+          }
+          const records = await new Promise<unknown[]>((resolve, reject) => {
+            const request = database
+              .transaction("alert-feeds", "readonly")
+              .objectStore("alert-feeds")
+              .getAll();
+            request.onsuccess = () => resolve(request.result as unknown[]);
+            request.onerror = () => reject(request.error);
+          });
+          database.close();
+          return records;
+        }),
+      )
+      .not.toHaveLength(0);
+
+    const keys = await page.evaluate(async () => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("kui-shell-cache", 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const records = await new Promise<readonly { key?: unknown }[]>((resolve, reject) => {
+        const request = database
+          .transaction("alert-feeds", "readonly")
+          .objectStore("alert-feeds")
+          .getAll();
+        request.onsuccess = () => resolve(request.result as readonly { key?: unknown }[]);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return records.map((record) => record.key);
+    });
+    expect(keys.some((key) => typeof key === "string" && /^[a-f0-9]{64}$/.test(key))).toBe(true);
+    expect(JSON.stringify(keys)).not.toContain(CLUSTER);
+
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(feedPattern, async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    try {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("notifications").click();
+      const panel = page.getByTestId("notification-panel");
+      await expect(panel).toContainText("Showing saved alerts while KUI refreshes.");
+
+      release();
+      await expect(panel).not.toContainText("Showing saved alerts while KUI refreshes.");
+    } finally {
+      release();
+      await page.unroute(feedPattern);
+    }
+  });
+
   /**
    * `M08`, and it is the last of the twenty-three screens that had never been drawn by a browser.
    *

@@ -94,6 +94,7 @@ export {
   ALERTS_EVENT_NAME,
   ALERTS_SECTION_KEY,
   createAlerts,
+  type AlertFeedCache,
   type Alerts,
   type AlertsOptions,
 } from "./data/alerts/store.js";

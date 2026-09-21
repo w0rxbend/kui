@@ -199,6 +199,20 @@ export const ALERTS_EVENT_NAME = "alerts";
  */
 export const ALERTS_SECTION_KEY = "events";
 
+/**
+ * An optional, best-effort warm cache for the feed.
+ *
+ * The shell owns the browser technology and the privacy boundary; the kernel only accepts bytes,
+ * validates them through the same decoder as the network, and always lets the backend replace
+ * them. Cache failures never turn an otherwise usable feed into a failure.
+ */
+export interface AlertFeedCache {
+  readonly read: () => Promise<unknown | undefined>;
+  readonly write: (feed: AlertFeed) => Promise<void>;
+  /** Removes the current scope after the backend refuses or cannot validate it. */
+  readonly remove: () => Promise<void>;
+}
+
 export interface AlertsOptions {
   /** Subscribes to the change stream. A function, because a new one is opened after a close. */
   readonly openStream: (subscriber: SseSubscriber<AlertChange>) => SseHandle;
@@ -219,6 +233,8 @@ export interface AlertsOptions {
   readonly cluster?: (() => string | undefined) | undefined;
   readonly eventName?: string | undefined;
   readonly sectionKey?: string | undefined;
+  /** A cluster-and-principal-scoped browser cache used only while the first read is in flight. */
+  readonly cache?: AlertFeedCache | undefined;
   /** Where an unreadable frame is reported. Defaults to the console. */
   readonly warn?: ((message: string) => void) | undefined;
 }
@@ -459,13 +475,47 @@ export function createAlerts(options: AlertsOptions): Alerts {
    * `store.test.ts`'s *"a refresh issued after stop() is not applied"* is that case, and it fails
    * when this clause is weakened rather than when the whole guard is deleted.
    */
-  function read(markRead: boolean): void {
+  function read(markRead: boolean, warmFromCache = false): void {
     episode += 1;
     const asked = episode;
+    let serverSettled = false;
+
+    if (warmFromCache && options.cache !== undefined) {
+      void options.cache
+        .read()
+        .then((cached) => {
+          if (
+            cached === undefined ||
+            serverSettled ||
+            asked !== episode ||
+            stopped ||
+            feed().kind !== "loading"
+          )
+            return;
+          const decoded = decodeAlertFeed(cached);
+          if (!decoded.ok) return;
+          setFeed({
+            kind: "stale",
+            value: decoded.value,
+            reason: "Showing saved alerts while KUI refreshes.",
+          });
+        })
+        .catch(() => undefined);
+    }
+
     void options.load(markRead).then((answer) => {
+      serverSettled = true;
       if (asked !== episode || stopped) return;
       applyRead(answer);
     });
+  }
+
+  function cache(feed: AlertFeed): void {
+    void options.cache?.write(feed).catch(() => undefined);
+  }
+
+  function discardCache(): void {
+    void options.cache?.remove().catch(() => undefined);
   }
 
   function applyRead(result: ApiResult<unknown>): void {
@@ -494,6 +544,7 @@ export function createAlerts(options: AlertsOptions): Alerts {
         markStale(userMessage(result.error));
         return;
       }
+      discardCache();
       setFeed(apiFailure(result.error));
       return;
     }
@@ -503,13 +554,16 @@ export function createAlerts(options: AlertsOptions): Alerts {
     const section = decodeSection<unknown>(envelope?.[sectionKey]);
     switch (section.status) {
       case "forbidden":
+        discardCache();
         setFeed({ kind: "forbidden" });
         return;
       case "not_configured":
+        discardCache();
         setFeed({ kind: "not-configured" });
         return;
       case "unavailable":
       case "unreadable":
+        discardCache();
         setFeed({
           kind: "failed",
           message: section.reason.message ?? "The alerts service did not answer.",
@@ -522,6 +576,7 @@ export function createAlerts(options: AlertsOptions): Alerts {
         if (!decoded.ok) {
           // The refusal, spelled out. This is the sentence that would have caught wave 5's
           // producers wire on the day it shipped rather than two waves later.
+          discardCache();
           setFeed({
             kind: "failed",
             message: `KUI could not read the alert feed: ${decoded.cause}`,
@@ -535,9 +590,11 @@ export function createAlerts(options: AlertsOptions): Alerts {
             value: decoded.value,
             reason: section.reason.message ?? "This is the last answer KUI received.",
           });
+          cache(decoded.value);
           return;
         }
         setFeed({ kind: "ready", value: decoded.value });
+        cache(decoded.value);
         return;
       }
     }
@@ -558,6 +615,10 @@ export function createAlerts(options: AlertsOptions): Alerts {
     unread: () => (current()?.unreadCount ?? 0) > 0,
 
     markAllRead(): void {
+      // A pre-write snapshot may still carry the unread count this request is about to retire.
+      // Remove it before asking so an immediate reload cannot briefly relight the bell from an old
+      // browser record. A successful answer writes the server's post-read feed back afterwards.
+      discardCache();
       read(true);
     },
 
@@ -567,7 +628,9 @@ export function createAlerts(options: AlertsOptions): Alerts {
 
     start(): void {
       stopped = false;
-      read(false);
+      setStreamed(null);
+      setFeed({ kind: "loading" });
+      read(false, true);
       connect();
     },
 

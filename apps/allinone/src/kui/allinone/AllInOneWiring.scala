@@ -302,7 +302,15 @@ object AllInOneWiring {
       // And the line before it, which is the only thing in this process that can tell a tuned deployment
       // from an untuned one. See `logAlertThresholds`.
       _ <- Resource.eval(logAlertThresholds[F](logger, alerts))
-      alertsService <- AlertsWiring.make[F](clusters, alerts, rbac, telemetry, principals, logger)
+      alertsService <- AlertsWiring.make[F](
+        clusters,
+        alerts,
+        store,
+        rbac,
+        telemetry,
+        principals,
+        logger
+      )
       // The connect service, and the tenth. It reads the same `kui.clusters[]` as the four services
       // above -- the Connect workers' addresses are a per-cluster key, `kui.clusters.<n>.connect[]` --
       // and it holds no Kafka client at all: every fact it reports comes from a worker's REST API.

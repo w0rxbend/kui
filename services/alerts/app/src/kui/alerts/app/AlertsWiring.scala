@@ -4,7 +4,7 @@ import cats.Parallel
 import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import fs2.io.file.Files
-import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.log4cats.{LoggerFactory, StructuredLogger}
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
@@ -14,13 +14,16 @@ import kui.alerts.application.*
 import kui.alerts.domain.{AlertLimits, ClusterFactsPort}
 import kui.alerts.infrastructure.{
   ConfiguredProfileSource,
+  DurableAlertStore,
   InMemoryAlertStore,
   KafkaClusterFacts,
   LoggingAcknowledgementSink
 }
 import kui.cache.CacheMetrics
-import kui.config.{AlertThresholds, AlertsConfig, ClusterConfig}
+import kui.config.store.ConfigStoreResource
+import kui.config.{AlertThresholds, AlertsConfig, ClusterConfig, StoreConfig}
 import kui.contracts.capability.ServiceCapabilities
+import kui.http.ProcessLoggerFactory
 import kui.http.health.ReadinessCheck
 import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kafka.admin.{KafkaClusterAdmin, KafkaGroupAdmin}
@@ -67,6 +70,9 @@ object AlertsWiring {
   /** The instrumentation scope this service's tracer and meter are named after. */
   val Instrumentation: String = AlertsService.Instrumentation
 
+  /** Store client identity visible in broker connection lists and quotas. */
+  val StoreClientId: String = "kui-alerts-store"
+
   /** Builds everything except the listener.
     *
     * @param clusters
@@ -80,11 +86,14 @@ object AlertsWiring {
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
       alerts: AlertsConfig,
+      storeConfig: StoreConfig,
       rbac: RbacPolicy,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
-  ): Resource[F, AlertsServer[F]] =
+  ): Resource[F, AlertsServer[F]] = {
+    given LoggerFactory[F] = ProcessLoggerFactory.of(logger)
+
     for {
       meter <- Resource.eval(telemetry.meter(Instrumentation))
       rejections <- Resource.eval(PrincipalVerification.rejectionCounter[F](meter))
@@ -92,7 +101,7 @@ object AlertsWiring {
 
       profiles = new ConfiguredProfileSource[F](clusters)
       cacheMetrics <- Resource.eval(CacheMetrics.otel4s[F](meter))
-      store <- InMemoryAlertStore.resource[F](alerts.retention, cacheMetrics)
+      store <- alertStore[F](storeConfig, alerts, cacheMetrics, logger)
 
       _ <- evaluators[F](clusters, alerts, store, telemetry, logger)
 
@@ -135,6 +144,34 @@ object AlertsWiring {
       readiness = readiness,
       capabilities = AlertsApi.capabilityDocument[F](capabilities, logger)
     )
+  }
+
+  /** Durable when a Kafka metadata store exists; explicit in-memory compatibility otherwise.
+    *
+    * A file store is read-only and therefore cannot honour read markers or acknowledgements. Keeping the
+    * existing in-memory behavior for that deployment shape is more honest than constructing a durable adapter
+    * whose first click always fails. Startup says which mode was selected.
+    */
+  private def alertStore[F[_]: {Async, Parallel, Files, LoggerFactory}](
+      storeConfig: StoreConfig,
+      alerts: AlertsConfig,
+      cacheMetrics: CacheMetrics[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, AlertStore[F]] =
+    storeConfig.kafka match {
+      case Some(_) =>
+        ConfigStoreResource
+          .resource[F](storeConfig, StoreClientId, logger)
+          .evalTap(_ => logger.info("alerts: durable event history and read markers enabled"))
+          .map(metadata => DurableAlertStore[F](metadata, alerts.retention, logger))
+      case None =>
+        Resource.eval(
+          logger.warn(
+            "alerts: no writable Kafka metadata store is configured; event history and read markers " +
+              "will last only until this process restarts"
+          )
+        ) *> InMemoryAlertStore.resource[F](alerts.retention, cacheMetrics)
+    }
 
   /** One evaluation fibre per configured cluster, over one shared admin pool.
     *

@@ -40,12 +40,11 @@ private object ClusterAlerts {
   * hold a million of them inside a week. Both are applied on every pass; the ceiling wins when they disagree,
   * and the events it drops are the oldest.
   *
-  * ==What it is not==
+  * ==Fallback semantics==
   *
-  * It is not durable, and ADR-053 §8 says so rather than leaving it to be discovered: a restart loses the
-  * open events and the read markers, and the next pass re-opens whatever is still true with a fresh
-  * `openedAt`. The consequence an operator sees is that an age is an age since KUI last started. Making it
-  * durable is a Kafka topic and a replay — `libs/config`'s metadata store — and a milestone of its own.
+  * This adapter is selected only when no Kafka metadata store is configured. A restart then loses the open
+  * events and read markers, and the next pass re-opens whatever is still true with a fresh `openedAt`. The
+  * composition root logs that degradation at startup; a configured store selects [[DurableAlertStore]].
   *
   * ==The read markers are a bounded cache and not a map==
   *

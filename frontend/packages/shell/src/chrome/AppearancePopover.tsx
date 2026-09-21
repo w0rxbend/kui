@@ -49,6 +49,7 @@ import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 import { SegmentedControl } from "@kui/kernel";
 import type { AccentChoice, DensityChoice, RootPreference, ThemeChoice } from "@kui/kernel";
+import type { AppearanceSyncStatus } from "../data/appearance.js";
 import {
   ACCENT_OPTIONS,
   DENSITY_OPTIONS,
@@ -67,6 +68,7 @@ export interface AppearancePreferences {
   readonly theme: RootPreference<ThemeChoice>;
   readonly accent: RootPreference<AccentChoice>;
   readonly density: RootPreference<DensityChoice>;
+  readonly persistence?: (() => AppearanceSyncStatus) | undefined;
 }
 
 export interface AppearancePopoverProps {
@@ -145,6 +147,34 @@ export function AppearancePopover(props: AppearancePopoverProps): JSX.Element {
           testId="appearance-density"
         />
       </div>
+
+      <Show when={props.preferences.persistence?.()}>
+        {(status) => (
+          <p
+            class="kui-appearance__persistence"
+            data-state={status().kind}
+            role={status().kind === "local-only" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {persistenceCopy(status())}
+          </p>
+        )}
+      </Show>
     </div>
   );
+}
+
+function persistenceCopy(status: AppearanceSyncStatus): string {
+  switch (status.kind) {
+    case "idle":
+      return "Choose a cluster to sync.";
+    case "loading":
+      return "Loading saved appearance…";
+    case "saving":
+      return "Saving…";
+    case "saved":
+      return "Saved for this cluster";
+    case "local-only":
+      return status.message;
+  }
 }

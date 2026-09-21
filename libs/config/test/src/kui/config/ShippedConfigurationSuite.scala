@@ -34,6 +34,10 @@ final class ShippedConfigurationSuite extends KuiSuite {
   private val cursorKey: Map[String, String] =
     Map("KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted")
 
+  /** The public demo-only AES-256 key supplied by quickstart Compose. */
+  private val quickstartStoreKey: Map[String, String] =
+    Map("KUI_STORE_ENCRYPTION_KEY" -> "a3VpLXF1aWNrc3RhcnQtZGVtby1rZXktMDAwMDAwMDE=")
+
   /** Every file, with the environment it expects and the URL policy the deployment it describes runs under.
     *
     * The environment entries are the `env:` references each file makes. Supplying them rather than leaving
@@ -56,7 +60,7 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // on a stack that never came up, with a message about a capability document.
     ("deployment/compose/kui-service.yaml", UrlPolicy.Dev, signingKey ++ cursorKey),
     ("deployment/compose/kui-allinone.yaml", UrlPolicy.Dev, Map.empty),
-    ("deployment/quickstart/kui-quickstart.yaml", UrlPolicy.Dev, Map.empty),
+    ("deployment/quickstart/kui-quickstart.yaml", UrlPolicy.Dev, quickstartStoreKey),
     // The quickstart's `--with-auth` configuration. No CI job runs `docker-compose.auth.yml`, so
     // before this row nothing in the repository read this file at all -- not a job, not a suite,
     // not a `docker compose config`. It carries its own `kui.auth`, its own `kui.rbac` and its own
@@ -64,7 +68,7 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // that failed in front of whoever was being shown it. The file itself now says so, beside the
     // section that says what still is not covered here: this row proves it loads and asserts
     // nothing about whether the two accounts can sign in.
-    ("deployment/quickstart/kui-quickstart-auth.yaml", UrlPolicy.Dev, Map.empty),
+    ("deployment/quickstart/kui-quickstart-auth.yaml", UrlPolicy.Dev, quickstartStoreKey),
     (
       "deployment/secured/kui-secured.yaml",
       UrlPolicy.Dev,
@@ -357,7 +361,7 @@ final class ShippedConfigurationSuite extends KuiSuite {
   test("both quickstarts automatically decode every Schema Registry fixture they seed") {
     quickstarts.foreach { relative =>
       val loaded = KuiConfigSource
-        .loadFrom[IO](Nil, List(resolve(relative)), Map.empty, UrlPolicy.Dev)
+        .loadFrom[IO](Nil, List(resolve(relative)), quickstartStoreKey, UrlPolicy.Dev)
         .unsafeRunSync()
         .fold(errors => fail(s"$relative does not load:\n${errors.render}"), identity)
 
@@ -392,7 +396,7 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // hole in place. It now reads both, requires them to agree, and keeps the "nobody else" half.
     val loadedQuickstarts = quickstarts.map { relative =>
       relative -> KuiConfigSource
-        .loadFrom[IO](Nil, List(resolve(relative)), Map.empty, UrlPolicy.Dev)
+        .loadFrom[IO](Nil, List(resolve(relative)), quickstartStoreKey, UrlPolicy.Dev)
         .unsafeRunSync()
         .fold(errors => fail(s"$relative does not load:\n${errors.render}"), identity)
     }
@@ -484,7 +488,12 @@ final class ShippedConfigurationSuite extends KuiSuite {
 
   test("the quickstart describes the broker the quickstart starts") {
     val loaded = KuiConfigSource
-      .loadFrom[IO](Nil, List(resolve("deployment/quickstart/kui-quickstart.yaml")), Map.empty, UrlPolicy.Dev)
+      .loadFrom[IO](
+        Nil,
+        List(resolve("deployment/quickstart/kui-quickstart.yaml")),
+        quickstartStoreKey,
+        UrlPolicy.Dev
+      )
       .unsafeRunSync()
       .fold(errors => fail(errors.render), identity)
 
@@ -503,6 +512,10 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // registry, no Connect and no ksqlDB — which is the emptiest possible first screen of this product.
     assertEquals(loaded.clusters.map(_.id.value), List("quickstart", "staging-eu-01"))
     assertEquals(loaded.clusters.map(_.bootstrapServers.value).distinct, List("kafka:9092"))
+    assertEquals(loaded.store.kafka.map(_.bootstrapServers.value), Some("kafka:9092"))
+    assertEquals(loaded.store.configTopic, "__kui_config")
+    assertEquals(loaded.store.replicationFactor, 1.toShort)
+    assertEquals(loaded.store.minInSyncReplicas.value, 1)
 
     // THE DISPLAY NAME, WHICH IS THE WORD THE DESIGN ASKS A BROWSER TO READ. The id and the broker were
     // asserted above and the name was not, so `- name: "Staging (EU)"` was a one-line edit with every

@@ -17,6 +17,7 @@ final class StoreKeySuite extends KuiSuite {
       Gen.oneOf(
         StoreSection.Cluster,
         StoreSection.Settings,
+        StoreSection.Alerts,
         StoreSection.Rbac,
         StoreSection.Masking,
         StoreSection.File
@@ -67,5 +68,6 @@ final class StoreKeySuite extends KuiSuite {
     assertEquals(StoreKey.SettingsGlobal.render, "settings/global")
     assertEquals(StoreKey.RbacRoles.render, "rbac/roles")
     assertEquals(StoreKey.cluster("prod-eu").map(_.render), Right("cluster/prod-eu"))
+    assertEquals(StoreKey(StoreSection.Alerts, "prod-eu").render, "alerts/prod-eu")
   }
 }

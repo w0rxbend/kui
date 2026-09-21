@@ -173,6 +173,17 @@ kui:
         passwordHash: "pbkdf2-sha256$210000$0y6raPVUTElFb7dJQAbEVA$AwALno5FnJFzpkRDseIvafLdRJIVhmfF3uve99WIA2A"
         groups: [readers]
 
+  # The same durable metadata store as the no-login quickstart. Principal-scoped settings and alert
+  # reads are especially useful here: admin and viewer keep independent state across KUI restarts.
+  store:
+    topicPrefix: "__kui_"
+    replicationFactor: 1
+    minInSyncReplicas: 1
+    encryptionKey: "env:KUI_STORE_ENCRYPTION_KEY"
+    kafka:
+      bootstrapServers:
+        - "kafka:9092"
+
   topics:
     # A topic is internal when Kafka says so OR when its name starts with this prefix. The default is
     # `__`, which catches Kafka's own `__consumer_offsets`. The quickstart lowers it to a single

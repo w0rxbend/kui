@@ -312,3 +312,14 @@
   line-height: var(--kui-font-line-height-normal);
   color: var(--kui-color-text-muted);
 }
+
+.kui-appearance__persistence {
+  margin: calc(-1 * var(--kui-space-1)) 0 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+.kui-appearance__persistence[data-state="local-only"] {
+  color: var(--kui-color-warning);
+}

@@ -31,7 +31,15 @@ object Main extends IOApp {
       args,
       (config, telemetry, principals, logger) =>
         AlertsWiring
-          .make[IO](config.clusters, config.alerts, config.rbac, telemetry, principals, logger)
+          .make[IO](
+            config.clusters,
+            config.alerts,
+            config.store,
+            config.rbac,
+            telemetry,
+            principals,
+            logger
+          )
           .map(service => ServiceMain.Serving(service.routes, service.interceptors))
     )
 }

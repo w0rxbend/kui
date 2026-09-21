@@ -931,6 +931,30 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/settings/ui": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read this principal's appearance settings for one cluster
+         * @description Returns the server-side value, or the product defaults when this principal has not saved one.
+         */
+        readonly get: operations["cluster.uiSettings.get"];
+        /**
+         * Persist this principal's appearance settings for one cluster
+         * @description Mutation (cluster.uiSettings.put). Replaces theme, accent and density atomically in KUI's metadata store; it does not alter the Kafka cluster itself.
+         */
+        readonly put: operations["cluster.uiSettings.put"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/topics": {
         readonly parameters: {
             readonly query?: never;
@@ -2888,6 +2912,15 @@ export interface components {
             /** @description JKS, PKCS12 or PEM */
             readonly storeType: string;
         };
+        /**
+         * UiAppearanceDto
+         * @description The complete appearance snapshot for this principal and cluster
+         */
+        readonly UiAppearanceDto: {
+            readonly accent: string;
+            readonly density: string;
+            readonly theme: string;
+        };
         /** Unavailable */
         readonly Unavailable: {
             readonly message: string;
@@ -4658,6 +4691,73 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["CompatibilityCheckDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.uiSettings.get": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["UiAppearanceDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.uiSettings.put": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UiAppearanceDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["UiAppearanceDto"];
                 };
             };
             readonly default: {

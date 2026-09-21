@@ -34,7 +34,6 @@ import kui.contracts.health.CheckResult
 import kui.http.health.ReadinessCheck
 import kui.kafka.admin.KafkaClusterAdmin
 import kui.kafka.{AdminClientPool, AdminMetrics}
-import kui.kernel.error.KuiError
 import kui.observability.Telemetry
 
 /** The ordered startup of ADR-042, as one `Resource`.
@@ -136,7 +135,7 @@ object ClusterBootstrap {
       statics <- Resource.eval(profilesOf[F](clusters))
       // Steps 1 to 3. The store's clients, its topics, and the replay - all three inside `configStore`,
       // because they are one decision ("is there a Kafka store?") with one answer.
-      configStore <- configStoreOf[F](store, logger)
+      configStore <- ConfigStoreResource.resource[F](store, StoreClientId, logger)
       clusterStore <- ClusterConfigStoreAdapter.resource[F](configStore, logger)
       // Step 4. The registry resolves once here, before anything downstream exists.
       registry <- ClusterRegistry.make[F](statics, clusterStore, clockOf[F], logger)
@@ -278,73 +277,6 @@ object ClusterBootstrap {
       )
       .leftMap(error => s"  - ${cluster.id.value}: ${error.message}")
 
-  /** The store, whichever kind this deployment has.
-    *
-    * Three shapes, and the middle one is the one operators actually meet first: a Kafka store when
-    * `kui.store.kafka.*` is set, a read-only directory when `kui.store.dir` is, and nothing at all otherwise.
-    * The store-less path is supported rather than tolerated - a KUI with clusters in its configuration file
-    * and no store is a perfectly good deployment - and it is the reason `ConfigStore` has a zero value that
-    * obeys the same contract.
-    */
-  private def configStoreOf[F[_]: {Async, Parallel, Files, LoggerFactory}](
-      config: StoreConfig,
-      logger: StructuredLogger[F]
-  ): Resource[F, ConfigStore[F]] =
-    config.kafka match {
-      case Some(kafka) =>
-        for {
-          keyring <- Resource.eval(keyringOf[F](config))
-          // The topics, before any consumer assigns a partition on one. KUI creates what is missing and
-          // validates what is there; it never rewrites an operator's topic settings.
-          _ <- StoreClients
-            .admin[F](kafka, s"$StoreClientId-bootstrap")
-            .evalMap(admin =>
-              StoreBootstrap
-                .ensureTopics[F](
-                  admin,
-                  StoreTopics.of(config),
-                  config.replicationFactor,
-                  kafka.bootstrapServers.value
-                )
-                .flatMap {
-                  case Right(()) => Async[F].unit
-                  case Left(error) => Async[F].raiseError[Unit](StoreErrors.asThrowable(error))
-                }
-            )
-          store <- KafkaConfigStore.resource[F](config, kafka, FieldCrypto[F](keyring), StoreClientId)
-          _ <- Resource.eval(logger.info("metadata store: replay complete, following the log"))
-        } yield store
-
-      case None =>
-        config.dir match {
-          case Some(dir) => FileConfigStore.resource[F](dir)
-          case None =>
-            Resource.eval(
-              logger
-                .info("no metadata store is configured; clusters come from configuration alone")
-                .as(ConfigStore.empty[F])
-            )
-        }
-    }
-
-  /** The encryption keyring, or a named failure. A Kafka store with no key cannot read its own secrets. */
-  private def keyringOf[F[_]: Async](config: StoreConfig): F[EncryptionKeyring] =
-    config.encryption match {
-      case None =>
-        Async[F].raiseError(
-          new IllegalStateException(
-            "kui.store.kafka.* is configured but kui.store.encryption is not; stored secrets cannot be " +
-              "read or written without a key"
-          )
-        )
-      case Some(encryption) =>
-        val keyring = encryption.keys.toList
-          .traverse((id, material) => EncryptionKey.fromBase64(id, material.value))
-          .flatMap(EncryptionKeyring.of(_, encryption.activeKeyId))
-
-        Async[F].fromEither(keyring.leftMap(StoreErrors.asThrowable))
-    }
-
   private def logResolved[F[_]: Async](
       registry: ClusterRegistry[F],
       logger: StructuredLogger[F]
@@ -360,18 +292,6 @@ object ClusterBootstrap {
 
   private def clockOf[F[_]: Clock]: ClockPort[F] = new ClockPort[F] {
     def now: F[Instant] = Clock[F].realTimeInstant
-  }
-
-  /** Turning a store failure into something a `Resource` can fail with, without losing its name.
-    *
-    * The message is what an operator reads when the process exits, so it keeps the store error's own words:
-    * those name the topic, the setting, the expected value and the found value.
-    */
-  private object StoreErrors {
-    def asThrowable(error: StoreError): Throwable = {
-      val kui: KuiError = StoreError.toKuiError(error)
-      new IllegalStateException(s"${kui.code.wire}: ${kui.message}")
-    }
   }
 
 }

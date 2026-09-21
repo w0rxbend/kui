@@ -86,6 +86,8 @@ import {
   loadAlertFeed,
   noticesOf,
 } from "./data/alerts.js";
+import { createAlertFeedCache } from "./data/alertCache.js";
+import { createAppearanceSync } from "./data/appearance.js";
 import { brokerStorageOf, createClusterStore } from "./data/clusterStore.js";
 import {
   SEARCH_DEBOUNCE_MS,
@@ -133,6 +135,7 @@ export function App() {
     settleCsrf: (token) => csrf.settle(token),
     invalidateCsrf: () => csrf.invalidate(),
   });
+  let clearPrivateBrowserState = (): Promise<void> => Promise.resolve();
 
   const api: KuiApiClient = createApiClient({
     bootstrap,
@@ -140,7 +143,10 @@ export function App() {
     csrf,
     // The gateway said the session lapsed. Emptying it here rather than at the call site means no
     // write control survives that moment even for the length of a reload.
-    onUnauthorized: () => session.markExpired(),
+    onUnauthorized: () => {
+      session.markExpired();
+      void clearPrivateBrowserState();
+    },
   });
 
   const health = createHealth({
@@ -219,6 +225,48 @@ export function App() {
    * with the first, so the two only ever disagree while no address names a cluster at all.
    */
   const clusterForFrame = (): string | undefined => routeCluster() ?? cluster.selected();
+
+  const alertCacheScope = () => {
+    const selected = clusterForFrame();
+    const identity = session.identity();
+    const principal = identity?.principal;
+    if (selected === undefined || identity === undefined || principal === undefined)
+      return undefined;
+    return {
+      cluster: selected,
+      principalKind: principal.kind,
+      principalName: principal.name,
+      authorization: JSON.stringify({ roles: principal.roles ?? [], grants: identity.permissions }),
+    };
+  };
+  const alertCache = createAlertFeedCache({ scope: alertCacheScope });
+  clearPrivateBrowserState = () => alertCache.clear();
+
+  const appearance = createAppearanceSync({
+    api,
+    preferences: {
+      theme: themePreference,
+      accent: accentPreference,
+      density: densityPreference,
+    },
+    storage: safeLocalStorage(),
+  });
+
+  createEffect(
+    () => {
+      const selected = clusterForFrame();
+      const principal = session.identity()?.principal;
+      return selected === undefined || principal === undefined
+        ? undefined
+        : {
+            cluster: selected,
+            principalKind: principal.kind,
+            principalName: principal.name,
+          };
+    },
+    (scope) => appearance.selectScope(scope),
+  );
+  onCleanup(() => appearance.dispose());
 
   /**
    * The search input, once it exists, and the `⌘K` that focuses it.
@@ -369,6 +417,7 @@ export function App() {
        naming another cluster moving this bell's count would be a number from somewhere the
        operator is not looking — and the accessor rather than the value, so a switch is followed. */
     cluster: () => clusterForFrame(),
+    cache: alertCache,
   });
 
   /*
@@ -389,9 +438,19 @@ export function App() {
    * on unmount is `onCleanup` below, and that one is load-bearing.
    */
   createEffect(
-    () => clusterForFrame(),
-    (chosen) => {
-      if (chosen === undefined) return undefined;
+    () => {
+      const scope = alertCacheScope();
+      return scope === undefined
+        ? undefined
+        : JSON.stringify([
+            scope.cluster,
+            scope.principalKind,
+            scope.principalName,
+            scope.authorization,
+          ]);
+    },
+    (scope) => {
+      if (scope === undefined) return undefined;
       alerts.start();
       return () => alerts.stop();
     },
@@ -598,9 +657,10 @@ export function App() {
       <SettingsPage
         /* The kernel's singletons, handed in rather than reached for. The page takes them as props
            so a test can drive it without sharing `localStorage` with the next suite. */
-        theme={asPreference(themePreference)}
-        accent={asPreference(accentPreference)}
-        density={asPreference(densityPreference)}
+        theme={asPreference(appearance.preferences.theme)}
+        accent={asPreference(appearance.preferences.accent)}
+        density={asPreference(appearance.preferences.density)}
+        persistence={appearance.status()}
         version={bootstrap.buildVersion}
         apiBase={bootstrap.apiBase}
       />
@@ -864,7 +924,8 @@ export function App() {
                       void signOut.run().then((outcome) => {
                         // Only on success. Reloading after a refusal would redraw a signed-in
                         // shell, which is indistinguishable from a sign-out that worked.
-                        if (outcome.kind === "done") window.location.reload();
+                        if (outcome.kind === "done")
+                          void alertCache.clear().finally(() => window.location.reload());
                       });
                     }}
                   />
@@ -932,11 +993,7 @@ export function App() {
                  Passing the preferences rather than a mode is also what removes the shell's own
                  read of `data-theme` — that attribute is written *by* the preference, so reading it
                  back was the frame asking the stylesheet what it had just been told. */
-              appearance={{
-                theme: themePreference,
-                accent: accentPreference,
-                density: densityPreference,
-              }}
+              appearance={{ ...appearance.preferences, persistence: appearance.status }}
               notificationsOpen={noticesOpen()}
               onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
               /* The bell's two facts, and neither is folded here. The figure is the alerts

@@ -1,3 +1,20 @@
+# Durable cluster-scoped user state
+
+- [x] Define cluster- and principal-scoped appearance/read-marker records in `__kui_config`.
+- [x] Persist theme, accent and density through authenticated GET/PUT endpoints with validation.
+- [x] Hydrate appearance from the backend without blocking first paint; retain a local dirty retry cache.
+- [x] Persist alert events, acknowledgements, rule state and per-principal read watermarks.
+- [x] Preserve independent settings/read-marker writes under optimistic-write conflicts.
+- [x] Reconcile concurrent alert evaluations without duplicate conditions or backwards timestamps.
+- [x] Configure quickstart metadata topics and a clearly demo-only encryption key.
+- [x] Verify theme hydration after removing browser cache and alert read state after a KUI restart.
+- [x] Add a bounded, expiring, principal/cluster/authorization-scoped IndexedDB alert warm cache.
+- [x] Keep immutable assets in HTTP cache while excluding session, API, SSE and message payload data.
+- [x] Run complete backend, frontend, formatting, security and Docker browser gates.
+- [x] Review the final diff, commit it atomically and push it.
+
+---
+
 # Consumer filtering worklist
 
 - [x] Inventory architecture, current filter behavior, test coverage, and baseline failures.
@@ -410,14 +427,14 @@ Integration tasks are sequential because they converge on the same client and wi
 # Cluster-scoped UI and alert persistence
 
 - [x] Add failing codec/key/mutation tests for versioned pseudonymous cluster-principal state.
-- [ ] Implement the bounded `__kui_config` projection and optimistic field-preserving updates.
-- [ ] Add failing alert restart/read-watermark/acknowledgement persistence tests.
-- [ ] Wire the durable alert store with explicit store-less fallback and operational diagnostics.
-- [ ] Define and test typed cluster UI-settings GET/PUT contracts and authorization.
-- [ ] Implement settings use cases/routes and regenerate every OpenAPI/browser contract artifact.
-- [ ] Add failing frontend tests for hydration, cluster switches, stale responses and save failures.
-- [ ] Implement immediate local application plus durable debounced backend synchronization and status UX.
-- [ ] Enable the quickstart Kafka metadata store with safe demonstration-only key material.
-- [ ] Build current-source containers and verify refresh plus KUI restart persistence in Chromium.
-- [ ] Inspect `__kui_*` topic shape/content, browser network/console, and bounded backend/Kafka logs.
-- [ ] Run full backend/frontend/architecture/format/security gates and complete the requirement audit.
+- [x] Implement the bounded `__kui_config` projection and optimistic field-preserving updates.
+- [x] Add failing alert restart/read-watermark/acknowledgement persistence tests.
+- [x] Wire the durable alert store with explicit store-less fallback and operational diagnostics.
+- [x] Define and test typed cluster UI-settings GET/PUT contracts and authorization.
+- [x] Implement settings use cases/routes and regenerate every OpenAPI/browser contract artifact.
+- [x] Add failing frontend tests for hydration, cluster switches, stale responses and save failures.
+- [x] Implement immediate local application plus durable debounced backend synchronization and status UX.
+- [x] Enable the quickstart Kafka metadata store with safe demonstration-only key material.
+- [x] Build current-source containers and verify refresh plus KUI restart persistence in Chromium.
+- [x] Inspect `__kui_*` topic shape/content, browser network/console, and bounded backend/Kafka logs.
+- [x] Run full backend/frontend/architecture/format/security gates and complete the requirement audit.

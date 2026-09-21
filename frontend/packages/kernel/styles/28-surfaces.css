@@ -1032,6 +1032,17 @@
   line-height: var(--kui-font-line-height-normal);
 }
 
+.kui-settings__persistence {
+  margin: var(--kui-space-1) 0 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+.kui-settings__persistence[data-state="local-only"] {
+  color: var(--kui-color-warning);
+}
+
 .kui-settings__facts {
   display: flex;
   flex-wrap: wrap;

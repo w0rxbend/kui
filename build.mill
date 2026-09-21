@@ -925,7 +925,7 @@ object services extends Module {
     object application extends KuiJvmModule {
       // `libs.cache` carries the `SnapshotCell` the topology snapshot is held in. It has no Kafka
       // dependency, so rule A10 is unaffected, and it is not a wire module, so rule A3 is too.
-      def moduleDeps = Seq(domain, libs.cache)
+      def moduleDeps = Seq(domain, libs.cache, libs.securityCore.jvm)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",

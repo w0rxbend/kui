@@ -53,6 +53,7 @@ final class OpenApiMergeSuite extends FunSuite {
         "/api/v1/clusters/{clusterId}/ksql/stream",
         "/api/v1/clusters/{clusterId}/log-dirs",
         "/api/v1/clusters/{clusterId}/refresh",
+        "/api/v1/clusters/{clusterId}/settings/ui",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/overview",
         "/api/v1/info",
