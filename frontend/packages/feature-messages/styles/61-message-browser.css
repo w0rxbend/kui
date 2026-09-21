@@ -703,6 +703,146 @@
   border-color: var(--kui-color-primary);
 }
 
+/* --- Produce value editor ----------------------------------------------------------------------
+ *
+ * The textarea stays the only interactive surface. The pre underneath is a visual copy made from
+ * text nodes, never payload HTML, so JSON syntax can be coloured without turning a message into
+ * executable markup or replacing native editing, selection and assistive-technology behaviour. */
+
+.kui-json-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-json-editor__heading,
+.kui-json-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  flex-wrap: wrap;
+}
+
+.kui-json-editor__label {
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-json-editor__status {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+.kui-json-editor__status--valid {
+  background-color: var(--kui-color-success-container);
+  color: var(--kui-color-success);
+}
+
+.kui-json-editor__status--invalid {
+  background-color: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+}
+
+.kui-json-editor__surface {
+  position: relative;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-hover);
+  overflow: hidden;
+  transition: border-color var(--kui-duration-fast) ease;
+}
+
+.kui-json-editor__surface:focus-within {
+  border-color: var(--kui-color-focus);
+  box-shadow: 0 0 0 1px var(--kui-color-focus);
+}
+
+.kui-json-editor--invalid .kui-json-editor__surface {
+  border-color: var(--kui-color-danger);
+}
+
+.kui-json-editor__highlight,
+.kui-json-editor__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 12rem;
+  margin: 0;
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border: 0;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+}
+
+.kui-json-editor__highlight {
+  position: absolute;
+  inset: 0;
+  color: var(--kui-color-text);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.kui-json-editor__input {
+  position: relative;
+  display: block;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--kui-color-text);
+  -webkit-text-fill-color: transparent;
+  resize: vertical;
+  overflow: auto;
+  outline: 0;
+}
+
+.kui-json-editor__input::selection {
+  background-color: color-mix(in srgb, var(--kui-color-primary) 28%, transparent);
+}
+
+.kui-json-editor__input:disabled {
+  cursor: not-allowed;
+}
+
+.kui-json-editor--disabled .kui-json-editor__surface {
+  opacity: var(--kui-opacity-disabled);
+}
+
+.kui-json-editor__token--key { color: var(--kui-color-primary); }
+.kui-json-editor__token--string { color: var(--kui-color-success); }
+.kui-json-editor__token--number { color: var(--kui-color-warning); }
+.kui-json-editor__token--boolean { color: var(--kui-color-info); }
+.kui-json-editor__token--null,
+.kui-json-editor__token--punctuation { color: var(--kui-color-text-muted); }
+.kui-json-editor__token--text { color: var(--kui-color-text); }
+
+.kui-json-editor__actions {
+  justify-content: flex-start;
+}
+
+.kui-json-editor__help {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+@media (forced-colors: active) {
+  .kui-json-editor__highlight { display: none; }
+  .kui-json-editor__input {
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
 .kui-smart-filter__compiled {
   margin: 0;
   color: var(--kui-color-text-muted);

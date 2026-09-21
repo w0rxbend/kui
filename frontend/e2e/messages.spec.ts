@@ -516,8 +516,21 @@ test.describe("writing", () => {
 
     const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
-    await drawer.getByLabel("Value", { exact: true }).first().fill('{"from":"the e2e suite"}');
+    const editor = drawer.getByLabel("Value", { exact: true }).first();
+    await editor.fill('{"from":"the e2e suite","metadata":{"attempt":1}}');
+    await expect(drawer).toContainText("Valid JSON");
+    await drawer.getByRole("button", { name: "Format JSON" }).click();
+    await expect(editor).toHaveValue(
+      '{\n  "from": "the e2e suite",\n  "metadata": {\n    "attempt": 1\n  }\n}',
+    );
+    await drawer.getByRole("checkbox", { name: "Minify before sending" }).check();
+
+    const request = page.waitForRequest(
+      (candidate) => candidate.url().includes(`/topics/${name}/messages`) && candidate.method() === "POST",
+    );
     await drawer.getByRole("button", { name: /^produce record$/i }).click();
+    const body = (await request).postDataJSON() as { value?: string };
+    expect(body.value).toBe('{"from":"the e2e suite","metadata":{"attempt":1}}');
 
     /*
      * The toast, and not the drawer's own receipt. A produce cannot be undone and the drawer is
