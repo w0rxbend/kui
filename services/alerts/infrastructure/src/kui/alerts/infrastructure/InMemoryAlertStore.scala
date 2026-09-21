@@ -74,10 +74,12 @@ final class InMemoryAlertStore[F[_]: Async] private (
       held <- state.get.map(_.getOrElse(cluster, ClusterAlerts.empty))
       marker <- markers.get(key)
       ordered = held.events.sorted
-      // Counted before the marker moves, so a caller that asks to be marked up to date still learns how
-      // many it had not seen. Moving it first would answer zero every time and make the field useless.
-      unread = ordered.count(event => marker.forall(event.openedAt.isAfter))
       _ <- markRead.traverse_(at => markers.put(key, at))
+      effectiveMarker = markRead.orElse(marker)
+      // `markRead` is a state-changing read whose response becomes the browser's new source of truth. It
+      // must describe the state after the write; returning the previous count leaves the bell lit until an
+      // unrelated later fetch even though the marker has already moved.
+      unread = ordered.count(event => effectiveMarker.forall(event.openedAt.isAfter))
     } yield AlertFeed(
       events = ordered.take(limit).toList,
       total = ordered.size,
@@ -86,7 +88,7 @@ final class InMemoryAlertStore[F[_]: Async] private (
       // own row saying `2 open` must not change when a caller asks for fewer rows.
       openByRule = ordered.filter(_.isOpen).groupBy(_.key.rule).view.mapValues(_.size).toMap,
       unreadCount = unread,
-      lastReadAt = marker,
+      lastReadAt = effectiveMarker,
       evaluatedAt = held.evaluatedAt,
       reports = held.reports
     )

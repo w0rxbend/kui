@@ -68,10 +68,10 @@ trait AlertStore[F[_]] {
   /** One page of one cluster's feed, for one principal.
     *
     * @param markRead
-    *   when set, the principal's read marker moves to this instant **after** `unreadCount` is computed, so a
-    *   caller that asks to be marked up to date still learns how many events they had not seen. It is a
-    *   parameter of the read rather than a second endpoint because there is no second RBAC action for it and
-    *   `ALERTS:ACKNOWLEDGE` is the wrong one — see ADR-053 §6.
+    *   when set, the principal's read marker moves to this instant and the returned feed describes the new
+    *   state (`unreadCount = 0`, `lastReadAt = markRead`). It is a parameter of the read rather than a second
+    *   endpoint because there is no second RBAC action for it and `ALERTS:ACKNOWLEDGE` is the wrong one — see
+    *   ADR-053 §6.
     */
   def feed(
       cluster: ClusterId,

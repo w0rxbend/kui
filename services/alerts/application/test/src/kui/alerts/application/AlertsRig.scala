@@ -85,15 +85,16 @@ object AlertsRig {
       for {
         events <- state.get.map(_.getOrElse(id, Nil).sorted)
         marker <- markers.get.map(_.get(key(id, principal)))
-        unread = events.count(event => marker.forall(event.openedAt.isAfter))
         _ <- markRead.traverse_(when => markers.update(_.updated(key(id, principal), when)))
+        effectiveMarker = markRead.orElse(marker)
+        unread = events.count(event => effectiveMarker.forall(event.openedAt.isAfter))
       } yield AlertFeed(
         events = events.take(limit),
         total = events.size,
         openCount = events.count(_.isOpen),
         openByRule = events.filter(_.isOpen).groupBy(_.key.rule).view.mapValues(_.size).toMap,
         unreadCount = unread,
-        lastReadAt = marker,
+        lastReadAt = effectiveMarker,
         evaluatedAt = Some(at),
         reports = AlertRule.All.map(RuleReport(_, RuleOutcome.evaluated))
       )

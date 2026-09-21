@@ -73,18 +73,15 @@ final class AlertFeedSuite extends CatsEffectSuite {
     }
   }
 
-  test("markRead moves the marker after the unread count is taken, so the caller still learns it") {
+  test("markRead answers with the cleared unread count and the new marker") {
     for {
       (store, alerts) <- rig
       _ <- store.seed(cluster, List(event(AlertRule.OfflinePartitions, "")))
       first <- alerts.feed(caller, cluster, 50, markRead = true)
       second <- alerts.feed(caller, cluster, 50, markRead = false)
     } yield {
-      assertEquals(
-        first.map(_.unreadCount),
-        Right(1),
-        clue = "the read that clears the bell still reports it"
-      )
+      assertEquals(first.map(_.unreadCount), Right(0), clue = "the response clears the bell immediately")
+      assert(first.toOption.flatMap(_.lastReadAt).nonEmpty, "the response carries the marker it wrote")
       assertEquals(second.map(_.unreadCount), Right(0))
     }
   }

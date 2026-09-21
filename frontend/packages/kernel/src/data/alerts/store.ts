@@ -60,9 +60,9 @@
  * - **Nothing about a severity, a tone or a glyph is decided here.** The server sends both halves of
  *   each pair for that reason; see `./events.ts`.
  * - **The bell goes quiet because the server said so.** `markAllRead()` re-reads with the
- *   endpoint's own `markRead` query — `AlertsEndpoints.MarkReadParam` — and takes the
- *   `unreadCount` that comes back. Zeroing a local number and hoping is how a bell ends up
- *   disagreeing with the panel it opens.
+ *   endpoint's own `markRead` query — `AlertsEndpoints.MarkReadParam` — and takes the post-write
+ *   `unreadCount` and `lastReadAt` that come back. Zeroing a local number and hoping is how a bell
+ *   ends up disagreeing with the panel it opens.
  * - **An answer that arrives after the store moved on is dropped.** Reads cannot be recalled, and
  *   applying a stale one repaints a card the shell has torn down or overwrites a newer feed with an
  *   older one. Every read carries the episode that asked for it.

@@ -225,10 +225,7 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
     }
   }
 
-  test("markRead moves the marker after the unread count is taken, against the shipped store") {
-    // The read that clears the bell still reports what it cleared. Moving the marker write ahead of the
-    // count in `feed` answers `unreadCount = 0` for ever with every other case green, because the case
-    // beside this one reads the count *back* on a second request and zero is what it expects there.
+  test("markRead returns the marker it wrote and a cleared unread count") {
     val opened = List(event("broker-1:/var", at), event("broker-2:/var", at.plusSeconds(1)))
 
     store.use { held =>
@@ -237,8 +234,8 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
         first <- held.feed(cluster, ada, 100, Some(at.plusSeconds(60)))
         second <- held.feed(cluster, ada, 100, None)
       } yield {
-        assertEquals(first.unreadCount, 2, clue = "the read that clears the bell still reports it")
-        assertEquals(first.lastReadAt, None, clue = "and it reports the marker it replaced, not the new one")
+        assertEquals(first.unreadCount, 0, clue = "the response clears the bell immediately")
+        assertEquals(first.lastReadAt, Some(at.plusSeconds(60)))
         assertEquals(second.unreadCount, 0)
         assertEquals(second.lastReadAt, Some(at.plusSeconds(60)))
       }
