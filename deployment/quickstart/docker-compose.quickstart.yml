@@ -117,12 +117,11 @@ services:
   # cannot be written into a KUI configuration at all. This container is the bridge, and
   # `kui-quickstart.yaml` names its address under `kui.metrics.sources.quickstart`.
   #
-  # `bitnamilegacy/` and not `bitnami/`: the Prometheus project publishes no exporter image of its
-  # own, Bitnami's is the build everybody uses, and in 2025 Bitnami moved its catalogue to the
-  # `bitnamilegacy` namespace leaving only floating `latest` tags behind the old one. A pinned tag
-  # in the moved namespace is preferable to a floating tag in the original, for the same reason
-  # `apache/kafka:4.3.1` is pinned above: a quickstart that pulls whatever was published this
-  # morning breaks for a newcomer without anybody touching KUI.
+  # `soldevelo/jmx-exporter:1.4.0`: in 2025 Bitnami moved its free catalogue to the frozen
+  # `bitnamilegacy` namespace. SolDevelo publishes maintained builds from its public Bitnami fork,
+  # and the version stays pinned for the same reason `apache/kafka:4.3.1` is pinned above: a
+  # quickstart that pulls whatever was published this morning can break for a newcomer without
+  # anybody touching KUI.
   #
   # NO PUBLISHED PORT. The exposition is for KUI, not for a person; a metrics endpoint on the host
   # would invite somebody to point their own Prometheus at it and conclude that this is how KUI is
@@ -132,7 +131,7 @@ services:
   #     http://kafka-metrics:5556/metrics
   # ---------------------------------------------------------------------------------------------
   kafka-metrics:
-    image: bitnamilegacy/jmx-exporter:1.4.0
+    image: soldevelo/jmx-exporter:1.4.0
     container_name: kui-quickstart-kafka-metrics
     # Port first, configuration second: that is the standalone jar's argument order, and the image's
     # own default command is `5556 examples/standalone_sample_config.yml`, which would export a
