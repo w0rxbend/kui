@@ -20,6 +20,7 @@ import kui.cluster.application.{
   BrokerList,
   BrokerLogDirs,
   ClusterService,
+  MessageBrowserSettings,
   SnapshotFreshness,
   TopologyView,
   UiAppearance,
@@ -74,6 +75,7 @@ final class SecretLeakSuite extends CatsEffectSuite {
     * catches.
     */
   private val settingsBody = """{"theme":"dark","accent":"teal","density":"compact"}"""
+  private val messageBrowserBody = """{"pageSize":250,"mode":"infinite"}"""
 
   private val requests: List[(AnyEndpoint, String, String, Option[String])] = List(
     (ClusterEndpoints.listClusters, "GET", "/internal/v1/clusters", None),
@@ -84,6 +86,18 @@ final class SecretLeakSuite extends CatsEffectSuite {
     (ClusterEndpoints.refresh, "POST", "/internal/v1/clusters/prod-eu/refresh", None),
     (ClusterEndpoints.getUiSettings, "GET", "/internal/v1/clusters/prod-eu/settings/ui", None),
     (ClusterEndpoints.putUiSettings, "PUT", "/internal/v1/clusters/prod-eu/settings/ui", Some(settingsBody)),
+    (
+      ClusterEndpoints.getMessageBrowserSettings,
+      "GET",
+      "/internal/v1/clusters/prod-eu/settings/messages",
+      None
+    ),
+    (
+      ClusterEndpoints.putMessageBrowserSettings,
+      "PUT",
+      "/internal/v1/clusters/prod-eu/settings/messages",
+      Some(messageBrowserBody)
+    ),
     (ProfileEndpoints.profile, "GET", "/internal/v1/clusters/prod-eu/profile", None)
   )
 
@@ -108,6 +122,13 @@ final class SecretLeakSuite extends CatsEffectSuite {
           def get(cluster: kui.kernel.ClusterId, principal: Principal) = IO.pure(Right(None))
           def put(cluster: kui.kernel.ClusterId, principal: Principal, appearance: UiAppearance) =
             IO.pure(Right(appearance))
+          def getMessageBrowser(cluster: kui.kernel.ClusterId, principal: Principal) =
+            IO.pure(Right(None))
+          def putMessageBrowser(
+              cluster: kui.kernel.ClusterId,
+              principal: Principal,
+              browserSettings: MessageBrowserSettings
+          ) = IO.pure(Right(browserSettings))
         }
       )
 

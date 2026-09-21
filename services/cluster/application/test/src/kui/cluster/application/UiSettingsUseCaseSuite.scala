@@ -22,19 +22,46 @@ final class UiSettingsUseCaseSuite extends KuiIOSuite {
   private val Bob = Principal(UserName.unsafe("bob"), Set.empty, PrincipalKind.Session)
 
   private val dark = UiAppearance(AppearanceTheme.Dark, AppearanceAccent.Teal, AppearanceDensity.Compact)
+  private val infinite = MessageBrowserSettings(250, MessageViewMode.Infinite)
+
+  final private case class StoredSettings(
+      appearances: Map[(ClusterId, Principal), UiAppearance],
+      messageBrowsers: Map[(ClusterId, Principal), MessageBrowserSettings]
+  )
 
   final private class MemoryStore(
-      state: Ref[IO, Map[(ClusterId, Principal), UiAppearance]]
+      state: Ref[IO, StoredSettings]
   ) extends UiSettingsStore[IO] {
     def get(cluster: ClusterId, principal: Principal): IO[Either[KuiError, Option[UiAppearance]]] =
-      state.get.map(values => Right(values.get(cluster -> principal)))
+      state.get.map(values => Right(values.appearances.get(cluster -> principal)))
 
     def put(
         cluster: ClusterId,
         principal: Principal,
         appearance: UiAppearance
     ): IO[Either[KuiError, UiAppearance]] =
-      state.update(_.updated(cluster -> principal, appearance)).as(Right(appearance))
+      state
+        .update(current =>
+          current.copy(appearances = current.appearances.updated(cluster -> principal, appearance))
+        )
+        .as(Right(appearance))
+
+    def getMessageBrowser(
+        cluster: ClusterId,
+        principal: Principal
+    ): IO[Either[KuiError, Option[MessageBrowserSettings]]] =
+      state.get.map(values => Right(values.messageBrowsers.get(cluster -> principal)))
+
+    def putMessageBrowser(
+        cluster: ClusterId,
+        principal: Principal,
+        settings: MessageBrowserSettings
+    ): IO[Either[KuiError, MessageBrowserSettings]] =
+      state
+        .update(current =>
+          current.copy(messageBrowsers = current.messageBrowsers.updated(cluster -> principal, settings))
+        )
+        .as(Right(settings))
   }
 
   private val clock = new ClockPort[IO] {
@@ -54,7 +81,7 @@ final class UiSettingsUseCaseSuite extends KuiIOSuite {
         clock,
         logger
       )
-      state <- Resource.eval(Ref.of[IO, Map[(ClusterId, Principal), UiAppearance]](Map.empty))
+      state <- Resource.eval(Ref.of[IO, StoredSettings](StoredSettings(Map.empty, Map.empty)))
     } yield new UiSettingsUseCase[IO](registry, new MemoryStore(state))
 
   test("missing settings return product defaults") {
@@ -80,6 +107,30 @@ final class UiSettingsUseCaseSuite extends KuiIOSuite {
   test("unknown clusters are rejected before the store is touched") {
     rig
       .use(_.put(Alice, ClusterId.unsafe("unknown"), dark))
+      .map(result => assertEquals(result.left.map(_.code), Left(kui.kernel.error.ErrorCode.ClusterNotFound)))
+  }
+
+  test("message browser settings default and remain isolated by principal and cluster") {
+    rig.use { settings =>
+      for {
+        defaults <- settings.getMessageBrowser(Alice, Prod)
+        saved <- settings.putMessageBrowser(Alice, Prod, infinite)
+        same <- settings.getMessageBrowser(Alice, Prod)
+        otherCluster <- settings.getMessageBrowser(Alice, Staging)
+        otherPrincipal <- settings.getMessageBrowser(Bob, Prod)
+      } yield {
+        assertEquals(defaults, Right(MessageBrowserSettings.Default))
+        assertEquals(saved, Right(infinite))
+        assertEquals(same, Right(infinite))
+        assertEquals(otherCluster, Right(MessageBrowserSettings.Default))
+        assertEquals(otherPrincipal, Right(MessageBrowserSettings.Default))
+      }
+    }
+  }
+
+  test("message browser settings reject unknown clusters before storage") {
+    rig
+      .use(_.putMessageBrowser(Alice, ClusterId.unsafe("unknown"), infinite))
       .map(result => assertEquals(result.left.map(_.code), Left(kui.kernel.error.ErrorCode.ClusterNotFound)))
   }
 }

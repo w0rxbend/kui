@@ -99,6 +99,17 @@ object EmptyClusterUseCases {
           principal: Principal,
           appearance: UiAppearance
       ): IO[Either[KuiError, UiAppearance]] = IO.pure(Right(appearance))
+
+      def getMessageBrowser(
+          cluster: ClusterId,
+          principal: Principal
+      ): IO[Either[KuiError, Option[MessageBrowserSettings]]] = IO.pure(Right(None))
+
+      def putMessageBrowser(
+          cluster: ClusterId,
+          principal: Principal,
+          settings: MessageBrowserSettings
+      ): IO[Either[KuiError, MessageBrowserSettings]] = IO.pure(Right(settings))
     }
   )
 

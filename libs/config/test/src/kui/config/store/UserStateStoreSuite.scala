@@ -18,6 +18,7 @@ final class UserStateStoreSuite extends KuiIOSuite {
   private val alice =
     Principal(UserName.unsafe("alice@example.com"), Set(RoleName.unsafe("ops")), PrincipalKind.Session)
   private val appearance = UiAppearance(UiTheme.Dark, UiAccent.Teal, UiDensity.Compact)
+  private val messageBrowser = MessageBrowserSettings(250, MessageViewMode.Infinite)
   private val readAt = Instant.parse("2026-09-21T12:00:00Z")
 
   test("principal keys are stable, cluster scoped and contain no identity") {
@@ -33,17 +34,19 @@ final class UserStateStoreSuite extends KuiIOSuite {
     assertEquals(StoreKey.parse(same.render), Right(same))
   }
 
-  test("appearance and alert watermark survive reconstruction") {
+  test("appearance, message browsing and alert watermark survive reconstruction") {
     for {
       config <- RefStore.create
       first = UserStateStore[IO](config)
       saved <- first.putAppearance(cluster, alice, appearance)
       _ = assertEquals(saved, Right(appearance))
+      browsing <- first.putMessageBrowser(cluster, alice, messageBrowser)
+      _ = assertEquals(browsing, Right(messageBrowser))
       marked <- first.markAlertsRead(cluster, alice, readAt)
       _ = assertEquals(marked, Right(readAt))
       second = UserStateStore[IO](config)
       restored <- second.get(cluster, alice)
-      _ = assertEquals(restored, Right(UserState(Some(appearance), Some(readAt))))
+      _ = assertEquals(restored, Right(UserState(Some(appearance), Some(messageBrowser), Some(readAt))))
     } yield ()
   }
 
@@ -53,12 +56,16 @@ final class UserStateStoreSuite extends KuiIOSuite {
       state = UserStateStore[IO](config)
       _ <- state.markAlertsRead(cluster, alice, readAt)
       _ <- state.putAppearance(cluster, alice, appearance)
+      _ <- state.putMessageBrowser(cluster, alice, messageBrowser)
       afterAppearance <- state.get(cluster, alice)
-      _ = assertEquals(afterAppearance, Right(UserState(Some(appearance), Some(readAt))))
+      _ = assertEquals(
+        afterAppearance,
+        Right(UserState(Some(appearance), Some(messageBrowser), Some(readAt)))
+      )
       later = readAt.plusSeconds(60)
       _ <- state.markAlertsRead(cluster, alice, later)
       afterRead <- state.get(cluster, alice)
-      _ = assertEquals(afterRead, Right(UserState(Some(appearance), Some(later))))
+      _ = assertEquals(afterRead, Right(UserState(Some(appearance), Some(messageBrowser), Some(later))))
     } yield ()
   }
 
@@ -70,7 +77,7 @@ final class UserStateStoreSuite extends KuiIOSuite {
       saved <- state.putAppearance(cluster, alice, appearance)
       _ = assertEquals(saved, Right(appearance))
       restored <- state.get(cluster, alice)
-      _ = assertEquals(restored, Right(UserState(Some(appearance), Some(readAt))))
+      _ = assertEquals(restored, Right(UserState(Some(appearance), None, Some(readAt))))
     } yield ()
   }
 
@@ -150,7 +157,7 @@ final private class ConflictOnceStore private (
   ): IO[Either[KuiError, StoreRecord]] =
     first.getAndSet(false).flatMap {
       case true if key == target =>
-        val winner = UserState(None, Some(marker)).asJson
+        val winner = UserState(None, None, Some(marker)).asJson
         delegate.put(key, winner, baseVersion, "racing-writer").as(Left(RefStore.conflict))
       case _ => delegate.put(key, payload, baseVersion, updatedBy)
     }

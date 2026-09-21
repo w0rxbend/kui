@@ -7,11 +7,15 @@ import kui.cluster.application.{
   AppearanceAccent,
   AppearanceDensity,
   AppearanceTheme,
+  MessageBrowserSettings as ApplicationMessageBrowser,
+  MessageViewMode as ApplicationMessageViewMode,
   UiAppearance as ApplicationAppearance,
   UiSettingsStore
 }
 import kui.config.store.{
   ConfigStore,
+  MessageBrowserSettings as StoredMessageBrowser,
+  MessageViewMode as StoredMessageViewMode,
   UiAccent,
   UiAppearance as StoredAppearance,
   UiDensity,
@@ -40,6 +44,21 @@ final class StoredUiSettings[F[_]: Monad](metadata: ConfigStore[F]) extends UiSe
     users
       .putAppearance(cluster, principal, toStored(appearance))
       .map(_.map(toApplication))
+
+  def getMessageBrowser(
+      cluster: ClusterId,
+      principal: Principal
+  ): F[Either[KuiError, Option[ApplicationMessageBrowser]]] =
+    users.get(cluster, principal).map(_.map(_.messageBrowser.map(toApplicationMessageBrowser)))
+
+  def putMessageBrowser(
+      cluster: ClusterId,
+      principal: Principal,
+      settings: ApplicationMessageBrowser
+  ): F[Either[KuiError, ApplicationMessageBrowser]] =
+    users
+      .putMessageBrowser(cluster, principal, toStoredMessageBrowser(settings))
+      .map(_.map(toApplicationMessageBrowser))
 
   private def toApplication(appearance: StoredAppearance): ApplicationAppearance =
     ApplicationAppearance(
@@ -76,6 +95,24 @@ final class StoredUiSettings[F[_]: Monad](metadata: ConfigStore[F]) extends UiSe
       density = appearance.density match {
         case AppearanceDensity.Comfortable => UiDensity.Comfortable
         case AppearanceDensity.Compact => UiDensity.Compact
+      }
+    )
+
+  private def toApplicationMessageBrowser(settings: StoredMessageBrowser): ApplicationMessageBrowser =
+    ApplicationMessageBrowser(
+      settings.pageSize,
+      settings.mode match {
+        case StoredMessageViewMode.Pages => ApplicationMessageViewMode.Pages
+        case StoredMessageViewMode.Infinite => ApplicationMessageViewMode.Infinite
+      }
+    )
+
+  private def toStoredMessageBrowser(settings: ApplicationMessageBrowser): StoredMessageBrowser =
+    StoredMessageBrowser(
+      settings.pageSize,
+      settings.mode match {
+        case ApplicationMessageViewMode.Pages => StoredMessageViewMode.Pages
+        case ApplicationMessageViewMode.Infinite => StoredMessageViewMode.Infinite
       }
     )
 }

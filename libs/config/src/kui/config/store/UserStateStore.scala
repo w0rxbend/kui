@@ -67,17 +67,60 @@ object UiAppearance {
   given CanEqual[UiAppearance, UiAppearance] = CanEqual.derived
 }
 
+enum MessageViewMode(val wire: String) {
+  case Pages extends MessageViewMode("pages")
+  case Infinite extends MessageViewMode("infinite")
+}
+
+object MessageViewMode {
+  given Codec[MessageViewMode] = enumCodec("mode", MessageViewMode.values, _.wire)
+  given CanEqual[MessageViewMode, MessageViewMode] = CanEqual.derived
+}
+
+final case class MessageBrowserSettings(pageSize: Int, mode: MessageViewMode)
+
+object MessageBrowserSettings {
+  val MinPageSize: Int = 1
+  val MaxPageSize: Int = 500
+
+  given Codec[MessageBrowserSettings] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        pageSize <- cursor.get[Int]("pageSize")
+        _ <- Either.cond(
+          pageSize >= MinPageSize && pageSize <= MaxPageSize,
+          (),
+          DecodingFailure(
+            s"pageSize must be between $MinPageSize and $MaxPageSize",
+            cursor.history
+          )
+        )
+        mode <- cursor.get[MessageViewMode]("mode")
+      } yield MessageBrowserSettings(pageSize, mode),
+    (settings: MessageBrowserSettings) =>
+      Json.obj(
+        "pageSize" -> Json.fromInt(settings.pageSize),
+        "mode" -> settings.mode.asJson
+      )
+  )
+
+  given CanEqual[MessageBrowserSettings, MessageBrowserSettings] = CanEqual.derived
+}
+
 /** The principal-scoped portion of KUI metadata.
   *
-  * Both fields are optional so two independent owners can update one record without inventing a value for the
-  * other. The API maps a missing appearance to [[UiAppearance.Default]]; the alerts store maps a missing
-  * watermark to "never read".
+  * Every field is optional so independent owners can update one record without inventing values for the
+  * others. APIs map missing preferences to product defaults; alerts map a missing watermark to "never read".
   */
-final case class UserState(appearance: Option[UiAppearance], alertsReadAt: Option[Instant])
+final case class UserState(
+    appearance: Option[UiAppearance],
+    messageBrowser: Option[MessageBrowserSettings],
+    alertsReadAt: Option[Instant]
+)
 
 object UserState {
   val CurrentFormatVersion: Int = 1
-  val empty: UserState = UserState(None, None)
+  val empty: UserState = UserState(None, None, None)
 
   given Codec[UserState] = Codec.from(
     (cursor: HCursor) =>
@@ -92,12 +135,14 @@ object UserState {
           )
         )
         appearance <- cursor.getOrElse[Option[UiAppearance]]("appearance")(None)
+        messageBrowser <- cursor.getOrElse[Option[MessageBrowserSettings]]("messageBrowser")(None)
         alertsReadAt <- cursor.getOrElse[Option[Instant]]("alertsReadAt")(None)
-      } yield UserState(appearance, alertsReadAt),
+      } yield UserState(appearance, messageBrowser, alertsReadAt),
     (state: UserState) =>
       Json.obj(
         "formatVersion" -> Json.fromInt(CurrentFormatVersion),
         "appearance" -> state.appearance.asJson,
+        "messageBrowser" -> state.messageBrowser.asJson,
         "alertsReadAt" -> state.alertsReadAt.asJson
       )
   )
@@ -146,6 +191,13 @@ final class UserStateStore[F[_]: Monad] private (store: ConfigStore[F]) {
       appearance: UiAppearance
   ): F[Either[KuiError, UiAppearance]] =
     modify(cluster, principal)(_.copy(appearance = Some(appearance))).map(_.map(_ => appearance))
+
+  def putMessageBrowser(
+      cluster: ClusterId,
+      principal: Principal,
+      settings: MessageBrowserSettings
+  ): F[Either[KuiError, MessageBrowserSettings]] =
+    modify(cluster, principal)(_.copy(messageBrowser = Some(settings))).map(_.map(_ => settings))
 
   def markAlertsRead(
       cluster: ClusterId,

@@ -931,6 +931,30 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/settings/messages": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read this principal's message browser defaults for one cluster
+         * @description Returns the saved page size and presentation mode, or product defaults when none were saved.
+         */
+        readonly get: operations["cluster.messageBrowserSettings.get"];
+        /**
+         * Persist this principal's message browser defaults for one cluster
+         * @description Mutation (cluster.messageBrowserSettings.put). Replaces the bounded browse page size and presentation mode in KUI metadata; it does not alter Kafka.
+         */
+        readonly put: operations["cluster.messageBrowserSettings.put"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/settings/ui": {
         readonly parameters: {
             readonly query?: never;
@@ -2055,6 +2079,15 @@ export interface components {
             readonly memberId: string;
             readonly partitions?: readonly string[];
             readonly rebalancing: boolean;
+        };
+        /**
+         * MessageBrowserSettingsDto
+         * @description The default page size and presentation mode for bounded message browsing
+         */
+        readonly MessageBrowserSettingsDto: {
+            readonly mode: string;
+            /** Format: int32 */
+            readonly pageSize: number;
         };
         /**
          * MessageDto
@@ -4691,6 +4724,73 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["CompatibilityCheckDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.messageBrowserSettings.get": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MessageBrowserSettingsDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.messageBrowserSettings.put": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["MessageBrowserSettingsDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MessageBrowserSettingsDto"];
                 };
             };
             readonly default: {

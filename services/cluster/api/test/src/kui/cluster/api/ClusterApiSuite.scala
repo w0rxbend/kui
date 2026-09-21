@@ -107,6 +107,55 @@ final class ClusterApiSuite extends CatsEffectSuite {
     }
   }
 
+  test("message browser settings default, validate and round-trip through the route") {
+    val path = "/internal/v1/clusters/prod-eu/settings/messages"
+    val valid = Json.obj(
+      "pageSize" -> Json.fromInt(250),
+      "mode" -> Json.fromString("infinite")
+    )
+    val invalid = Json.obj(
+      "pageSize" -> Json.fromInt(501),
+      "mode" -> Json.fromString("stream")
+    )
+
+    ClusterTestServer.resource(profiles = List(ClusterFixtures.profile())).use { server =>
+      def put(body: Json) = {
+        val bytes = body.noSpaces.getBytes(StandardCharsets.UTF_8)
+        for {
+          token <- ClusterTestServer.token(digest = RequestDigests.of("PUT", path, bytes))
+          response <- basicRequest
+            .put(uri"http://cluster/internal/v1/clusters/prod-eu/settings/messages")
+            .header(KuiEndpoint.PrincipalHeader, token.value)
+            .header(HttpHeaders.Csrf, "test-csrf")
+            .contentType("application/json")
+            .body(body.noSpaces)
+            .response(asStringAlways)
+            .send(server.backend)
+        } yield response
+      }
+
+      for {
+        getToken <- ClusterTestServer.token(
+          digest = kui.security.RequestDigest.ofRequestLine("GET", path)
+        )
+        defaults <- basicRequest
+          .get(uri"http://cluster/internal/v1/clusters/prod-eu/settings/messages")
+          .header(KuiEndpoint.PrincipalHeader, getToken.value)
+          .response(asStringAlways)
+          .send(server.backend)
+        saved <- put(valid)
+        rejected <- put(invalid)
+      } yield {
+        assertEquals(defaults.code.code, 200, defaults.body)
+        assertEquals(parse(defaults.body).flatMap(_.hcursor.get[Int]("pageSize")), Right(100))
+        assertEquals(parse(defaults.body).flatMap(_.hcursor.get[String]("mode")), Right("pages"))
+        assertEquals(saved.code.code, 200, saved.body)
+        assertEquals(parse(saved.body), Right(valid))
+        assertEquals(rejected.code.code, 400, rejected.body)
+      }
+    }
+  }
+
   test("aMalformedClusterIdIsFourHundredWithTheFieldNamed") {
     // 400 and not 404, and not 500: "that is not an id" and "no such cluster" are different answers, and
     // only one of them is worth retrying with a different id. `ErrorEnvelope.statusOf` decides the status.

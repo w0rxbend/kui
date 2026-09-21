@@ -54,6 +54,30 @@ object UiAppearance {
   given CanEqual[UiAppearance, UiAppearance] = CanEqual.derived
 }
 
+/** How the message browser presents a bounded browse. Live mode always remains an infinite tail. */
+enum MessageViewMode(val wire: String) {
+  case Pages extends MessageViewMode("pages")
+  case Infinite extends MessageViewMode("infinite")
+}
+
+object MessageViewMode {
+  def fromWire(raw: String): Option[MessageViewMode] = values.find(_.wire == raw)
+  given CanEqual[MessageViewMode, MessageViewMode] = CanEqual.derived
+}
+
+/** Defaults applied when a message URL does not explicitly choose a page size or presentation mode. */
+final case class MessageBrowserSettings(pageSize: Int, mode: MessageViewMode)
+
+object MessageBrowserSettings {
+  val MinPageSize: Int = 1
+  val MaxPageSize: Int = 500
+  val Default: MessageBrowserSettings = MessageBrowserSettings(100, MessageViewMode.Pages)
+
+  def validPageSize(value: Int): Boolean = value >= MinPageSize && value <= MaxPageSize
+
+  given CanEqual[MessageBrowserSettings, MessageBrowserSettings] = CanEqual.derived
+}
+
 /** Persistence boundary for principal-scoped settings. */
 trait UiSettingsStore[F[_]] {
   def get(cluster: ClusterId, principal: Principal): F[Either[KuiError, Option[UiAppearance]]]
@@ -62,6 +86,15 @@ trait UiSettingsStore[F[_]] {
       principal: Principal,
       appearance: UiAppearance
   ): F[Either[KuiError, UiAppearance]]
+  def getMessageBrowser(
+      cluster: ClusterId,
+      principal: Principal
+  ): F[Either[KuiError, Option[MessageBrowserSettings]]]
+  def putMessageBrowser(
+      cluster: ClusterId,
+      principal: Principal,
+      settings: MessageBrowserSettings
+  ): F[Either[KuiError, MessageBrowserSettings]]
 }
 
 /** Resolves the cluster before touching metadata, keeping unknown cluster ids a truthful 404. */
@@ -83,5 +116,25 @@ final class UiSettingsUseCase[F[_]: Monad](
     registry.resolve(cluster).flatMap {
       case Left(error) => error.asLeft[UiAppearance].pure[F]
       case Right(_) => store.put(cluster, principal, appearance)
+    }
+
+  def getMessageBrowser(
+      principal: Principal,
+      cluster: ClusterId
+  ): F[Either[KuiError, MessageBrowserSettings]] =
+    registry.resolve(cluster).flatMap {
+      case Left(error) => error.asLeft[MessageBrowserSettings].pure[F]
+      case Right(_) =>
+        store.getMessageBrowser(cluster, principal).map(_.map(_.getOrElse(MessageBrowserSettings.Default)))
+    }
+
+  def putMessageBrowser(
+      principal: Principal,
+      cluster: ClusterId,
+      settings: MessageBrowserSettings
+  ): F[Either[KuiError, MessageBrowserSettings]] =
+    registry.resolve(cluster).flatMap {
+      case Left(error) => error.asLeft[MessageBrowserSettings].pure[F]
+      case Right(_) => store.putMessageBrowser(cluster, principal, settings)
     }
 }

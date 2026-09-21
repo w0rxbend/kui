@@ -694,6 +694,125 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/settings/messages" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Read this principal's message browser defaults for one cluster",
+        "description" : "Returns the saved page size and presentation mode, or product defaults when none were saved.",
+        "operationId" : "cluster.messageBrowserSettings.get",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Persist this principal's message browser defaults for one cluster",
+        "description" : "Mutation (cluster.messageBrowserSettings.put). Replaces the bounded browse page size and presentation mode in KUI metadata; it does not alter Kafka.",
+        "operationId" : "cluster.messageBrowserSettings.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/connection-test" : {
       "post" : {
         "tags" : [
@@ -6615,6 +6734,24 @@
           },
           "rebalancing" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "MessageBrowserSettingsDto" : {
+        "title" : "MessageBrowserSettingsDto",
+        "description" : "The default page size and presentation mode for bounded message browsing",
+        "type" : "object",
+        "required" : [
+          "pageSize",
+          "mode"
+        ],
+        "properties" : {
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "mode" : {
+            "type" : "string"
           }
         }
       },

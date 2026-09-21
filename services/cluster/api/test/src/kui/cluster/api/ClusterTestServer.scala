@@ -20,6 +20,7 @@ import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 import kui.cluster.application.{
   CapabilityReportUseCase,
   ClusterService,
+  MessageBrowserSettings,
   UiAppearance,
   UiSettingsStore,
   UiSettingsUseCase
@@ -147,6 +148,12 @@ object ClusterTestServer {
             def get(cluster: ClusterId, principal: Principal) = IO.pure(Right(None))
             def put(cluster: ClusterId, principal: Principal, appearance: UiAppearance) =
               IO.pure(Right(appearance))
+            def getMessageBrowser(cluster: ClusterId, principal: Principal) = IO.pure(Right(None))
+            def putMessageBrowser(
+                cluster: ClusterId,
+                principal: Principal,
+                settings: MessageBrowserSettings
+            ) = IO.pure(Right(settings))
           }
         )
         val routes = ClusterApi.routes[IO](

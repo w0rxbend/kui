@@ -53,6 +53,7 @@ final class ClusterWiringSuite extends CatsEffectSuite {
             "/internal/v1/clusters/{clusterId}/log-dirs",
             "/internal/v1/clusters/{clusterId}/refresh",
             "/internal/v1/clusters/{clusterId}/settings/ui",
+            "/internal/v1/clusters/{clusterId}/settings/messages",
             "/internal/v1/clusters/{clusterId}/profile",
             "/internal/v1/clusters/stream",
             // The connection test. It has no cluster id because the whole point is to answer before

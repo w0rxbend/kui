@@ -67,7 +67,7 @@ final class ClusterEndpointsSuite extends FunSuite {
     }
   }
 
-  test("theEndpointListIsExactlyTheEightDeclared") {
+  test("theEndpointListIsExactlyTheTenDeclared") {
     // A ninth endpoint must be a deliberate edit to this list rather than something that appears
     // because a value was declared.
     assertEquals(
@@ -80,7 +80,9 @@ final class ClusterEndpointsSuite extends FunSuite {
         "cluster.logDirs",
         "cluster.refresh",
         "cluster.uiSettings.get",
-        "cluster.uiSettings.put"
+        "cluster.uiSettings.put",
+        "cluster.messageBrowserSettings.get",
+        "cluster.messageBrowserSettings.put"
       )
     )
   }
@@ -100,7 +102,9 @@ final class ClusterEndpointsSuite extends FunSuite {
         "GET /internal/v1/clusters/{clusterId}/log-dirs",
         "POST /internal/v1/clusters/{clusterId}/refresh",
         "GET /internal/v1/clusters/{clusterId}/settings/ui",
-        "PUT /internal/v1/clusters/{clusterId}/settings/ui"
+        "PUT /internal/v1/clusters/{clusterId}/settings/ui",
+        "GET /internal/v1/clusters/{clusterId}/settings/messages",
+        "PUT /internal/v1/clusters/{clusterId}/settings/messages"
       )
     )
   }
@@ -139,7 +143,7 @@ final class ClusterEndpointsSuite extends FunSuite {
     // both M5 - is one somebody implements (DEVPLAN §3).
     assertEquals(
       ClusterEndpoints.all.filter(_.method.contains(Method.PUT)).flatMap(_.info.name),
-      List("cluster.uiSettings.put")
+      List("cluster.uiSettings.put", "cluster.messageBrowserSettings.put")
     )
   }
 }

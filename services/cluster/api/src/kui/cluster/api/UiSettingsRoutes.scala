@@ -10,11 +10,13 @@ import kui.cluster.application.{
   AppearanceAccent,
   AppearanceDensity,
   AppearanceTheme,
+  MessageBrowserSettings,
+  MessageViewMode,
   UiAppearance,
   UiSettingsUseCase
 }
 import kui.cluster.contract.ClusterEndpoints
-import kui.cluster.contract.dto.UiAppearanceDto
+import kui.cluster.contract.dto.{MessageBrowserSettingsDto, UiAppearanceDto}
 import kui.http.principal.{RbacGuard, SecuredRoutes}
 import kui.kernel.error.{ApplicationError, FieldError, KuiError}
 import kui.security.PrincipalCodec
@@ -44,6 +46,22 @@ object UiSettingsRoutes {
                 settings.put(principal, cluster, appearance).map(_.map(toWire))
             }
           }
+      },
+      secured(ClusterEndpoints.getMessageBrowserSettings) { principal => cluster =>
+        settings.getMessageBrowser(principal, cluster).map(_.map(toMessageBrowserWire))
+      },
+      secured.withBody(ClusterEndpoints.putMessageBrowserSettings)(input =>
+        SecuredRoutes.bodyBytes(input._3)
+      ) { principal =>
+        { case (_, cluster, request) =>
+          fromMessageBrowserWire(request) match {
+            case Left(error) => error.asLeft[MessageBrowserSettingsDto].pure[F]
+            case Right(browserSettings) =>
+              settings
+                .putMessageBrowser(principal, cluster, browserSettings)
+                .map(_.map(toMessageBrowserWire))
+          }
+        }
       }
     )
   }
@@ -63,5 +81,27 @@ object UiSettingsRoutes {
 
     if problems.nonEmpty then Left(ApplicationError.Invalid("appearance settings are not valid", problems))
     else Right(UiAppearance(theme.get, accent.get, density.get))
+  }
+
+  private def toMessageBrowserWire(settings: MessageBrowserSettings): MessageBrowserSettingsDto =
+    MessageBrowserSettingsDto(settings.pageSize, settings.mode.wire)
+
+  private def fromMessageBrowserWire(
+      dto: MessageBrowserSettingsDto
+  ): Either[KuiError, MessageBrowserSettings] = {
+    val mode = MessageViewMode.fromWire(dto.mode)
+    val problems = List(
+      Option.when(!MessageBrowserSettings.validPageSize(dto.pageSize))(
+        FieldError.of(
+          "pageSize",
+          s"must be between ${MessageBrowserSettings.MinPageSize} and ${MessageBrowserSettings.MaxPageSize}"
+        )
+      ),
+      Option.when(mode.isEmpty)(FieldError.of("mode", "must be one of pages, infinite"))
+    ).flatten
+
+    if problems.nonEmpty then
+      Left(ApplicationError.Invalid("message browser settings are not valid", problems))
+    else Right(MessageBrowserSettings(dto.pageSize, mode.get))
   }
 }
