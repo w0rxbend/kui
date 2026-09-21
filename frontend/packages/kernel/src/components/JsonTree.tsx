@@ -5,8 +5,10 @@ const DEFAULT_EXPANDED_DEPTH = 0;
 const MAX_RENDER_DEPTH = 64;
 const CHILD_BATCH_SIZE = 200;
 
-interface JsonTreeProps {
+export interface JsonTreeProps {
   readonly text: string;
+  readonly ariaLabel?: string | undefined;
+  readonly class?: string | undefined;
 }
 
 interface JsonNodeProps {
@@ -320,14 +322,18 @@ export default function JsonTree(props: JsonTreeProps): JSX.Element {
   const result = parseBounds(text);
   if (!result.parsed) {
     return (
-      <pre class="kui-record__payload" tabindex="0">
+      <pre class={["kui-record__payload", props.class]} tabindex="0">
         {text}
       </pre>
     );
   }
 
   return (
-    <div class="kui-json-tree" tabindex="0" aria-label="JSON value">
+    <div
+      class={["kui-json-tree", props.class]}
+      tabindex="0"
+      aria-label={props.ariaLabel ?? "JSON value"}
+    >
       <JsonNode source={text} start={result.start} end={result.end} path="$" depth={0} />
     </div>
   );

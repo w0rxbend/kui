@@ -18,7 +18,7 @@
  * decides; a level said in words rather than only in a colour is not one of them, and it is the
  * sentence this feature's first file header calls the reason the screen exists.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { flush } from "solid-js";
 import { mount } from "./testing.js";
 import { SubjectList } from "./SubjectList.jsx";
@@ -318,6 +318,74 @@ describe("one subject's pane", () => {
     const links = [...container.querySelectorAll<HTMLAnchorElement>(".kui-subject__version-list a")];
     expect(links.map((one) => one.textContent)).toEqual(["v1", "v2", "v3"]);
     expect(links.map((one) => one.getAttribute("aria-current"))).toEqual([null, "page", null]);
+    dispose();
+  });
+
+  it("shows JSON-family schemas as a multiline, highlighted, collapsible tree", async () => {
+    const jsonSchema: SchemaVersion = {
+      ...SCHEMA,
+      subject: "orders.jsonschema-value",
+      schemaType: "JSON",
+      definition:
+        '{"type":"object","properties":{"id":{"type":"integer"},"paid":{"type":"boolean"}}}',
+    };
+    const { container, dispose } = pane(jsonSchema);
+    await flush();
+    await vi.waitFor(() => {
+      expect(container.querySelector(".kui-json-tree")).not.toBeNull();
+    });
+
+    const panel = container.querySelector<HTMLDetailsElement>(".kui-subject__definition-panel");
+    expect(panel?.open).toBe(true);
+    expect(panel?.querySelector("summary")?.textContent).toContain("Schema definition");
+    expect(panel?.textContent).toContain("Structured JSON");
+    expect(panel?.querySelector(".kui-json-tree")).not.toBeNull();
+    expect(panel?.querySelector(".kui-json-tree__key")?.textContent).toBe('"type"');
+    // Nested objects have their own native disclosure control, so large schemas can be scanned by
+    // section rather than becoming one wall of text.
+    expect(panel?.querySelectorAll("details.kui-json-tree__branch").length).toBeGreaterThan(1);
+
+    panel!.open = false;
+    panel!.dispatchEvent(new Event("toggle"));
+    expect(panel?.open).toBe(false);
+    dispose();
+  });
+
+  it("formats and highlights a compact Protobuf schema without changing its words", async () => {
+    const protobuf: SchemaVersion = {
+      ...SCHEMA,
+      subject: "orders.protobuf-value",
+      schemaType: "PROTOBUF",
+      definition: 'syntax = "proto3"; message Order { string id = 1; bool paid = 2; }',
+    };
+    const { container, dispose } = pane(protobuf);
+    await flush();
+
+    const source = container.querySelector(".kui-subject__definition-source");
+    expect(source).not.toBeNull();
+    expect(source?.textContent).toContain("\n");
+    expect(source?.querySelector(".kui-schema-token--keyword")?.textContent).toBe("syntax");
+    expect(source?.querySelector(".kui-schema-token--string")?.textContent).toBe('"proto3"');
+    expect(source?.querySelector(".kui-schema-token--number")?.textContent).toBe("1");
+    expect(source?.textContent?.replace(/\s+/gu, " ").trim()).toBe(
+      'syntax = "proto3"; message Order { string id = 1; bool paid = 2; }',
+    );
+    dispose();
+  });
+
+  it("does not apply Protobuf formatting rules to an unknown schema language", async () => {
+    const definition = "namespace Orders { struct Order { 1: required string id } }";
+    const thrift: SchemaVersion = {
+      ...SCHEMA,
+      subject: "orders.thrift-value",
+      schemaType: "THRIFT",
+      definition,
+    };
+    const { container, dispose } = pane(thrift);
+    await flush();
+
+    expect(container.querySelector(".kui-subject__definition-source")?.textContent).toBe(definition);
+    expect(container.textContent).toContain("THRIFT source · 1 line");
     dispose();
   });
 });

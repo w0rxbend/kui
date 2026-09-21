@@ -8,16 +8,16 @@
  * different numbers and an operator debugging a decode failure needs the id, not the version — the
  * record does not carry a version. Both are shown, labelled, and never conflated.
  *
- * ## The schema text is not pretty-printed
+ * ## The schema preview is readable without changing the registry
  *
- * It is shown exactly as the registry stores it, because that string is what the registry compares
- * for compatibility and what a producer's tooling will send. Reformatting it here would make a
- * "these are identical" comparison in a terminal fail for reasons the operator cannot see.
+ * The stored string is never mutated. The read-only preview gives JSON-family schemas a structured
+ * tree and source languages a formatted, highlighted view, and states that distinction explicitly.
  */
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Banner, Select, StatusPill, Tag, type Mutation } from "@kui/kernel";
 import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
+import { SchemaDefinition } from "./SchemaDefinition.jsx";
 import {
   COMPATIBILITY_LEVELS,
   type Compatibility,
@@ -189,11 +189,10 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
               </div>
             </Show>
 
-            {/* Exactly as the registry stores it. Reformatting would make a byte-for-byte comparison
-                in a terminal fail for reasons that are invisible on this screen. */}
-            <pre class="kui-subject__definition" tabindex={0}>
-              <code>{schema().definition}</code>
-            </pre>
+            <SchemaDefinition
+              definition={schema().definition}
+              schemaType={schema().schemaType}
+            />
           </>
         )}
       </Show>

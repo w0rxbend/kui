@@ -8,6 +8,7 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./json-tree": "./src/json-tree.ts",
     "./styles/index.css": "./styles/index.css"
   },
   "dependencies": {

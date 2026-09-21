@@ -183,6 +183,23 @@ test.describe("the schema registry", () => {
     await expect(page.getByText(/schema id/i).first()).toBeVisible();
     await expect(page.getByText(/^version$/i).first()).toBeVisible();
   });
+
+  test("shows a schema as a highlighted multiline preview that can be folded", async ({ page }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas/orders.jsonschema-value`);
+
+    const panel = page.locator(".kui-subject__definition-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute("open", "");
+    await expect(panel).toContainText("Structured JSON");
+    const tree = panel.locator(".kui-json-tree");
+    await expect(tree).toBeVisible();
+    await expect(tree.locator(".kui-json-tree__key").first()).toBeVisible();
+    await expect(tree.locator("details.kui-json-tree__branch")).not.toHaveCount(0);
+
+    await panel.locator("summary").first().click();
+    await expect(panel).not.toHaveAttribute("open", "");
+    await expect(tree).not.toBeVisible();
+  });
 });
 
 /**
