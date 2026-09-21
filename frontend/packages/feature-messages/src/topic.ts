@@ -37,11 +37,17 @@ export interface TopicFacts {
    * that is both impossible and reassuring, which is the pairing this product treats as expensive.
    */
   readonly partitionCount: number | undefined;
+  /** Replication health for the context header around the message browser. */
+  readonly health: TopicHealth;
 }
+
+export type TopicHealth = "in-sync" | "under-replicated" | "offline" | "unknown";
 
 /** The wire's topic row, as much of it as this screen reads. */
 interface TopicRowPayload {
   readonly partitionCount?: number | null;
+  readonly outOfSyncReplicas?: number | null;
+  readonly offlinePartitions?: number | null;
 }
 
 interface TopicDetailPayload {
@@ -58,6 +64,16 @@ interface TopicDetailPayload {
  */
 export function topicFactsKey(clusterId: string, topicName: string): string {
   return `messages:topic:${clusterId}:${topicName}`;
+}
+
+/** The detail endpoint's replication figures, interpreted without inventing healthy zeros. */
+export function topicHealthOf(row: TopicRowPayload): TopicHealth {
+  if (row.offlinePartitions === null || row.offlinePartitions === undefined) {
+    if (row.outOfSyncReplicas === null || row.outOfSyncReplicas === undefined) return "unknown";
+  }
+  if ((row.offlinePartitions ?? 0) > 0) return "offline";
+  if ((row.outOfSyncReplicas ?? 0) > 0) return "under-replicated";
+  return "in-sync";
 }
 
 /**
@@ -84,5 +100,6 @@ export async function fetchTopicFacts(
     // and `?? 0` would turn that sentence into the claim the whole screen exists to avoid.
     partitionCount:
       typeof detail.row?.partitionCount === "number" ? detail.row.partitionCount : undefined,
+    health: detail.row === undefined || detail.row === null ? "unknown" : topicHealthOf(detail.row),
   }));
 }

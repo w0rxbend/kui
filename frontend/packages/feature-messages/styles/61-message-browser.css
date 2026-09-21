@@ -703,6 +703,21 @@
   border-color: var(--kui-color-primary);
 }
 
+/* The message browser lives in its own lazy feature, but it remains one section of one topic.
+ * Keep the topic identity and route-level section navigation above the browser body. */
+.kui-topic-messages-page {
+  min-width: 0;
+}
+
+.kui-topic-messages-page .kui-page-head {
+  margin-block-end: var(--kui-space-4);
+}
+
+.kui-topic-messages-page__body {
+  min-width: 0;
+  margin-block-start: var(--kui-space-4);
+}
+
 /* --- Produce value editor ----------------------------------------------------------------------
  *
  * The textarea stays the only interactive surface. The pre underneath is a visual copy made from

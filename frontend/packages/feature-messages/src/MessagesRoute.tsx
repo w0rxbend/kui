@@ -58,6 +58,7 @@ import {
   type FilterPreset,
 } from "./presets.js";
 import { fetchTopicFacts, topicFactsKey } from "./topic.js";
+import { TopicMessageContext } from "./TopicMessageContext.jsx";
 
 export default function Messages(): JSX.Element {
   const params = useParams<{
@@ -183,6 +184,10 @@ function BrowserScreen(props: {
   const partitionCount = (): number | undefined => {
     const state = topic.state();
     return state.kind === "ready" || state.kind === "stale" ? state.value.partitionCount : undefined;
+  };
+  const topicHealth = () => {
+    const state = topic.state();
+    return state.kind === "ready" || state.kind === "stale" ? state.value.health : "unknown";
   };
 
   /**
@@ -405,72 +410,79 @@ function BrowserScreen(props: {
 
   return (
     <>
-      <MessagesTab
-        topic={props.topicName}
-        /* The topic's own figure, fetched beside the stream. `undefined` while it is loading or if
-         the answer refused: the children below each draw a sentence for that, and none of them
-         draws a zero — a topic cannot have no partitions, so a zero here would be a claim that
-         is both impossible and reassuring. */
+      <TopicMessageContext
+        clusterId={props.clusterId}
+        topicName={props.topicName}
         partitionCount={partitionCount()}
-        query={query()}
-        onQueryChange={writeQuery}
-        predicates={predicates()}
-        onPredicatesChange={(next) => writeQuery(currentQuery(), next)}
-        onRead={start}
-        readBusy={prepare.busy()}
-        {...(refusal() === undefined ? {} : { refusal: refusal() })}
-        presets={presets()}
-        onApplyPreset={applyPreset}
-        onRemovePreset={(preset) => {
-          const next = withoutPreset(presets(), preset.name);
-          setPresets(next);
-          writePresets(props.clusterId, next);
-        }}
-        /* Offered only when there is something to save. A "save as preset" that saves the empty
-           arrangement is a chip that does nothing, named after nothing. */
-        {...(isEmpty(predicates()) && (query().filterSource ?? "") === ""
-          ? {}
-          : { onSavePreset: savePreset })}
-        session={session}
-        mayProduce={mayProduce()}
-        produceDisabledReason={
-          mayProduce() ? undefined : "You do not have permission to publish into this topic."
-        }
-        onProduce={() => {
-          // The last attempt's receipt or error belongs to the drawer that showed it. Reopening to
-          // find "written to partition 3" from ten minutes ago reads as this record having been sent.
-          write.reset();
-          setProducing(true);
-        }}
-        mayResend={mayResend()}
-        resendDisabledReason={
-          mayResend()
-            ? undefined
-            : "You do not have permission to read this topic and publish into another one."
-        }
-        onResend={() => {
-          // Same rule as produce: a tally from a previous copy reappearing over a fresh form would
-          // read as this copy's receipt, and the figures are the whole content of that panel.
-          copy.reset();
-          setResending(true);
-        }}
-        smartFilter={{
-          ...(query().filterSource === undefined ? {} : { source: query().filterSource }),
-          onOpen: () => {
-            compile.reset();
-            preview.reset();
-            setEditingFilter(true);
-          },
-          ...(query().filterId === undefined
+        health={topicHealth()}
+      >
+        <MessagesTab
+          topic={props.topicName}
+          /* The topic's own figure, fetched beside the stream. `undefined` while it is loading or if
+           the answer refused: the children below each draw a sentence for that, and none of them
+           draws a zero — a topic cannot have no partitions, so a zero here would be a claim that
+           is both impossible and reassuring. */
+          partitionCount={partitionCount()}
+          query={query()}
+          onQueryChange={writeQuery}
+          predicates={predicates()}
+          onPredicatesChange={(next) => writeQuery(currentQuery(), next)}
+          onRead={start}
+          readBusy={prepare.busy()}
+          {...(refusal() === undefined ? {} : { refusal: refusal() })}
+          presets={presets()}
+          onApplyPreset={applyPreset}
+          onRemovePreset={(preset) => {
+            const next = withoutPreset(presets(), preset.name);
+            setPresets(next);
+            writePresets(props.clusterId, next);
+          }}
+          /* Offered only when there is something to save. A "save as preset" that saves the empty
+             arrangement is a chip that does nothing, named after nothing. */
+          {...(isEmpty(predicates()) && (query().filterSource ?? "") === ""
             ? {}
-            : {
-                onClear: () => {
-                  session.stop();
-                  applyFilter(undefined);
-                },
-              }),
-        }}
-      />
+            : { onSavePreset: savePreset })}
+          session={session}
+          mayProduce={mayProduce()}
+          produceDisabledReason={
+            mayProduce() ? undefined : "You do not have permission to publish into this topic."
+          }
+          onProduce={() => {
+            // The last attempt's receipt or error belongs to the drawer that showed it. Reopening to
+            // find "written to partition 3" from ten minutes ago reads as this record having been sent.
+            write.reset();
+            setProducing(true);
+          }}
+          mayResend={mayResend()}
+          resendDisabledReason={
+            mayResend()
+              ? undefined
+              : "You do not have permission to read this topic and publish into another one."
+          }
+          onResend={() => {
+            // Same rule as produce: a tally from a previous copy reappearing over a fresh form would
+            // read as this copy's receipt, and the figures are the whole content of that panel.
+            copy.reset();
+            setResending(true);
+          }}
+          smartFilter={{
+            ...(query().filterSource === undefined ? {} : { source: query().filterSource }),
+            onOpen: () => {
+              compile.reset();
+              preview.reset();
+              setEditingFilter(true);
+            },
+            ...(query().filterId === undefined
+              ? {}
+              : {
+                  onClear: () => {
+                    session.stop();
+                    applyFilter(undefined);
+                  },
+                })
+          }}
+        />
+      </TopicMessageContext>
 
       <SmartFilterDialog
         open={editingFilter()}

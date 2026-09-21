@@ -118,6 +118,30 @@ test.describe("the partition count", () => {
   });
 });
 
+test.describe("the topic context", () => {
+  test("keeps the topic identity and all sibling sections around Messages", async ({ page }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/${TOPIC}/messages`);
+
+    const header = page.getByTestId("topic-message-head");
+    await expect(header.getByRole("heading", { name: TOPIC, exact: true })).toBeVisible();
+    await expect(header.getByText("in sync", { exact: true })).toBeVisible();
+    await expect(header.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Topics");
+
+    const sections = page.getByRole("navigation", { name: "Topic sections" });
+    await expect(sections.getByRole("link", { name: /messages/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    for (const name of ["Overview", "Partitions", "Messages", "Consumers", "Settings"]) {
+      await expect(sections.getByRole("link", { name: new RegExp(name, "i") })).toBeVisible();
+    }
+
+    await sections.getByRole("link", { name: /partitions/i }).click();
+    await expect(page).toHaveURL(new RegExp(`/topics/${TOPIC.replace(".", "\\.")}\\?tab=partitions`));
+    await expect(page.getByRole("heading", { name: TOPIC, exact: true })).toBeVisible();
+  });
+});
+
 test.describe("the typed predicates", () => {
   test("a key predicate and a value predicate reach the request separately", async ({ page }) => {
     await page.goto(`/ui/clusters/${CLUSTER}/topics/${TOPIC}/messages`);

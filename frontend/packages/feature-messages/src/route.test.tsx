@@ -161,7 +161,16 @@ function topicWith(partitionCount: number, name: string = TOPIC): unknown {
     topic: {
       status: "ok",
       fetchedAt: "2026-09-05T10:00:00Z",
-      data: { row: { name, internal: false, partitionCount, replicationFactor: 3 } },
+      data: {
+        row: {
+          name,
+          internal: false,
+          partitionCount,
+          replicationFactor: 3,
+          outOfSyncReplicas: 0,
+          offlinePartitions: 0,
+        },
+      },
     },
   };
 }
@@ -193,7 +202,23 @@ const TOPIC_UNAVAILABLE: unknown = {
   },
 };
 
-const PATHS = new Proxy({}, { get: () => () => "/ui" }) as unknown as KuiPaths;
+const PATHS: KuiPaths = {
+  home: () => "/ui",
+  settings: () => "/ui/settings",
+  clusters: () => "/ui/clusters",
+  manageClusters: () => "/ui/clusters/manage",
+  dashboard: (cluster, tab) => `/ui/clusters/${cluster}/dashboard/${tab ?? "overview"}`,
+  brokers: (cluster) => `/ui/clusters/${cluster}/brokers`,
+  broker: (cluster, brokerId) => `/ui/clusters/${cluster}/brokers/${String(brokerId)}`,
+  topics: (cluster) => `/ui/clusters/${cluster}/topics`,
+  topic: (cluster, name) => `/ui/clusters/${cluster}/topics/${encodeURIComponent(name)}`,
+  topicMessages: (cluster, name) =>
+    `/ui/clusters/${cluster}/topics/${encodeURIComponent(name)}/messages`,
+  trackMessages: (cluster) => `/ui/clusters/${cluster}/messages/track`,
+  consumerGroups: (cluster) => `/ui/clusters/${cluster}/consumer-groups`,
+  consumerGroup: (cluster, groupId) =>
+    `/ui/clusters/${cluster}/consumer-groups/${encodeURIComponent(groupId)}`,
+};
 
 /**
  * Mounts the route inside a real router with an in-memory history.
@@ -359,6 +384,38 @@ async function fillCopy(dialog: HTMLElement, destination: string): Promise<void>
   type(dialog, `Type ${destination} to confirm`, destination);
   await settle();
 }
+
+describe("the topic context around the message browser", () => {
+  test("keeps the topic name, health, breadcrumb and section navigation on screen", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12) });
+    const { container, dispose } = routeAt("", api);
+    await settle();
+
+    expect(container.querySelector("h1")?.textContent).toBe(TOPIC);
+    expect(container.textContent).toContain("in sync");
+    expect(container.querySelector("[aria-label='Breadcrumb']")?.textContent).toContain("Topics");
+
+    const tabs = container.querySelector("[aria-label='Topic sections']");
+    expect(tabs).not.toBeNull();
+    const base = `/ui/clusters/${CLUSTER}/topics/${encodeURIComponent(TOPIC)}`;
+    expect(tabs?.querySelector("[data-testid='tab-overview']")?.getAttribute("href")).toBe(base);
+    expect(tabs?.querySelector("[data-testid='tab-partitions']")?.getAttribute("href")).toBe(
+      `${base}?tab=partitions`,
+    );
+    expect(tabs?.querySelector("[data-testid='tab-messages']")?.getAttribute("href")).toBe(
+      `${base}/messages`,
+    );
+    expect(tabs?.querySelector("[data-testid='tab-consumers']")?.getAttribute("href")).toBe(
+      `${base}?tab=consumers`,
+    );
+    expect(tabs?.querySelector("[data-testid='tab-settings']")?.getAttribute("href")).toBe(
+      `${base}?tab=settings`,
+    );
+    expect(tabs?.querySelector("[aria-current='page']")?.textContent).toContain("Messages");
+
+    dispose();
+  });
+});
 
 describe("the partition count the route fetches", () => {
   test("the copy dialog quotes the topic's real partition count", async () => {
