@@ -306,6 +306,43 @@ final class KafkaRecordSource[F[_]: Temporal](
       windows: List[Window],
       budget: PollBudget
   ): Stream[F, Either[KuiError, RawRecord]] = {
+
+    /** Reads one request-depth window per partition with one assignment. This is the ordinary page path:
+      * Kafka can return the whole bounded range in one poll instead of paying one assignment and fetch setup
+      * per offset. A small aggregate record budget still uses `fill`, whose one-offset round robin is what
+      * prevents a high partition id from being starved.
+      *
+      * The fetched candidates are replayed in the same depth-first, partition-round-robin order as `fill`
+      * before the byte budget is applied. The broker work is batched; the logical selection is unchanged.
+      */
+    def batch(walk: Walk): F[Either[KuiError, Option[(Walk, Selected)]]] = {
+      val split = walk.remaining.flatMap(_.newest(size = request.limit.toLong))
+      val round = split.map((window, _) => window)
+      val slots = round.foldLeft(0L)((total, window) => addLong(total, window.size))
+      val recordsRemaining = math.max(0, budget.recordsLeft - walk.emitted).toLong
+      val prefetchAllowance = multiplyLong(slots, CandidatePrefetchBytesPerRecord)
+
+      if round.isEmpty || slots > recordsRemaining || prefetchAllowance > budget.bytesLeft - walk.bytes then
+        Option.empty[(Walk, Selected)].asRight.pure[F]
+      else
+        readCandidateBatch(consumer, request.topic, round).map {
+          case Left(error) => error.asLeft[Option[(Walk, Selected)]]
+          case Right(candidates) =>
+            val selected = within(
+              inScanOrder(round, candidates),
+              recordsLeft = math.min(recordsRemaining, Int.MaxValue.toLong).toInt,
+              bytesLeft = budget.bytesLeft - walk.bytes
+            )
+            Some(
+              Walk(
+                split.flatMap((_, below) => below),
+                emitted = walk.emitted + selected.records.size,
+                bytes = addBytes(walk.bytes, selected.bytes)
+              ) -> selected
+            ).asRight[KuiError]
+        }
+    }
+
     def fill(walk: Walk, target: Int): F[Either[KuiError, (Walk, Selected)]] =
       Temporal[F].tailRecM(Fill.from(walk)) { filling =>
         if filling.remaining.isEmpty ||
@@ -365,6 +402,15 @@ final class KafkaRecordSource[F[_]: Temporal](
         }
       }
 
+    def emit(answer: (Walk, Selected)): (List[Either[KuiError, RawRecord]], Option[Walk]) = {
+      val (next, selected) = answer
+      val newestFirst = selected.records.sorted(using Newest).map(_.asRight[KuiError])
+      val more = Option.when(
+        next.remaining.nonEmpty && !exhausted(next.emitted, next.bytes, budget)
+      )(next)
+      (newestFirst, more)
+    }
+
     Stream
       .unfoldLoopEval(Walk(windows, emitted = 0, bytes = 0L)) { walk =>
         if walk.remaining.isEmpty || exhausted(walk.emitted, walk.bytes, budget) then
@@ -373,18 +419,49 @@ final class KafkaRecordSource[F[_]: Temporal](
           val recordsRemaining = budget.recordsLeft - walk.emitted
           val target = aggregateChunkSize(request.limit, walk.remaining.size, recordsRemaining)
 
-          fill(walk, target).map {
-            case Left(error) => (List(Left(error)), None)
-            case Right((next, selected)) =>
-              val newestFirst = selected.records.sorted(using Newest).map(_.asRight[KuiError])
-              val more = Option.when(
-                next.remaining.nonEmpty && !exhausted(next.emitted, next.bytes, budget)
-              )(next)
-              (newestFirst, more)
+          batch(walk).flatMap {
+            case Left(error) => (List(Left(error)), Option.empty[Walk]).pure[F]
+            case Right(Some(answer)) => emit(answer).pure[F]
+            case Right(None) =>
+              fill(walk, target).map {
+                case Left(error) => (List(Left(error)), None)
+                case Right(answer) => emit(answer)
+              }
           }
         }
       }
       .flatMap(Stream.emits)
+  }
+
+  /** Drains several widened backward windows under one assignment.
+    *
+    * The retained candidate set is bounded by `request.limit * partitions` before this method is called.
+    * Records are accumulated because none can be called globally newest until every partition in the
+    * candidate range has answered. Kafka may transport records just outside a resumed upper bound in the same
+    * poll; `holds` drops those before they enter the retained set.
+    */
+  private def readCandidateBatch(
+      consumer: BrowseConsumer[F],
+      topic: TopicName,
+      round: List[Window]
+  ): F[Either[KuiError, List[RawRecord]]] = {
+    val bounds = round.map(window => window.partition -> window.high).toMap
+
+    def drain(progress: Progress, reversed: List[RawRecord]): F[Either[KuiError, List[RawRecord]]] =
+      if progress.empties > tuning.emptyPollsBeforeEnd || reachedEnd(progress, bounds) then
+        reversed.reverse.asRight[KuiError].pure[F]
+      else
+        consumer.poll(tuning.pollTimeout).flatMap {
+          case Left(error) => error.asLeft[List[RawRecord]].pure[F]
+          case Right(polled) =>
+            val kept = polled.filter(record => round.exists(_.holds(record.partition, record.offset)))
+            drain(progress.after(polled), kept.reverse ::: reversed)
+        }
+
+    assignAndSeek(consumer, topic, round.map(window => window.partition -> window.low)).flatMap {
+      case Left(error) => error.asLeft[List[RawRecord]].pure[F]
+      case Right(_) => drain(Progress.empty, reversed = Nil)
+    }
   }
 
   /** Reads one bounded window on each of several partitions, to their ends.
@@ -483,6 +560,8 @@ object KafkaRecordSource {
 
   /** One partition's half-open offset range, `[low, high)`. */
   final case class Window(partition: PartitionId, low: Long, high: Long) {
+
+    def size: Long = math.max(0L, high - low)
 
     def holds(other: PartitionId, offset: Offset): Boolean =
       other == partition && offset.value >= low && offset.value < high
@@ -610,6 +689,34 @@ object KafkaRecordSource {
 
   private def addBytes(left: Long, right: Long): Long =
     if right >= Long.MaxValue - left then Long.MaxValue else left + right
+
+  private def addLong(left: Long, right: Long): Long =
+    if right >= Long.MaxValue - left then Long.MaxValue else left + right
+
+  private def multiplyLong(left: Long, right: Long): Long =
+    if left <= 0L || right <= 0L then 0L
+    else if left > Long.MaxValue / right then Long.MaxValue
+    else left * right
+
+  /** Candidate batching is a latency optimization, never permission to speculatively read an enormous range
+    * near an exhausted byte budget. Four KiB per offset keeps ordinary pages on the fast path while large
+    * assignments and deliberately small budgets retain the exact one-offset walk. The actual bytes are still
+    * measured; a batch whose records exceed this allowance falls back before emitting anything.
+    */
+  private val CandidatePrefetchBytesPerRecord: Long = 4L * 1024L
+
+  /** The order the exact one-offset walker would have accounted these candidates: newest offset depth first,
+    * then the stable partition order of the current walk. Replaying that order before `within` makes a tight
+    * byte budget select the same records even though Kafka fetched their windows together.
+    */
+  private def inScanOrder(round: List[Window], records: List[RawRecord]): List[RawRecord] = {
+    val positions = round.zipWithIndex.map((window, index) => window.partition -> (window, index)).toMap
+
+    records.sortBy { record =>
+      val (window, partitionIndex) = positions(record.partition)
+      (math.max(0L, window.high - 1L - record.offset.value), partitionIndex)
+    }
+  }
 
   /** The old backward read needed `limit` candidates from every partition to preserve newest-first order.
     * Keep that depth when the aggregate record budget can afford it, but never let multiplication by a large

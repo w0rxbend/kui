@@ -29,6 +29,7 @@ final class FakeBrowseConsumer(
     log: Ref[IO, Map[PartitionId, Vector[RawRecord]]],
     assigned: Ref[IO, List[PartitionId]],
     positions: Ref[IO, Map[PartitionId, Long]],
+    assignments: Ref[IO, Int],
     polls: Ref[IO, Int]
 ) extends BrowseConsumer[IO] {
 
@@ -89,7 +90,7 @@ final class FakeBrowseConsumer(
     )
 
   def assign(topic: TopicName, partitions: List[PartitionId]): IO[Either[KuiError, Unit]] =
-    assigned.set(partitions).as(().asRight[KuiError])
+    assignments.update(_ + 1) *> assigned.set(partitions).as(().asRight[KuiError])
 
   def seek(topic: TopicName, partition: PartitionId, offset: Long): IO[Either[KuiError, Unit]] =
     positions.update(_.updated(partition, offset)).as(().asRight[KuiError])
@@ -112,6 +113,11 @@ final class FakeBrowseConsumer(
 
   /** How many polls this browse made, for the suite that asserts a bounded read stops. */
   val pollCount: IO[Int] = polls.get
+
+  /** How many times the source replaced the consumer assignment. Real Kafka pays a coordination and fetch
+    * setup cost for each one, so a backward page must not perform one assignment per record.
+    */
+  val assignmentCount: IO[Int] = assignments.get
 }
 
 object FakeBrowseConsumer {
@@ -141,8 +147,12 @@ object FakeBrowseConsumer {
     Ref.of[IO, Map[PartitionId, Vector[RawRecord]]](log).flatMap(of)
 
   def of(log: Ref[IO, Map[PartitionId, Vector[RawRecord]]]): IO[FakeBrowseConsumer] =
-    (Ref.of[IO, List[PartitionId]](Nil), Ref.of[IO, Map[PartitionId, Long]](Map.empty), Ref.of[IO, Int](0))
-      .mapN(new FakeBrowseConsumer(log, _, _, _))
+    (
+      Ref.of[IO, List[PartitionId]](Nil),
+      Ref.of[IO, Map[PartitionId, Long]](Map.empty),
+      Ref.of[IO, Int](0),
+      Ref.of[IO, Int](0)
+    ).mapN(new FakeBrowseConsumer(log, _, _, _, _))
 
   /** The consumer, as the `Resource` a browse opens — with a flag that records the close.
     *

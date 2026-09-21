@@ -259,6 +259,31 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
     }
   }
 
+  test("a backward page assigns its candidate window once before the first record") {
+    val log = Map(FakeBrowseConsumer.partition(0, 200))
+    val rawBudget = PollBudget.unsafe(maxRecords = 100, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      first <- source
+        .browse(request(SeekMode.Latest, Direction.Backward, limit = 100), rawBudget)
+        .take(1L)
+        .compile
+        .lastOrError
+      assignments <- consumer.assignmentCount
+    } yield {
+      assertEquals(offsets(List(first)), List((0, 199L)))
+      assertEquals(assignments, 1)
+    }
+  }
+
   test("a backward source does not emit records beyond the raw byte budget") {
     val log = Map(FakeBrowseConsumer.partition(0, 10))
     val rawBudget = PollBudget.unsafe(maxRecords = 20, maxBytes = 48L, deadline = 30.seconds)
@@ -339,6 +364,31 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
       // Timestamps are the offsets here, so the newest four records are offsets 3 and 2 of both
       // partitions — in that order, with the partition number breaking the tie.
       assertEquals(offsets(records).map(_._2), List(3L, 3L, 2L, 2L))
+    }
+  }
+
+  test("a backward page fetches every partition under one candidate-window assignment") {
+    val log = Map(FakeBrowseConsumer.partition(0, 4), FakeBrowseConsumer.partition(1, 4))
+    val rawBudget = PollBudget.unsafe(maxRecords = 4, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source
+        .browse(request(SeekMode.Latest, Direction.Backward, limit = 2), rawBudget)
+        .take(2L)
+        .compile
+        .toList
+      assignments <- consumer.assignmentCount
+    } yield {
+      assertEquals(offsets(records), List((1, 3L), (0, 3L)))
+      assertEquals(assignments, 1)
     }
   }
 
