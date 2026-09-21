@@ -404,3 +404,20 @@ Integration tasks are sequential because they converge on the same client and wi
 - [x] Assemble an optimized walkthrough GIF from the real captures and keep repository media reasonably sized.
 - [x] Add the GIF and a compact screenshot gallery near the top of `README.md`, with useful alt text.
 - [x] Run image/link checks, Playwright E2E, and inspect bounded backend/frontend/Kafka/registry logs.
+
+---
+
+# Cluster-scoped UI and alert persistence
+
+- [x] Add failing codec/key/mutation tests for versioned pseudonymous cluster-principal state.
+- [ ] Implement the bounded `__kui_config` projection and optimistic field-preserving updates.
+- [ ] Add failing alert restart/read-watermark/acknowledgement persistence tests.
+- [ ] Wire the durable alert store with explicit store-less fallback and operational diagnostics.
+- [ ] Define and test typed cluster UI-settings GET/PUT contracts and authorization.
+- [ ] Implement settings use cases/routes and regenerate every OpenAPI/browser contract artifact.
+- [ ] Add failing frontend tests for hydration, cluster switches, stale responses and save failures.
+- [ ] Implement immediate local application plus durable debounced backend synchronization and status UX.
+- [ ] Enable the quickstart Kafka metadata store with safe demonstration-only key material.
+- [ ] Build current-source containers and verify refresh plus KUI restart persistence in Chromium.
+- [ ] Inspect `__kui_*` topic shape/content, browser network/console, and bounded backend/Kafka logs.
+- [ ] Run full backend/frontend/architecture/format/security gates and complete the requirement audit.

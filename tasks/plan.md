@@ -299,3 +299,81 @@ capabilities exist; the later E2E gate must still inspect backend logs after eve
 After human approval, Phase 3 will add small, dependency-ordered tasks with per-task acceptance criteria,
 verification commands and file ownership to `tasks/todo.md`. No production implementation starts before
 those tasks receive their own review.
+
+---
+
+# Cluster-scoped UI and alert persistence
+
+Status: requested by the user on 2026-09-21
+
+## Outcome
+
+Persist each principal's appearance preferences and alert read state in KUI's existing compacted Kafka
+metadata log. A refresh must retain the selected theme without a flash, and restarting KUI must not make a
+continuing alert unread again. State is scoped by cluster and pseudonymous principal identity.
+
+## Architecture decisions
+
+- Reuse `__kui_config` and `ConfigStore`; do not add a second persistence protocol or database. The store
+  cluster may be one of the managed Kafka clusters, as documented in `ARCHITECTURE.md` section 10.1.
+- Keep local appearance storage as the first-paint cache. The backend is the durable cross-restart source;
+  the browser applies the cached choice synchronously, then reconciles after session and cluster resolution.
+- Store a bounded alert projection, including event identity/opened time and per-principal read watermarks.
+  Persisting only a timestamp is insufficient because an in-memory restart recreates a continuing event with
+  a later opening time and makes it unread again.
+- Use a SHA-256-derived principal reference including principal kind. Kafka keys and telemetry never contain
+  login names, session ids, roles, or preference values.
+- Preserve existing store-less deployments. They keep the current in-memory/local behavior and expose a
+  truthful non-durable status; quickstart enables the Kafka store so the complete workflow is testable.
+- Use optimistic record versions and bounded retries for independent appearance/read/evaluation writes.
+  An update always re-reads and preserves fields it does not own.
+
+## Vertical slices
+
+### 1. Durable user-state contract
+
+- Add strict, versioned codecs for cluster/principal appearance and alert state.
+- Add collision-resistant store keys and bounded optimistic mutation helpers.
+- Prove malformed/oversized records fail closed and principal names never enter keys or diagnostics.
+
+### 2. Restart-safe alert store
+
+- Implement the alert store over the replayed metadata projection, retaining events, rule state, resolution,
+  evaluation time and bounded read watermarks.
+- Fall back explicitly to the existing in-memory store when no writable Kafka metadata store is configured.
+- Prove a reconstructed store retains read state, continuing-event identity and acknowledgements.
+
+### 3. Cluster UI-settings API
+
+- Add typed GET and PUT endpoints under the selected cluster, with strict theme/accent/density enums.
+- Scope reads and writes to the verified principal and keep read-only Kafka-cluster mode from blocking KUI
+  metadata preferences.
+- Regenerate service, merged and browser OpenAPI artifacts and cover route/error/security behavior.
+
+### 4. Frontend synchronization and UX
+
+- Load cluster settings after session establishment and cluster selection, applying only the latest response.
+- Apply choices immediately, debounce/coalesce backend saves, expose saving/saved/degraded state, and retain
+  the local cache when the backend is unavailable.
+- Verify refresh, cluster switching and backend restart in the real quickstart stack; inspect browser console,
+  network traffic, Kafka topic contents without sensitive identifiers, and bounded backend logs.
+
+## Verification gates
+
+- Focused config-store, cluster and alerts Scala suites after every backend slice.
+- Cluster/alerts OpenAPI checks, merged gateway document, frontend API generation and typecheck.
+- Focused kernel/shell component tests for hydration, stale-response rejection and save failure UX.
+- Full backend and frontend suites, architecture/format/security review.
+- Current-source Docker build plus Playwright proof of refresh and container-restart persistence, with logs
+  inspected after failures and at the final gate.
+
+## Risks and mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Concurrent alert and appearance writes clobber one another | High | Versioned field-preserving mutation with conflict retry tests |
+| Restart assigns a continuing event a new identity | High | Persist the event projection, not only the read timestamp |
+| Preferences leak account names into readable Kafka metadata | High | Hash kind + name; allowlist log fields; canary leak tests |
+| Backend hydration causes a theme flash or overwrites a newer click | Medium | Synchronous local first paint plus request/save generation guards |
+| Store outage breaks alert reads | High | Serve the replayed projection, report degraded writes, retain explicit in-memory fallback when unconfigured |
+| Metadata records grow without bound | High | Existing 500-event retention plus a fixed per-cluster read-watermark ceiling and payload decode limits |
