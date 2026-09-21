@@ -45,7 +45,7 @@
 # ---------------------------------------------------------------------------------------------
 #
 #   Image        anything with bash and curl. The Compose file uses the registry's own image,
-#                apicurio/apicurio-registry:3.0.6, for the reason `avro-seed.sh` gives at length:
+#                apicurio/apicurio-registry:3.0.6, for the reason `schema-seed.sh` gives at length:
 #                `apache/kafka` is Alpine with busybox wget and no curl at all, and that image is
 #                already being pulled by this same file.
 #   Entrypoint   /bin/bash, with this script's path as the argument.

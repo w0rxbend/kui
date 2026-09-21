@@ -548,6 +548,72 @@ describe("RecordRow", () => {
     expect(container.querySelectorAll(".kui-record__fact")).toHaveLength(5);
   });
 
+  it("copies headers, value, or the complete record without losing header order", async () => {
+    if (first.value.kind !== "json") throw new Error("the first record fixture must remain JSON");
+    const expectedValue = JSON.parse(first.value.text) as unknown;
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const record = {
+      ...first,
+      headers: [
+        { name: "trace-id", value: "first" },
+        { name: "trace-id", value: "0xff", binary: true },
+      ],
+    } as const;
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={record} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    const action = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes(label),
+      ) as HTMLButtonElement;
+
+    await userEvent.click(action("Copy headers"));
+    expect(writeText).toHaveBeenLastCalledWith(
+      JSON.stringify(record.headers, null, 2),
+    );
+
+    await userEvent.click(action("Copy value"));
+    expect(writeText).toHaveBeenLastCalledWith(JSON.stringify(expectedValue, null, 2));
+
+    await userEvent.click(action("Copy all"));
+    const copiedRecord = JSON.parse(writeText.mock.calls.at(-1)?.[0] ?? "{}") as Record<string, unknown>;
+    expect(copiedRecord).toMatchObject({
+      offset: record.offset,
+      partition: record.partition,
+      key: record.key,
+      timestamp: record.timestamp,
+      timestampType: record.timestampType,
+      headers: record.headers,
+      value: expectedValue,
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Record copied");
+  });
+
+  it("reports a refused clipboard write instead of claiming success", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    const container = render(() => (
+      <RecordList label="Records">
+        <RecordRow record={first} now={NOW} initiallyExpanded />
+      </RecordList>
+    ));
+
+    const copyValue = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Copy value"),
+    ) as HTMLButtonElement;
+    await userEvent.click(copyValue);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Copy failed");
+  });
+
   it("keeps every digit of an offset past 2^53", () => {
     const container = render(() => (
       <RecordList label="Records">

@@ -71,7 +71,16 @@ trait CircuitBreaker[F[_]] {
     * than "did it throw", because an upstream that answers `503` to everything is as down as one that refuses
     * connections, and a breaker that only noticed exceptions would never open for it.
     */
-  def protect[A](call: F[A])(succeeded: A => Boolean): F[A]
+  def protect[A](call: F[A])(succeeded: A => Boolean): F[A] =
+    protectClassified(call)(succeeded)(_ => true)
+
+  /** The shared HTTP transport uses this form for terminal local contract failures, such as a response body
+    * crossing its configured byte ceiling. Such a failure proves that the upstream answered, so it must not
+    * contribute to opening an availability circuit.
+    */
+  private[upstream] def protectClassified[A](call: F[A])(succeeded: A => Boolean)(
+      countsAsFailure: Throwable => Boolean
+  ): F[A]
 
   /** [[protect]] where any value that comes back counts as a success. */
   def protect[A](call: F[A]): F[A] = protect(call)(_ => true)
@@ -159,7 +168,9 @@ object CircuitBreaker {
     // mean dropping the very line this exists to guarantee.
     def subscribed: Resource[F, Stream[F, CircuitEvent]] = topic.subscribeAwait(Int.MaxValue)
 
-    def protect[A](call: F[A])(succeeded: A => Boolean): F[A] =
+    def protectClassified[A](call: F[A])(succeeded: A => Boolean)(
+        countsAsFailure: Throwable => Boolean
+    ): F[A] =
       Clock[F].realTimeInstant.flatMap { now =>
         admit(now).flatMap {
           case Left(openSince) => Temporal[F].raiseError[A](CircuitOpenException(upstream, openSince))
@@ -177,7 +188,9 @@ object CircuitBreaker {
                 case Right(value) if succeeded(value) => onSuccess() *> Temporal[F].pure(value)
                 case Right(value) =>
                   onFailure(isProbe, UnsuccessfulResponse) *> Temporal[F].pure(value)
-                case Left(error) => onFailure(isProbe, error) *> Temporal[F].raiseError[A](error)
+                case Left(error) if countsAsFailure(error) =>
+                  onFailure(isProbe, error) *> Temporal[F].raiseError[A](error)
+                case Left(error) => onIgnoredFailure(isProbe) *> Temporal[F].raiseError[A](error)
               }
         }
       }
@@ -233,7 +246,7 @@ object CircuitBreaker {
 
     private def onFailure(isProbe: Boolean, error: Throwable): F[Unit] =
       Clock[F].realTimeInstant.flatMap { now =>
-        val reason = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+        val reason = failureCategory(error)
 
         memory
           .modify { current =>
@@ -256,6 +269,49 @@ object CircuitBreaker {
             case Some(next) => publish(next, now, Some(reason))
             case None => Temporal[F].unit
           }
+      }
+
+    /** A bounded diagnostic category, never an exception message.
+      *
+      * Transport exceptions routinely embed the destination URL, request path, certificate names, proxy
+      * credentials or query parameters in their messages. A circuit transition needs the class of failure for
+      * diagnosis, not any of those values.
+      */
+    private def failureCategory(error: Throwable): String =
+      if error eq UnsuccessfulResponse then UnsuccessfulResponseCategory
+      else
+        error match {
+          case _: javax.net.ssl.SSLException => TlsFailure
+          case _: java.net.UnknownHostException | _: java.nio.channels.UnresolvedAddressException =>
+            DnsFailure
+          case _: java.net.SocketTimeoutException | _: java.util.concurrent.TimeoutException =>
+            TimeoutFailure
+          case _ if Failover.isConnectionFailure(error) => ConnectionFailure
+          case _ => TransportFailure
+        }
+
+    /** Leaves a closed circuit's failure streak untouched for a terminal local contract failure.
+      *
+      * A half-open probe still has to release its exclusive claim. Because the ignored failure did not prove
+      * recovery, the breaker returns to open with a fresh timer, retaining both its failure count and its
+      * last real failure category.
+      */
+    private def onIgnoredFailure(isProbe: Boolean): F[Unit] =
+      Temporal[F].whenA(isProbe) {
+        Clock[F].realTimeInstant.flatMap { now =>
+          memory
+            .modify { current =>
+              (
+                current.copy(
+                  state = CircuitState.Open,
+                  openedAt = Some(now),
+                  probeInFlight = false
+                ),
+                current.lastError
+              )
+            }
+            .flatMap(lastError => publish(CircuitState.Open, now, lastError))
+        }
       }
 
     /** Releases a probe claim whose call was cancelled before it could answer.
@@ -296,7 +352,14 @@ object CircuitBreaker {
   }
 
   /** The stand-in cause recorded when a probe was cancelled before the upstream answered. */
-  private val ProbeCancelled: String = "the probe was cancelled before the upstream answered"
+  private val ProbeCancelled: String = "cancelled"
+
+  private val ConnectionFailure: String = "connection"
+  private val DnsFailure: String = "dns"
+  private val TimeoutFailure: String = "timeout"
+  private val TlsFailure: String = "tls"
+  private val TransportFailure: String = "transport"
+  private val UnsuccessfulResponseCategory: String = "unsuccessful_response"
 
   /** The stand-in cause recorded when a response arrived but did not count as a success.
     *

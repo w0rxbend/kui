@@ -1,5 +1,6 @@
 import type { JSX } from "@solidjs/web";
-import { createSignal, createUniqueId, For, Show } from "solid-js";
+import { createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
+import { Button } from "./Button.jsx";
 import { HeaderChip } from "./HeaderChip.jsx";
 import { Icon } from "./Icon.jsx";
 import {
@@ -167,8 +168,90 @@ function RecordExpansion(props: {
   readonly record: KafkaRecord;
   readonly tombstone: boolean;
 }): JSX.Element {
+  const [copyStatus, setCopyStatus] = createSignal("");
+  let clearStatusTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
+
+  onCleanup(() => {
+    if (clearStatusTimer !== undefined) globalThis.clearTimeout(clearStatusTimer);
+  });
+
+  const headerData = () => props.record.headers.map((header) => ({ ...header }));
+
+  const valueData = (): unknown => {
+    const value = props.record.value;
+    if (value.kind === "json") {
+      try {
+        return JSON.parse(value.text) as unknown;
+      } catch {
+        return value.text;
+      }
+    }
+    if (value.kind === "text") return value.text;
+    if (value.kind === "tombstone") return null;
+    if (value.kind === "large") return { unavailable: true, bytes: value.bytes };
+    return {
+      undecodable: true,
+      reason: value.reason,
+      ...(value.hex === undefined ? {} : { hex: value.hex }),
+    };
+  };
+
+  const completeRecord = () => ({
+    offset: props.record.offset,
+    partition: props.record.partition,
+    key: props.record.key,
+    timestamp: props.record.timestamp,
+    ...(props.record.timestampType === undefined
+      ? {}
+      : { timestampType: props.record.timestampType }),
+    headers: headerData(),
+    value: valueData(),
+    ...(props.record.schema === undefined ? {} : { schema: props.record.schema }),
+  });
+
+  async function copy(text: string, successMessage: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(successMessage);
+    } catch {
+      setCopyStatus("Copy failed — clipboard permission was denied");
+    }
+    if (clearStatusTimer !== undefined) globalThis.clearTimeout(clearStatusTimer);
+    clearStatusTimer = globalThis.setTimeout(() => setCopyStatus(""), 2000);
+  }
+
   return (
     <div id={props.id} class="kui-record__body">
+      <div class="kui-record__copy-toolbar" aria-label="Copy record data">
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="copy"
+          onClick={() => void copy(JSON.stringify(headerData(), null, 2), "Headers copied")}
+        >
+          Copy headers
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="copy"
+          onClick={() => void copy(prettyValue(props.record.value), "Value copied")}
+        >
+          Copy value
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="copy"
+          onClick={() => void copy(JSON.stringify(completeRecord(), null, 2), "Record copied")}
+        >
+          Copy all
+        </Button>
+        <span class="kui-record__copy-status" role="status" aria-live="polite">
+          {copyStatus()}
+        </span>
+      </div>
+
       <dl class="kui-record__facts">
         <Fact label="OFFSET" mono>
           {formatOffset(props.record.offset)}

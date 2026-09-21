@@ -70,6 +70,7 @@ function fakeApi(options: {
   readonly topicFails?: boolean;
   readonly filterId?: string;
   readonly filterFails?: string;
+  readonly filterReply?: Promise<{ readonly id: string }>;
   /** What `POST …/messages` answers with. Absent means the endpoint is not part of the case. */
   readonly produced?: readonly { readonly partition: number; readonly offset: number }[];
   readonly produceFails?: string;
@@ -105,7 +106,13 @@ function fakeApi(options: {
             },
           };
         }
-        return { ok: true, value: { id: options.filterId ?? "0123456789abcdef" } };
+        return {
+          ok: true,
+          value:
+            options.filterReply === undefined
+              ? { id: options.filterId ?? "0123456789abcdef" }
+              : await options.filterReply,
+        };
       }
       if (path === "/api/v1/clusters/{clusterId}/topics/{topicName}/messages") {
         if (options.produceFails !== undefined) {
@@ -421,6 +428,49 @@ describe("the partition count the route fetches", () => {
 });
 
 describe("the typed predicates", () => {
+  test("changing the controls while registration is pending does not start the stale browse", async () => {
+    let finishRegistration: ((value: { readonly id: string }) => void) | undefined;
+    const filterReply = new Promise<{ readonly id: string }>((resolve) => {
+      finishRegistration = resolve;
+    });
+    const { api } = fakeApi({
+      topicAnswer: topicWith(12, "orders.registration-race"),
+      filterReply,
+    });
+    const opened: string[] = [];
+
+    await withFetch(
+      (url) => opened.push(url),
+      async () => {
+        const { container, dispose } = routeAt(
+          "?value=before&valueMode=contains",
+          api,
+          "orders.registration-race",
+        );
+        await settle();
+
+        press(container, "Read");
+        await settle();
+
+        const valueBox = container.querySelector<HTMLInputElement>(
+          ".kui-browse-bar__predicate:nth-of-type(2) input",
+        );
+        expect(valueBox).not.toBeNull();
+        if (valueBox !== null) {
+          valueBox.value = "after";
+          valueBox.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        await pastDebounce();
+
+        finishRegistration?.({ id: "abc0123456789def" });
+        await settle();
+
+        expect(opened).toEqual([]);
+        dispose();
+      },
+    );
+  });
+
   test("a key predicate and a value predicate reach the request separately", async () => {
     const { api, calls } = fakeApi({
       topicAnswer: topicWith(12, "orders.predicates"),

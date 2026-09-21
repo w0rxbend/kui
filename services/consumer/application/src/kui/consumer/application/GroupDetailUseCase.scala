@@ -107,8 +107,9 @@ object GroupDetailUseCase {
   ): GroupDetailUseCase[F] =
     new GroupDetailUseCase[F] {
 
-      /** In-flight describes, keyed by (cluster, group), so several operators on the same detail page — or one
-        * polling it — join the live coordinator round trip already running instead of each starting their own.
+      /** In-flight describes, keyed by (cluster, group), so several operators on the same detail page — or
+        * one polling it — join the live coordinator round trip already running instead of each starting their
+        * own.
         */
       private val inFlight
           : Ref[F, Map[(ClusterId, GroupId), Deferred[F, Either[KuiError, Map[GroupId, ConsumerGroup]]]]] =

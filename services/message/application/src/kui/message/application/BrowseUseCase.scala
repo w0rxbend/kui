@@ -29,6 +29,9 @@ enum BrowseEnd {
   /** The caller's `limit` was reached and there is more where that came from. */
   case Limit
 
+  /** The raw record, byte, or time budget was spent before the requested match limit was reached. */
+  case Budget
+
   /** Every selected partition was read to its end. Asking again returns nothing new. */
   case Exhausted
 }
@@ -315,8 +318,14 @@ object BrowseUseCase {
             case Some(error) => Stream.emit(BrowseEvent.Failed(error))
             case None =>
               val elapsed = now - startedAt
+              val remaining = budget.consume(
+                records = math.min(finalState.read, Int.MaxValue.toLong).toInt,
+                bytes = finalState.bytes,
+                elapsed = elapsed
+              )
               val reason =
                 if finalState.delivered >= request.limit.toLong then BrowseEnd.Limit
+                else if remaining.isExhausted then BrowseEnd.Budget
                 else BrowseEnd.Exhausted
 
               Stream.emit(
@@ -344,7 +353,8 @@ object BrowseUseCase {
           state: State,
           reason: BrowseEnd
       ): F[Option[String]] =
-        if reason != BrowseEnd.Limit || state.delivered == 0L then Option.empty[String].pure[F]
+        if (reason != BrowseEnd.Limit && reason != BrowseEnd.Budget) || state.read == 0L then
+          Option.empty[String].pure[F]
         else
           Clock[F].realTimeInstant.flatMap { now =>
             request.direction match {
@@ -353,8 +363,10 @@ object BrowseUseCase {
                   .flatMap(last => cursors.encode(BrowseCursor.afterForward(request, last, now, CursorTtl)))
                   .map(_.toOption)
               case Direction.Backward =>
-                withUnseenPartitions(request, state.first, identity)
-                  .flatMap(first => cursors.encode(BrowseCursor.beforeBackward(request, first, now, CursorTtl)))
+                withUnseenPartitions(request, state.last, identity)
+                  .flatMap(oldest =>
+                    cursors.encode(BrowseCursor.beforeBackward(request, oldest, now, CursorTtl))
+                  )
                   .map(_.toOption)
             }
           }
@@ -495,8 +507,9 @@ object BrowseUseCase {
 
   /** Everything a browse remembers, which is deliberately not the records themselves.
     *
-    * `first` and `last` are the boundary offsets per partition, and they are what a continuation cursor is
-    * built from: a forward browse resumes after `last`, a backward one before `first`.
+    * `last` is the final raw boundary offset processed per partition, and is what a continuation cursor is
+    * built from: a forward browse resumes after it, while a backward browse uses it as the next half-open
+    * window's upper bound.
     */
   /** True when the filter answered neither way about this record. */
   private def failed(verdict: FilterVerdict): Boolean = verdict match {
@@ -509,7 +522,6 @@ object BrowseUseCase {
       bytes: Long,
       delivered: Long,
       filterErrors: Long,
-      first: Map[PartitionId, Offset],
       last: Map[PartitionId, Offset],
       failure: Option[KuiError]
   ) {
@@ -520,12 +532,11 @@ object BrowseUseCase {
         bytes = bytes + raw.keySize.toLong + raw.valueSize.toLong + raw.headersSize.toLong,
         delivered = if matched then delivered + 1L else delivered,
         filterErrors = if filterFailed then filterErrors + 1L else filterErrors,
-        first = if first.contains(raw.partition) then first else first.updated(raw.partition, raw.offset),
         last = last.updated(raw.partition, raw.offset)
       )
   }
 
   private object State {
-    val empty: State = State(0L, 0L, 0L, 0L, Map.empty, Map.empty, None)
+    val empty: State = State(0L, 0L, 0L, 0L, Map.empty, None)
   }
 }

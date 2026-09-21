@@ -94,7 +94,11 @@ object KafkaGroupAdminPort {
             wanted = partitionsOf(described, commitsByGroup)
             endsAndBegins <-
               if wanted.isEmpty then (noEnds, noEnds).pure[F]
-              else (offsets.endOffsets(connection, wanted), offsets.beginningOffsets(connection, wanted)).parTupled
+              else
+                (
+                  offsets.endOffsets(connection, wanted),
+                  offsets.beginningOffsets(connection, wanted)
+                ).parTupled
             (ends, begins) = endsAndBegins
             _ <- ends.left.toOption.traverse_(error =>
               logger.debug(context ++ Map("error.code" -> error.code.wire))(

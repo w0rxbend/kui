@@ -16,12 +16,13 @@ import { NO_PREDICATES } from "./predicates.js";
 import {
   createBrowseSession,
   decodeBrowseEvent,
+  MAX_CACHED_PAGES,
   MAX_ROWS,
   type BrowseHandle,
   type BrowseSession,
   type BrowseTransport,
 } from "./session.js";
-import { MessagesTab, pauseLabel } from "./MessagesTab.jsx";
+import { MessagesTab, offsetRangeLabel, pauseLabel } from "./MessagesTab.jsx";
 import { toRecord, type MessageDto } from "./wire.js";
 
 /** A transport that runs no network: the test drives the stream by hand. */
@@ -29,23 +30,27 @@ function fakeTransport(): {
   readonly transport: BrowseTransport;
   readonly urls: string[];
   emit: (record: KafkaRecord) => void;
-  close: (marker?: string) => void;
+  consumed: (records: number, filterErrors?: number) => void;
+  close: (marker?: string, reason?: "limit" | "exhausted" | "budget" | "cancelled") => void;
   closes: () => number;
 } {
   const urls: string[] = [];
   let handlers: Parameters<BrowseTransport["open"]>[1] | undefined;
   let marker: string | undefined;
+  let reason: "limit" | "exhausted" | "budget" | "cancelled" | undefined;
   let closed = 0;
   const transport: BrowseTransport = {
     open: (url, given) => {
       urls.push(url);
       handlers = given;
       marker = undefined;
+      reason = undefined;
       const handle: BrowseHandle = {
         close: () => {
           closed += 1;
         },
         endMarker: () => marker,
+        endReason: () => reason,
       };
       return handle;
     },
@@ -54,8 +59,14 @@ function fakeTransport(): {
     transport,
     urls,
     emit: (record) => handlers?.onEvent({ kind: "record", record }),
-    close: (end) => {
+    consumed: (records: number, filterErrors = 0) =>
+      handlers?.onEvent({
+        kind: "consumed",
+        consumed: { records, bytes: records * 24, elapsedMs: 5, filterErrors },
+      }),
+    close: (end, why) => {
       marker = end;
+      reason = why;
       handlers?.onConnection({ phase: "closed", reason: "done" });
     },
     closes: () => closed,
@@ -86,13 +97,24 @@ function withSession(run: (session: BrowseSession, fake: ReturnType<typeof fakeT
 }
 
 describe("a browse session", () => {
-  test("keeps records newest first", async () => {
+  test("keeps a latest browse in the newest-first order delivered by the backend", async () => {
     withSession((session, fake) => {
       session.start(DEFAULT_BROWSE);
+      fake.emit(record("2"));
+      fake.emit(record("1"));
+      void flush();
+      expect(session.rows().map((r) => r.offset)).toEqual(["2", "1"]);
+      expect(session.pageRows().map((r) => r.offset)).toEqual(["2", "1"]);
+    });
+  });
+
+  test("keeps an earliest browse in the forward offset order delivered by the backend", async () => {
+    withSession((session, fake) => {
+      session.start({ ...DEFAULT_BROWSE, seek: { kind: "beginning" } });
       fake.emit(record("1"));
       fake.emit(record("2"));
       void flush();
-      expect(session.rows().map((r) => r.offset)).toEqual(["2", "1"]);
+      expect(session.rows().map((r) => r.offset)).toEqual(["1", "2"]);
     });
   });
 
@@ -219,15 +241,27 @@ describe("a browse session", () => {
     });
   });
 
+  test("preserves a budget-limited terminal reason with its continuation", () => {
+    withSession((session, fake) => {
+      session.start(DEFAULT_BROWSE);
+      fake.consumed(20_000);
+      fake.close("cursor-budget", "budget");
+      void flush();
+
+      expect(session.progress().endReason).toBe("budget");
+      expect(session.canNextPage()).toBe(true);
+    });
+  });
+
   test("load more appends and sends the cursor, not the seek", () => {
     withSession((session, fake) => {
       session.start({ ...DEFAULT_BROWSE, partitions: [3] });
-      fake.emit(record("1"));
+      fake.emit(record("2"));
       fake.close("cursor-1");
       void flush();
 
       session.loadMore();
-      fake.emit(record("2"));
+      fake.emit(record("1"));
       void flush();
 
       expect(session.rows().map((r) => r.offset)).toEqual(["2", "1"]);
@@ -237,6 +271,65 @@ describe("a browse session", () => {
       // The *last browse's* partitions, not whatever the controls hold now: a continuation that
       // silently changed range would move the reader sideways.
       expect(second).toContain("partition=3");
+    });
+  });
+
+  test("moves between offset pages without rereading a cached previous page", () => {
+    withSession((session, fake) => {
+      session.start(DEFAULT_BROWSE);
+      fake.emit(record("9"));
+      fake.emit(record("8"));
+      fake.close("cursor-1");
+      void flush();
+
+      expect(session.pageNumber()).toBe(1);
+      expect(session.pageRows().map((r) => r.offset)).toEqual(["9", "8"]);
+      expect(session.canPreviousPage()).toBe(false);
+      expect(session.canNextPage()).toBe(true);
+
+      session.nextPage();
+      fake.emit(record("7"));
+      fake.emit(record("6"));
+      void flush();
+      expect(session.pageNumber()).toBe(1);
+      expect(session.pageRows().map((r) => r.offset)).toEqual(["9", "8"]);
+      fake.close();
+      void flush();
+
+      expect(session.pageNumber()).toBe(2);
+      expect(session.pageRows().map((r) => r.offset)).toEqual(["7", "6"]);
+      expect(fake.urls).toHaveLength(2);
+
+      session.previousPage();
+      void flush();
+      expect(session.pageNumber()).toBe(1);
+      expect(session.pageRows().map((r) => r.offset)).toEqual(["9", "8"]);
+
+      session.nextPage();
+      void flush();
+      expect(session.pageNumber()).toBe(2);
+      expect(fake.urls).toHaveLength(2);
+    });
+  });
+
+  test("bounds cached page history while keeping page numbers relative to the cursor sequence", () => {
+    withSession((session, fake) => {
+      session.start(DEFAULT_BROWSE);
+      for (let page = 1; page <= MAX_CACHED_PAGES + 1; page += 1) {
+        fake.emit(record(String(100 - page)));
+        fake.close(page <= MAX_CACHED_PAGES ? `cursor-${String(page)}` : undefined);
+        void flush();
+        if (page <= MAX_CACHED_PAGES) session.nextPage();
+      }
+
+      expect(session.pageNumber()).toBe(MAX_CACHED_PAGES + 1);
+      for (let page = 1; page < MAX_CACHED_PAGES; page += 1) {
+        session.previousPage();
+        void flush();
+      }
+      expect(session.pageNumber()).toBe(2);
+      expect(session.canPreviousPage()).toBe(false);
+      expect(fake.urls).toHaveLength(MAX_CACHED_PAGES + 1);
     });
   });
 
@@ -337,14 +430,13 @@ describe("a browse session", () => {
     });
   });
 
-  test("does not offer load-more while a browse is still running", () => {
+  test("ignores every callback from a browse superseded by a newer one", () => {
     /*
-     * A stream that ends *after* a newer one has started still hands over the continuation the
-     * server sent with it — deliberately, because `finish` runs for whichever handle reported the
-     * close and an early close must not be lost. What it must not do is light up Load more beside
-     * a browse that is still delivering: pressing it stops the running stream and restarts it at a
-     * continuation belonging to the range before it, so the rows on screen and the rows arriving
-     * are two different questions.
+     * Closing the old handle asks the transport to abort it, but cancellation is a race: a frame
+     * already read from the response can still be queued when a new browse starts. Every callback
+     * therefore belongs to the generation that opened it. Letting the old generation append a row
+     * or report progress/failure mixes two different questions on one screen; letting its terminal
+     * cursor through offers a continuation for the wrong range.
      *
      * The transport here keeps its handlers per call, which the shared fake does not — it holds
      * only the latest, so this sequence is not expressible with it.
@@ -372,12 +464,58 @@ describe("a browse session", () => {
 
       const first = streams[0];
       if (first === undefined) throw new Error("the first browse never opened a stream");
+      first.handlers.onEvent({ kind: "record", record: record("old") });
+      first.handlers.onEvent({ kind: "phase", name: "filtering-old-range" });
+      first.handlers.onEvent({
+        kind: "consumed",
+        consumed: { records: 99, bytes: 999, elapsedMs: 9 },
+      });
+      first.handlers.onFailure({ kind: "decode", event: "message", cause: "old failure" });
       first.marker = "cursor-1";
       first.handlers.onConnection({ phase: "closed", reason: "done" });
       void flush();
 
-      // The second browse is still open, so this is not the state Load more is for.
+      expect(session.rows()).toEqual([]);
+      expect(session.progress()).toEqual({
+        delivered: 0,
+        connection: { phase: "connecting" },
+      });
       expect(session.running()).toBe(true);
+      expect(session.canLoadMore()).toBe(false);
+      return null;
+    });
+    dispose();
+  });
+
+  test("ignores callbacks queued after the active browse is stopped", () => {
+    let handlers: Parameters<BrowseTransport["open"]>[1] | undefined;
+    const transport: BrowseTransport = {
+      open: (_url, given) => {
+        handlers = given;
+        return { close: () => undefined, endMarker: () => "stale-cursor" };
+      },
+    };
+
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({ streamUrl: "/s", transport });
+      session.start(DEFAULT_BROWSE);
+      handlers?.onEvent({ kind: "record", record: record("before-stop") });
+      handlers?.onConnection({ phase: "open" });
+      void flush();
+      session.stop();
+      void flush();
+      const rowsAtStop = session.rows();
+      const progressAtStop = session.progress();
+
+      handlers?.onEvent({ kind: "record", record: record("after-stop") });
+      handlers?.onEvent({ kind: "phase", name: "reading-after-stop" });
+      handlers?.onFailure({ kind: "transport", cause: "late failure" });
+      handlers?.onConnection({ phase: "closed", reason: "late close" });
+      void flush();
+
+      expect(session.rows()).toEqual(rowsAtStop);
+      expect(session.progress()).toEqual(progressAtStop);
+      expect(session.running()).toBe(false);
       expect(session.canLoadMore()).toBe(false);
       return null;
     });
@@ -411,11 +549,35 @@ describe("a browse session", () => {
   });
 });
 
+describe("offset range labels", () => {
+  test("keeps offsets partition-relative and precise beyond Number.MAX_SAFE_INTEGER", () => {
+    expect(
+      offsetRangeLabel([
+        record("9007199254740995", 2),
+        record("8", 0),
+        record("9007199254740993", 2),
+        record("6", 0),
+      ]),
+    ).toBe("p0 offsets 6–8 · p2 offsets 9007199254740993–9007199254740995");
+  });
+
+  test("does not imply that an empty Kafka page has a global row range", () => {
+    expect(offsetRangeLabel([])).toBe("No offsets loaded");
+  });
+});
+
 describe("decoding what the stream sends", () => {
   test("one unreadable event does not end the stream", () => {
     // A decode failure is informational; the transport reports it and keeps going, which is the
     // same rule ADR-035 gives the server.
     expect(decodeBrowseEvent("message", "not json")).toEqual({ ok: false, cause: "not JSON" });
+  });
+
+  test("a structurally malformed message is a decode failure, not an exception", () => {
+    expect(decodeBrowseEvent("message", "{}")).toEqual({
+      ok: false,
+      cause: "invalid message: partition must be a non-negative integer",
+    });
   });
 
   test("reads a phase and a consumed figure", () => {
@@ -558,6 +720,109 @@ describe("the messages screen", () => {
     dispose();
   });
 
+  test("defaults to one offset-relative page with cached previous and next controls", async () => {
+    const { container, fake, session, dispose } = screen({ ...DEFAULT_BROWSE, limit: 2 });
+    session().start({ ...DEFAULT_BROWSE, limit: 2 });
+    fake.emit(record("9"));
+    fake.emit(record("8"));
+    fake.close("cursor-1");
+    await flush();
+
+    const pages = container.querySelector<HTMLInputElement>('input[value="pages"]');
+    expect(pages?.checked).toBe(true);
+    expect(container.textContent).toContain("Page 1");
+    expect(container.textContent).toContain("p0 offsets 8–9");
+    expect(container.querySelectorAll(".kui-record")).toHaveLength(2);
+
+    container.querySelector<HTMLButtonElement>('button[aria-label="Next offset page"]')?.click();
+    fake.emit(record("7"));
+    fake.emit(record("6"));
+    fake.close();
+    await flush();
+
+    expect(container.textContent).toContain("Page 2");
+    expect(container.textContent).toContain("p0 offsets 6–7");
+    expect(container.textContent).not.toContain("ord_9");
+
+    container.querySelector<HTMLButtonElement>('button[aria-label="Previous offset page"]')?.click();
+    await flush();
+    expect(container.textContent).toContain("Page 1");
+    expect(container.textContent).toContain("ord_9");
+    expect(fake.urls).toHaveLength(2);
+    dispose();
+  });
+
+  test("keeps an empty budget-limited filtered page continuable", async () => {
+    const filtered = {
+      ...DEFAULT_BROWSE,
+      filterId: "selective-filter",
+      filterSource: 'record.value.region == "antarctica"',
+    };
+    const { container, fake, session, dispose } = screen(filtered);
+    session().start(filtered);
+    fake.consumed(20_000);
+    fake.close("cursor-budget", "budget");
+    await flush();
+
+    expect(container.querySelectorAll(".kui-record")).toHaveLength(0);
+    expect(container.textContent).toContain("scan safety budget");
+    expect(container.textContent).not.toContain("Every record in the range was read");
+    const next = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Next offset page"]',
+    );
+    expect(next).not.toBeNull();
+    expect(next?.disabled).toBe(false);
+
+    next?.click();
+    expect(fake.urls).toHaveLength(2);
+    expect(fake.urls[1]).toContain("cursor=cursor-budget");
+    dispose();
+  });
+
+  test("infinite scroll preloads the next cursor before the end enters the viewport", async () => {
+    let intersect: (() => void) | undefined;
+    class Observer {
+      constructor(callback: IntersectionObserverCallback) {
+        intersect = () =>
+          callback(
+            [{ isIntersecting: true } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+      }
+      observe(): void {}
+      disconnect(): void {}
+      unobserve(): void {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+      readonly root = null;
+      readonly rootMargin = "720px 0px";
+      readonly thresholds = [0];
+    }
+    vi.stubGlobal("IntersectionObserver", Observer);
+
+    const { container, fake, session, dispose } = screen({ ...DEFAULT_BROWSE, limit: 1 });
+    container.querySelector<HTMLInputElement>('input[value="infinite"]')?.click();
+    session().start({ ...DEFAULT_BROWSE, limit: 1 });
+    fake.emit(record("9"));
+    fake.close("cursor-1");
+    await flush();
+
+    expect(container.textContent).toContain("p0 offsets 9–9");
+    intersect?.();
+    await flush();
+
+    expect(fake.urls).toHaveLength(2);
+    expect(fake.urls[1]).toContain("cursor=cursor-1");
+    intersect?.();
+    expect(fake.urls).toHaveLength(2);
+
+    fake.emit(record("8"));
+    fake.close();
+    await flush();
+    expect(container.querySelectorAll(".kui-record")).toHaveLength(2);
+    dispose();
+    vi.unstubAllGlobals();
+  });
+
   test("the whole row is the control and it says which way it will go", async () => {
     const { container, fake, session, dispose } = screen();
     session().start(DEFAULT_BROWSE);
@@ -599,6 +864,25 @@ describe("the messages screen", () => {
     fake.close();
     await flush();
     expect(container.textContent).toContain("No record matched that filter");
+    dispose();
+  });
+
+  test("reports filter evaluation errors instead of claiming every record was a clean non-match", async () => {
+    const filtered = {
+      ...DEFAULT_BROWSE,
+      filterId: "abc0123456789def",
+      filterSource: 'record.value.status == "CAPTURED"',
+    };
+    const { container, fake, session, dispose } = screen(filtered);
+    session().start(filtered);
+    fake.consumed(12, 2);
+    fake.close();
+    await flush();
+
+    expect(container.textContent).toContain("2 filter evaluations failed");
+    expect(container.textContent).toContain("Some records could not be evaluated");
+    expect(container.textContent).not.toContain("none of them satisfied");
+    expect(container.textContent).not.toContain("Finished — nothing matched");
     dispose();
   });
 

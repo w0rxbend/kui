@@ -132,10 +132,15 @@ function BrowserScreen(props: {
   });
 
   let disposed = false;
+  /* Invalidates an asynchronous filter registration when the controls change before it answers.
+   * Without this, Read snapshots one expression for the POST and then starts a browse from the
+   * newer URL, pairing an id minted for the old source with a different range or serde selection. */
+  let startGeneration = 0;
   onCleanup(() => {
     // Closes the stream, which aborts the request, which releases the consumer. The single most
     // important line in this file.
     disposed = true;
+    startGeneration += 1;
     session.stop();
   });
 
@@ -268,6 +273,7 @@ function BrowserScreen(props: {
    * means — the address of a browse is its query — so it is also the honest spelling.
    */
   function writeQuery(next: BrowseQuery, nextPredicates: Predicates = currentPredicates()): void {
+    startGeneration += 1;
     written = { query: next, predicates: nextPredicates };
     const search = [
       queryString(next),
@@ -297,17 +303,19 @@ function BrowserScreen(props: {
    */
   function start(): void {
     setRefusal(undefined);
+    const generation = ++startGeneration;
     const asked = currentQuery();
-    const source = celFor(currentPredicates(), asked.filterSource);
+    const askedPredicates = currentPredicates();
+    const source = celFor(askedPredicates, asked.filterSource);
     if (source === undefined) {
       session.start({ ...asked, filterId: undefined, filterSource: undefined });
       return;
     }
     void prepare.run(source).then((state) => {
-      if (disposed) return;
+      if (disposed || generation !== startGeneration) return;
       if (state.kind === "done") {
         session.start({
-          ...currentQuery(),
+          ...asked,
           filterId: state.value.id,
           filterSource: state.value.source,
         });

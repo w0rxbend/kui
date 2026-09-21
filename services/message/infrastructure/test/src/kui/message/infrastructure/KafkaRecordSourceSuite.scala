@@ -1,9 +1,11 @@
 package kui.message.infrastructure
 
+import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
-import cats.effect.kernel.{Deferred, Ref}
+import cats.effect.kernel.{Deferred, Ref, Resource}
 import cats.syntax.all.*
 
 import kui.kernel.browse.{Direction, PollBudget, SeekMode}
@@ -65,12 +67,31 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
 
   private def browse(
       log: Map[PartitionId, Vector[RawRecord]],
-      of: BrowseRequest
+      of: BrowseRequest,
+      over: PollBudget = budget
   ): IO[List[Either[KuiError, RawRecord]]] =
-    Ref.of[IO, Boolean](false).flatMap(closed => sourceOver(log, closed).browse(of, budget).compile.toList)
+    Ref.of[IO, Boolean](false).flatMap(closed => sourceOver(log, closed).browse(of, over).compile.toList)
 
   private def offsets(records: List[Either[KuiError, RawRecord]]): List[(Int, Long)] =
     records.collect { case Right(record) => (record.partition.value, record.offset.value) }
+
+  private def observedBrowse(
+      log: Map[PartitionId, Vector[RawRecord]],
+      of: BrowseRequest,
+      over: PollBudget
+  ): IO[(List[Either[KuiError, RawRecord]], Int)] =
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source.browse(of, over).compile.toList
+      polls <- consumer.pollCount
+    } yield (records, polls)
 
   // -------------------------------------------------------------------------------------- forward
 
@@ -84,11 +105,23 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
     )
   }
 
-  test("a forward browse stops at the caller's limit rather than at the end of the log") {
+  test("a forward source scans past the delivered limit up to the raw record budget") {
     val log = Map(FakeBrowseConsumer.partition(0, 20))
+    val rawBudget = PollBudget.unsafe(maxRecords = 5, maxBytes = 1L << 20, deadline = 30.seconds)
 
-    browse(log, request(SeekMode.Beginning, Direction.Forward, limit = 3)).map(records =>
-      assertEquals(offsets(records), List((0, 0L), (0, 1L), (0, 2L)))
+    browse(log, request(SeekMode.Beginning, Direction.Forward, limit = 2), rawBudget).map(records =>
+      assertEquals(offsets(records), List((0, 0L), (0, 1L), (0, 2L), (0, 3L), (0, 4L)))
+    )
+  }
+
+  test("a forward source does not emit records beyond the raw byte budget") {
+    // Fake records account for 8 key bytes and 16 value bytes. Forty-eight bytes therefore admit exactly
+    // two records; the request limit is deliberately one so it cannot accidentally be the scan bound.
+    val log = Map(FakeBrowseConsumer.partition(0, 20))
+    val rawBudget = PollBudget.unsafe(maxRecords = 20, maxBytes = 48L, deadline = 30.seconds)
+
+    browse(log, request(SeekMode.Beginning, Direction.Forward, limit = 1), rawBudget).map(records =>
+      assertEquals(offsets(records), List((0, 0L), (0, 1L)))
     )
   }
 
@@ -185,10 +218,92 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
 
   test("a backward browse from the end returns the newest records, newest first") {
     val log = Map(FakeBrowseConsumer.partition(0, 10))
+    val rawBudget = PollBudget.unsafe(maxRecords = 3, maxBytes = 1L << 20, deadline = 30.seconds)
 
-    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 3)).map(records =>
+    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 3), rawBudget).map(records =>
       assertEquals(offsets(records), List((0, 9L), (0, 8L), (0, 7L)))
     )
+  }
+
+  test("a backward source walks past the delivered limit up to the raw record budget") {
+    val log = Map(FakeBrowseConsumer.partition(0, 10))
+    val rawBudget = PollBudget.unsafe(maxRecords = 5, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 2), rawBudget).map(records =>
+      assertEquals(offsets(records), List((0, 9L), (0, 8L), (0, 7L), (0, 6L), (0, 5L)))
+    )
+  }
+
+  test("a backward source emits one small page without preloading the whole raw record budget") {
+    val log = Map(FakeBrowseConsumer.partition(0, 100))
+    val rawBudget = PollBudget.unsafe(maxRecords = 100, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source
+        .browse(request(SeekMode.Latest, Direction.Backward, limit = 2), rawBudget)
+        .take(2L)
+        .compile
+        .toList
+      polls <- consumer.pollCount
+    } yield {
+      assertEquals(offsets(records), List((0, 99L), (0, 98L)))
+      assertEquals(polls, 2)
+    }
+  }
+
+  test("a backward source does not emit records beyond the raw byte budget") {
+    val log = Map(FakeBrowseConsumer.partition(0, 10))
+    val rawBudget = PollBudget.unsafe(maxRecords = 20, maxBytes = 48L, deadline = 30.seconds)
+
+    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 1), rawBudget).map(records =>
+      assertEquals(offsets(records), List((0, 9L), (0, 8L)))
+    )
+  }
+
+  test("a backward source applies one raw record budget across a high-partition round and its continuation") {
+    val partitionCount = 64
+    val log = (0 until partitionCount).map(id => FakeBrowseConsumer.partition(id, count = 1)).toMap
+    val rawBudget = PollBudget.unsafe(maxRecords = 9, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      first <- observedBrowse(log, request(SeekMode.Latest, Direction.Backward, limit = 100), rawBudget)
+      firstOffsets = offsets(first._1)
+      seen = firstOffsets.iterator.map(_._1).toSet
+      continuation = (0 until partitionCount).map { id =>
+        val next = if seen.contains(id) then 0L else 1L
+        PartitionId.unsafe(id) -> Offset.unsafe(next)
+      }.toMap
+      second <- observedBrowse(
+        log,
+        request(SeekMode.AtOffsets(continuation), Direction.Backward, limit = 100),
+        rawBudget
+      )
+    } yield {
+      assertEquals(first._2, 9)
+      assertEquals(firstOffsets, (8 to 0 by -1).map(id => (id, 0L)).toList)
+      assertEquals(second._2, 9)
+      assertEquals(offsets(second._1), (17 to 9 by -1).map(id => (id, 0L)).toList)
+    }
+  }
+
+  test("a backward source stops draining partitions when the aggregate raw byte budget is spent") {
+    val log = (0 until 64).map(id => FakeBrowseConsumer.partition(id, count = 1)).toMap
+    // Each fake record is 24 bytes, so the aggregate allowance admits two records across the whole round.
+    val rawBudget = PollBudget.unsafe(maxRecords = 64, maxBytes = 48L, deadline = 30.seconds)
+
+    observedBrowse(log, request(SeekMode.Latest, Direction.Backward, limit = 100), rawBudget).map {
+      case (records, polls) =>
+        assertEquals(polls, 2)
+        assertEquals(offsets(records), List((1, 0L), (0, 0L)))
+    }
   }
 
   test("a backward browse walks down in windows and never reads below the oldest record") {
@@ -207,16 +322,20 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
     // The range is half-open in the same direction as the forward case, which is what lets a cursor
     // minted by one be read by the other with no record shown twice.
     val log = Map(FakeBrowseConsumer.partition(0, 10))
+    val rawBudget = PollBudget.unsafe(maxRecords = 3, maxBytes = 1L << 20, deadline = 30.seconds)
 
-    browse(log, request(SeekMode.AtOffset(Offset.unsafe(5)), Direction.Backward, limit = 3)).map(records =>
-      assertEquals(offsets(records), List((0, 4L), (0, 3L), (0, 2L)))
-    )
+    browse(
+      log,
+      request(SeekMode.AtOffset(Offset.unsafe(5)), Direction.Backward, limit = 3),
+      rawBudget
+    ).map(records => assertEquals(offsets(records), List((0, 4L), (0, 3L), (0, 2L))))
   }
 
   test("a backward browse merges partitions newest first") {
     val log = Map(FakeBrowseConsumer.partition(0, 4), FakeBrowseConsumer.partition(1, 4))
+    val rawBudget = PollBudget.unsafe(maxRecords = 4, maxBytes = 1L << 20, deadline = 30.seconds)
 
-    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 4)).map { records =>
+    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 4), rawBudget).map { records =>
       // Timestamps are the offsets here, so the newest four records are offsets 3 and 2 of both
       // partitions — in that order, with the partition number breaking the tie.
       assertEquals(offsets(records).map(_._2), List(3L, 3L, 2L, 2L))
@@ -238,11 +357,72 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
      * longer where the next page expects it.
      */
     val log = Map(FakeBrowseConsumer.partition(0, 4), FakeBrowseConsumer.partition(1, 4))
+    val rawBudget = PollBudget.unsafe(maxRecords = 4, maxBytes = 1L << 20, deadline = 30.seconds)
 
-    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 4)).map { records =>
+    browse(log, request(SeekMode.Latest, Direction.Backward, limit = 4), rawBudget).map { records =>
       // Timestamps here are the offsets, so 3 and 3 tie and 2 and 2 tie. The tie is broken by the
       // partition, descending, which is what `Newest` says and what nothing has been reading.
       assertEquals(offsets(records), List((1, 3L), (0, 3L), (1, 2L), (0, 2L)))
+    }
+  }
+
+  test("a backward chunk keeps enough candidates per partition to preserve newest-first timestamp order") {
+    val fast = FakeBrowseConsumer.partition(0, 4)._2.map { record =>
+      val timestamp =
+        if record.offset.value == 3L then 100L else if record.offset.value == 2L then 99L else 98L
+      record.copy(timestamp = Instant.ofEpochMilli(timestamp))
+    }
+    val slow = FakeBrowseConsumer
+      .partition(1, 4)
+      ._2
+      .map(record => record.copy(timestamp = Instant.ofEpochMilli(record.offset.value - 3L)))
+    val log = Map(PartitionId.unsafe(0) -> fast, PartitionId.unsafe(1) -> slow)
+    val rawBudget = PollBudget.unsafe(maxRecords = 100, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source
+        .browse(request(SeekMode.Latest, Direction.Backward, limit = 2), rawBudget)
+        .take(2L)
+        .compile
+        .toList
+      polls <- consumer.pollCount
+    } yield {
+      assertEquals(offsets(records), List((0, 3L), (0, 2L)))
+      // Two candidates from each partition preserve the ordering without scanning the 100-record budget.
+      assertEquals(polls, 4)
+    }
+  }
+
+  test("a backward chunk does not spend an exhausted partition's candidate allowance on another partition") {
+    val log = Map(FakeBrowseConsumer.partition(0, 1), FakeBrowseConsumer.partition(1, 100))
+    val rawBudget = PollBudget.unsafe(maxRecords = 100, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source
+        .browse(request(SeekMode.Latest, Direction.Backward, limit = 2), rawBudget)
+        .take(2L)
+        .compile
+        .toList
+      polls <- consumer.pollCount
+    } yield {
+      assertEquals(offsets(records), List((1, 99L), (1, 98L)))
+      assertEquals(polls, 3)
     }
   }
 

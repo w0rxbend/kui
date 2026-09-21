@@ -256,6 +256,21 @@
   background-color: var(--kui-color-surface-raised);
 }
 
+.kui-record__copy-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.kui-record__copy-status {
+  min-width: 8rem;
+  margin-inline-start: var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
 /* `auto-fit` with a floor, not four fixed columns: a schema adds a fifth box, and five boxes in a
  * four-column grid either squash or overflow. This reflows onto a second line instead. */
 .kui-record__facts {

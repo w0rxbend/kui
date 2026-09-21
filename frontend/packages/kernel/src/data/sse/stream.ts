@@ -116,6 +116,14 @@ export interface SseSubscriber<A> {
    * care about progress should not have to handle it at all — hence optional.
    */
   readonly onPhase?: ((data: string) => void) | undefined;
+  /**
+   * Called with the terminal `done` frame's raw payload before the connection closes.
+   *
+   * The payload names why the server stopped (`limit`, `exhausted`, `budget`, or `cancelled`).
+   * Most streams only need the connection state and can omit this callback; consumers that offer
+   * continuation controls use it to distinguish a complete range from a safety-budget pause.
+   */
+  readonly onDone?: ((data: string) => void) | undefined;
 }
 
 /**
@@ -257,8 +265,13 @@ export function openEventSourceWith<A>(
     }
   });
 
-  source.addEventListener(SseEventNames.Done, () => {
-    closeWith("the stream finished");
+  source.addEventListener(SseEventNames.Done, (event: Event) => {
+    if (closed) return;
+    try {
+      subscriber.onDone?.(payloadOf(event) ?? "");
+    } finally {
+      closeWith("the stream finished");
+    }
   });
 
   // Forwarded raw: `phase` is shared, so it never goes through `decode`, which is keyed on the
@@ -439,7 +452,11 @@ export function openFetchStreamWith<A>(
         // recorded before the connection is closed, so a caller watching `connection` for the end
         // finds the marker already there rather than a tick later.
         marker = raw.id;
-        end("the stream finished");
+        try {
+          subscriber.onDone?.(raw.data);
+        } finally {
+          end("the stream finished");
+        }
         return;
       case SseEventNames.Error:
         subscriber.onError(serverError(raw.data));

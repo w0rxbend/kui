@@ -43,11 +43,13 @@ customers.profiles	3	3	cleanup.policy=compact;min.cleanable.dirty.ratio=0.1;segm
 inventory.stock-levels	4	2	cleanup.policy=compact,delete;retention.ms=1209600000;segment.ms=60000
 # 14 days.
 
-# --- Avro -------------------------------------------------------------------------------------
-# The topic whose values are Avro, written in the Schema Registry wire format. seed.sh creates it
-# and leaves it empty; avro-seed.sh registers the schema and produces the records through KUI,
-# because a console producer cannot write a record that starts with a zero byte.
+# --- Schema Registry wire formats -------------------------------------------------------------
+# These topics are created empty here. schema-seed.sh registers each subject and writes records
+# through KUI after the application is healthy. Keeping Avro, JSON Schema and Protobuf separate
+# makes the decoded shape and field filtering of each format easy to compare in the message browser.
 orders.avro	3	1	retention.ms=604800000
+orders.jsonschema	3	1	retention.ms=604800000
+orders.protobuf	3	1	retention.ms=604800000
 
 # --- Not JSON ---------------------------------------------------------------------------------
 # Plain-text log lines. The message browser has to show a value it cannot parse as JSON without

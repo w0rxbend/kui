@@ -20,8 +20,8 @@ import kui.testkit.KuiIOSuite
   * documents for CEL — reach Avro, Protobuf and JSON Schema values exactly as they reach a plain-JSON one.
   *
   * `CelFilterEngineSuite` and `CelFilterSourceSuite` establish that a `record.value` built from a JSON string
-  * filters correctly; `AvroPayloadSuite` and `ProtobufPayloadSuite` establish that decoding produces the right
-  * JSON text. Neither closes the loop between them. This suite does: it decodes real Avro bytes with
+  * filters correctly; `AvroPayloadSuite` and `ProtobufPayloadSuite` establish that decoding produces the
+  * right JSON text. Neither closes the loop between them. This suite does: it decodes real Avro bytes with
   * `AvroPayload`, real Protobuf bytes with `ProtobufPayload`, and a real JSON Schema payload with
   * `JsonSchemaPayload`, hands each result to `CelFilterSource` — the one adapter that joins a `DecodedRecord`
   * to the CEL engine — and asserts the filter's verdict.
@@ -57,9 +57,9 @@ final class CelSerdeFilterSuite extends KuiIOSuite {
       decodeErrors = Nil
     )
 
-  /** Registers and compiles an expression the way a browse does, and answers whether it matched — failing
-    * the test outright on a compile or runtime error, since every case in this suite expects a clean match
-    * or non-match against a well-formed decoded record.
+  /** Registers and compiles an expression the way a browse does, and answers whether it matched — failing the
+    * test outright on a compile or runtime error, since every case in this suite expects a clean match or
+    * non-match against a well-formed decoded record.
     */
   private def matches(expression: String, against: DecodedRecord): IO[Boolean] =
     source.use { filters =>

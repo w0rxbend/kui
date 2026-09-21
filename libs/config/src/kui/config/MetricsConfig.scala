@@ -24,7 +24,17 @@ import kui.kernel.ClusterId
 final case class MetricsSourceSettings(
     url: SafeUrl,
     kind: MetricsSourceKind = MetricsSourceKind.Prometheus,
-    callTimeout: FiniteDuration = MetricsSourceSettings.DefaultCallTimeout
+    callTimeout: FiniteDuration = MetricsSourceSettings.DefaultCallTimeout,
+    queryTimeout: FiniteDuration = MetricsSourceSettings.DefaultQueryTimeout,
+    maxConcurrentQueries: Int = MetricsSourceSettings.DefaultMaxConcurrentQueries,
+    maxSeriesPerQuery: Int = MetricsSourceSettings.DefaultMaxSeriesPerQuery,
+    maxPointsPerSeries: Int = MetricsSourceSettings.DefaultMaxPointsPerSeries,
+    maxResponseBytes: Int = MetricsSourceSettings.DefaultMaxResponseBytes,
+    maxCacheBytes: Int = MetricsSourceSettings.DefaultMaxCacheBytes,
+    cacheTtl: FiniteDuration = MetricsSourceSettings.DefaultCacheTtl,
+    staleTtl: FiniteDuration = MetricsSourceSettings.DefaultStaleTtl,
+    auth: UpstreamAuthConfig = UpstreamAuthConfig.Anonymous,
+    tls: HttpTlsConfig = HttpTlsConfig.Default
 )
 
 object MetricsSourceSettings {
@@ -34,23 +44,57 @@ object MetricsSourceSettings {
   val MinCallTimeout: FiniteDuration = 1.second
   val MaxCallTimeout: FiniteDuration = 60.seconds
 
+  val DefaultQueryTimeout: FiniteDuration = 8.seconds
+  val MinQueryTimeout: FiniteDuration = 1.second
+  val MaxQueryTimeout: FiniteDuration = 55.seconds
+
+  val DefaultMaxConcurrentQueries: Int = 4
+  val MinConcurrentQueries: Int = 1
+  val MaxConcurrentQueries: Int = 32
+
+  val DefaultMaxSeriesPerQuery: Int = 200
+  val MinSeriesPerQuery: Int = 1
+  val MaxSeriesPerQuery: Int = 1000
+
+  val DefaultMaxPointsPerSeries: Int = 600
+  val MinPointsPerSeries: Int = 60
+  val MaxPointsPerSeries: Int = 2000
+
+  val DefaultMaxResponseBytes: Int = 4 * 1024 * 1024
+  val MinResponseBytes: Int = 64 * 1024
+  val MaxResponseBytes: Int = 32 * 1024 * 1024
+
+  val DefaultMaxCacheBytes: Int = 64 * 1024 * 1024
+  val MinCacheBytes: Int = 4 * 1024 * 1024
+  val MaxCacheBytes: Int = 512 * 1024 * 1024
+
+  val DefaultCacheTtl: FiniteDuration = 15.seconds
+  val MinCacheTtl: FiniteDuration = 1.second
+  val MaxCacheTtl: FiniteDuration = 5.minutes
+
+  val DefaultStaleTtl: FiniteDuration = 2.minutes
+  val MinStaleTtl: FiniteDuration = 1.second
+  val MaxStaleTtl: FiniteDuration = 30.minutes
+
   given CanEqual[MetricsSourceSettings, MetricsSourceSettings] = CanEqual.derived
 }
 
-/** The two shapes a metrics source can have. */
+/** The explicit protocols a metrics source can expose. */
 enum MetricsSourceKind {
   case Prometheus
+  case PrometheusApi
   case Jmx
 
   def wireName: String = this match {
     case Prometheus => "prometheus"
+    case PrometheusApi => "prometheus-api"
     case Jmx => "jmx"
   }
 }
 
 object MetricsSourceKind {
 
-  val All: List[MetricsSourceKind] = List(Prometheus, Jmx)
+  val All: List[MetricsSourceKind] = List(Prometheus, PrometheusApi, Jmx)
 
   def fromWire(raw: String): Option[MetricsSourceKind] =
     All.find(_.wireName == raw.trim.toLowerCase)

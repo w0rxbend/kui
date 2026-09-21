@@ -249,10 +249,10 @@ object AuthRoutes {
 
   /** How many attempts a single window tolerates, and how long a window lasts, for each throttled key.
     *
-    * Per-IP is the wider bucket, catching one caller trying many usernames; per-username is the narrower
-    * one, catching many callers guessing one account's password. Both cover PBKDF2's own cost: 210k
-    * iterations is expensive enough on its own, and unlimited attempts multiplies that cost by whatever an
-    * attacker is willing to spend.
+    * Per-IP is the wider bucket, catching one caller trying many usernames; per-username is the narrower one,
+    * catching many callers guessing one account's password. Both cover PBKDF2's own cost: 210k iterations is
+    * expensive enough on its own, and unlimited attempts multiplies that cost by whatever an attacker is
+    * willing to spend.
     */
   private val RateLimitWindow: FiniteDuration = 1.minute
   private val MaxLoginAttemptsPerIp: Int = 20
@@ -268,8 +268,8 @@ object AuthRoutes {
 
   /** Runs `action` only while every key in `limits` is still under its own budget for this window, and
     * answers `429 KUI-AUTH-RATE-LIMITED` the moment one of them is not. Each key is charged in order and the
-    * chain stops at the first refusal, so a caller who is already over one budget does not also spend a
-    * token out of the other.
+    * chain stops at the first refusal, so a caller who is already over one budget does not also spend a token
+    * out of the other.
     */
   private def withinRateLimit[F[_]: Sync, A](
       limiter: RateLimiter[F],
@@ -304,16 +304,16 @@ object AuthRoutes {
       StatusCode.TooManyRequests
     ).asLeft[A]
 
-  /** An in-memory fixed-window counter, one per gateway process. It is not a `KuiError` case because it
-    * never reaches business logic — a refused request stops here, at the edge, exactly where the identity
-    * service's own contract says the throttle has to live.
+  /** An in-memory fixed-window counter, one per gateway process. It is not a `KuiError` case because it never
+    * reaches business logic — a refused request stops here, at the edge, exactly where the identity service's
+    * own contract says the throttle has to live.
     *
     * Fixed-window rather than a sliding one: a login screen does not need the precision, and a window that
     * resets on a clean boundary is a counter and an instant, not a log of every attempt's timestamp. Expired
     * windows are dropped on every call so that a process fielding attempts from many distinct addresses does
     * not grow this map without bound.
     */
-  private[auth] final class RateLimiter[F[_]: Sync] private (state: Ref[F, Map[String, RateLimiter.Window]]) {
+  final private[auth] class RateLimiter[F[_]: Sync] private (state: Ref[F, Map[String, RateLimiter.Window]]) {
 
     /** `true` when `key` still had budget left in its current window, which this call then spends one unit
       * of; `false` when it did not, in which case nothing is spent.
@@ -324,7 +324,8 @@ object AuthRoutes {
           val live = attempts.filterNot { case (_, w) => RateLimiter.expired(w, now, window) }
           live.get(key) match {
             case Some(RateLimiter.Window(count, _)) if count >= maxAttempts => (live, false)
-            case Some(w @ RateLimiter.Window(count, _)) => (live.updated(key, w.copy(count = count + 1)), true)
+            case Some(w @ RateLimiter.Window(count, _)) =>
+              (live.updated(key, w.copy(count = count + 1)), true)
             case None => (live.updated(key, RateLimiter.Window(1, now)), true)
           }
         }

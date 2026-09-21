@@ -97,6 +97,34 @@ describe("createBrowseTransport", () => {
     vi.unstubAllGlobals();
   });
 
+  it("preserves the server's terminal reason beside its continuation cursor", async () => {
+    const body = [
+      "event: done",
+      "id: cursor-budget",
+      'data: {"reason":"budget","cursor":"cursor-budget"}',
+      "",
+      "",
+    ].join("\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })),
+    );
+
+    const connections: BrowseConnection[] = [];
+    const handle = createBrowseTransport().open("/api/v1/stream", {
+      onEvent: () => undefined,
+      onFailure: () => undefined,
+      onConnection: (connection) => connections.push(connection),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(handle.endMarker()).toBe("cursor-budget");
+    expect(handle.endReason?.()).toBe("budget");
+    expect(connections.at(-1)?.phase).toBe("closed");
+    vi.unstubAllGlobals();
+  });
+
   it("reports every connection transition, not just a one-off snapshot", async () => {
     /*
      * `open()` used to read `handle.connection()` exactly once, synchronously, right after
@@ -212,6 +240,62 @@ describe("createBrowseTransport", () => {
     expect(only?.kind).toBe("decode");
     // The name, separable from the prose, which is what a reader chasing it needs.
     expect(only?.kind === "decode" && only.event).toBe("message");
+    vi.unstubAllGlobals();
+  });
+
+  it("reports a malformed message and continues with the next valid frame", async () => {
+    const valid = JSON.stringify({
+      partition: 0,
+      offset: 42,
+      timestamp: "2026-09-20T10:00:00Z",
+      timestampType: "CreateTime",
+      key: { kind: "string", text: "order-42", serde: "String", properties: {} },
+      value: { kind: "json", text: '{"status":"paid"}', serde: "Json", properties: {} },
+      headers: {},
+      keySize: 8,
+      valueSize: 17,
+      headersSize: 0,
+      deserializeErrors: [],
+    });
+    const body = [
+      "event: message",
+      "data: {}",
+      "",
+      "event: message",
+      `data: ${valid}`,
+      "",
+      "",
+    ].join("\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+
+    const events: BrowseEvent[] = [];
+    const failures: BrowseFailure[] = [];
+    createBrowseTransport().open("/api/v1/stream", {
+      onEvent: (event) => events.push(event),
+      onFailure: (failure) => failures.push(failure),
+      onConnection: () => undefined,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(failures).toEqual([
+      {
+        kind: "decode",
+        event: "message",
+        cause: "invalid message: partition must be a non-negative integer",
+      },
+    ]);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.kind === "record" && events[0].record.offset).toBe("42");
     vi.unstubAllGlobals();
   });
 });

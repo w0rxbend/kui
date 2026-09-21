@@ -12,6 +12,7 @@ import kui.kernel.ClusterId
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
 import kui.kernel.error.KuiError
 import kui.metrics.domain.*
+import kui.metrics.infrastructure.prometheus.PrometheusQueryClient
 
 /** What this process was configured to measure, and what it will actually do about it.
   *
@@ -101,6 +102,40 @@ final class ConfiguredClusterSourcesSuite extends FunSuite {
     )
   }
 
+  test("a Prometheus API source is queryable internally but never enters the exposition scrape loop") {
+    val prod = ClusterId.unsafe("prod")
+    val configured = metricsFor(MetricsSourceKind.PrometheusApi)("prod")
+    val profiles = ConfiguredClusterSources.profilesOf(List(cluster("prod")), configured)
+
+    assertEquals(ConfiguredClusterSources.scrapable(List(cluster("prod")), configured), Nil)
+    assertEquals(
+      ConfiguredClusterSources.queryable(List(cluster("prod")), configured).map(_._1),
+      List(prod)
+    )
+    assertEquals(profiles.head.isMeasurable, false)
+    assert(
+      profiles.head.unreadableReason.exists(_.contains("server-owned Kafka metrics catalog")),
+      profiles.toString
+    )
+  }
+
+  test("mixed source kinds select exactly one exposition source and one query source") {
+    val exposition = metricsFor()("scrape").sources
+    val query = metricsFor(MetricsSourceKind.PrometheusApi)("query").sources
+    val jmx = metricsFor(MetricsSourceKind.Jmx)("legacy").sources
+    val metrics = MetricsConfig.Default.copy(sources = exposition ++ query ++ jmx)
+    val clusters = List(cluster("none"), cluster("legacy"), cluster("query"), cluster("scrape"))
+
+    assertEquals(
+      ConfiguredClusterSources.scrapable(clusters, metrics).map(_._1.value),
+      List("scrape")
+    )
+    assertEquals(
+      ConfiguredClusterSources.queryable(clusters, metrics).map(_._1.value),
+      List("query")
+    )
+  }
+
   test("a collector handed in is the one the use case is given, and only for its own cluster") {
     val prod = ClusterId.unsafe("prod")
     val profiles =
@@ -112,6 +147,20 @@ final class ConfiguredClusterSourcesSuite extends FunSuite {
     assert(sources.source(prod).isDefined)
     assertEquals(sources.source(ClusterId.unsafe("dev")), None)
     assertEquals(sources.profile(ClusterId.unsafe("nope")), None)
+  }
+
+  test("a query client handed in is available only through the infrastructure query lookup") {
+    val prod = ClusterId.unsafe("prod")
+    val profiles = ConfiguredClusterSources.profilesOf(
+      List(cluster("prod"), cluster("dev")),
+      metricsFor(MetricsSourceKind.PrometheusApi)("prod")
+    )
+    val client = new FixedQueryClient
+    val sources = new ConfiguredClusterSources[Id](profiles, queryClients = Map(prod -> client))
+
+    assertEquals(sources.queryClient(prod), Some(client: PrometheusQueryClient[Id]))
+    assertEquals(sources.queryClient(ClusterId.unsafe("dev")), None)
+    assertEquals(sources.source(prod), None, "query clients must not satisfy exposition-backed public reads")
   }
 }
 
@@ -134,4 +183,21 @@ final class FixedSource extends MetricsSourcePort[Id] {
 
   def recordSize(asOf: Instant): Id[Either[KuiError, Observed[RecordSizeReading]]] =
     Right(Observed(RecordSizeReading.Empty, asOf))
+}
+
+final private class FixedQueryClient extends PrometheusQueryClient[Id] {
+
+  def probe(at: Instant) = Left(kui.kernel.error.InfrastructureError.Unreachable("prometheus", "unused"))
+
+  def instant(
+      query: kui.metrics.infrastructure.prometheus.CompiledPromQuery,
+      at: Instant
+  ) = Left(kui.kernel.error.InfrastructureError.Unreachable("prometheus", "unused"))
+
+  def range(
+      query: kui.metrics.infrastructure.prometheus.CompiledPromQuery,
+      from: Instant,
+      to: Instant,
+      step: scala.concurrent.duration.FiniteDuration
+  ) = Left(kui.kernel.error.InfrastructureError.Unreachable("prometheus", "unused"))
 }

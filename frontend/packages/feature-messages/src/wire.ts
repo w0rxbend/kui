@@ -15,6 +15,10 @@ export type MessageDto = components["schemas"]["MessageDto"];
 type PayloadDto = components["schemas"]["DecodedPayloadDto"];
 type DecodeErrorDto = components["schemas"]["DecodeErrorDto"];
 
+type DecodeResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly cause: string };
+
 /**
  * The `kind` values KUI's own serdes produce.
  *
@@ -39,6 +43,126 @@ const PAYLOAD_KIND = {
  * threshold on: it is what the record weighs in the log.
  */
 export const LARGE_VALUE_BYTES = 256 * 1024;
+
+/**
+ * Validates one parsed `message` frame before the typed mapper sees it.
+ *
+ * OpenAPI types describe trusted callers at compile time; an SSE frame is untrusted runtime data.
+ * Keeping that boundary here makes `toRecord`'s input promise true and, importantly, turns one bad
+ * frame into a recoverable decode result instead of an exception that tears down the stream.
+ */
+export function decodeMessageRecord(value: unknown): DecodeResult<KafkaRecord> {
+  const decoded = decodeMessageDto(value);
+  return decoded.ok
+    ? { ok: true, value: toRecord(decoded.value) }
+    : { ok: false, cause: `invalid message: ${decoded.cause}` };
+}
+
+function decodeMessageDto(value: unknown): DecodeResult<MessageDto> {
+  if (!isObject(value)) return { ok: false, cause: "must be an object" };
+
+  const partition = value["partition"];
+  if (!isNonNegativeInteger(partition)) {
+    return { ok: false, cause: "partition must be a non-negative integer" };
+  }
+  const offset = value["offset"];
+  if (!isNonNegativeInteger(offset)) {
+    return { ok: false, cause: "offset must be a non-negative integer" };
+  }
+  const timestamp = value["timestamp"];
+  if (typeof timestamp !== "string") return { ok: false, cause: "timestamp must be a string" };
+  const timestampType = value["timestampType"];
+  if (typeof timestampType !== "string") {
+    return { ok: false, cause: "timestampType must be a string" };
+  }
+
+  const key = decodePayload(value["key"], "key");
+  if (!key.ok) return key;
+  const payload = decodePayload(value["value"], "value");
+  if (!payload.ok) return payload;
+  const headers = value["headers"];
+  if (!isStringMap(headers)) return { ok: false, cause: "headers must be a string map" };
+
+  const keySize = value["keySize"];
+  if (!isNonNegativeInteger(keySize)) {
+    return { ok: false, cause: "keySize must be a non-negative integer" };
+  }
+  const valueSize = value["valueSize"];
+  if (!isNonNegativeInteger(valueSize)) {
+    return { ok: false, cause: "valueSize must be a non-negative integer" };
+  }
+  const headersSize = value["headersSize"];
+  if (!isNonNegativeInteger(headersSize)) {
+    return { ok: false, cause: "headersSize must be a non-negative integer" };
+  }
+
+  const errors = decodeErrors(value["deserializeErrors"]);
+  if (!errors.ok) return errors;
+  return {
+    ok: true,
+    value: {
+      partition,
+      offset,
+      timestamp,
+      timestampType,
+      key: key.value,
+      value: payload.value,
+      headers,
+      keySize,
+      valueSize,
+      headersSize,
+      ...(errors.value === undefined ? {} : { deserializeErrors: errors.value }),
+    },
+  };
+}
+
+function decodePayload(value: unknown, name: "key" | "value"): DecodeResult<PayloadDto> {
+  if (!isObject(value)) return { ok: false, cause: `${name} must be an object` };
+  const kind = value["kind"];
+  const text = value["text"];
+  const serde = value["serde"];
+  const properties = value["properties"];
+  if (typeof kind !== "string") return { ok: false, cause: `${name}.kind must be a string` };
+  if (typeof text !== "string") return { ok: false, cause: `${name}.text must be a string` };
+  if (typeof serde !== "string") return { ok: false, cause: `${name}.serde must be a string` };
+  if (!isStringMap(properties)) {
+    return { ok: false, cause: `${name}.properties must be a string map` };
+  }
+  return { ok: true, value: { kind, text, serde, properties } };
+}
+
+function decodeErrors(value: unknown): DecodeResult<readonly DecodeErrorDto[] | undefined> {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (!Array.isArray(value)) return { ok: false, cause: "deserializeErrors must be an array" };
+
+  const errors: DecodeErrorDto[] = [];
+  for (const error of value) {
+    if (!isObject(error)) return { ok: false, cause: "deserializeErrors entries must be objects" };
+    const target = error["target"];
+    const serde = error["serde"];
+    const cause = error["cause"];
+    if (typeof target !== "string" || typeof serde !== "string" || typeof cause !== "string") {
+      return {
+        ok: false,
+        cause: "deserializeErrors entries must contain string target, serde, and cause",
+      };
+    }
+    errors.push({ target, serde, cause });
+  }
+  return { ok: true, value: errors };
+}
+
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringMap(value: unknown): value is Readonly<Record<string, string>> {
+  return isObject(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
 
 /** One record, as the list draws it. */
 export function toRecord(dto: MessageDto): KafkaRecord {

@@ -9,8 +9,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.data.NonEmptyList
-import cats.effect.IO
 import cats.effect.kernel.Resource
+import cats.effect.{IO, Ref}
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import io.circe.Json
 import io.circe.parser.parse
@@ -25,10 +25,19 @@ import kui.cache.CacheMetrics
 import kui.config.*
 import kui.contracts.KuiEndpoint
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
+import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, PositiveInt, Secret, UserName}
 import kui.metrics.api.MetricsApi
 import kui.metrics.domain.{BrokerSample, ThroughputRange}
 import kui.metrics.infrastructure.MetricsBuffer
+import kui.metrics.infrastructure.prometheus.{
+  CompiledPromQuery,
+  InstantQueryResult,
+  PrometheusProbe,
+  PrometheusQueryClient,
+  QueryAnswer,
+  RangeQueryResult
+}
 import kui.observability.Telemetry
 import kui.security.*
 import kui.testkit.KuiIOSuite
@@ -153,6 +162,19 @@ final class MetricsWiringSuite extends KuiIOSuite {
       retention = retention,
       maxSamplesPerSeries = maxSamples,
       sources = Map(quickstart -> MetricsSourceSettings(url, kind, callTimeout))
+    )
+
+  private def querySettings(
+      url: SafeUrl,
+      auth: UpstreamAuthConfig = UpstreamAuthConfig.Anonymous
+  ): MetricsSourceSettings =
+    MetricsSourceSettings(
+      url = url,
+      kind = MetricsSourceKind.PrometheusApi,
+      callTimeout = 2.seconds,
+      queryTimeout = 1.second,
+      maxConcurrentQueries = 3,
+      auth = auth
     )
 
   /** Thirty-two bytes, which is the shortest key HS256 accepts. */
@@ -401,6 +423,107 @@ final class MetricsWiringSuite extends KuiIOSuite {
     }
   }
 
+  // -----------------------------------------------------------------------------------------------
+  // Prometheus query clients: source ownership without a scrape loop
+  // -----------------------------------------------------------------------------------------------
+
+  test("no API source invokes the query-client builder") {
+    for {
+      builds <- Ref.of[IO, Int](0)
+      clients <- MetricsWiring
+        .queryClientsFrom[IO](List(cluster(quickstart)), MetricsConfig.Default) { (_, _) =>
+          Resource.eval(builds.update(_ + 1).as(new InertQueryClient))
+        }
+        .use(IO.pure)
+      count <- builds.get
+    } yield {
+      assertEquals(clients, Map.empty[ClusterId, PrometheusQueryClient[IO]])
+      assertEquals(count, 0, "the empty selector must return before allocating a transport or pool")
+    }
+  }
+
+  test("query-client resources are isolated per API source and all are finalized") {
+    val queryA = ClusterId.unsafe("query-a")
+    val queryB = ClusterId.unsafe("query-b")
+    val scrape = ClusterId.unsafe("scrape")
+    val settings = querySettings(SafeUrl.unsafe("http://prometheus:9090"))
+    val metrics = MetricsConfig.Default.copy(sources =
+      Map(
+        queryA -> settings,
+        queryB -> settings.copy(url = SafeUrl.unsafe("http://prometheus-b:9090")),
+        scrape -> settings.copy(
+          url = SafeUrl.unsafe("http://exporter:9404/metrics"),
+          kind = MetricsSourceKind.Prometheus
+        )
+      )
+    )
+
+    for {
+      acquired <- Ref.of[IO, List[ClusterId]](Nil)
+      released <- Ref.of[IO, List[ClusterId]](Nil)
+      inside <- MetricsWiring
+        .queryClientsFrom[IO](List(cluster(queryA), cluster(scrape), cluster(queryB)), metrics) { (id, _) =>
+          Resource.make(acquired.update(id :: _).as(new InertQueryClient))(_ => released.update(id :: _))
+        }
+        .use(clients => released.get.map(before => clients.keySet -> before))
+      after <- released.get
+      built <- acquired.get
+    } yield {
+      assertEquals(inside._1, Set(queryA, queryB))
+      assertEquals(inside._2, Nil, "clients must remain live until the owning wiring is released")
+      assertEquals(built.toSet, Set(queryA, queryB))
+      assertEquals(after.toSet, Set(queryA, queryB))
+    }
+  }
+
+  test("an API source performs no remote request until its client is used") {
+    val body =
+      """{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[0,"1"]}]}}"""
+
+    for {
+      log <- FakeStructuredLogger[IO]
+      result <- exporter(_ => body).use { serving =>
+        val metrics = MetricsConfig.Default.copy(sources = Map(quickstart -> querySettings(serving.url)))
+        Resource
+          .eval(MeterProvider.noop[IO].get("kui.metrics"))
+          .flatMap(meter =>
+            MetricsWiring.queryClients[IO](
+              List(cluster(quickstart)),
+              metrics,
+              UrlPolicy.Dev,
+              Telemetry.noop[IO],
+              meter,
+              log
+            )
+          )
+          .use { clients =>
+            for {
+              before <- serving.hits
+              probe <- clients(quickstart).probe(Instant.parse("2026-09-20T12:00:00Z"))
+              after <- serving.hits
+            } yield (before, probe, after)
+          }
+      }
+    } yield {
+      assertEquals(result._1, 0, "resource acquisition must not probe Prometheus")
+      assert(result._2.isRight, result._2.toString)
+      assertEquals(result._3, 1)
+    }
+  }
+
+  test("an unreachable API source does not fail startup or add a readiness check") {
+    val metrics = MetricsConfig.Default.copy(sources =
+      Map(
+        quickstart -> querySettings(SafeUrl.unsafe("http://127.0.0.1:1/prometheus"))
+      )
+    )
+
+    for {
+      log <- FakeStructuredLogger[IO]
+      readiness <- wiring(metrics, UrlPolicy.Dev, log).use(server => IO.pure(server.readiness))
+    } yield assertEquals(readiness, Nil)
+  }
+
   test("a cluster the wiring built no collector for answers not_configured through the real routes") {
     for {
       log <- FakeStructuredLogger[IO]
@@ -435,6 +558,21 @@ final class MetricsWiringSuite extends KuiIOSuite {
     // A name and never an address: a connection failure's text routinely carries hosts and ports, and
     // ADR-034 keeps them out of a user-visible message.
     assertEquals(config.name, "metrics-exporter-quickstart")
+  }
+
+  test("the query API uses one address, its configured bulkhead and whole-call budget, with zero retry") {
+    val settings = querySettings(SafeUrl.unsafe("https://prometheus.example/prometheus")).copy(
+      callTimeout = 17.seconds,
+      maxConcurrentQueries = 7
+    )
+    val config = MetricsWiring.queryUpstreamConfig(quickstart, settings, UrlPolicy.Strict)
+
+    assertEquals(config.maxRetries, 0)
+    assertEquals(config.maxConcurrent, PositiveInt.unsafe(7))
+    assertEquals(config.urls, NonEmptyList.one(settings.url))
+    assertEquals(config.callTimeout, 17.seconds)
+    assertEquals(config.urlPolicy, UrlPolicy.Strict)
+    assertEquals(config.name, "prometheus-query-quickstart")
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -472,6 +610,34 @@ final class MetricsWiringSuite extends KuiIOSuite {
     }
   }
 
+  test("an API source is logged as an internal query provider without leaking its URL or credentials") {
+    val urlCanary = "prometheus-private-canary.example"
+    val tokenCanary = "bearer-secret-canary"
+    val metrics = MetricsConfig.Default.copy(sources =
+      Map(
+        quickstart -> querySettings(
+          SafeUrl.unsafe(s"https://$urlCanary/prometheus"),
+          UpstreamAuthConfig.Bearer(Secret(tokenCanary))
+        )
+      )
+    )
+
+    for {
+      log <- FakeStructuredLogger[IO]
+      _ <- wiring(metrics, UrlPolicy.Strict, log).use(server => IO(assertEquals(server.readiness, Nil)))
+      querySources <- log.entriesWith("metrics.querySources")
+      unreadable <- log.entriesWith("metrics.unreadableSource")
+      entries <- log.entries
+    } yield {
+      assertEquals(querySources.map(_.context("metrics.querySources")), List("quickstart"))
+      assertEquals(querySources.map(_.level), List("info"))
+      assertEquals(unreadable, Nil, "a supported internal provider must not be logged as an unsupported kind")
+      val rendered = entries.toString
+      assert(!rendered.contains(urlCanary), rendered)
+      assert(!rendered.contains(tokenCanary), rendered)
+    }
+  }
+
   test("nothing is scraped for a cluster whose configuration names no source") {
     // The collector list is derived from the configuration and not from the cluster list, so a two-cluster
     // deployment with one source builds one fibre. `CacheMetrics.noop` is not used here on purpose: the
@@ -482,4 +648,24 @@ final class MetricsWiringSuite extends KuiIOSuite {
       IO(assertEquals(buffers.keySet, Set(quickstart)))
     )
   }
+}
+
+final private class InertQueryClient extends PrometheusQueryClient[IO] {
+
+  private val unused: Either[KuiError, Nothing] =
+    Left(InfrastructureError.Unreachable("prometheus", "unused test client"))
+
+  def probe(at: Instant): IO[Either[KuiError, PrometheusProbe]] = IO.pure(unused)
+
+  def instant(
+      query: CompiledPromQuery,
+      at: Instant
+  ): IO[Either[KuiError, QueryAnswer[InstantQueryResult]]] = IO.pure(unused)
+
+  def range(
+      query: CompiledPromQuery,
+      from: Instant,
+      to: Instant,
+      step: FiniteDuration
+  ): IO[Either[KuiError, QueryAnswer[RangeQueryResult]]] = IO.pure(unused)
 }

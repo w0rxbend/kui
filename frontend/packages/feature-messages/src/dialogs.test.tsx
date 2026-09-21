@@ -272,6 +272,28 @@ describe("the smart filter editor", () => {
     applyState: { kind: "idle" } as const,
   };
 
+  it("builds a safe field filter before exposing advanced CEL", async () => {
+    const onApply = vi.fn();
+    const { dispose } = mount(() => <SmartFilterDialog {...base} onApply={onApply} />);
+    await flush();
+
+    expect(text()).toContain("Field path");
+    expect(find(".kui-smart-filter__editor")).toBeNull();
+
+    const value = find<HTMLInputElement>('input[name="json-path-filter-value"]');
+    expect(value).not.toBeNull();
+    if (value !== null) {
+      value.value = "CAPTURED";
+      value.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+
+    buttons().find((button) => (button.textContent ?? "").includes("Use this filter"))?.click();
+    expect(onApply).toHaveBeenCalledWith('record.value.status == "CAPTURED"');
+
+    dispose();
+  });
+
   it("draws an expression that threw differently from one that did not match", async () => {
     const failed = mount(() => (
       <SmartFilterDialog

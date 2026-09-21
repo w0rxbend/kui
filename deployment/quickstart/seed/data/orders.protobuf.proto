@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package shop.orders;
+
+message ProtobufOrder {
+  string id = 1;
+  string customer = 2;
+  repeated Item items = 3;
+  double total = 4;
+  bool expedited = 5;
+  Shipping shipping = 6;
+}
+
+message Item {
+  string sku = 1;
+  int32 quantity = 2;
+}
+
+message Shipping {
+  string city = 1;
+  string country = 2;
+}

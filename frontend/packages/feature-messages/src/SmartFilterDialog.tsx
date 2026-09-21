@@ -44,7 +44,7 @@
  */
 import { For, Show, createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { Banner, Button, Dialog, Icon, Select, type Mutation } from "@kui/kernel";
+import { Banner, Button, Dialog, Icon, Select, TextField, type Mutation } from "@kui/kernel";
 import type { IconName, KafkaRecord } from "@kui/kernel";
 
 import {
@@ -54,6 +54,14 @@ import {
   type FilterVerdict,
   type RegisteredFilter,
 } from "./filters.js";
+import {
+  compileJsonPathFilter,
+  type JsonPathComparisonOperator,
+  type JsonPathFilterTarget,
+} from "./jsonPathFilter.js";
+
+type EditorMode = "field" | "advanced";
+type FieldValueType = "string" | "number" | "boolean" | "null";
 
 export interface SmartFilterDialogProps {
   readonly open: boolean;
@@ -98,6 +106,14 @@ export function SmartFilterDialog(props: SmartFilterDialogProps): JSX.Element {
    * one-off read of a reactive value, which Solid 2's strict mode otherwise reports. */
   const [source, setSource] = createSignal(untrack(() => props.source ?? ""));
   const [sampleAt, setSampleAt] = createSignal(0);
+  const [mode, setMode] = createSignal<EditorMode>(
+    untrack(() => ((props.source ?? "") === "" ? "field" : "advanced")),
+  );
+  const [fieldTarget, setFieldTarget] = createSignal<JsonPathFilterTarget>("value");
+  const [fieldPath, setFieldPath] = createSignal("$.status");
+  const [fieldOperator, setFieldOperator] = createSignal<JsonPathComparisonOperator>("==");
+  const [fieldValueType, setFieldValueType] = createSignal<FieldValueType>("string");
+  const [fieldValue, setFieldValue] = createSignal("");
 
   createEffect(
     () => props.open,
@@ -107,12 +123,31 @@ export function SmartFilterDialog(props: SmartFilterDialogProps): JSX.Element {
        * that was chosen last time may not be on screen any more, and an index into a list that has
        * moved on points at a different record. */
       setSource(untrack(() => props.source ?? ""));
+      setMode(untrack(() => (props.source ?? "") === "" ? "field" : "advanced"));
       setSampleAt(0);
     },
   );
 
-  const problem = createMemo(() => filterProblem(source()));
+  const compiledField = createMemo(() =>
+    compileJsonPathFilter({
+      target: fieldTarget(),
+      path: fieldPath(),
+      operator: fieldOperator(),
+      value: fieldFilterValue(fieldValueType(), fieldValue()),
+    }),
+  );
+  const effectiveSource = (): string => {
+    if (mode() === "advanced") return source();
+    const compiled = compiledField();
+    return compiled.ok ? compiled.source : "";
+  };
+  const problem = createMemo(() => {
+    if (mode() === "advanced") return filterProblem(source());
+    const compiled = compiledField();
+    return compiled.ok ? undefined : compiled.error;
+  });
   const busy = () => props.testState.kind === "running" || props.applyState.kind === "running";
+  const suggestions = createMemo(() => jsonPathSuggestions(props.samples, fieldTarget()));
 
   const sample = (): KafkaRecord | undefined => props.samples[sampleAt()];
 
@@ -177,7 +212,7 @@ export function SmartFilterDialog(props: SmartFilterDialogProps): JSX.Element {
             {...disabledProps(testDisabledReason())}
             onClick={() => {
               const chosen = sample();
-              if (chosen !== undefined) props.onTest(source(), chosen);
+              if (chosen !== undefined) props.onTest(effectiveSource(), chosen);
             }}
           >
             Try it on one record
@@ -187,7 +222,7 @@ export function SmartFilterDialog(props: SmartFilterDialogProps): JSX.Element {
             icon="check"
             busy={props.applyState.kind === "running"}
             {...disabledProps(applyDisabledReason())}
-            onClick={() => props.onApply(source())}
+            onClick={() => props.onApply(effectiveSource())}
           >
             Use this filter
           </Button>
@@ -195,24 +230,138 @@ export function SmartFilterDialog(props: SmartFilterDialogProps): JSX.Element {
       }
     >
       <div class="kui-smart-filter">
-        <label class="kui-smart-filter__field">
-          <span class="kui-smart-filter__label">Expression</span>
-          {/* A textarea rather than the kernel's `TextField`: a CEL predicate wraps, and a filter
-              that has scrolled off the right edge of a one-line box is a filter nobody can check.
-              `spellcheck` off and the autocapitalise family off because this is code — a browser
-              that capitalises `record` writes an expression that does not compile. */}
-          <textarea
-            class="kui-smart-filter__editor kui-focusable"
-            rows={3}
-            spellcheck={false}
-            autocapitalize="off"
-            autocorrect="off"
-            autocomplete="off"
-            placeholder={'record.value.status == "CAPTURED"'}
-            value={source()}
-            onInput={(event) => setSource(event.currentTarget.value)}
-          />
-        </label>
+        <div class="kui-smart-filter__modes" role="group" aria-label="Filter editor mode">
+          <button
+            type="button"
+            class="kui-smart-filter__mode kui-focusable"
+            aria-pressed={mode() === "field" ? "true" : "false"}
+            onClick={() => setMode("field")}
+          >
+            Field filter
+          </button>
+          <button
+            type="button"
+            class="kui-smart-filter__mode kui-focusable"
+            aria-pressed={mode() === "advanced" ? "true" : "false"}
+            onClick={() => setMode("advanced")}
+          >
+            Advanced CEL
+          </button>
+        </div>
+
+        <Show
+          when={mode() === "field"}
+          fallback={
+            <label class="kui-smart-filter__field">
+              <span class="kui-smart-filter__label">Expression</span>
+              {/* A textarea rather than the kernel's `TextField`: a CEL predicate wraps, and a filter
+                  that has scrolled off the right edge of a one-line box is a filter nobody can check. */}
+              <textarea
+                class="kui-smart-filter__editor kui-focusable"
+                rows={3}
+                spellcheck={false}
+                autocapitalize="off"
+                autocorrect="off"
+                autocomplete="off"
+                placeholder={'record.value.status == "CAPTURED"'}
+                value={source()}
+                onInput={(event) => setSource(event.currentTarget.value)}
+              />
+            </label>
+          }
+        >
+          <section class="kui-smart-filter__builder" aria-label="Field filter">
+            <div class="kui-smart-filter__builder-grid">
+              <Select<JsonPathFilterTarget>
+                label="Payload"
+                options={[
+                  { value: "value", label: "Value" },
+                  { value: "key", label: "Key" },
+                ]}
+                value={fieldTarget()}
+                onChange={setFieldTarget}
+              />
+              <TextField
+                label="Field path"
+                name="json-path-filter-path"
+                value={fieldPath()}
+                mono
+                placeholder="$.customer.address.city"
+                help="JSONPath-style field access. Arrays use [0]; unusual names use ['field-name']."
+                onInput={setFieldPath}
+              />
+              <Select<JsonPathComparisonOperator>
+                label="Comparison"
+                options={[
+                  { value: "==", label: "equals" },
+                  { value: "!=", label: "does not equal" },
+                  { value: "contains", label: "contains" },
+                  { value: ">", label: "greater than" },
+                  { value: ">=", label: "at least" },
+                  { value: "<", label: "less than" },
+                  { value: "<=", label: "at most" },
+                ]}
+                value={fieldOperator()}
+                onChange={setFieldOperator}
+              />
+              <Select<FieldValueType>
+                label="Value type"
+                options={[
+                  { value: "string", label: "Text" },
+                  { value: "number", label: "Number" },
+                  { value: "boolean", label: "True / false" },
+                  { value: "null", label: "Null" },
+                ]}
+                value={fieldValueType()}
+                onChange={setFieldValueType}
+              />
+              <Show when={fieldValueType() !== "null"}>
+                <Show
+                  when={fieldValueType() === "boolean"}
+                  fallback={
+                    <TextField
+                      label="Compare with"
+                      name="json-path-filter-value"
+                      value={fieldValue()}
+                      mono
+                      type={fieldValueType() === "number" ? "number" : "text"}
+                      onInput={setFieldValue}
+                    />
+                  }
+                >
+                  <Select<"true" | "false">
+                    label="Compare with"
+                    options={[
+                      { value: "true", label: "True" },
+                      { value: "false", label: "False" },
+                    ]}
+                    value={fieldValue() === "false" ? "false" : "true"}
+                    onChange={setFieldValue}
+                  />
+                </Show>
+              </Show>
+            </div>
+            <Show when={suggestions().length > 0}>
+              <div class="kui-smart-filter__suggestions" aria-label="Fields found in records on screen">
+                <span class="kui-smart-filter__suggestions-label">Fields on screen</span>
+                <For each={suggestions()}>
+                  {(path) => (
+                    <button
+                      type="button"
+                      class="kui-smart-filter__suggestion kui-focusable"
+                      onClick={() => setFieldPath(path)}
+                    >
+                      <code>{path}</code>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <p class="kui-smart-filter__compiled">
+              Runs as <code>{effectiveSource()}</code>
+            </p>
+          </section>
+        </Show>
 
         <Show when={problem()}>
           {(stated) => <p class="kui-smart-filter__problem">{stated()}</p>}
@@ -255,10 +404,71 @@ export function SmartFilterDialog(props: SmartFilterDialogProps): JSX.Element {
           )}
         </Show>
 
-        <FilterHelp onUse={setSource} />
+        <FilterHelp
+          onUse={(example) => {
+            setSource(example);
+            setMode("advanced");
+          }}
+        />
       </div>
     </Dialog>
   );
+}
+
+function fieldFilterValue(type: FieldValueType, raw: string): string | number | boolean | null {
+  switch (type) {
+    case "string":
+      return raw;
+    case "number":
+      return raw.trim() === "" ? Number.NaN : Number(raw);
+    case "boolean":
+      return raw !== "false";
+    case "null":
+      return null;
+  }
+}
+
+/** Field paths observed in decoded records. Schema-backed values arrive here as JSON too. */
+function jsonPathSuggestions(
+  samples: readonly KafkaRecord[],
+  target: JsonPathFilterTarget,
+): readonly string[] {
+  const found = new Set<string>();
+  const limit = 16;
+
+  const visit = (value: unknown, path: string, depth: number): void => {
+    if (found.size >= limit || depth > 6) return;
+    if (Array.isArray(value)) {
+      if (value.length === 0) found.add(path);
+      else visit(value[0], `${path}[0]`, depth + 1);
+      return;
+    }
+    if (value !== null && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) found.add(path);
+      for (const [key, nested] of entries) {
+        const next = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+          ? `${path}.${key}`
+          : `${path}[${JSON.stringify(key)}]`;
+        visit(nested, next, depth + 1);
+        if (found.size >= limit) return;
+      }
+      return;
+    }
+    found.add(path);
+  };
+
+  for (const sample of samples) {
+    const text = target === "value" ? (sample.value.kind === "json" ? sample.value.text : undefined) : sample.key;
+    if (text === undefined || text === null) continue;
+    try {
+      visit(JSON.parse(text) as unknown, "$", 0);
+    } catch {
+      // A plain string key/value has no discoverable field path; the text predicates remain available.
+    }
+    if (found.size >= limit) break;
+  }
+  return [...found];
 }
 
 /**

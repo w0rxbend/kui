@@ -13,6 +13,38 @@
 import { test, expect, CLUSTER } from "./fixtures";
 
 test.describe("the cluster dashboard", () => {
+  test("keeps the in-sync gauge text inside its ring at desktop and narrow widths", async ({
+    page,
+  }) => {
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+      const gauge = page.getByTestId("stat-in-sync").locator(".kui-gauge__ring");
+      await expect(gauge).toBeVisible();
+
+      await expect
+        .poll(async () =>
+          gauge.evaluate((ring) => {
+            const boundary = ring.getBoundingClientRect();
+            return Array.from(
+              ring.querySelectorAll<HTMLElement>(".kui-gauge__figure, .kui-gauge__caption"),
+            )
+              .every((label) => {
+                const box = label.getBoundingClientRect();
+                return (
+                  box.left >= boundary.left &&
+                  box.right <= boundary.right &&
+                  box.top >= boundary.top &&
+                  box.bottom <= boundary.bottom
+                );
+              });
+          }),
+        { message: `the in-sync gauge overflowed its ring at ${width}px` },
+      )
+        .toBe(true);
+    }
+  });
+
   test("names the cluster at the drawer's head, with a figure beside it", async ({ page }) => {
     await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
 

@@ -324,18 +324,25 @@ describe("a stream over fetch", () => {
     const response = fakeResponse(200);
     const transport = fakeTransport(Promise.resolve(response));
     const { values, subscriber } = recorder();
+    const done: string[] = [];
+    const subscriberWithDone = Object.assign(subscriber, {
+      onDone: (data: string) => done.push(data),
+    });
 
     await createRoot(async (dispose) => {
-      const handle = openFetchStreamWith(transport, subscriber);
+      const handle = openFetchStreamWith(transport, subscriberWithDone);
       await Promise.resolve();
       flush();
 
       // Split across chunk boundaries, because that is what a network does.
       response.push('event: row\ndata: {"value":"one"}\n\nevent: hea');
-      response.push("rtbeat\ndata: {}\n\nevent: done\nid: eyJ2Ijox\ndata: {}\n\n");
+      response.push(
+        'rtbeat\ndata: {}\n\nevent: done\nid: eyJ2Ijox\ndata: {"reason":"budget","cursor":"eyJ2Ijox"}\n\n',
+      );
       flush();
 
       expect(values).toEqual(["one"]);
+      expect(done).toEqual(['{"reason":"budget","cursor":"eyJ2Ijox"}']);
       expect(handle.endMarker()).toBe("eyJ2Ijox");
       expect(handle.connection()).toEqual({ phase: "closed", reason: "the stream finished" });
       dispose();

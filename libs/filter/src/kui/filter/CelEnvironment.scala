@@ -43,7 +43,8 @@ import io.circe.{parser, Json}
   * | source length          | 8 KiB                       | a CEL predicate longer than that is a program, not a filter                                             |
   * | AST nodes              | 1 000                       | the cheap half of ADR-017's complexity limit, checked after parsing and before caching                  |
   * | per-record deadline    | 10 ms                       | at 20 000 records a page it bounds the worst case to 200 s, which the browse deadline then cuts to 60 s |
-  * | JSON value nodes       | 50 000                      | bounds the work of parsing `record.key`/`record.value`, since the deadline above cannot (see below)     |
+  * | JSON value text        | 1 048 576 UTF-16 chars      | refuses oversized decoded payloads before the JSON parser allocates their trees                         |
+  * | JSON value nodes       | 50 000                      | bounds conversion of parsed `record.key`/`record.value`, since the deadline above cannot (see below)    |
   * | compiled-program cache | 10 000 entries, 1 hour      | ADR-017                                                                                                 |
   * | regex engine           | re2j, through CEL's default | linear time, so a regex filter cannot backtrack the service to a halt                                   |
   *
@@ -53,12 +54,12 @@ import io.circe.{parser, Json}
   * included (`CelFilterEngine`'s `program.test`). `interruptible` only requests `Thread.interrupt()`; it
   * cannot stop code that never checks for it, and neither `io.circe`'s parser nor [[toJava]]'s walk of the
   * parsed tree does. A producer controls the bytes of `record.value`, so without a budget of its own, one
-  * pathological record — a very large or very deeply nested JSON value — spends CPU on its thread for as
-  * long as the walk takes regardless of the ten-millisecond deadline, and a burst of such records from
-  * concurrent browses can occupy the whole interruptible pool while every deadline it reports is a fiction.
-  * The JSON value node limit bounds that walk directly, independent of whether the interrupt is honored;
-  * [[toJava]] also caps recursion depth, since a narrow, very deep structure can exhaust the JVM stack long
-  * before it exhausts the node budget.
+  * pathological record — a very large or very deeply nested JSON value — spends CPU on its thread for as long
+  * as the walk takes regardless of the ten-millisecond deadline, and a burst of such records from concurrent
+  * browses can occupy the whole interruptible pool while every deadline it reports is a fiction. The JSON
+  * text limit bounds what reaches the parser, and the node limit bounds the conversion walk, independently of
+  * whether the interrupt is honored; [[toJava]] also caps recursion depth, since a narrow, very deep
+  * structure can exhaust the JVM stack long before it exhausts the node budget.
   */
 object CelEnvironment {
 
@@ -117,9 +118,13 @@ object CelEnvironment {
   def activation(
       record: FilterableRecord,
       maxJsonNodes: Int = DefaultMaxJsonNodes,
+      maxJsonChars: Int = DefaultMaxJsonChars,
       neededDynamicFields: Set[String] = AllDynamicFields
   ): java.util.Map[String, Object] =
-    java.util.Collections.singletonMap(RecordVariable, recordFields(record, maxJsonNodes, neededDynamicFields))
+    java.util.Collections.singletonMap(
+      RecordVariable,
+      recordFields(record, maxJsonNodes, maxJsonChars, neededDynamicFields)
+    )
 
   /** One record, as the fields of `record`.
     *
@@ -136,6 +141,7 @@ object CelEnvironment {
   def recordFields(
       record: FilterableRecord,
       maxJsonNodes: Int = DefaultMaxJsonNodes,
+      maxJsonChars: Int = DefaultMaxJsonChars,
       neededDynamicFields: Set[String] = AllDynamicFields
   ): java.util.Map[String, Object] = {
     val base = Map[String, Object](
@@ -147,8 +153,12 @@ object CelEnvironment {
       "headers" -> record.headers.asJava
     )
     val parsed = List(
-      Option.when(neededDynamicFields.contains("key"))("key" -> asDynamic(record.keyAsText, maxJsonNodes)),
-      Option.when(neededDynamicFields.contains("value"))("value" -> asDynamic(record.valueAsText, maxJsonNodes))
+      Option.when(neededDynamicFields.contains("key"))(
+        "key" -> asDynamic(record.keyAsText, maxJsonNodes, maxJsonChars)
+      ),
+      Option.when(neededDynamicFields.contains("value"))(
+        "value" -> asDynamic(record.valueAsText, maxJsonNodes, maxJsonChars)
+      )
     ).flatten.collect { case (name, Some(value)) => name -> value }
 
     (base ++ parsed).asJava
@@ -159,14 +169,14 @@ object CelEnvironment {
     */
   val AllDynamicFields: Set[String] = Set("key", "value")
 
-  /** Which of [[AllDynamicFields]] a compiled filter can actually observe, computed once per compiled
-    * program rather than once per record.
+  /** Which of [[AllDynamicFields]] a compiled filter can actually observe, computed once per compiled program
+    * rather than once per record.
     *
     * Deliberately over-inclusive rather than exact: it flags a field as needed on any `record.key`/
     * `record.value` **select** (including the one `has()` expands to, and one nested arbitrarily deep, e.g.
     * `record.value.items[0]`) and on any `record["key"]`/`record["value"]` **index** call, without checking
-    * that the select's or index's operand chain actually resolves back to the top-level `record` variable.
-    * A false positive costs a conversion nobody reads, which [[recordFields]] already paid on every record
+    * that the select's or index's operand chain actually resolves back to the top-level `record` variable. A
+    * false positive costs a conversion nobody reads, which [[recordFields]] already paid on every record
     * before this method existed; a false negative would silently make a field a live filter asked for
     * disappear, which is a far worse failure to ship than the perf win is worth. Uses `CelNavigableAst`, the
     * same navigation `CelFilterEngine.compile` already uses to count AST nodes.
@@ -205,77 +215,76 @@ object CelEnvironment {
     */
   val DefaultMaxJsonNodes: Int = 50000
 
+  /** Producer-controlled decoded JSON larger than this is refused before it reaches the parser. */
+  val DefaultMaxJsonChars: Int = 1024 * 1024
+
   /** Recursion beyond this depth is refused regardless of how much of the node budget remains, because a
-    * narrow structure nested this deep — `[[[[...]]]]` — costs almost nothing in node count but one JVM
-    * stack frame per level, and a producer can make the text of such a payload arbitrarily small.
+    * narrow structure nested this deep — `[[[[...]]]]` — costs almost nothing in node count but one JVM stack
+    * frame per level, and a producer can make the text of such a payload arbitrarily small.
     */
   private val MaxJsonDepth: Int = 500
 
-  /** Thrown by [[toJava]] when it exceeds its node or depth budget, and caught nowhere but [[asDynamic]] —
-    * an oversized or pathologically nested value is treated exactly like text that is not JSON at all,
-    * which is already a well-defined, tested outcome (`record.value` absent, not null).
-    */
-  private object JsonBudgetExceeded extends RuntimeException(null, null, false, false)
-
-  /** A JSON payload's remaining walk budget: a running count of nodes and the current recursion depth,
-    * shared across one call to [[toJava]] and every node it recurses into.
-    */
-  private final class JsonBudget(initialNodes: Int) {
-    private var nodesLeft: Int = initialNodes
-    private var depth: Int = 0
-
-    def spend(): Unit = {
-      if nodesLeft <= 0 then throw JsonBudgetExceeded
-      nodesLeft -= 1
-    }
-
-    def descend(): Unit = {
-      depth += 1
-      if depth > MaxJsonDepth then throw JsonBudgetExceeded
-    }
-
-    def ascend(): Unit = depth -= 1
-  }
-
-  /** JSON text as the Java values CEL understands, or `None` when the text is not JSON, or when converting
-    * it would exceed `maxNodes` nodes or [[MaxJsonDepth]] levels of nesting.
+  /** JSON text as the Java values CEL understands, or `None` when the text is not JSON, or when converting it
+    * would exceed `maxNodes` nodes or [[MaxJsonDepth]] levels of nesting.
     *
     * Only objects and arrays count, matching the `Json` serde's rule: a payload of `123` is a number, and
     * exposing it as `record.value` would let `record.value.status` fail in a way that reads like a missing
     * field rather than like a payload that has no fields at all. A payload that blows the budget gets the
     * same treatment on purpose (see the class doc's `## The limits` section): the alternative is a filter
-    * referencing `record.value` succeeding on every record but the rare oversized one, which is a much
-    * harder failure to notice than a runtime error that is counted and shown.
+    * referencing `record.value` succeeding on every record but the rare oversized one, which is a much harder
+    * failure to notice than a runtime error that is counted and shown.
     */
-  private[filter] def asDynamic(text: String, maxNodes: Int = DefaultMaxJsonNodes): Option[Object] =
-    parser.parse(text).toOption.filter(json => json.isObject || json.isArray).flatMap { json =>
-      try Some(toJava(json, new JsonBudget(maxNodes)))
-      catch { case JsonBudgetExceeded => None }
+  private[filter] def asDynamic(
+      text: String,
+      maxNodes: Int = DefaultMaxJsonNodes,
+      maxChars: Int = DefaultMaxJsonChars
+  ): Option[Object] =
+    Option.unless(text.length > maxChars)(text).flatMap { bounded =>
+      parser.parse(bounded).toOption.filter(json => json.isObject || json.isArray).flatMap { json =>
+        toJava(json, maxNodes, depth = 1).map(_._1)
+      }
     }
 
-  private def toJava(json: Json, budget: JsonBudget): Object = {
-    budget.spend()
-    json.fold(
-      // CEL's own representation of null. A Scala `null` would work by accident and would also be the one
-      // value in this file that `-Wunused`'s stricter sibling, the pure-module scalafix rule set, forbids.
-      jsonNull = com.google.protobuf.NullValue.NULL_VALUE,
-      jsonBoolean = java.lang.Boolean.valueOf(_),
-      // CEL has `int`, `uint` and `double` and no arbitrary-precision number. A JSON number that is a
-      // whole number becomes an `int` so that `record.value.count == 3` works the way anyone would expect;
-      // everything else becomes a `double`.
-      jsonNumber = number =>
-        number.toLong.fold[Object](java.lang.Double.valueOf(number.toDouble))(java.lang.Long.valueOf),
-      jsonString = identity,
-      jsonArray = values => {
-        budget.descend()
-        try values.map(toJava(_, budget)).asJava
-        finally budget.ascend()
-      },
-      jsonObject = obj => {
-        budget.descend()
-        try obj.toMap.map((key, value) => key -> toJava(value, budget)).asJava
-        finally budget.ascend()
-      }
-    )
-  }
+  /** Converts one node and returns the unspent node budget. `None` is the normal bounded-failure value: an
+    * untrusted payload cannot use an exception or shared mutable counter as control flow.
+    */
+  private def toJava(json: Json, nodesLeft: Int, depth: Int): Option[(Object, Int)] =
+    Option.when(nodesLeft > 0 && depth <= MaxJsonDepth)(nodesLeft - 1).flatMap { remaining =>
+      json.fold(
+        // CEL's own representation of null. A Scala `null` would work by accident and would also be the one
+        // value in this file that `-Wunused`'s stricter sibling, the pure-module scalafix rule set, forbids.
+        jsonNull = Some((com.google.protobuf.NullValue.NULL_VALUE, remaining)),
+        jsonBoolean = value => Some((java.lang.Boolean.valueOf(value), remaining)),
+        // CEL has `int`, `uint` and `double` and no arbitrary-precision number. A JSON number that is a
+        // whole number becomes an `int` so that `record.value.count == 3` works the way anyone would expect;
+        // everything else becomes a `double`.
+        jsonNumber = number =>
+          Some(
+            number.toLong
+              .fold[Object](java.lang.Double.valueOf(number.toDouble))(java.lang.Long.valueOf) -> remaining
+          ),
+        jsonString = value => Some((value, remaining)),
+        jsonArray = values =>
+          values
+            .foldLeft(Option((Vector.empty[Object], remaining))) { case (converted, value) =>
+              converted.flatMap { (items, available) =>
+                toJava(value, available, depth + 1).map { (item, after) =>
+                  (items :+ item, after)
+                }
+              }
+            }
+            .map((items, after) => (items.asJava, after)),
+        jsonObject = obj =>
+          obj.toIterable
+            .foldLeft(Option((Map.empty[String, Object], remaining))) { case (converted, entry) =>
+              val (key, value) = entry
+              converted.flatMap { (fields, available) =>
+                toJava(value, available, depth + 1).map { (field, after) =>
+                  (fields.updated(key, field), after)
+                }
+              }
+            }
+            .map((fields, after) => (fields.asJava, after))
+      )
+    }
 }

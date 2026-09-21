@@ -221,6 +221,26 @@ final class ServiceRbacGuardSuite extends CatsEffectSuite {
     }
   }
 
+  test("a malformed filter id is rejected before the browse stream opens") {
+    server(policy("payments\\..*", Action.TopicMessagesRead)).use { backend =>
+      val at = path("payments.orders")
+      val requestUri = uri"${s"http://message$at"}?filterId=not-a-kui-filter-id"
+
+      token(at, Set(reader))
+        .flatMap(principal =>
+          basicRequest
+            .get(requestUri)
+            .header(KuiEndpoint.PrincipalHeader, principal.value)
+            .response(asStringAlways)
+            .send(backend)
+        )
+        .map { response =>
+          assertEquals(response.code.code, 400, response.body)
+          assert(response.body.contains("filterId"), response.body)
+        }
+    }
+  }
+
   test("holding TopicView but not TopicMessagesRead is not enough to read a topic's records") {
     // The distinction the message service exists to enforce: seeing that a topic exists and reading what
     // is in it are different permissions, and only the second one hands over customer data.

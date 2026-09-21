@@ -3,6 +3,28 @@
 A Kafka management and observability interface. Scala 3 on the server, TypeScript and SolidJS in
 the browser, built and shipped as two independent halves that talk over HTTP.
 
+## Application tour
+
+[![Animated walkthrough of the KUI cluster dashboard, topics, message filtering and Kafka ecosystem pages](docs/frontend/screenshots/kui-walkthrough.gif)](docs/frontend/screenshots/kui-walkthrough.gif)
+
+These captures come from the real current-source quickstart with its seeded Kafka, Schema Registry,
+Kafka Connect and ksqlDB services—not mocked screens.
+
+| Cluster overview and traffic | Topics and message browsing |
+| --- | --- |
+| [![Cluster overview with responsive health, traffic and storage cards](docs/frontend/screenshots/current/05-cluster-overview.png)](docs/frontend/screenshots/current/05-cluster-overview.png) | [![Kafka topics table with cluster-wide statistics](docs/frontend/screenshots/current/10-topics.png)](docs/frontend/screenshots/current/10-topics.png) |
+| [![Traffic dashboard with throughput, latency and producer metrics](docs/frontend/screenshots/current/06-cluster-traffic.png)](docs/frontend/screenshots/current/06-cluster-traffic.png) | [![JSONPath-style field filtering over decoded Kafka records](docs/frontend/screenshots/current/26-filter-json.png)](docs/frontend/screenshots/current/26-filter-json.png) |
+| [![Consumer groups with lag and assignment details](docs/frontend/screenshots/current/17-consumer-groups.png)](docs/frontend/screenshots/current/17-consumer-groups.png) | [![Expanded Kafka record with copy headers, copy value and copy all controls](docs/frontend/screenshots/current/31-copy-controls.png)](docs/frontend/screenshots/current/31-copy-controls.png) |
+| [![Schema Registry subjects and compatibility controls](docs/frontend/screenshots/current/22-schemas.png)](docs/frontend/screenshots/current/22-schemas.png) | [![Offset-relative message pages with previous and next navigation](docs/frontend/screenshots/current/32-pagination.png)](docs/frontend/screenshots/current/32-pagination.png) |
+
+The [complete set of 37 current screenshots](docs/frontend/screenshots/current/) covers every
+navigable page, JSON and string filtering, registry-backed
+[Avro](docs/frontend/screenshots/current/28-filter-avro.png),
+[JSON Schema](docs/frontend/screenshots/current/29-filter-json-schema.png) and
+[Protobuf](docs/frontend/screenshots/current/30-filter-protobuf.png), plus
+[infinite-scroll preloading](docs/frontend/screenshots/current/33-infinite-scroll.png) and explicit
+not-configured states.
+
 > **Status: every milestone of [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) is closed except its
 > last one, M10, which is open on one of the five things it defines as done — the documentation
 > item, and `docs/plan/ROADMAP.md` names what is open on it with the command that finds each.** KUI
@@ -149,6 +171,13 @@ above is the whole of what does exist.
   than a failure. There is still no JMX client: `MetricsSourceKind.Jmx` is declared, refuses with a
   sentence naming the build, and cannot be configured at all while a metrics source's address is an
   `http`/`https` URL (ADR-050).
+- **Prometheus HTTP API queries are wired internally, with a deliberately narrow boundary.** A
+  `prometheus-api` source owns a bounded, authenticated instant/range client with TLS/mTLS,
+  concurrency and response limits, coalescing, caching, stale-on-transient-failure rules and
+  low-cardinality telemetry. It starts no exposition scraper and does not make dashboard claims by
+  guessing PromQL: no public metrics route consumes it until a server-owned Kafka metric catalog
+  defines those queries. See [the metrics-source configuration guide](docs/operations/configuration.md)
+  for the exact source kinds, limits and security model.
 - **Field masking is configured, applied and has been watched in a browser.** The engine is called
   from the browse and track paths, and `kui.clusters.<n>.masking` decodes ten keys into its own rule
   type at start-up, so a rule an operator writes is a start-up error rather than a policy that loads
@@ -239,11 +268,9 @@ What you get is the product against that broker: two registered clusters, the br
 seeded topics with their partitions and configuration, the JSON records inside them, a form to
 publish more, consumer groups with their lag, a schema registry, a Connect worker with a connector
 deployed on it, a ksqlDB server with streams and queries, and a wizard that resets a group's offsets
-and shows you what it would write before it writes it. **The exact counts are published once, in
-[`deployment/quickstart/README.md`](deployment/quickstart/README.md)**, beside the commands that
-recount them — they used to be published here as well and the two copies disagreed, which is what a
-figure in two places does. That file also explains why the broker's readiness check is what it is,
-and how to run the stack when 8080 or 9092 are already taken.
+and shows you what it would write before it writes it. The
+[manual-QA runbook](deployment/MANUAL_QA.md) documents the current-source launcher, port matrix,
+readiness checks, bounded logs and message-consumer checklist.
 
 One caveat if you have run KUI before: the quickstart reuses whatever `kui-allinone` image is
 already on the machine and only builds one when none is there, so after changing code run
@@ -286,7 +313,7 @@ pressed. `stop prod-broker` is the subtler one — it stops a single broker of t
 keeps serving while KUI's topic table shows 96 replicas fallen out of sync, which is exactly what
 Kafka itself reports for the same moment.
 
-[`deployment/demo/README.md`](deployment/demo/README.md) has the seven-step walkthrough.
+The [manual-QA runbook](deployment/MANUAL_QA.md) has the walkthrough and coexistence notes.
 
 ### See the interface, and change it
 
@@ -346,7 +373,8 @@ docker compose -f deployment/compose/docker-compose.yml down -v
 A process died and the interface stayed up, told you which part of the product was affected, and
 came back on its own. That is the promise the whole architecture exists to keep.
 `./deployment/compose/smoke.sh` runs that sequence and fails loudly if any step gives the wrong
-answer. [`deployment/compose/README.md`](deployment/compose/README.md) explains each command.
+answer. The [manual-QA runbook](deployment/MANUAL_QA.md) explains the supported Compose modes and
+commands.
 
 ### Where things are
 
@@ -595,7 +623,7 @@ $ curl -s localhost:8081/internal/v1/clusters
 
 **A service started with no signing keys refuses to start.** For local development, and only for
 that, `KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and says so in the log every minute.
-`docs/operations/configuration.md` has the whole configuration surface;
+`docs/operations/configuration.md` documents the metrics-source and shared server-path configuration used here;
 `services/cluster/app/resources/reference.yaml` is a commented file to copy from.
 
 ## Running the gateway with a locally built frontend

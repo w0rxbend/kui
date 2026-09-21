@@ -37,9 +37,10 @@ object BrowseTuning {
   *
   * **It never materialises a topic.** A forward browse seeks and streams, emitting each record as it is
   * polled. A backward browse — which Kafka cannot do, because a consumer only ever moves forward — walks each
-  * partition in *windows*: it seeks to `high - limit`, reads that window forwards, hands it back
-  * newest-first, and only if the caller wants more does it drop the window down and read the one below.
-  * Neither path ever holds more than one window of one round in memory, whatever the size of the topic.
+  * partition in one-offset *windows*, reads those windows forwards, and sorts the bounded result
+  * newest-first. Only while the aggregate raw scan budget has room does it drop the windows down by one.
+  * Neither path ever holds more than the request's raw budget in memory, whatever the size of the topic or
+  * its partition count.
   *
   * **Cancellation reaches the consumer.** The consumer is a `Resource`, opened by [[open]] inside the stream,
   * so fs2 closes it when the stream completes *or is cancelled*. The poll loop is a sequence of short polls
@@ -72,14 +73,15 @@ final class KafkaRecordSource[F[_]: Temporal](
             case Right(Nil) => Stream.empty
             case Right(windows) =>
               request.direction match {
-                case Direction.Forward => forward(consumer, request, windows)
-                case Direction.Backward => backward(consumer, request, windows)
+                case Direction.Forward => forward(consumer, request, windows, budget)
+                case Direction.Backward => backward(consumer, request, windows, budget)
               }
           }
       }
       // The budget's deadline, applied to the whole read. It is the last line of defence rather than the
-      // first: `limit` normally ends a browse long before this does, and a browse that hits this one has
-      // been scanning without matching, which is exactly when a user needs it to stop by itself.
+      // first: the application normally cancels this stream after delivering `limit` matches, and a browse
+      // that hits this one has been scanning without matching, which is exactly when a user needs it to stop
+      // by itself.
       //
       // A tail is exempt, and it is the one read that has to be. Its whole purpose is to still be open in
       // ten minutes' time; a sixty-second deadline would close it just as the user stopped watching it, and
@@ -223,21 +225,22 @@ final class KafkaRecordSource[F[_]: Temporal](
   private def forward(
       consumer: BrowseConsumer[F],
       request: BrowseRequest,
-      windows: List[Window]
+      windows: List[Window],
+      budget: PollBudget
   ): Stream[F, Either[KuiError, RawRecord]] =
     Stream
       .eval(assignAndSeek(consumer, request.topic, windows.map(window => window.partition -> window.low)))
       .flatMap {
         case Left(error) => Stream.emit(Left(error))
-        case Right(_) => polling(consumer, windows, request.limit, request.live)
+        case Right(_) => polling(consumer, windows, budget, request.live)
       }
 
   /** The poll loop, as a stream, so a record reaches the browser as it arrives rather than when the last one
     * does.
     *
     * @param live
-    *   a tail. Every one of the three reasons an ordinary browse stops is a reason a tail must not: it has
-    *   read its `limit` (a tail has no total, only a rate), several polls in a row came back empty (a quiet
+    *   a tail. Every one of the reasons an ordinary browse stops is a reason a tail must not: it spent its
+    *   raw scan budget (a tail has no total, only a rate), several polls in a row came back empty (a quiet
     *   topic is the ordinary state of a tail, not the end of one), and every partition reached its window's
     *   end (a tail's window has no end). So a tail stops for exactly one reason — the caller went away — and
     *   that arrives as cancellation rather than as a decision made here.
@@ -245,7 +248,7 @@ final class KafkaRecordSource[F[_]: Temporal](
   private def polling(
       consumer: BrowseConsumer[F],
       windows: List[Window],
-      limit: Int,
+      budget: PollBudget,
       live: Boolean
   ): Stream[F, Either[KuiError, RawRecord]] = {
     val bounds = windows.map(window => window.partition -> window.high).toMap
@@ -256,17 +259,27 @@ final class KafkaRecordSource[F[_]: Temporal](
           case Left(error) => (List(Left(error)), None)
           case Right(polled) =>
             val next = progress.after(polled)
-            val room = if live then polled.size else limit - progress.emitted
-            val kept = polled.filter(inside(bounds)).take(math.max(0, room))
-            val advanced = next.copy(emitted = next.emitted + kept.size)
+            val candidates = polled.filter(inside(bounds))
+            val selected =
+              if live then Selected(candidates, bytes = 0L)
+              else
+                within(
+                  candidates,
+                  recordsLeft = budget.recordsLeft - progress.emitted,
+                  bytesLeft = budget.bytesLeft - progress.bytes
+                )
+            val advanced = next.copy(
+              emitted = next.emitted + selected.records.size,
+              bytes = addBytes(next.bytes, selected.bytes)
+            )
             val done =
               !live && (
-                advanced.emitted >= limit ||
+                exhausted(advanced.emitted, advanced.bytes, budget) ||
                   advanced.empties > tuning.emptyPollsBeforeEnd ||
                   reachedEnd(advanced, bounds)
               )
 
-            (kept.map(_.asRight[KuiError]), Option.unless(done)(advanced))
+            (selected.records.map(_.asRight[KuiError]), Option.unless(done)(advanced))
         }
       }
       .flatMap(Stream.emits)
@@ -276,69 +289,170 @@ final class KafkaRecordSource[F[_]: Temporal](
 
   /** The window walk.
     *
-    * One round reads at most `limit` records per partition and hands them back newest-first. If the caller
-    * still wants more, the next round starts where this one began and reads the window below it. A partition
-    * that has reached its oldest retained record drops out; when they all have, the walk ends.
+    * One round reads a one-offset window per active partition. One offset is deliberate: if an aggregate
+    * budget ends a round after partition 3, partitions 4 onward remain untouched, and every partition that
+    * did contribute completed its whole window. A continuation can therefore resume every partition at its
+    * emitted or untouched boundary without skipping the newer half of a partly-read window.
     *
-    * The bound is what makes this safe on a topic of any size: the walk never reads from the beginning and
-    * never keeps more than one round.
+    * A chunk accumulates at most `limit` candidates per active partition (or the smaller aggregate budget),
+    * then sorts and emits them together. Keeping the original candidate depth preserves deterministic
+    * newest-first ordering when partitions' timestamps differ; chunking lets an ordinary page cancel the
+    * source as soon as it fills, while a selective filter can pull another chunk and keep scanning toward the
+    * aggregate budget.
     */
   private def backward(
       consumer: BrowseConsumer[F],
       request: BrowseRequest,
-      windows: List[Window]
+      windows: List[Window],
+      budget: PollBudget
   ): Stream[F, Either[KuiError, RawRecord]] = {
-    val size = math.max(1, request.limit).toLong
+    def fill(walk: Walk, target: Int): F[Either[KuiError, (Walk, Selected)]] =
+      Temporal[F].tailRecM(Fill.from(walk)) { filling =>
+        if filling.remaining.isEmpty ||
+          exhausted(filling.emitted, filling.bytes, budget) ||
+          filling.chunkRecords >= target
+        then
+          Right(
+            Right(
+              Walk(
+                filling.remaining ++ filling.deferredReversed.reverse,
+                filling.emitted,
+                filling.bytes
+              ) ->
+                Selected(filling.reversed.reverse, filling.chunkBytes)
+            )
+          ).pure[F]
+        else {
+          val room = target - filling.chunkRecords
+          val (chosen, waiting) = filling.remaining.splitAt(room)
+          val split = chosen.flatMap(_.newest(size = 1L))
+          val round = split.map((window, _) => window)
+
+          if round.isEmpty then Left(filling.copy(remaining = waiting)).pure[F]
+          else
+            readWindows(
+              consumer,
+              request.topic,
+              round,
+              recordsLeft = room,
+              bytesLeft = budget.bytesLeft - filling.bytes
+            ).map {
+              case Left(error) => Right(Left(error))
+              case Right(selected) =>
+                val depths = split.foldLeft(filling.depths)((seen, pair) =>
+                  seen.updated(pair._1.partition, seen.getOrElse(pair._1.partition, 0) + 1)
+                )
+                val (continuing, deferred) = split
+                  .flatMap((_, below) => below)
+                  .partition(window => depths.getOrElse(window.partition, 0) < request.limit)
+
+                Left(
+                  Fill(
+                    // Partitions not chosen for this depth stay ahead of the partitions that just moved
+                    // down one. That is the round-robin boundary which prevents a small aggregate budget
+                    // from starving the tail of a high-partition assignment.
+                    remaining = waiting ++ continuing,
+                    deferredReversed = deferred.reverse ::: filling.deferredReversed,
+                    depths = depths,
+                    emitted = filling.emitted + selected.records.size,
+                    bytes = addBytes(filling.bytes, selected.bytes),
+                    reversed = selected.records.reverse ::: filling.reversed,
+                    chunkRecords = filling.chunkRecords + selected.records.size,
+                    chunkBytes = addBytes(filling.chunkBytes, selected.bytes)
+                  )
+                )
+            }
+        }
+      }
 
     Stream
-      .unfoldLoopEval(Walk(windows, 0)) { walk =>
-        val split = walk.remaining.flatMap(_.newest(size))
-        val round = split.map((window, _) => window)
-
-        if round.isEmpty || walk.emitted >= request.limit then
+      .unfoldLoopEval(Walk(windows, emitted = 0, bytes = 0L)) { walk =>
+        if walk.remaining.isEmpty || exhausted(walk.emitted, walk.bytes, budget) then
           (List.empty[Either[KuiError, RawRecord]], Option.empty[Walk]).pure[F]
-        else
-          readWindows(consumer, request.topic, round).map {
-            case Left(error) => (List(Left(error)), None)
-            case Right(records) =>
-              val room = request.limit - walk.emitted
-              val newestFirst = records.sorted(using Newest).take(math.max(0, room))
-              val next = Walk(split.flatMap((_, below) => below), walk.emitted + newestFirst.size)
+        else {
+          val recordsRemaining = budget.recordsLeft - walk.emitted
+          val target = aggregateChunkSize(request.limit, walk.remaining.size, recordsRemaining)
 
-              (newestFirst.map(_.asRight[KuiError]), Option.when(next.remaining.nonEmpty)(next))
+          fill(walk, target).map {
+            case Left(error) => (List(Left(error)), None)
+            case Right((next, selected)) =>
+              val newestFirst = selected.records.sorted(using Newest).map(_.asRight[KuiError])
+              val more = Option.when(
+                next.remaining.nonEmpty && !exhausted(next.emitted, next.bytes, budget)
+              )(next)
+              (newestFirst, more)
           }
+        }
       }
       .flatMap(Stream.emits)
   }
 
   /** Reads one bounded window on each of several partitions, to their ends.
     *
-    * Unlike the forward path this one accumulates, because the round has to be sorted before any of it can be
-    * shown: a record is only "the newest" once every partition in the round has been read. The accumulation
-    * is bounded by the round, which is bounded by the caller's limit.
+    * The one-offset windows drain one partition at a time. A completed partition is therefore unassigned
+    * before it can feed records above its window while another partition is still catching up, and the
+    * aggregate record and byte allowance can stop between two complete windows without creating a cursor gap.
+    * Accumulation prepends into a reversed list, so the cost stays linear in the bounded result.
     */
   private def readWindows(
       consumer: BrowseConsumer[F],
       topic: TopicName,
-      round: List[Window]
-  ): F[Either[KuiError, List[RawRecord]]] = {
-    val bounds = round.map(window => window.partition -> window.high).toMap
+      round: List[Window],
+      recordsLeft: Int,
+      bytesLeft: Long
+  ): F[Either[KuiError, Selected]] = {
+    def readWindow(window: Window, recordRoom: Int, byteRoom: Long): F[Either[KuiError, Selected]] = {
+      val bounds = Map(window.partition -> window.high)
 
-    def drain(progress: Progress, taken: List[RawRecord]): F[Either[KuiError, List[RawRecord]]] =
-      if progress.empties > tuning.emptyPollsBeforeEnd || reachedEnd(progress, bounds) then
-        taken.asRight[KuiError].pure[F]
+      def drain(progress: Progress, reversed: List[RawRecord], bytes: Long): F[Either[KuiError, Selected]] =
+        if progress.empties > tuning.emptyPollsBeforeEnd ||
+          reachedEnd(progress, bounds) ||
+          reversed.size >= recordRoom ||
+          bytes >= byteRoom
+        then Selected(reversed.reverse, bytes).asRight[KuiError].pure[F]
+        else
+          consumer.poll(tuning.pollTimeout).flatMap {
+            case Left(error) => error.asLeft[Selected].pure[F]
+            case Right(polled) =>
+              val selected = within(
+                polled,
+                recordsLeft = recordRoom - reversed.size,
+                bytesLeft = byteRoom - bytes,
+                include = record => window.holds(record.partition, record.offset)
+              )
+              drain(
+                progress.after(polled),
+                selected.records.reverse ::: reversed,
+                addBytes(bytes, selected.bytes)
+              )
+          }
+
+      assignAndSeek(consumer, topic, List(window.partition -> window.low)).flatMap {
+        case Left(error) => error.asLeft[Selected].pure[F]
+        case Right(_) => drain(Progress.empty, reversed = Nil, bytes = 0L)
+      }
+    }
+
+    Temporal[F].tailRecM(WindowDrain(round, reversed = Nil, records = 0, bytes = 0L)) { draining =>
+      if draining.remaining.isEmpty || draining.records >= recordsLeft || draining.bytes >= bytesLeft then
+        Right(Right(Selected(draining.reversed.reverse, draining.bytes))).pure[F]
       else
-        consumer.poll(tuning.pollTimeout).flatMap {
-          case Left(error) => error.asLeft[List[RawRecord]].pure[F]
-          case Right(polled) =>
-            val kept =
-              polled.filter(record => round.exists(window => window.holds(record.partition, record.offset)))
-            drain(progress.after(polled), taken ++ kept)
+        readWindow(
+          draining.remaining.head,
+          recordRoom = recordsLeft - draining.records,
+          byteRoom = bytesLeft - draining.bytes
+        ).map {
+          case Left(error) => Right(Left(error))
+          case Right(selected) =>
+            Left(
+              WindowDrain(
+                remaining = draining.remaining.tail,
+                reversed = selected.records.reverse ::: draining.reversed,
+                records = draining.records + selected.records.size,
+                bytes = addBytes(draining.bytes, selected.bytes)
+              )
+            )
         }
-
-    assignAndSeek(consumer, topic, round.map(window => window.partition -> window.low)).flatMap {
-      case Left(error) => error.asLeft[List[RawRecord]].pure[F]
-      case Right(_) => drain(Progress.empty, List.empty)
     }
   }
 
@@ -391,11 +505,45 @@ object KafkaRecordSource {
     }
   }
 
-  /** The state of a backward walk: which windows are still to be read, and how much has been emitted. */
-  final private case class Walk(remaining: List[Window], emitted: Int)
+  /** The state of a backward walk: which windows are still to be read, and how much raw input it consumed. */
+  final private case class Walk(remaining: List[Window], emitted: Int, bytes: Long)
 
-  /** How far each partition has been read, and how many polls in a row have returned nothing. */
-  final private case class Progress(next: Map[PartitionId, Long], empties: Int, emitted: Int) {
+  /** A bounded backward output chunk while it is being filled one complete offset-depth at a time. */
+  final private case class Fill(
+      remaining: List[Window],
+      deferredReversed: List[Window],
+      depths: Map[PartitionId, Int],
+      emitted: Int,
+      bytes: Long,
+      reversed: List[RawRecord],
+      chunkRecords: Int,
+      chunkBytes: Long
+  )
+
+  private object Fill {
+    def from(walk: Walk): Fill =
+      Fill(
+        remaining = walk.remaining,
+        deferredReversed = Nil,
+        depths = Map.empty,
+        emitted = walk.emitted,
+        bytes = walk.bytes,
+        reversed = Nil,
+        chunkRecords = 0,
+        chunkBytes = 0L
+      )
+  }
+
+  /** Aggregate state while the one-offset windows selected for a backward round drain in order. */
+  final private case class WindowDrain(
+      remaining: List[Window],
+      reversed: List[RawRecord],
+      records: Int,
+      bytes: Long
+  )
+
+  /** How far each partition has been read, how many polls returned nothing, and the raw input consumed. */
+  final private case class Progress(next: Map[PartitionId, Long], empties: Int, emitted: Int, bytes: Long) {
 
     def after(polled: List[RawRecord]): Progress =
       Progress(
@@ -406,12 +554,70 @@ object KafkaRecordSource {
           )
         ),
         empties = if polled.isEmpty then empties + 1 else 0,
-        emitted = emitted
+        emitted = emitted,
+        bytes = bytes
       )
   }
 
   private object Progress {
-    val empty: Progress = Progress(Map.empty, 0, 0)
+    val empty: Progress = Progress(Map.empty, 0, 0, 0L)
+  }
+
+  /** A raw prefix that fits the record budget and reaches (or stays below) the byte budget.
+    *
+    * Kafka hands a record to the consumer atomically, so a record larger than the remaining byte allowance is
+    * included and exhausts the browse. This is the same saturating, one-chunk overshoot semantics as
+    * [[PollBudget.consume]]; it guarantees progress past a large record while bounding an overshoot to one
+    * broker record.
+    */
+  final private case class Selected(records: List[RawRecord], bytes: Long)
+
+  private def within(
+      records: List[RawRecord],
+      recordsLeft: Int,
+      bytesLeft: Long,
+      include: RawRecord => Boolean = _ => true
+  ): Selected = {
+    @annotation.tailrec
+    def loop(
+        remaining: List[RawRecord],
+        recordRoom: Int,
+        byteRoom: Long,
+        selected: List[RawRecord],
+        bytes: Long
+    ): Selected =
+      if recordRoom <= 0 || byteRoom <= 0L then Selected(selected.reverse, bytes)
+      else
+        remaining match {
+          case Nil => Selected(selected.reverse, bytes)
+          case record :: tail if !include(record) =>
+            loop(tail, recordRoom, byteRoom, selected, bytes)
+          case record :: tail =>
+            val size = serialisedSize(record)
+            loop(tail, recordRoom - 1, byteRoom - size, record :: selected, addBytes(bytes, size))
+        }
+
+    loop(records, math.max(0, recordsLeft), math.max(0L, bytesLeft), Nil, 0L)
+  }
+
+  private def exhausted(records: Int, bytes: Long, budget: PollBudget): Boolean =
+    records >= budget.recordsLeft || bytes >= budget.bytesLeft
+
+  private def serialisedSize(record: RawRecord): Long =
+    math.max(0, record.keySize).toLong +
+      math.max(0, record.valueSize).toLong +
+      math.max(0, record.headersSize).toLong
+
+  private def addBytes(left: Long, right: Long): Long =
+    if right >= Long.MaxValue - left then Long.MaxValue else left + right
+
+  /** The old backward read needed `limit` candidates from every partition to preserve newest-first order.
+    * Keep that depth when the aggregate record budget can afford it, but never let multiplication by a large
+    * assignment escape the request-wide cap.
+    */
+  private def aggregateChunkSize(limit: Int, partitions: Int, recordsRemaining: Int): Int = {
+    val candidates = math.max(1L, limit.toLong) * math.max(1L, partitions.toLong)
+    math.max(1L, math.min(math.max(1L, recordsRemaining.toLong), candidates)).toInt
   }
 
   /** Newest first, and by offset within a partition.

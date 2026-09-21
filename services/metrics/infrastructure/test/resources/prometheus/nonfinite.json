@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "cluster_name": "production",
+          "group": "orders"
+        },
+        "values": [
+          [1725624000, "0"],
+          [1725624060.000000001, "NaN"],
+          [1725624120, "Inf"],
+          [1725624180, "+Inf"],
+          [1725624240, "-Inf"]
+        ],
+        "futureSeriesField": [
+          "ignored"
+        ]
+      }
+    ],
+    "futureDataField": {
+      "ignored": true
+    }
+  },
+  "futureEnvelopeField": false
+}

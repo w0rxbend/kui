@@ -101,7 +101,13 @@ object CursorCodec {
         }
 
       /** Splits, decodes and checks the signature, returning the payload bytes only if they were signed. */
-      private def verified(raw: String): Either[KuiError, String] = {
+      private def verified(raw: String): Either[KuiError, String] =
+        // A valid cursor is base64url ASCII, so its character count is also its encoded byte count. Reject
+        // before `split` and Base64 decoding allocate from an untrusted query parameter.
+        if raw.length > maxBytes then Left(invalid(s"it exceeds the $maxBytes-byte limit"))
+        else verifiedWithinLimit(raw)
+
+      private def verifiedWithinLimit(raw: String): Either[KuiError, String] = {
         val parts = raw.split(Separator).toList
         parts match {
           case encodedPayload :: encodedSignature :: Nil =>

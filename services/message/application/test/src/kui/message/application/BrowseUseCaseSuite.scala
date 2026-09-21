@@ -388,6 +388,57 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
     )
   }
 
+  test("a selective browse that spends its raw budget returns a cursor to later matches") {
+    val partition = PartitionId.unsafe(0)
+    val scanBudget = PollBudget.unsafe(2, 1L << 20, 30.seconds)
+    val available = List(raw(0, "skip"), raw(1, "skip"), raw(2, "match"))
+    val pagedSource: RecordSource[IO] = new RecordSource[IO] {
+      private def startOf(request: BrowseRequest): Long = request.seek match {
+        case SeekMode.Beginning => 0L
+        case SeekMode.AtOffsets(offsets) => offsets(partition).value
+        case other => fail(s"expected a beginning or resumed seek, got $other")
+      }
+
+      def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
+        Stream
+          .emits(available.filter(_.offset.value >= startOf(request)).map(_.asRight[KuiError]))
+          .take(budget.recordsLeft.toLong)
+
+      def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+        IO.pure(Right(Map(partition -> Offset.unsafe(startOf(request)))))
+    }
+    val browse = BrowseUseCase.make[IO](
+      clusters,
+      serdes("<nothing fails>"),
+      pagedSource,
+      CursorCodec.hmacSha256[IO](key),
+      FilterSource.unsupported[IO],
+      RecordMasking.none[IO]
+    )
+    val firstRequest = request(limit = 1, filter = Some("match"))
+
+    for {
+      first <- browse.browse(firstRequest, scanBudget).compile.toList
+      token = first.last match {
+        case BrowseEvent.Finished(BrowseEnd.Budget, Some(cursor)) => cursor
+        case other => fail(s"expected a budget ending with a cursor, got $other")
+      }
+      resumed <- browse.resume(cluster, topic, token, Some("match"), BrowseLimits.Default)
+      secondRequest = resumed.getOrElse(fail(s"the budget cursor did not resume: $resumed"))
+      second <- browse.browse(secondRequest, scanBudget).compile.toList
+    } yield {
+      assertEquals(delivered(first), Nil)
+      assertEquals(delivered(second), List("match"))
+      assertEquals(
+        second.lastOption.map {
+          case BrowseEvent.Finished(reason, _) => reason
+          case other => fail(s"expected a finished event, got $other")
+        },
+        Some(BrowseEnd.Limit)
+      )
+    }
+  }
+
   test("a tail delivers past its limit, because a limit is a page size and a tail has no pages") {
     // `limit` bounds a page; a tail is not paged, and the bound that keeps a tail from growing without
     // end is on the screen — the browser keeps the newest rows and drops the rest. A tail that stopped at
@@ -430,6 +481,63 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
         assertEquals(cursor.perPartitionNext, Map(PartitionId.unsafe(0) -> Offset.unsafe(2)))
         assertEquals(cursor.v, BrowseCursor.Version)
       case Left(error) => fail(s"the cursor this build minted could not be read back: ${error.message}")
+    }
+  }
+
+  test("a backward cursor resumes before the oldest record processed without duplicates or gaps") {
+    val partition = PartitionId.unsafe(0)
+    val available = List(99L, 98L, 97L, 96L, 95L).map(offset => raw(offset, offset.toString))
+    val pagedSource: RecordSource[IO] = new RecordSource[IO] {
+      def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] = {
+        val high = request.seek match {
+          case SeekMode.Latest => 100L
+          case SeekMode.AtOffsets(offsets) => offsets(partition).value
+          case other => fail(s"expected a latest or resumed backward seek, got $other")
+        }
+        Stream.emits(available.filter(_.offset.value < high).map(_.asRight[KuiError]))
+      }
+
+      def assignedStarts(request: BrowseRequest): IO[Either[KuiError, Map[PartitionId, Offset]]] =
+        IO.pure(Right(Map(partition -> Offset.unsafe(100L))))
+    }
+    val browse = BrowseUseCase.make[IO](
+      clusters,
+      serdes("<nothing fails>"),
+      pagedSource,
+      CursorCodec.hmacSha256[IO](key),
+      FilterSource.unsupported[IO],
+      RecordMasking.none[IO]
+    )
+    val firstRequest = BrowseRequest
+      .of(
+        cluster = cluster,
+        topic = topic,
+        seek = SeekMode.Latest,
+        direction = Some(Direction.Backward),
+        partitions = Some(Set(partition)),
+        limit = Some(2),
+        isolation = None,
+        keySerde = None,
+        valueSerde = None,
+        stringFilter = None,
+        filter = None,
+        live = false
+      )
+      .getOrElse(fail("the backward request under test is not legal"))
+
+    for {
+      first <- events(browse, firstRequest)
+      token = first.last match {
+        case BrowseEvent.Finished(BrowseEnd.Limit, Some(cursor)) => cursor
+        case other => fail(s"expected the first backward page to end with a cursor, got $other")
+      }
+      resumed <- browse.resume(cluster, topic, token, None, BrowseLimits.Default)
+      secondRequest = resumed.getOrElse(fail(s"the backward cursor did not resume: $resumed"))
+      second <- events(browse, secondRequest)
+    } yield {
+      assertEquals(delivered(first), List("99", "98"))
+      assertEquals(delivered(second), List("97", "96"))
+      assertEquals((delivered(first) ++ delivered(second)).distinct, List("99", "98", "97", "96"))
     }
   }
 

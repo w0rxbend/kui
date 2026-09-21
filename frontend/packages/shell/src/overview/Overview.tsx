@@ -751,9 +751,9 @@ const STAT_TILES: Readonly<Record<StatId, (props: StatRowProps) => JSX.Element>>
             value={props.model.inSync.value}
             goodDirection="high"
             caption="IN SYNC"
-            diameter={44}
-            strokeWidth={5}
-            decimals={1}
+            diameter={64}
+            strokeWidth={6}
+            decimals={0}
           />
         ) : undefined
       }

@@ -127,6 +127,19 @@ final class CelFilterEngineSuite extends KuiIOSuite {
       evaluate("has(record.value)", wide).assertEquals(Right(true))
   }
 
+  test("a decoded JSON value over the text limit is refused before parsing") {
+    val large = record.copy(valueAsText = s"""{"field":"${"x" * 100}"}""")
+    val tight = generous.copy(maxJsonValueChars = 32)
+
+    engine(tight).use { port =>
+      for {
+        id <- orFail(port.register("has(record.value)"))
+        predicate <- orFail(port.predicate(id, Some("has(record.value)")))
+        result <- predicate.test(large)
+      } yield assertEquals(result, Right(false), "an over-limit payload reached the JSON parser")
+    } >> evaluate("has(record.value)", large).assertEquals(Right(true))
+  }
+
   test("a JSON value nested deeper than the walk allows is treated as absent, not a stack overflow") {
     // Depth, not width: a producer can make `[[[[...]]]]` arbitrarily deep for very little wire size, which
     // costs the walk one JVM stack frame per level rather than one unit of the node budget above.
@@ -135,8 +148,10 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     evaluate("has(record.value)", deeplyNested).assertEquals(Right(false))
   }
 
-  test("referencedDynamicFields finds record.key/record.value however a filter spells them, and nothing" +
-    " when a filter never mentions either") {
+  test(
+    "referencedDynamicFields finds record.key/record.value however a filter spells them, and nothing" +
+      " when a filter never mentions either"
+  ) {
     // The set this returns decides whether `recordFields` bothers parsing a record's key or value as JSON
     // at all. Under-detecting is the dangerous direction — it would silently make a field a live filter
     // reads disappear — so every shape a filter can use to reach `record.key`/`record.value` is asserted
@@ -422,6 +437,21 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     engine()
       .use(_.predicate(FilterId.of("record.partition == 0"), Some("record.partition == 1")))
       .map(result => assert(result.swap.exists(_.message.contains("does not match"))))
+  }
+
+  test("a mismatched source is refused even when the requested id is already cached") {
+    val cachedSource = "record.partition == 3"
+    val mismatchedSource = "record.partition == 1"
+
+    engine().use { port =>
+      for {
+        cachedId <- orFail(port.register(cachedSource))
+        result <- port.predicate(cachedId, Some(mismatchedSource))
+      } yield assert(
+        result.swap.exists(_.message.contains("does not match")),
+        s"a warm cache bypassed source/id validation: $result"
+      )
+    }
   }
 
   // ------------------------------------------------------------------ the test endpoint

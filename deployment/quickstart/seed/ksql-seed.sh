@@ -30,7 +30,7 @@
 # ---------------------------------------------------------------------------------------------
 #
 #   Image        anything with bash and curl. The Compose file uses the registry's own image for
-#                the reason `avro-seed.sh` records: `apache/kafka` has no curl at all.
+#                the reason `schema-seed.sh` records: `apache/kafka` has no curl at all.
 #   Entrypoint   /bin/bash, with this script's path as the argument.
 #   Environment  KUI_KSQL_URL    -- required, e.g. http://ksqldb-server:8088
 #                KUI_KSQL_STREAM -- optional, default QUICKSTART_ORDERS

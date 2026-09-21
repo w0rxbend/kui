@@ -109,6 +109,7 @@ object ConnectCredentials {
     auth match {
       case UpstreamAuthConfig.Anonymous => Resource.pure(anonymous[F])
       case UpstreamAuthConfig.Basic(username, password) => Resource.pure(basic[F](username, password))
+      case UpstreamAuthConfig.Bearer(_) => Resource.pure(unsupportedBearer[F])
       case oauthConfig: UpstreamAuthConfig.OAuth =>
         tokenBackend match {
           case Some(backend) => oauth[F](oauthConfig, backend, logger)
@@ -137,6 +138,19 @@ object ConnectCredentials {
             ErrorCode.UpstreamAuth,
             s"$TokenUpstreamName: this Connect cluster is configured for OAuth and no token endpoint " +
               "client was built for it",
+            Nil
+          )
+        )
+      )
+
+  /** Bearer is part of the shared HTTP-auth vocabulary but is intentionally not configurable for Connect. */
+  private def unsupportedBearer[F[_]: Async]: ConnectCredentials[F] =
+    _ =>
+      Async[F].pure(
+        Left(
+          InfrastructureError.Remote(
+            ErrorCode.UpstreamAuth,
+            "kafka-connect: bearer authentication is not supported",
             Nil
           )
         )

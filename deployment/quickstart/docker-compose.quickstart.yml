@@ -332,7 +332,7 @@ services:
   # ---------------------------------------------------------------------------------------------
   # A one-shot container that puts one connector onto the worker above, then exits.
   #
-  # It runs the registry's image and not `apache/kafka` for the reason `avro-seed.sh` records in
+  # It runs the registry's image and not `apache/kafka` for the reason `schema-seed.sh` records in
   # full: this script talks HTTP and nothing else, so it needs `curl`, and the Kafka image is
   # Alpine with busybox `wget` and no `curl` at all. The registry image is already being pulled by
   # this same file.
@@ -394,7 +394,7 @@ services:
   # KUI has no dependency on which one an operator runs.
   #
   # Its storage is in memory, which is right for a throwaway: restarting this container loses the
-  # registered schema, and `avro-seed` below re-registers it. Nothing a person clicks in KUI is
+  # registered schemas, and the schema seed below re-registers them. Nothing a person clicks in KUI is
   # kept in the registry, so nothing they did is lost with it.
   # ---------------------------------------------------------------------------------------------
   schema-registry:
@@ -531,14 +531,12 @@ services:
       start_period: 20s
 
   # ---------------------------------------------------------------------------------------------
-  # The Avro half of the demonstration, which runs last because it needs everything else.
+  # The schema-aware half of the demonstration, which runs last because it needs everything else.
   #
-  # It registers a schema in the registry and then writes records through KUI's own produce API.
-  # That is deliberate and it is worth saying why: a record in this format is a magic byte, a
-  # schema id and an Avro-encoded body, and the only Apache-licensed writer of it in this
-  # repository is KUI itself. Producing through the product also means the seed proves the write
-  # path as well as the read path — if the records show up decoded on the messages screen, both
-  # halves of SD-001 worked.
+  # It registers Avro, JSON Schema and Protobuf subjects and writes records through KUI's produce
+  # API. The first two exercise KUI's registry serializer; Protobuf uses Hex because KUI supports
+  # decoding but deliberately refuses to claim it can encode Protobuf yet. All three then exercise
+  # the same registry-aware read and field-filter paths in the message browser.
   # ---------------------------------------------------------------------------------------------
   avro-seed:
     # The registry's own image, and not `apache/kafka` like the other two seed containers, for one
@@ -555,7 +553,7 @@ services:
         condition: service_healthy
       kui:
         condition: service_healthy
-    entrypoint: ["/bin/bash", "/seed/avro-seed.sh"]
+    entrypoint: ["/bin/bash", "/seed/schema-seed.sh"]
     environment:
       KUI_BASE_URL: http://kui:8080
       KUI_CLUSTER_ID: quickstart

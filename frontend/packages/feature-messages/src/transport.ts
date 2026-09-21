@@ -39,6 +39,7 @@ import { createEffect, createRoot } from "solid-js";
 import {
   decodeBrowseEvent,
   type BrowseConnection,
+  type BrowseEndReason,
   type BrowseEvent,
   type BrowseFailure,
   type BrowseHandle,
@@ -59,6 +60,7 @@ export function createBrowseTransport(options?: {
 }): BrowseTransport {
   return {
     open(url, handlers): BrowseHandle {
+      let endReason: BrowseEndReason | undefined;
       const handle = openFetchStream(
         {
           url,
@@ -78,6 +80,9 @@ export function createBrowseTransport(options?: {
             // not be updated would be the tail wagging the dog.
             const decoded = decodeBrowseEvent("phase", data);
             if (decoded.ok) handlers.onEvent(decoded.value);
+          },
+          onDone: (data) => {
+            endReason = decodeEndReason(data);
           },
           onError: (error) => handlers.onFailure(toFailure(error)),
         },
@@ -103,9 +108,30 @@ export function createBrowseTransport(options?: {
           handle.close();
         },
         endMarker: () => handle.endMarker(),
+        endReason: () => endReason,
       };
     },
   };
+}
+
+/** Decode only the bounded enum the browser understands; malformed additions remain non-fatal. */
+function decodeEndReason(data: string): BrowseEndReason | undefined {
+  try {
+    const decoded: unknown = JSON.parse(data);
+    if (typeof decoded !== "object" || decoded === null) return undefined;
+    const reason = (decoded as { readonly reason?: unknown }).reason;
+    switch (reason) {
+      case "limit":
+      case "exhausted":
+      case "budget":
+      case "cancelled":
+        return reason;
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 /**

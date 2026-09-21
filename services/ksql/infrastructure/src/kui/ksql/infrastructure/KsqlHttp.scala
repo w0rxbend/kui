@@ -1,7 +1,5 @@
 package kui.ksql.infrastructure
 
-import java.io.{ByteArrayOutputStream, InputStream}
-
 import scala.concurrent.duration.FiniteDuration
 
 import cats.effect.kernel.Async
@@ -13,7 +11,7 @@ import sttp.client4.*
 import sttp.model.{StatusCode, Uri}
 
 import kui.config.SafeUrl
-import kui.http.upstream.UpstreamFailure
+import kui.http.upstream.{BoundedResponse, UpstreamFailure}
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.ksql.application.KsqlClient
 import kui.ksql.domain.*
@@ -189,7 +187,7 @@ final class KsqlHttp[F[_]: Async](
       request: Request[Either[String, String]],
       maxResponseBytes: Option[Long] = None
   ): F[Either[KuiError, String]] = {
-    val responseAs = maxResponseBytes.fold(asStringAlways)(cappedResponseAs)
+    val responseAs = maxResponseBytes.fold(asStringAlways)(BoundedResponse.asString)
 
     credentials.authenticate(request.header("Accept", MediaType).response(responseAs)).flatMap {
       case Left(error) => error.asLeft[String].pure[F]
@@ -207,34 +205,11 @@ final class KsqlHttp[F[_]: Async](
             // upstream. Anything else is genuinely unexpected and is reported as an upstream that did not
             // produce a response, which is the honest description.
             case UpstreamFailure(error) => Left(error)
-            case KsqlHttp.ResponseTooLarge(limit) =>
+            case BoundedResponse.LimitExceeded(limit) =>
               Left(malformed(s"its answer was larger than the $limit-byte limit KUI enforces on this call"))
             case failure: Exception => Left(thrown(failure))
           }
     }
-  }
-
-  /** A `String` response, capped at `maxBytes` — read incrementally rather than buffered whole and then
-    * measured, so the excess itself is never held in memory. The backend closes the stream once this function
-    * returns, same as it would for [[asStringAlways]].
-    */
-  private def cappedResponseAs(maxBytes: Long): ResponseAs[String] =
-    asInputStreamAlways(readCapped(_, maxBytes))
-
-  private def readCapped(input: InputStream, maxBytes: Long): String = {
-    val buffer = new Array[Byte](8192)
-    val out = new ByteArrayOutputStream(math.min(maxBytes, 8192L).toInt)
-    var total = 0L
-    var chunk = input.read(buffer)
-
-    while chunk != -1 do {
-      total += chunk
-      if total > maxBytes then throw KsqlHttp.ResponseTooLarge(maxBytes)
-      out.write(buffer, 0, chunk)
-      chunk = input.read(buffer)
-    }
-
-    out.toString(java.nio.charset.StandardCharsets.UTF_8)
   }
 
   private def upstreamName: String = UpstreamName
@@ -338,12 +313,6 @@ object KsqlHttp {
     * answers every other cluster's schema, connect and cluster calls.
     */
   val MaxPullQueryResponseBytes: Long = 16L * 1024 * 1024
-
-  /** Thrown by [[KsqlHttp.readCapped]] once a response has grown past its ceiling, and turned back into a
-    * [[kui.kernel.error.KuiError]] by [[KsqlHttp.send]] before it ever reaches a caller.
-    */
-  final private case class ResponseTooLarge(limitBytes: Long)
-      extends Exception(s"response exceeded $limitBytes bytes")
 
   /** ksqlDB's own media type, sent and accepted.
     *

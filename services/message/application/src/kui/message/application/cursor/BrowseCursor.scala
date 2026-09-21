@@ -69,15 +69,15 @@ object BrowseCursor {
       ttl
     )
 
-  /** The cursor that continues a **backward** browse: each partition's next window *ends* where this one
-    * began, and the range is half-open, so the boundary is the first offset seen and not one below it.
+  /** The cursor that continues a **backward** browse: each partition's next window *ends* at the oldest
+    * offset this page processed, and the range is half-open, so that record is not returned twice.
     */
   def beforeBackward(
       request: BrowseRequest,
-      firstSeen: Map[PartitionId, Offset],
+      oldestSeen: Map[PartitionId, Offset],
       now: Instant,
       ttl: FiniteDuration
-  ): BrowseCursor = from(request, firstSeen, now, ttl)
+  ): BrowseCursor = from(request, oldestSeen, now, ttl)
 
   private def from(
       request: BrowseRequest,

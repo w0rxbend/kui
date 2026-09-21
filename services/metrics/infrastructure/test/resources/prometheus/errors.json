@@ -1,0 +1,57 @@
+{
+  "errorEnvelope": {
+    "status": "error",
+    "errorType": "bad_data",
+    "error": "CANARY_ERROR token=super-secret query=sum(private_metric{tenant=\"hidden\"})"
+  },
+  "unknownStatus": {
+    "status": "CANARY_STATUS",
+    "data": {
+      "resultType": "vector",
+      "result": []
+    }
+  },
+  "malformedEnvelope": {
+    "status": "success",
+    "data": {
+      "resultType": "vector"
+    },
+    "CANARY_BODY": "must never enter an error"
+  },
+  "malformedTuple": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        {
+          "metric": {},
+          "value": [0, "1", "CANARY_TUPLE"]
+        }
+      ]
+    }
+  },
+  "malformedTimestamp": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        {
+          "metric": {},
+          "value": [0.0000000001, "1"]
+        }
+      ]
+    }
+  },
+  "unquotedValue": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        {
+          "metric": {},
+          "value": [0, 1]
+        }
+      ]
+    }
+  }
+}

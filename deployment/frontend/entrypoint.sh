@@ -64,9 +64,14 @@ grep -q "<base href=\"${BASE_PATH}/ui/\">" "$INDEX" || {
 # The server.
 # ------------------------------------------------------------------------------------------------
 cat > /etc/nginx/conf.d/default.conf <<NGINX
+# Filters and cursor continuations travel in API query parameters. Keep operational request logs,
+# but log only the normalized path so customer values and signed cursors never land in stdout.
+log_format kui_no_query '\$remote_addr - \$remote_user [\$time_local] "\$request_method \$uri \$server_protocol" \$status \$body_bytes_sent "\$http_user_agent"';
+
 server {
   listen 8082;
   server_tokens off;
+  access_log /dev/stdout kui_no_query;
 
   root /usr/share/nginx/html;
 

@@ -354,6 +354,23 @@ final class ShippedConfigurationSuite extends KuiSuite {
     "deployment/quickstart/kui-quickstart-auth.yaml"
   )
 
+  test("both quickstarts automatically decode every Schema Registry fixture they seed") {
+    quickstarts.foreach { relative =>
+      val loaded = KuiConfigSource
+        .loadFrom[IO](Nil, List(resolve(relative)), Map.empty, UrlPolicy.Dev)
+        .unsafeRunSync()
+        .fold(errors => fail(s"$relative does not load:\n${errors.render}"), identity)
+
+      assertEquals(
+        loaded.clusters.head.serde.patterns.map(rule =>
+          (rule.serde.value, rule.topicValuesPattern.map(_.regex))
+        ),
+        List(("SchemaRegistry", Some("orders\\.(avro|jsonschema|protobuf)"))),
+        clue = relative
+      )
+    }
+  }
+
   test(
     "both quickstarts ship the masking rules their comments describe, and neither second profile has any"
   ) {

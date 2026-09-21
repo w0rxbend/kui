@@ -60,6 +60,28 @@ final class KsqlCredentialsSuite extends KuiIOSuite {
     }
   }
 
+  test("the shared bearer variant remains unsupported for ksqlDB") {
+    val auth = UpstreamAuthConfig.Bearer(Secret("ksql-bearer-canary"))
+
+    kui.testkit.fakes
+      .FakeStructuredLogger[IO]
+      .flatMap { logger =>
+        KsqlCredentials
+          .fromConfig[IO](auth, None, logger)
+          .use(
+            _.authenticate(
+              basicRequest.get(sttp.model.Uri.unsafeParse("http://ksqldb/ksql")).response(asStringAlways)
+            )
+          )
+      }
+      .map {
+        case Left(error) =>
+          assertEquals(error.code, ErrorCode.UpstreamAuth)
+          assert(!error.toString.contains("ksql-bearer-canary"), error.toString)
+        case Right(_) => fail("ksqlDB accepted a shared bearer credential")
+      }
+  }
+
   test("an OAuth configuration with no token backend refuses every request rather than throwing") {
     // A ksqlDB KUI cannot authenticate to must show one unavailable section, exactly like a ksqlDB that is
     // down, and never stop a service that is also serving three other clusters.

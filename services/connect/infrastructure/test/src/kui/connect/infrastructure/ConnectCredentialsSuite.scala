@@ -72,6 +72,17 @@ final class ConnectCredentialsSuite extends KuiIOSuite {
     }
   }
 
+  test("the shared bearer variant remains unsupported for Connect") {
+    val auth = UpstreamAuthConfig.Bearer(Secret("connect-bearer-canary"))
+
+    credentials(auth, None).use(_.authenticate(request)).map {
+      case Left(error) =>
+        assertEquals(error.code, ErrorCode.UpstreamAuth)
+        assert(!error.toString.contains("connect-bearer-canary"), error.toString)
+      case Right(_) => fail("Connect accepted a shared bearer credential")
+    }
+  }
+
   test("an OAuth token is fetched once and reused while it is comfortably valid") {
     // Two requests, one token: an issuer asked once per request would be a denial of service KUI performs
     // against its own identity provider.

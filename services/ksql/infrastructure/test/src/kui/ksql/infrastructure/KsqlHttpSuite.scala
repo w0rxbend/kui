@@ -255,6 +255,20 @@ final class KsqlHttpSuite extends KuiIOSuite {
     }
   }
 
+  test("a pull query answer exactly at the byte ceiling is accepted") {
+    // JSON permits trailing whitespace, which makes this a valid empty query answer at the exact byte
+    // boundary rather than merely a direct unit test of the shared reader.
+    val atLimit = "[]" + (" " * (KsqlHttp.MaxPullQueryResponseBytes.toInt - 2))
+    val statement = KsqlStatement.parse("SELECT * FROM ORDERS;").toOption.get
+
+    server { case "/query" => (StatusCode.Ok, atLimit) }.execute(statement).map {
+      case Right(StatementOutcome.Rows(columns, rows)) =>
+        assertEquals(columns, Nil)
+        assertEquals(rows, Nil)
+      case other => fail(s"expected the exact-limit answer to be accepted, got $other")
+    }
+  }
+
   test("a push query that reached this adapter is a caller defect and says so rather than buffering") {
     val statement = KsqlStatement.parse("SELECT * FROM ORDERS EMIT CHANGES;").toOption.get
 

@@ -1,5 +1,6 @@
 package kui.config
 
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.time.Instant
@@ -236,6 +237,33 @@ object KuiConfigSource {
       fromCli ++ fromEnv ++ fromFiles
     }
 
+    /** Direct map members under `prefix` when their values may have nested, fixed-shape leaves.
+      *
+      * Environment names flatten both member IDs and leaf paths with underscores, so splitting at the last
+      * underscore is only valid for a one-segment leaf. Match the known leaf suffix instead: for example,
+      * `..._PRODUCTION_EU_AUTH_TYPE` is source `production-eu` plus `auth.type`, not source
+      * `production-eu-auth` plus `type`.
+      */
+    def mapMembersOf(prefix: String, envLeafPaths: Set[String]): Set[String] = {
+      val dotted = s"$prefix."
+      val fromCli = cli.keySet.filter(_.startsWith(dotted)).map(_.drop(dotted.length).takeWhile(_ != '.'))
+      val envPrefix = s"${Layers.envName(prefix)}_"
+      val suffixes = envLeafPaths.toList
+        .map(path => s"_${Layers.envName(path)}")
+        .sortBy(suffix => -suffix.length)
+      val fromEnv = env.keySet
+        .filter(_.startsWith(envPrefix))
+        .flatMap { key =>
+          val rest = key.drop(envPrefix.length)
+          suffixes.collectFirst {
+            case suffix if rest.endsWith(suffix) && rest.length > suffix.length =>
+              rest.dropRight(suffix.length).toLowerCase.replace('_', '-')
+          }
+        }
+      val fromFiles = files.flatMap(document => Layers.membersOf(document.json, prefix)).toSet
+      fromCli ++ fromEnv ++ fromFiles
+    }
+
     /** Numeric member names directly under `prefix`, in ascending order, across all three layers.
       *
       * [[childrenOf]] cannot be used for this. Its environment branch takes everything up to the *last*
@@ -402,6 +430,13 @@ object KuiConfigSource {
 
   private def readUrl(policy: UrlPolicy)(raw: String): Either[String, SafeUrl] =
     SafeUrl.from(raw, policy).leftMap(_.message)
+
+  /** Metrics source addresses are never rendered in startup diagnostics. `SafeUrl` messages predate that
+    * stronger query-core rule and may include the rejected address for SSRF diagnostics, so this boundary
+    * deliberately collapses every failure to one value-free sentence.
+    */
+  private def readMetricsSourceUrl(policy: UrlPolicy)(raw: String): Either[String, SafeUrl] =
+    SafeUrl.from(raw, policy).leftMap(_ => "is not an allowed http or https upstream URL")
 
   /** Origins are a list, and `*` is refused: combined with credentials it would let any website read a
     * signed-in user's Kafka data. ADR-019 makes the allow-list explicit for that reason.
@@ -1225,20 +1260,18 @@ object KuiConfigSource {
       (interval, window, cap, addresses, _) => MetricsConfig(interval, window, cap, addresses)
     )
 
-  /** The per-cluster sources, keyed by cluster id, discovered the way the gateway's services are.
+  /** The per-cluster sources, keyed by cluster id.
     *
-    * Every leaf under a source is a single segment on purpose. `Layers.childrenOf` reads an environment
-    * variable's member name as everything up to the *last* underscore, so `KUI_METRICS_SOURCES_LOCAL_URL`
-    * means the cluster `local`; a nested block would make `..._LOCAL_AUTH_USERNAME` discover a cluster called
-    * `local-auth` and then fail it for having no URL. A flat shape is what keeps the environment and the YAML
-    * file spelling the same thing.
+    * Sources have fixed nested auth/TLS leaves, so environment discovery strips a recognized leaf suffix
+    * rather than guessing at the last underscore. That keeps `..._LOCAL_AUTH_USERNAME` attached to `local`
+    * just as the equivalent YAML and command-line paths are.
     */
   private def decodeMetricsSources[F[_]: Async](
       layers: Layers,
       policy: UrlPolicy
   ): F[Problems[Map[ClusterId, MetricsSourceSettings]]] =
     layers
-      .childrenOf(MetricsSourcesPrefix)
+      .mapMembersOf(MetricsSourcesPrefix, MetricsSourceEnvLeafPaths)
       .toList
       .sorted
       .traverse(name => decodeMetricsSource[F](layers, policy, name))
@@ -1252,10 +1285,12 @@ object KuiConfigSource {
     val prefix = s"$MetricsSourcesPrefix.$name"
     for {
       url <- read[F, SafeUrl](
-        field(
+        Field(
           s"$prefix.url",
           "an http or https URL this deployment is allowed to call, such as http://broker-1:9404/metrics",
-          readUrl(policy)
+          readMetricsSourceUrl(policy),
+          None,
+          secret = true
         ),
         layers
       )
@@ -1281,6 +1316,103 @@ object KuiConfigSource {
         ),
         layers
       )
+      queryTimeout <- read[F, FiniteDuration](
+        field(
+          s"$prefix.queryTimeout",
+          s"a duration between ${MetricsSourceSettings.MinQueryTimeout} and " +
+            s"${MetricsSourceSettings.MaxQueryTimeout}",
+          readBoundedDuration(
+            MetricsSourceSettings.MinQueryTimeout,
+            MetricsSourceSettings.MaxQueryTimeout
+          ),
+          MetricsSourceSettings.DefaultQueryTimeout
+        ),
+        layers
+      )
+      maxConcurrentQueries <- read[F, Int](
+        field(
+          s"$prefix.maxConcurrentQueries",
+          s"a whole number between ${MetricsSourceSettings.MinConcurrentQueries} and " +
+            s"${MetricsSourceSettings.MaxConcurrentQueries}",
+          readBoundedInt(
+            MetricsSourceSettings.MinConcurrentQueries,
+            MetricsSourceSettings.MaxConcurrentQueries
+          ),
+          MetricsSourceSettings.DefaultMaxConcurrentQueries
+        ),
+        layers
+      )
+      maxSeriesPerQuery <- read[F, Int](
+        field(
+          s"$prefix.maxSeriesPerQuery",
+          s"a whole number between ${MetricsSourceSettings.MinSeriesPerQuery} and " +
+            s"${MetricsSourceSettings.MaxSeriesPerQuery}",
+          readBoundedInt(
+            MetricsSourceSettings.MinSeriesPerQuery,
+            MetricsSourceSettings.MaxSeriesPerQuery
+          ),
+          MetricsSourceSettings.DefaultMaxSeriesPerQuery
+        ),
+        layers
+      )
+      maxPointsPerSeries <- read[F, Int](
+        field(
+          s"$prefix.maxPointsPerSeries",
+          s"a whole number between ${MetricsSourceSettings.MinPointsPerSeries} and " +
+            s"${MetricsSourceSettings.MaxPointsPerSeries}",
+          readBoundedInt(
+            MetricsSourceSettings.MinPointsPerSeries,
+            MetricsSourceSettings.MaxPointsPerSeries
+          ),
+          MetricsSourceSettings.DefaultMaxPointsPerSeries
+        ),
+        layers
+      )
+      maxResponseBytes <- read[F, Int](
+        field(
+          s"$prefix.maxResponseBytes",
+          s"a whole number between ${MetricsSourceSettings.MinResponseBytes} and " +
+            s"${MetricsSourceSettings.MaxResponseBytes}",
+          readBoundedInt(
+            MetricsSourceSettings.MinResponseBytes,
+            MetricsSourceSettings.MaxResponseBytes
+          ),
+          MetricsSourceSettings.DefaultMaxResponseBytes
+        ),
+        layers
+      )
+      maxCacheBytes <- read[F, Int](
+        field(
+          s"$prefix.maxCacheBytes",
+          s"a whole number between ${MetricsSourceSettings.MinCacheBytes} and " +
+            s"${MetricsSourceSettings.MaxCacheBytes}",
+          readBoundedInt(MetricsSourceSettings.MinCacheBytes, MetricsSourceSettings.MaxCacheBytes),
+          MetricsSourceSettings.DefaultMaxCacheBytes
+        ),
+        layers
+      )
+      cacheTtl <- read[F, FiniteDuration](
+        field(
+          s"$prefix.cacheTtl",
+          s"a duration between ${MetricsSourceSettings.MinCacheTtl} and " +
+            s"${MetricsSourceSettings.MaxCacheTtl}",
+          readBoundedDuration(MetricsSourceSettings.MinCacheTtl, MetricsSourceSettings.MaxCacheTtl),
+          MetricsSourceSettings.DefaultCacheTtl
+        ),
+        layers
+      )
+      staleTtl <- read[F, FiniteDuration](
+        field(
+          s"$prefix.staleTtl",
+          s"a duration between ${MetricsSourceSettings.MinStaleTtl} and " +
+            s"${MetricsSourceSettings.MaxStaleTtl}",
+          readBoundedDuration(MetricsSourceSettings.MinStaleTtl, MetricsSourceSettings.MaxStaleTtl),
+          MetricsSourceSettings.DefaultStaleTtl
+        ),
+        layers
+      )
+      auth <- decodeMetricsSourceAuth[F](layers, policy, prefix)
+      tls <- decodeMetricsSourceTls[F](layers, prefix)
       // The member name is a cluster id and not a free label: it is how a source is matched to the cluster
       // in `kui.clusters[]`, so a name that could never be a `ClusterId` is a source that could never be
       // read, and saying so at load time is the difference between a typo and a card that never fills.
@@ -1296,12 +1428,278 @@ object KuiConfigSource {
           )
         )
         .toValidated
-    } yield (id, url, kind, callTimeout).mapN((clusterId, address, protocol, timeout) =>
-      clusterId -> MetricsSourceSettings(address, protocol, timeout)
+    } yield (
+      id,
+      url,
+      kind,
+      callTimeout,
+      queryTimeout,
+      maxConcurrentQueries,
+      maxSeriesPerQuery,
+      maxPointsPerSeries,
+      maxResponseBytes,
+      maxCacheBytes,
+      cacheTtl,
+      staleTtl,
+      auth,
+      tls
+    ).mapN {
+      (
+          clusterId,
+          address,
+          protocol,
+          callBudget,
+          queryBudget,
+          concurrency,
+          seriesCap,
+          pointsCap,
+          responseCap,
+          cacheCap,
+          freshFor,
+          staleFor,
+          credentials,
+          tlsConfig
+      ) =>
+        clusterId -> MetricsSourceSettings(
+          address,
+          protocol,
+          callBudget,
+          queryBudget,
+          concurrency,
+          seriesCap,
+          pointsCap,
+          responseCap,
+          cacheCap,
+          freshFor,
+          staleFor,
+          credentials,
+          tlsConfig
+        )
+    }.andThen { case pair @ (_, source) => validateMetricsSourceSecurity(layers, prefix, source).as(pair) }
+  }
+
+  private def decodeMetricsSourceAuth[F[_]: Async](
+      layers: Layers,
+      policy: UrlPolicy,
+      prefix: String
+  ): F[Problems[UpstreamAuthConfig]] = {
+    val kind = layers.first(s"$prefix.kind") match {
+      case None => Some(MetricsSourceKind.Prometheus)
+      case Some((_, raw)) => readMetricsSourceKind(raw).toOption
+    }
+    kind match {
+      case Some(MetricsSourceKind.PrometheusApi) =>
+        decodeUpstreamAuth[F](
+          layers,
+          s"$prefix.auth",
+          "Prometheus API",
+          policy,
+          UpstreamAuthConfig.Mechanism.All
+        ).map(
+          _.andThen {
+            case UpstreamAuthConfig.OAuth(endpoint, _, _, _)
+                if !endpoint.value.toLowerCase.startsWith("https://") =>
+              ConfigProblem(
+                s"$prefix.auth.tokenEndpoint",
+                "must use HTTPS for OAuth client credentials",
+                layers
+                  .first(s"$prefix.auth.tokenEndpoint")
+                  .map(_._1)
+                  .getOrElse(ConfigSourceName.Default)
+              ).invalidNel
+            case auth => auth.validNel
+          }
+        )
+      case _ => Async[F].pure(UpstreamAuthConfig.Anonymous.validNel)
+    }
+  }
+
+  private def decodeMetricsSourceTls[F[_]: Async](
+      layers: Layers,
+      prefix: String
+  ): F[Problems[HttpTlsConfig]] = {
+    val kind = layers.first(s"$prefix.kind") match {
+      case None => Some(MetricsSourceKind.Prometheus)
+      case Some((_, raw)) => readMetricsSourceKind(raw).toOption
+    }
+    kind match {
+      case Some(MetricsSourceKind.PrometheusApi) => decodeHttpTls[F](layers, s"$prefix.tls")
+      case _ => Async[F].pure(HttpTlsConfig.Default.validNel)
+    }
+  }
+
+  private def decodeHttpTls[F[_]: Async](layers: Layers, prefix: String): F[Problems[HttpTlsConfig]] = {
+    val trustPrefix = s"$prefix.truststore"
+    val keyPrefix = s"$prefix.keystore"
+    val trustConfigured =
+      HttpTlsConfig.keysUnder(prefix).filter(_.startsWith(trustPrefix)).exists(layers.first(_).isDefined)
+    val keyConfigured =
+      HttpTlsConfig.keysUnder(prefix).filter(_.startsWith(keyPrefix)).exists(layers.first(_).isDefined)
+
+    for {
+      truststore <-
+        if trustConfigured then decodeHttpTrustStore[F](layers, trustPrefix).map(_.map(_.some))
+        else Async[F].pure(none[HttpTrustStore].validNel)
+      keystore <-
+        if keyConfigured then decodeHttpKeyStore[F](layers, keyPrefix).map(_.map(_.some))
+        else Async[F].pure(none[HttpKeyStore].validNel)
+    } yield (truststore, keystore).mapN(HttpTlsConfig.apply)
+  }
+
+  private def decodeHttpTrustStore[F[_]: Async](
+      layers: Layers,
+      prefix: String
+  ): F[Problems[HttpTrustStore]] =
+    for {
+      format <- readHttpStoreFormat[F](layers, s"$prefix.type")
+      location <- readOptional[F, String](
+        field(s"$prefix.location", "a non-empty readable path", readNonEmpty),
+        layers
+      )
+      inline <- readOptionalUpstreamSecret[F](layers, s"$prefix.inline")
+      password <- readUpstreamSecret[F](layers, s"$prefix.password")
+      material = httpStoreMaterial(layers, prefix, location, inline)
+    } yield (material, password, format).mapN(HttpTrustStore.apply)
+
+  private def decodeHttpKeyStore[F[_]: Async](
+      layers: Layers,
+      prefix: String
+  ): F[Problems[HttpKeyStore]] =
+    for {
+      format <- readHttpStoreFormat[F](layers, s"$prefix.type")
+      location <- readOptional[F, String](
+        field(s"$prefix.location", "a non-empty readable path", readNonEmpty),
+        layers
+      )
+      inline <- readOptionalUpstreamSecret[F](layers, s"$prefix.inline")
+      password <- readUpstreamSecret[F](layers, s"$prefix.password")
+      keyPassword <- readUpstreamSecret[F](layers, s"$prefix.keyPassword")
+      material = httpStoreMaterial(layers, prefix, location, inline)
+    } yield (material, password, keyPassword, format).mapN(HttpKeyStore.apply)
+
+  private def readHttpStoreFormat[F[_]: Async](layers: Layers, key: String): F[Problems[HttpStoreFormat]] =
+    read[F, HttpStoreFormat](
+      field(
+        key,
+        HttpStoreFormat.All.map(_.wireName).mkString(" or "),
+        raw =>
+          HttpStoreFormat
+            .fromWire(raw)
+            .toRight(s"'$raw' is not ${HttpStoreFormat.All.map(_.wireName).mkString(" or ")}")
+      ),
+      layers
     )
+
+  private def readOptionalUpstreamSecret[F[_]: Async](
+      layers: Layers,
+      key: String
+  ): F[Problems[Option[Secret[String]]]] =
+    if layers.first(key).isEmpty then Async[F].pure(none[Secret[String]].validNel)
+    else readUpstreamSecret[F](layers, key).map(_.map(_.some))
+
+  private def httpStoreMaterial(
+      layers: Layers,
+      prefix: String,
+      location: Problems[Option[String]],
+      inline: Problems[Option[Secret[String]]]
+  ): Problems[HttpStoreMaterial] =
+    (location, inline).mapN((_, _)).andThen {
+      case (Some(path), None) => HttpStoreMaterial.Location(path).validNel
+      case (None, Some(material)) => HttpStoreMaterial.Inline(material).validNel
+      case _ =>
+        ConfigProblem(
+          prefix,
+          "must set exactly one of location or inline",
+          List(s"$prefix.location", s"$prefix.inline")
+            .flatMap(layers.first)
+            .headOption
+            .map(_._1)
+            .getOrElse(ConfigSourceName.Default)
+        ).invalidNel
+    }
+
+  private def validateMetricsSourceSecurity(
+      layers: Layers,
+      prefix: String,
+      source: MetricsSourceSettings
+  ): Problems[Unit] =
+    source.kind match {
+      case MetricsSourceKind.PrometheusApi =>
+        val uri = URI.create(source.url.value)
+        val baseRule = prometheusBaseUrlProblem(uri).fold(().validNel[ConfigProblem]) { problem =>
+          ConfigProblem(
+            s"$prefix.url",
+            problem,
+            layers.first(s"$prefix.url").map(_._1).getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+        }
+        val secure = Option(uri.getScheme).exists(_.equalsIgnoreCase("https"))
+        val requiresHttps = source.auth match {
+          case UpstreamAuthConfig.Anonymous => source.tls != HttpTlsConfig.Default
+          case _ => true
+        }
+        val transportRule =
+          if !requiresHttps || secure then ().validNel
+          else
+            ConfigProblem(
+              s"$prefix.url",
+              "must use HTTPS when authentication or custom TLS material is configured",
+              layers.first(s"$prefix.url").map(_._1).getOrElse(ConfigSourceName.Default)
+            ).invalidNel
+        (baseRule, transportRule).mapN((_, _) => ())
+
+      case _ => ().validNel
+    }
+
+  private def prometheusBaseUrlProblem(uri: URI): Option[String] = {
+    val path = Option(uri.getPath).getOrElse("").reverse.dropWhile(_ == '/').reverse
+    if Option(uri.getRawQuery).isDefined then
+      Some("must not contain a query string; configure the Prometheus server base URL")
+    else if Option(uri.getRawFragment).isDefined then
+      Some("must not contain a fragment; configure the Prometheus server base URL")
+    else if path.endsWith("/api/v1/query") || path.endsWith("/api/v1/query_range") then
+      Some("must be a Prometheus server base URL, not an /api/v1/query or /api/v1/query_range endpoint")
+    else None
   }
 
   private val MetricsSourcesPrefix: String = "kui.metrics.sources"
+
+  private val MetricsSourceQueryLeafPaths: Set[String] = Set(
+    "queryTimeout",
+    "maxConcurrentQueries",
+    "maxSeriesPerQuery",
+    "maxPointsPerSeries",
+    "maxResponseBytes",
+    "maxCacheBytes",
+    "cacheTtl",
+    "staleTtl"
+  )
+
+  /** The fixed leaves used only to recover a direct source ID from flattened environment names.
+    * Query/auth/TLS leaves are included before their decoders land so adding a nested setting cannot regress
+    * source discovery while those slices are implemented incrementally.
+    */
+  private val MetricsSourceEnvLeafPaths: Set[String] = Set(
+    "url",
+    "kind",
+    "callTimeout",
+    "queryTimeout",
+    "maxConcurrentQueries",
+    "maxSeriesPerQuery",
+    "maxPointsPerSeries",
+    "maxResponseBytes",
+    "maxCacheBytes",
+    "cacheTtl",
+    "staleTtl",
+    "auth.type",
+    "auth.username",
+    "auth.password",
+    "auth.token",
+    "auth.tokenEndpoint",
+    "auth.clientId",
+    "auth.clientSecret",
+    "auth.scope"
+  ) ++ HttpTlsConfig.keysUnder("tls")
 
   private def readMetricsSourceKind(raw: String): Either[String, MetricsSourceKind] =
     MetricsSourceKind
@@ -1340,15 +1738,18 @@ object KuiConfigSource {
       case _ => ().validNel
     }
 
-    // One scrape must finish before the next one starts, which is the rule `kui.topics.scrapeTimeout`
-    // already follows: a scrape that outlives its interval overlaps the next one and doubles the load on
-    // the exporter that is already the slow part.
+    // Exposition sources scrape on a cadence; API sources instead have a nested transport/query budget.
     val budgetRules = layers
-      .childrenOf(MetricsSourcesPrefix)
+      .mapMembersOf(MetricsSourcesPrefix, MetricsSourceEnvLeafPaths)
       .toList
       .sorted
       .map { name =>
-        val key = s"$MetricsSourcesPrefix.$name.callTimeout"
+        val prefix = s"$MetricsSourcesPrefix.$name"
+        val key = s"$prefix.callTimeout"
+        val kind = layers.first(s"$prefix.kind") match {
+          case None => Some(MetricsSourceKind.Prometheus)
+          case Some((_, raw)) => readMetricsSourceKind(raw).toOption
+        }
         val callTimeout = effectiveDuration(
           layers,
           key,
@@ -1356,17 +1757,114 @@ object KuiConfigSource {
           MetricsSourceSettings.MaxCallTimeout,
           MetricsSourceSettings.DefaultCallTimeout
         )
-        (scrapeInterval, callTimeout) match {
-          case (Some(interval), Some(budget)) if budget >= interval =>
-            val origin =
-              if layers.first("kui.metrics.scrapeInterval").isDefined then "" else ", which is the default"
-            ConfigProblem(
-              key,
-              s"($budget) must be shorter than kui.metrics.scrapeInterval " +
-                s"($interval$origin); a scrape that outlives its interval overlaps the next one",
-              layers.first(key).map(_._1).getOrElse(ConfigSourceName.Default)
-            ).invalidNel
-          case _ => ().validNel
+        kind match {
+          case Some(MetricsSourceKind.PrometheusApi) =>
+            val queryKey = s"$prefix.queryTimeout"
+            val queryTimeout = effectiveDuration(
+              layers,
+              queryKey,
+              MetricsSourceSettings.MinQueryTimeout,
+              MetricsSourceSettings.MaxQueryTimeout,
+              MetricsSourceSettings.DefaultQueryTimeout
+            )
+            val cacheKey = s"$prefix.cacheTtl"
+            val cacheTtl = effectiveDuration(
+              layers,
+              cacheKey,
+              MetricsSourceSettings.MinCacheTtl,
+              MetricsSourceSettings.MaxCacheTtl,
+              MetricsSourceSettings.DefaultCacheTtl
+            )
+            val staleKey = s"$prefix.staleTtl"
+            val staleTtl = effectiveDuration(
+              layers,
+              staleKey,
+              MetricsSourceSettings.MinStaleTtl,
+              MetricsSourceSettings.MaxStaleTtl,
+              MetricsSourceSettings.DefaultStaleTtl
+            )
+            val queryRule = (queryTimeout, callTimeout) match {
+              case (Some(query), Some(call)) if query >= call =>
+                ConfigProblem(
+                  queryKey,
+                  s"($query) must be shorter than $key ($call)",
+                  layers.first(queryKey).map(_._1).getOrElse(ConfigSourceName.Default)
+                ).invalidNel
+              case _ => ().validNel
+            }
+            val staleRule = (cacheTtl, staleTtl) match {
+              case (Some(fresh), Some(stale)) if stale < fresh =>
+                ConfigProblem(
+                  staleKey,
+                  s"($stale) must not be shorter than $cacheKey ($fresh)",
+                  layers.first(staleKey).map(_._1).getOrElse(ConfigSourceName.Default)
+                ).invalidNel
+              case _ => ().validNel
+            }
+            (queryRule, staleRule).mapN((_, _) => ())
+
+          case Some(_) =>
+            val scrapeRule = (scrapeInterval, callTimeout) match {
+              case (Some(interval), Some(budget)) if budget >= interval =>
+                val origin =
+                  if layers.first("kui.metrics.scrapeInterval").isDefined then ""
+                  else ", which is the default"
+                ConfigProblem(
+                  key,
+                  s"($budget) must be shorter than kui.metrics.scrapeInterval " +
+                    s"($interval$origin); a scrape that outlives its interval overlaps the next one",
+                  layers.first(key).map(_._1).getOrElse(ConfigSourceName.Default)
+                ).invalidNel
+              case _ => ().validNel
+            }
+            val queryOnlyRules = MetricsSourceQueryLeafPaths.toList.sorted
+              .flatMap { leaf =>
+                val leafKey = s"$prefix.$leaf"
+                layers.first(leafKey).map { (source, _) =>
+                  ConfigProblem(
+                    leafKey,
+                    "is only valid for a prometheus-api metrics source",
+                    source
+                  )
+                }
+              }
+            val queryOnlyRule = queryOnlyRules match {
+              case Nil => ().validNel
+              case first :: rest => NonEmptyList(first, rest).invalid[Unit]
+            }
+            val configuredAuthKeys = UpstreamAuthConfig
+              .keysUnder(s"$prefix.auth")
+              .filter(layers.first(_).isDefined)
+            val authRule = configuredAuthKeys match {
+              case Nil => ().validNel
+              case _ =>
+                ConfigProblem(
+                  s"$prefix.auth.type",
+                  "authentication is only valid for a prometheus-api metrics source",
+                  configuredAuthKeys
+                    .flatMap(layers.first)
+                    .headOption
+                    .map(_._1)
+                    .getOrElse(ConfigSourceName.Default)
+                ).invalidNel
+            }
+            val configuredTlsKeys = HttpTlsConfig.keysUnder(s"$prefix.tls").filter(layers.first(_).isDefined)
+            val tlsRule = configuredTlsKeys match {
+              case Nil => ().validNel
+              case _ =>
+                ConfigProblem(
+                  s"$prefix.tls",
+                  "TLS material is only valid for a prometheus-api metrics source",
+                  configuredTlsKeys
+                    .flatMap(layers.first)
+                    .headOption
+                    .map(_._1)
+                    .getOrElse(ConfigSourceName.Default)
+                ).invalidNel
+            }
+            (scrapeRule, queryOnlyRule, authRule, tlsRule).mapN((_, _, _, _) => ())
+
+          case None => ().validNel
         }
       }
       .sequence_
@@ -1947,7 +2445,13 @@ object KuiConfigSource {
         ),
         layers
       )
-      auth <- decodeUpstreamAuth[F](layers, s"$entry.auth", "Kafka Connect cluster", policy)
+      auth <- decodeUpstreamAuth[F](
+        layers,
+        s"$entry.auth",
+        "Kafka Connect cluster",
+        policy,
+        UpstreamAuthConfig.Mechanism.LegacyHttp
+      )
     } yield (name, urls, callTimeout, auth).mapN((connectName, addresses, timeout, credentials) =>
       ConnectClusterSettings(connectName, addresses, credentials, timeout)
     )
@@ -2030,7 +2534,13 @@ object KuiConfigSource {
           ),
           layers
         )
-        auth <- decodeUpstreamAuth[F](layers, s"$prefix.auth", "ksqlDB cluster", policy)
+        auth <- decodeUpstreamAuth[F](
+          layers,
+          s"$prefix.auth",
+          "ksqlDB cluster",
+          policy,
+          UpstreamAuthConfig.Mechanism.LegacyHttp
+        )
       } yield (urls, callTimeout, streamTimeout, auth, checkKsqlTimeouts(layers, prefix)).mapN(
         (addresses, call, stream, credentials, _) => Some(KsqlSettings(addresses, credentials, call, stream))
       )
@@ -2374,43 +2884,59 @@ object KuiConfigSource {
       layers: Layers,
       prefix: String,
       dependency: String,
-      policy: UrlPolicy
+      policy: UrlPolicy,
+      allowedMechanisms: Set[UpstreamAuthConfig.Mechanism]
   ): F[Problems[UpstreamAuthConfig]] = {
     val typeKey = s"$prefix.type"
     val basicKeys = List("username", "password").map(leaf => s"$prefix.$leaf")
+    val bearerKeys = List(s"$prefix.token")
     val oauthKeys = List("tokenEndpoint", "clientId", "clientSecret", "scope").map(leaf => s"$prefix.$leaf")
 
     /** Keys that belong to a mechanism other than the one chosen. */
     def surplus(allowed: List[String], chosen: String): Problems[Unit] =
-      (basicKeys ++ oauthKeys).filterNot(allowed.contains).filter(layers.first(_).isDefined) match {
+      (basicKeys ++ bearerKeys ++ oauthKeys)
+        .filterNot(allowed.contains)
+        .filter(layers.first(_).isDefined) match {
         case Nil => ().validNel
         case offenders =>
           ConfigProblem(
             typeKey,
             s"is '$chosen', so ${offenders.mkString(", ")} " +
               s"${if offenders.sizeIs == 1 then "is" else "are"} not read. KUI authenticates to a " +
-              s"$dependency with basic credentials or with OAuth client credentials, never both; remove " +
+              s"$dependency with exactly one authentication mechanism, never both; remove " +
               "the keys belonging to the mechanism you are not using",
             layers.first(typeKey).map(_._1).getOrElse(ConfigSourceName.Default)
           ).invalidNel
       }
 
-    read[F, String](
+    read[F, UpstreamAuthConfig.Mechanism](
       field(
         typeKey,
-        "none, basic or oauth",
-        raw => UpstreamAuthConfig.fromWire(raw).toRight(s"'$raw' is not none, basic or oauth"),
-        "none"
+        "none, basic, bearer or oauth",
+        raw =>
+          UpstreamAuthConfig
+            .fromWire(raw)
+            .toRight(s"'$raw' is not none, basic, bearer or oauth"),
+        UpstreamAuthConfig.Mechanism.None
       ),
       layers
     ).flatMap {
       case cats.data.Validated.Invalid(problems) =>
         Async[F].pure(cats.data.Validated.Invalid(problems))
 
-      case cats.data.Validated.Valid("none") =>
+      case cats.data.Validated.Valid(mechanism) if !allowedMechanisms.contains(mechanism) =>
+        Async[F].pure(
+          ConfigProblem(
+            typeKey,
+            s"is '${mechanism.wireName}', which is not supported for this $dependency",
+            layers.first(typeKey).map(_._1).getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+        )
+
+      case cats.data.Validated.Valid(UpstreamAuthConfig.Mechanism.None) =>
         Async[F].pure(surplus(Nil, "none").map(_ => UpstreamAuthConfig.Anonymous))
 
-      case cats.data.Validated.Valid("basic") =>
+      case cats.data.Validated.Valid(UpstreamAuthConfig.Mechanism.Basic) =>
         for {
           username <- read[F, String](
             field(s"$prefix.username", s"the user name the $dependency knows KUI by", readNonEmpty),
@@ -2420,7 +2946,11 @@ object KuiConfigSource {
         } yield (username, password, surplus(basicKeys, "basic"))
           .mapN((user, secret, _) => UpstreamAuthConfig.Basic(user, secret))
 
-      case cats.data.Validated.Valid(_) =>
+      case cats.data.Validated.Valid(UpstreamAuthConfig.Mechanism.Bearer) =>
+        readUpstreamSecret[F](layers, s"$prefix.token")
+          .map((_, surplus(bearerKeys, "bearer")).mapN((token, _) => UpstreamAuthConfig.Bearer(token)))
+
+      case cats.data.Validated.Valid(UpstreamAuthConfig.Mechanism.OAuth) =>
         for {
           endpoint <- read[F, SafeUrl](
             field(
@@ -2453,12 +2983,27 @@ object KuiConfigSource {
       prefix: String,
       policy: UrlPolicy
   ): F[Problems[RegistryAuthConfig]] =
-    decodeUpstreamAuth[F](layers, prefix, "Schema Registry", policy).map(_.map {
-      case UpstreamAuthConfig.Anonymous => RegistryAuthConfig.Anonymous
-      case UpstreamAuthConfig.Basic(username, password) => RegistryAuthConfig.Basic(username, password)
-      case UpstreamAuthConfig.OAuth(endpoint, clientId, clientSecret, scope) =>
-        RegistryAuthConfig.OAuth(endpoint, clientId, clientSecret, scope)
-    })
+    decodeUpstreamAuth[F](
+      layers,
+      prefix,
+      "Schema Registry",
+      policy,
+      UpstreamAuthConfig.Mechanism.LegacyHttp
+    ).map(
+      _.andThen {
+        case UpstreamAuthConfig.Anonymous => RegistryAuthConfig.Anonymous.validNel
+        case UpstreamAuthConfig.Basic(username, password) =>
+          RegistryAuthConfig.Basic(username, password).validNel
+        case UpstreamAuthConfig.OAuth(endpoint, clientId, clientSecret, scope) =>
+          RegistryAuthConfig.OAuth(endpoint, clientId, clientSecret, scope).validNel
+        case UpstreamAuthConfig.Bearer(_) =>
+          ConfigProblem(
+            s"$prefix.type",
+            "is 'bearer', which is not supported for this Schema Registry",
+            layers.first(s"$prefix.type").map(_._1).getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+      }
+    )
 
   /** One upstream credential, with its `env:` or `file:` reference already followed.
     *
@@ -2830,6 +3375,14 @@ object KuiConfigSource {
       List("kui", "metrics", "sources", "*", "url"),
       List("kui", "metrics", "sources", "*", "kind"),
       List("kui", "metrics", "sources", "*", "callTimeout"),
+      List("kui", "metrics", "sources", "*", "queryTimeout"),
+      List("kui", "metrics", "sources", "*", "maxConcurrentQueries"),
+      List("kui", "metrics", "sources", "*", "maxSeriesPerQuery"),
+      List("kui", "metrics", "sources", "*", "maxPointsPerSeries"),
+      List("kui", "metrics", "sources", "*", "maxResponseBytes"),
+      List("kui", "metrics", "sources", "*", "maxCacheBytes"),
+      List("kui", "metrics", "sources", "*", "cacheTtl"),
+      List("kui", "metrics", "sources", "*", "staleTtl"),
       List("kui", "alerts", "retention"),
       List("kui", "alerts", "evaluationInterval"),
       List("kui", "alerts", "thresholds", "offlinePartitions"),
@@ -2895,9 +3448,15 @@ object KuiConfigSource {
       List("kui", "clusters", "*", "masking", "*", "keep", "prefix"),
       List("kui", "clusters", "*", "masking", "*", "keep", "suffix"),
       List("kui", "clusters", "*", "properties", "**")
-    ) ++ UpstreamAuthConfig
-      .keysUnder("kui.clusters.*.connect.*.auth")
+    ) ++ HttpTlsConfig
+      .keysUnder("kui.metrics.sources.*.tls")
       .map(_.split('.').toList)
+      ++ UpstreamAuthConfig
+        .keysUnder("kui.metrics.sources.*.auth")
+        .map(_.split('.').toList)
+      ++ UpstreamAuthConfig
+        .keysUnder("kui.clusters.*.connect.*.auth")
+        .map(_.split('.').toList)
       ++ UpstreamAuthConfig.keysUnder("kui.clusters.*.ksql.auth").map(_.split('.').toList)
       ++ AuthConfigSection.keys ++ RbacConfigSection.keys ++ ClusterSecurityConfig
         .keysUnder("kui.store.kafka.security")

@@ -190,15 +190,24 @@ final class CursorCodecSuite extends ScalaCheckSuite {
     )
   }
 
+  test("oversizedRawCursorIsRejectedBeforeDecode") {
+    val tiny = CursorCodec.hmacSha256[IO](key, maxBytes = 64)
+    val oversized = "a" * 65
+    val decoded = tiny.decode(oversized, (cluster, topic), now).unsafeRunSync()
+
+    assertEquals(decoded.swap.map(_.code), Right(ErrorCode.CursorInvalid))
+    assert(decoded.swap.exists(_.message.contains("64-byte limit")))
+  }
+
   test("forwardAndBackwardBoundariesDifferByExactlyOne") {
     // The off-by-one that duplicates or skips exactly one record on every page boundary, pinned as its own
-    // case. A forward page resumes *after* the last record it showed; a backward page's next window *ends*
-    // where this one began, and the range is half-open, so it is the first offset seen and not one below it.
+    // case. A forward page resumes *after* the last record it processed; a backward page's next window *ends*
+    // at the oldest record it processed, and the range is half-open, so the boundary itself is not repeated.
     val request = browseRequest(Direction.Forward)
-    val seen = Map(PartitionId.unsafe(0) -> Offset.unsafe(99L))
+    val boundary = Map(PartitionId.unsafe(0) -> Offset.unsafe(99L))
 
-    val forward = BrowseCursor.afterForward(request, seen, now, 1.hour)
-    val backward = BrowseCursor.beforeBackward(browseRequest(Direction.Backward), seen, now, 1.hour)
+    val forward = BrowseCursor.afterForward(request, boundary, now, 1.hour)
+    val backward = BrowseCursor.beforeBackward(browseRequest(Direction.Backward), boundary, now, 1.hour)
 
     assertEquals(forward.perPartitionNext(PartitionId.unsafe(0)).value, 100L)
     assertEquals(backward.perPartitionNext(PartitionId.unsafe(0)).value, 99L)

@@ -8,10 +8,11 @@ import io.circe.Json
 import munit.FunSuite
 
 import kui.contracts.message.{DecodeErrorDto, DecodedPayloadDto}
+import kui.contracts.sse.DoneReason
 import kui.kernel.browse.PollBudget
 import kui.kernel.serde.{PayloadKind, SerdeName, Target}
 import kui.kernel.{Offset, PartitionId}
-import kui.message.application.BrowseEvent
+import kui.message.application.{BrowseEnd, BrowseEvent}
 import kui.message.contract.MessageDto
 import kui.message.domain.{DecodeError, Decoded, DecodedRecord, RenderedHeader, TimestampType}
 
@@ -124,6 +125,10 @@ final class MessageMappingSuite extends FunSuite {
     assertEquals(budget.get[Int]("recordsLeft"), Right(0))
     assertEquals(budget.get[Long]("bytesLeft"), Right(0L))
     assertEquals(budget.get[Long]("millisLeft"), Right(0L))
+  }
+
+  test("a raw scan budget ending is distinct from an exhausted topic on the wire") {
+    assertEquals(MessageMapping.doneReason(BrowseEnd.Budget), DoneReason.Budget)
   }
 
   test("a record whose producer stamped no timestamp is reported as create-time") {

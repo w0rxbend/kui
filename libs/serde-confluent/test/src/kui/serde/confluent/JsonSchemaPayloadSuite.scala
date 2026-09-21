@@ -37,7 +37,10 @@ final class JsonSchemaPayloadSuite extends FunSuite {
 
     // Decoding does not validate: bytes already in the topic are shown as they are, matching schema or not.
     val notMatchingTheSchema = """{"id":42}"""
-    assertEquals(JsonSchemaPayload.decode(notMatchingTheSchema.getBytes("UTF-8")), Right(notMatchingTheSchema))
+    assertEquals(
+      JsonSchemaPayload.decode(notMatchingTheSchema.getBytes("UTF-8")),
+      Right(notMatchingTheSchema)
+    )
   }
 
   test("bytes that are not JSON at all are rejected with a clear message, not thrown") {

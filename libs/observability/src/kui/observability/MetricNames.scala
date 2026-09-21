@@ -5,8 +5,8 @@ package kui.observability
   * A metric name is an interface. Someone builds a dashboard on `kui.upstream.duration`, and a rename — or a
   * second module inventing `kui.upstream.latency` for the same thing — breaks it silently: the panel does not
   * fail, it just goes empty, and nobody notices until an incident. Names living here as constants means a
-  * rename is a compile error at every call site, and `MetricNamesSuite` asserts this list against the one in
-  * PLAN §30 and `ARCHITECTURE.md` §13, so the plan and the code cannot drift apart either.
+  * rename is a compile error at every call site, and `MetricNamesSuite` asserts this list against the
+  * operator catalogue and the approved feature specifications, so documentation and code cannot drift.
   *
   * The milestone in a comment is when the metric starts being *emitted*. Every name is declared now, because
   * the alternative is discovering during M3 that the obvious name was already taken by something else.
@@ -28,6 +28,17 @@ object MetricNames {
 
   val CacheHits: String = "kui.cache.hits" // {cache}
   val CacheMisses: String = "kui.cache.misses" // {cache}
+
+  val PrometheusQueryDuration: String = "kui.prometheus.query.duration"
+  val PrometheusQueryRequests: String = "kui.prometheus.query.requests"
+  val PrometheusResponseBytes: String = "kui.prometheus.response.bytes"
+  val PrometheusResponseSeries: String = "kui.prometheus.response.series"
+  val PrometheusResponseSamples: String = "kui.prometheus.response.samples"
+  val PrometheusQueryInFlight: String = "kui.prometheus.query.inflight"
+  val PrometheusQueryCacheAccess: String = "kui.prometheus.query.cache.access"
+  val PrometheusQueryCoalesced: String = "kui.prometheus.query.coalesced"
+  val PrometheusQueryLimitRejected: String = "kui.prometheus.query.limit.rejected"
+  val PrometheusQueryDiagnostics: String = "kui.prometheus.query.diagnostics"
 
   /** What the UI is allowed to show, per service and cluster (ADR-039). */
   val CapabilityState: String = "kui.capability.state" // {service, cluster, state}
@@ -103,7 +114,7 @@ object MetricNames {
     */
   val MaskingApplied: String = "kui.masking.applied" // {cluster, topic, target}                      (M3)
 
-  /** Every name, in the order PLAN §30 lists them followed by the `ARCHITECTURE.md` §13 additions.
+  /** Every name, in operator-catalogue order.
     *
     * Every name declared above is in here. There is no "declared but unpinned" tier: a constant that is not
     * in this list is invisible to `MetricNamesSuite`, to the operator table that suite compares against, and
@@ -118,6 +129,16 @@ object MetricNames {
     KafkaConsumeBytes,
     CacheHits,
     CacheMisses,
+    PrometheusQueryDuration,
+    PrometheusQueryRequests,
+    PrometheusResponseBytes,
+    PrometheusResponseSeries,
+    PrometheusResponseSamples,
+    PrometheusQueryInFlight,
+    PrometheusQueryCacheAccess,
+    PrometheusQueryCoalesced,
+    PrometheusQueryLimitRejected,
+    PrometheusQueryDiagnostics,
     CapabilityState,
     StreamEvents,
     StreamActive,
@@ -155,6 +176,9 @@ object MetricNames {
     val Cluster: String = "cluster"
     val Operation: String = "operation"
     val Cache: String = "cache"
+    val Source: String = "source"
+    val Query: String = "query"
+    val Limit: String = "limit"
     val State: String = "state"
     val Stream: String = "stream"
     val Event: String = "event"
@@ -174,6 +198,9 @@ object MetricNames {
       Cluster,
       Operation,
       Cache,
+      Source,
+      Query,
+      Limit,
       State,
       Stream,
       Event,

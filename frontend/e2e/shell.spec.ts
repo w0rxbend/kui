@@ -171,7 +171,10 @@ test.describe("the shell", () => {
     api,
   }) => {
     const body = (await api.get(`/api/v1/clusters/${CLUSTER}/alerts/events`)) as {
-      events?: { status?: string; data?: { items?: readonly unknown[] } };
+      events?: {
+        status?: string;
+        data?: { items?: readonly unknown[]; unreadCount?: number };
+      };
     };
     const section = body.events;
 
@@ -189,9 +192,11 @@ test.describe("the shell", () => {
         await expect(panel).toContainText("Nothing to report");
       } else {
         await expect(panel.locator(".kui-notices__item")).toHaveCount(rows.length);
-        /* The control that makes the bell's mark meaningful. Present only where there is something
-           to mark, which is why it is asserted inside this branch and not above it. */
-        await expect(panel.getByRole("button", { name: "Mark all read" })).toBeVisible();
+        /* Historical rows stay visible after acknowledgement. The server's unread aggregate — not
+           the number of rows in this page — decides whether there is anything left to mark. */
+        const markAll = panel.getByRole("button", { name: "Mark all read" });
+        if ((section.data?.unreadCount ?? 0) > 0) await expect(markAll).toBeVisible();
+        else await expect(markAll).toHaveCount(0);
       }
     } else {
       /* Refused, unavailable or not configured. Each has its own sentence and none of them is the

@@ -802,6 +802,11 @@ describe("the healthy dashboard", () => {
     const { container } = show(HEALTHY);
     const card = container.querySelector('[data-testid="stat-in-sync"]');
     expect(card?.textContent).toContain("100.0%");
+    // The old 44px ring left only 26px for `100.0%` plus its caption, so both strings crossed the
+    // arc. A real micro-gauge needs a large enough centre and can round its duplicate reading: the
+    // card immediately beside it still carries the precise one-decimal figure.
+    expect(card?.querySelector<HTMLElement>(".kui-gauge__ring")?.style.width).toBe("64px");
+    expect(card?.querySelector(".kui-gauge__figure")?.textContent).toBe("100%");
     // `data-tone` is the gauge's own published judgement, which is what a test should read rather
     // than a fill colour a theme is allowed to change.
     expect(card?.querySelector(".kui-gauge")?.getAttribute("data-tone")).toBe("success");

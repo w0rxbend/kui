@@ -185,6 +185,8 @@
   min-width: 0;
   text-decoration: none;
   color: inherit;
+  container-name: kui-stat;
+  container-type: inline-size;
 }
 
 .kui-stat--link:hover {
@@ -286,6 +288,24 @@
 .kui-stat__pill-slot {
   display: flex;
   min-width: 0;
+}
+
+/* At the grid's 15rem floor the card has only about 13rem inside its padding. Keep the primary
+ * figure and the fixed-size micro-visual on one readable line instead of letting either overlap or
+ * clipping the visual's centre label. Wider cards retain the full display scale. */
+@container kui-stat (max-width: 14rem) {
+  .kui-stat__row {
+    gap: var(--kui-space-2);
+  }
+
+  .kui-stat__value,
+  .kui-stat__unknown {
+    font-size: var(--kui-font-size-2xl);
+  }
+
+  .kui-stat__visual {
+    max-width: 42%;
+  }
 }
 
 /* --- Empty and failure surfaces ---------------------------------------------------------------

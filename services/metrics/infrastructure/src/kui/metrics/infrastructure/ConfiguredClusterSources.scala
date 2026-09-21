@@ -7,6 +7,17 @@ import kui.config.{ClusterConfig, MetricsConfig, MetricsSourceKind, MetricsSourc
 import kui.kernel.ClusterId
 import kui.metrics.application.{ClusterSources, SourceProfile}
 import kui.metrics.domain.MetricsSourcePort
+import kui.metrics.infrastructure.prometheus.PrometheusQueryClient
+
+/** Infrastructure-only lookup for the bounded Prometheus query transport owned by one configured cluster.
+  *
+  * It deliberately does not extend the public metrics port: query results need the server-owned Kafka metric
+  * catalog before they can satisfy those contracts, so an API source remains `not_configured` at the public
+  * boundary until that catalog exists.
+  */
+private[metrics] trait PrometheusQuerySources[F[_]] {
+  private[metrics] def queryClient(cluster: ClusterId): F[Option[PrometheusQueryClient[F]]]
+}
 
 /** The clusters this process was configured with, and the metrics sources some of them declare.
   *
@@ -27,8 +38,8 @@ import kui.metrics.domain.MetricsSourcePort
   * ==Where the collectors come from==
   *
   * They are built in [[kui.metrics.app.MetricsWiring]], one per cluster that names a Prometheus source, and
-  * handed in here. This class holds no client and starts nothing: a buffer with a scrape loop behind it has a
-  * lifetime, and a lifetime belongs to the composition root's `Resource` rather than to a lookup table.
+  * handed in here. This class holds collector and query-client references but starts and owns no resources:
+  * their lifetimes belong to the composition root's `Resource`, not to a lookup table.
   *
   * A cluster whose entry names `MetricsSourceKind.Jmx` gets **no** collector and an `unreadableReason` saying
   * why. It is not a failure and it is not silence: the endpoint answers `not_configured`, the capability row
@@ -36,8 +47,10 @@ import kui.metrics.domain.MetricsSourcePort
   */
 final class ConfiguredClusterSources[F[_]: Applicative](
     profiles: List[SourceProfile],
-    ports: Map[ClusterId, MetricsSourcePort[F]] = Map.empty[ClusterId, MetricsSourcePort[F]]
-) extends ClusterSources[F] {
+    ports: Map[ClusterId, MetricsSourcePort[F]] = Map.empty[ClusterId, MetricsSourcePort[F]],
+    queryClients: Map[ClusterId, PrometheusQueryClient[F]] = Map.empty[ClusterId, PrometheusQueryClient[F]]
+) extends ClusterSources[F]
+    with PrometheusQuerySources[F] {
 
   private val byId: Map[ClusterId, SourceProfile] =
     profiles.map(profile => profile.cluster -> profile).toMap
@@ -47,6 +60,9 @@ final class ConfiguredClusterSources[F[_]: Applicative](
   def profile(cluster: ClusterId): F[Option[SourceProfile]] = byId.get(cluster).pure[F]
 
   def source(cluster: ClusterId): F[Option[MetricsSourcePort[F]]] = ports.get(cluster).pure[F]
+
+  private[metrics] def queryClient(cluster: ClusterId): F[Option[PrometheusQueryClient[F]]] =
+    queryClients.get(cluster).pure[F]
 }
 
 object ConfiguredClusterSources {
@@ -85,7 +101,23 @@ object ConfiguredClusterSources {
     clusters.flatMap(cluster =>
       metrics
         .sourceFor(cluster.id)
-        .filter(source => unreadable(cluster.id, source.kind).isEmpty)
+        .filter(_.kind == MetricsSourceKind.Prometheus)
+        .map(cluster.id -> _)
+    )
+
+  /** Which clusters own an on-demand Prometheus HTTP query client.
+    *
+    * Kept separate from [[scrapable]] so adding query support cannot accidentally start a scrape fibre or
+    * allocate an exposition buffer for an API source.
+    */
+  private[metrics] def queryable(
+      clusters: List[ClusterConfig],
+      metrics: MetricsConfig
+  ): List[(ClusterId, MetricsSourceSettings)] =
+    clusters.flatMap(cluster =>
+      metrics
+        .sourceFor(cluster.id)
+        .filter(_.kind == MetricsSourceKind.PrometheusApi)
         .map(cluster.id -> _)
     )
 
@@ -96,6 +128,12 @@ object ConfiguredClusterSources {
     */
   def unreadable(cluster: ClusterId, kind: MetricsSourceKind): Option[String] = kind match {
     case MetricsSourceKind.Prometheus => None
+    case MetricsSourceKind.PrometheusApi =>
+      Some(
+        s"cluster ${cluster.value} configures kui.metrics.sources.${cluster.value}.kind: prometheus-api, " +
+          "and its query client is available internally, but no server-owned Kafka metrics catalog maps " +
+          "it to the public metric sections in this build yet"
+      )
     case MetricsSourceKind.Jmx =>
       Some(
         s"cluster ${cluster.value} configures kui.metrics.sources.${cluster.value}.kind: jmx, and this " +

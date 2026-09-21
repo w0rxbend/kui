@@ -6,9 +6,8 @@ import munit.FunSuite
 
 /** That the metric names in the code are the ones the documentation promises.
   *
-  * The expected list below is written out in full rather than derived from `MetricNames.all`, which is the
-  * entire point: a name that changes has to be changed in two places, and the second place is a test whose
-  * diff a reviewer reads.
+  * The expected list below is written out in full rather than derived from `MetricNames.all`. A name that
+  * changes has to be changed in two places, and the second place is a test whose diff a reviewer reads.
   *
   * ==What this suite actually reads, because the operator page used to overstate it==
   *
@@ -21,7 +20,7 @@ import munit.FunSuite
   */
 final class MetricNamesSuite extends FunSuite {
 
-  /** Copied from PLAN §30, then the `ARCHITECTURE.md` §13 additions, in that order. */
+  /** Copied from the approved metric contracts, in operator-catalogue order. */
   private val expected = List(
     "kui.http.server.duration",
     "kui.upstream.duration",
@@ -31,6 +30,16 @@ final class MetricNamesSuite extends FunSuite {
     "kui.kafka.consume.bytes",
     "kui.cache.hits",
     "kui.cache.misses",
+    "kui.prometheus.query.duration",
+    "kui.prometheus.query.requests",
+    "kui.prometheus.response.bytes",
+    "kui.prometheus.response.series",
+    "kui.prometheus.response.samples",
+    "kui.prometheus.query.inflight",
+    "kui.prometheus.query.cache.access",
+    "kui.prometheus.query.coalesced",
+    "kui.prometheus.query.limit.rejected",
+    "kui.prometheus.query.diagnostics",
     "kui.capability.state",
     // ARCHITECTURE.md §13 additions
     "kui.stream.events",
@@ -54,7 +63,7 @@ final class MetricNamesSuite extends FunSuite {
     "kui.masking.applied"
   )
 
-  test("the list matches PLAN §30 and ARCHITECTURE.md §13, exactly and in order") {
+  test("the list matches the approved metric contracts, exactly and in order") {
     assertEquals(MetricNames.all, expected)
   }
 
@@ -99,6 +108,26 @@ final class MetricNamesSuite extends FunSuite {
       Nil,
       "this build declares a metric docs/operations/observability.md's table does not name"
     )
+  }
+
+  test("the operator table pins every Prometheus-query metric to its bounded attribute set") {
+    val common = List("source", "query", "operation")
+    val expected = Map(
+      MetricNames.PrometheusQueryDuration -> (common :+ "outcome"),
+      MetricNames.PrometheusQueryRequests -> (common :+ "outcome"),
+      MetricNames.PrometheusResponseBytes -> common,
+      MetricNames.PrometheusResponseSeries -> common,
+      MetricNames.PrometheusResponseSamples -> common,
+      MetricNames.PrometheusQueryInFlight -> common,
+      MetricNames.PrometheusQueryCacheAccess -> (common :+ "state"),
+      MetricNames.PrometheusQueryCoalesced -> common,
+      MetricNames.PrometheusQueryLimitRejected -> (common :+ "limit"),
+      MetricNames.PrometheusQueryDiagnostics -> (common :+ "kind")
+    )
+
+    val documented = documentedMetricAttributes
+    val actual = expected.keysIterator.map(name => name -> documented.getOrElse(name, Nil)).toMap
+    assertEquals(actual, expected)
   }
 
   test("no metric name is declared and then left out of the list every gate reads") {
@@ -193,6 +222,18 @@ final class MetricNamesSuite extends FunSuite {
     // failure mode of every document check ever written.
     assert(names.sizeIs > 20, s"observability.md's metric table read as ${names.size} rows: $names")
     names
+  }
+
+  private def documentedMetricAttributes: Map[String, List[String]] = {
+    val document = Files.readString(resolve("docs/operations/observability.md"))
+    val row = "^\\| `(kui\\.[a-z0-9.]+)` \\| ([^|]+) \\|".r
+    val attribute = "`([a-z]+)`".r
+
+    document.linesIterator.flatMap { line =>
+      row
+        .findFirstMatchIn(line)
+        .map(matched => matched.group(1) -> attribute.findAllMatchIn(matched.group(2)).map(_.group(1)).toList)
+    }.toMap
   }
 
   private def resolve(relative: String): Path = {

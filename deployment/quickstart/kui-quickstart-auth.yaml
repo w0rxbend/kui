@@ -178,7 +178,7 @@ kui:
     # `__`, which catches Kafka's own `__consumer_offsets`. The quickstart lowers it to a single
     # underscore because it seeds `_schemas` — the topic Confluent Schema Registry keeps its schemas
     # in — and a single leading underscore is the convention infrastructure topics like that use. With
-    # this set, the topics screen shows the seven topics that are yours and hides `_schemas` and
+    # this set, the topics screen shows the ten topics that are yours and hides `_schemas` and
     # `__consumer_offsets` behind the "show internal topics" switch.
     internalPrefix: "_"
 
@@ -298,7 +298,7 @@ kui:
       # THE WORKER RUNS ONE CONNECTOR, and this comment said it ran none until wave 11. `--with-auth`
       # applies ./docker-compose.auth.yml as an OVERRIDE over ./docker-compose.quickstart.yml, and
       # that override changes two services — which configuration file KUI reads, and the credentials
-      # the Avro seed signs in with. `connect-seed` is not one of them, so it runs here exactly as it
+      # the schema seed signs in with. `connect-seed` is not one of them, so it runs here exactly as it
       # runs in the default quickstart and registers the same connector. The empty-worker state lives
       # in `deployment/compose`, whose worker runs nothing.
       #
@@ -312,18 +312,16 @@ kui:
 
       # Which serde reads which topic.
       #
-      # `defaultValue` is deliberately NOT set to SchemaRegistry here. Only one topic in this
-      # quickstart is Avro, and the other seven are JSON or plain text; a per-topic pattern says
-      # exactly that, and it is also the setting an operator is most likely to need on a real
-      # cluster where one team's topics are Avro and another's are not. A cluster that is Avro
-      # throughout writes `defaultValue: SchemaRegistry` instead and no patterns at all.
+      # `defaultValue` is deliberately NOT set to SchemaRegistry here. Three topics exercise the
+      # registry's Avro, JSON Schema and Protobuf wire formats; the other topics are plain JSON or
+      # text. A per-topic pattern says exactly that, which is also what a mixed real cluster needs.
       #
-      # The pattern matches a whole topic name. `orders\.avro` matches the topic of that name and
-      # not `orders.avro.retry`, because the dot is escaped and the match is anchored at both ends.
+      # The pattern matches a whole topic name. It selects exactly the three registry fixtures and
+      # not a suffix such as `orders.avro.retry`, because resolution anchors the expression.
       serde:
         patterns:
           - serde: SchemaRegistry
-            topicValuesPattern: "orders\\.avro"
+            topicValuesPattern: "orders\\.(avro|jsonschema|protobuf)"
 
       # WHICH FIELDS NEVER LEAVE THE SERVICE IN FULL (DM-001, ADR-023).
       #

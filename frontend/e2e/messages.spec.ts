@@ -17,12 +17,50 @@
  *
  * Everything here reads except the last case, which publishes one record into a topic it created.
  */
+import type { Page } from "@playwright/test";
 import { test, expect, CLUSTER, removeTopic, scratchTopic } from "./fixtures";
 
 // It shares the cluster with the other specs, and the last case writes to it.
 test.describe.configure({ mode: "serial" });
 
 const TOPIC = "orders.v1";
+
+async function applyFieldFilter(
+  page: Page,
+  topic: string,
+  path: string,
+  value: string,
+  serdes = "",
+): Promise<void> {
+  await page.goto(
+    `/ui/clusters/${CLUSTER}/topics/${encodeURIComponent(topic)}/messages?seekTo=beginning${serdes}`,
+  );
+  await page.getByRole("button", { name: "Filter with an expression" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Field filter" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await dialog.getByLabel("Field path").fill(path);
+  await dialog.getByLabel("Compare with").fill(value);
+
+  const registration = page.waitForResponse(
+    (response) =>
+      response.url().includes("/messages/filters") && response.request().method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Use this filter" }).click();
+  expect((await registration).ok()).toBe(true);
+  await expect(dialog).toBeHidden();
+
+  const browse = page.waitForRequest((request) => request.url().includes("/messages/stream"));
+  await page.getByRole("button", { name: /^read$/i }).first().click();
+  await browse;
+  await expect(page.locator(".kui-browse__phase")).toContainText("Finished", {
+    timeout: 30_000,
+  });
+}
 
 /** The topic's own partition count, straight from the gateway. The screen has to agree with this. */
 async function partitionCount(api: { get: (path: string) => Promise<unknown> }): Promise<number> {
@@ -137,6 +175,249 @@ test.describe("the typed predicates", () => {
     await browse;
 
     expect(filterCalls).toEqual([]);
+  });
+});
+
+test.describe("offset cursor pagination", () => {
+  test("pages cache backwards navigation and infinite scroll preloads one continuation at a time", async ({
+    page,
+  }) => {
+    const streamUrls: string[] = [];
+    let releasePreload = (): void => {};
+    const preloadGate = new Promise<void>((resolve) => {
+      releasePreload = resolve;
+    });
+
+    /* Keep the first infinite-scroll continuation at the browser boundary for a few frames. If
+     * two observer callbacks can spend the same cursor concurrently, both requests reach this
+     * route and the assertion below sees four calls before either one has a response. The response
+     * still comes from the real message service once the gate opens. */
+    await page.route(/\/messages\/stream(?:\?|$)/, async (route) => {
+      streamUrls.push(route.request().url());
+      if (streamUrls.length === 3) await preloadGate;
+      await route.continue();
+    });
+
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/${TOPIC}/messages?seekTo=beginning&limit=2`,
+    );
+
+    const mode = page.getByRole("radiogroup", { name: "Message loading mode" });
+    await expect(mode.getByRole("radio", { name: "Pages" })).toBeChecked();
+
+    const firstResponse = page.waitForResponse((response) =>
+      response.url().includes("/messages/stream"),
+    );
+    await page.getByRole("button", { name: /^read$/i }).first().click();
+    const first = await firstResponse;
+    expect(first.ok()).toBe(true);
+    expect(await first.finished()).toBeNull();
+
+    const records = page.locator(".kui-record");
+    const pager = page.getByRole("navigation", { name: "Message offset pages" });
+    const pageSummary = pager.locator(".kui-browse__offset-range");
+    await expect(records).toHaveCount(2);
+    await expect(pageSummary).toContainText("Page 1");
+
+    /* Kafka has no global row number across partitions. The page names the partition-local
+     * offsets actually represented, regardless of which two partitions the keyed seed selected. */
+    expect((await pageSummary.innerText()).trim()).toMatch(
+      /^Page 1 · p\d+ offsets \d+–\d+(?: · p\d+ offsets \d+–\d+)* · 2 records$/,
+    );
+
+    const firstPagePositions = await records.evaluateAll((rows) =>
+      rows.map((row) => {
+        const partition = row.querySelector(".kui-record__partition")?.textContent ?? "";
+        const offset = row.querySelector(".kui-record__offset-value")?.textContent ?? "";
+        return `${partition.replace(/\s+/g, "")}:${offset.replace(/\s+/g, "")}`;
+      }),
+    );
+
+    expect(streamUrls).toHaveLength(1);
+    const firstUrl = new URL(streamUrls[0] ?? "");
+    expect(firstUrl.searchParams.get("limit")).toBe("2");
+    expect(firstUrl.searchParams.get("seekTo")).toBe("beginning");
+    expect(firstUrl.searchParams.get("cursor")).toBeNull();
+
+    const secondResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith("/messages/stream") && url.searchParams.has("cursor");
+    });
+    await pager.getByRole("button", { name: "Next offset page" }).click();
+    const second = await secondResponse;
+    expect(second.ok()).toBe(true);
+    expect(await second.finished()).toBeNull();
+    await expect(records).toHaveCount(2);
+    await expect(pageSummary).toContainText("Page 2");
+
+    expect(streamUrls).toHaveLength(2);
+    const nextUrl = new URL(streamUrls[1] ?? "");
+    expect(nextUrl.searchParams.get("cursor")).toBeTruthy();
+    expect(nextUrl.searchParams.getAll("seekTo")).toEqual([]);
+    expect(nextUrl.searchParams.get("limit")).toBe("2");
+
+    await pager.getByRole("button", { name: "Previous offset page" }).click();
+    await expect(pageSummary).toContainText("Page 1");
+    expect(
+      await records.evaluateAll((rows) =>
+        rows.map((row) => {
+          const partition = row.querySelector(".kui-record__partition")?.textContent ?? "";
+          const offset = row.querySelector(".kui-record__offset-value")?.textContent ?? "";
+          return `${partition.replace(/\s+/g, "")}:${offset.replace(/\s+/g, "")}`;
+        }),
+      ),
+    ).toEqual(firstPagePositions);
+
+    /* Cached Previous is entirely local. Two animation frames cover the reactive update and the
+     * following paint; a transport call caused by it would already have crossed the route above. */
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    expect(streamUrls).toHaveLength(2);
+
+    const preloadResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith("/messages/stream") && url.searchParams.has("cursor");
+    });
+    await mode.getByRole("radio", { name: "Infinite scroll" }).check();
+
+    /* The two cached pages are visible immediately; the observer then asks for their real cursor
+     * continuation before the sentinel enters the viewport. */
+    await expect(records).toHaveCount(4);
+    await expect.poll(() => streamUrls.length).toBe(3);
+    const preloadUrl = new URL(streamUrls[2] ?? "");
+    expect(preloadUrl.searchParams.get("cursor")).toBeTruthy();
+    expect(preloadUrl.searchParams.getAll("seekTo")).toEqual([]);
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        }),
+    );
+    expect(streamUrls).toHaveLength(3);
+
+    releasePreload();
+    const preload = await preloadResponse;
+    expect(preload.ok()).toBe(true);
+    expect(await preload.finished()).toBeNull();
+    await expect.poll(() => records.count(), { timeout: 30_000 }).toBeGreaterThan(4);
+  });
+});
+
+test.describe("field filtering over decoded records", () => {
+  test("a JSONPath-style nested field filter returns only matching JSON records", async ({ page }) => {
+    await applyFieldFilter(page, "payments.transactions", "$.method.type", "card");
+
+    const rows = page.locator(".kui-record");
+    expect(await rows.count()).toBeGreaterThan(0);
+    for (const row of await rows.all()) {
+      await row.locator(".kui-record__summary").click();
+      await expect(row).toContainText(/"type"\s*:\s*"card"/);
+    }
+    await expect(page).toHaveURL(/filterSource=record\.value\.method\.type/);
+  });
+
+  test("the same field builder filters registry-backed Avro values", async ({ page }) => {
+    await applyFieldFilter(
+      page,
+      "orders.avro",
+      "$.address.city",
+      "Krakow",
+      "&keySerde=String&valueSerde=SchemaRegistry",
+    );
+
+    const rows = page.locator(".kui-record");
+    expect(await rows.count()).toBeGreaterThan(0);
+    for (const row of await rows.all()) {
+      await expect(row).toContainText("Krakow");
+      await row.locator(".kui-record__summary").click();
+      await expect(row).toContainText(/schema/i);
+    }
+  });
+
+  for (const topic of ["orders.jsonschema", "orders.protobuf"] as const) {
+    test(`the same field builder filters registry-backed ${topic.split(".")[1]} values`, async ({
+      page,
+    }) => {
+      await applyFieldFilter(
+        page,
+        topic,
+        "$.shipping.city",
+        "Krakow",
+        "&keySerde=String&valueSerde=SchemaRegistry",
+      );
+
+      const rows = page.locator(".kui-record");
+      expect(await rows.count()).toBeGreaterThan(0);
+      for (const row of await rows.all()) {
+        await expect(row).toContainText("Krakow");
+        await row.locator(".kui-record__summary").click();
+        await expect(row).toContainText(/schema/i);
+        await expect(row).toContainText(/"city"\s*:\s*"Krakow"/);
+      }
+    });
+  }
+
+  test("plain string topics use the fast value-text predicate", async ({ page }) => {
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/audit.log.raw/messages?seekTo=beginning&value=result%3Dsuccess`,
+    );
+    const browse = page.waitForRequest((request) => request.url().includes("/messages/stream"));
+    await page.getByRole("button", { name: /^read$/i }).first().click();
+    await browse;
+    await expect(page.locator(".kui-browse__phase")).toContainText("Finished", {
+      timeout: 30_000,
+    });
+
+    const rows = page.locator(".kui-record");
+    expect(await rows.count()).toBeGreaterThan(0);
+    for (const row of await rows.all()) await expect(row).toContainText("result=success");
+  });
+});
+
+test.describe("expanded record copy actions", () => {
+  test("copies headers, value, and a complete structured record", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/topics/inventory.stock-levels/messages?seekTo=beginning`,
+    );
+    const browse = page.waitForRequest((request) => request.url().includes("/messages/stream"));
+    await page.getByRole("button", { name: /^read$/i }).first().click();
+    await browse;
+    await expect(page.locator(".kui-browse__phase")).toContainText("Finished", {
+      timeout: 30_000,
+    });
+
+    const row = page.locator(".kui-record").first();
+    await row.locator(".kui-record__summary").click();
+
+    await row.getByRole("button", { name: "Copy headers", exact: true }).click();
+    const headers = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as unknown[];
+    expect(headers.length).toBeGreaterThan(0);
+    await expect(row.getByRole("status")).toContainText("Headers copied");
+
+    await row.getByRole("button", { name: "Copy value", exact: true }).click();
+    const value = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as {
+      sku?: unknown;
+    };
+    expect(typeof value.sku).toBe("string");
+
+    await row.getByRole("button", { name: "Copy all", exact: true }).click();
+    const record = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as {
+      offset?: unknown;
+      headers?: unknown[];
+      value?: { sku?: unknown };
+    };
+    expect(typeof record.offset).toBe("string");
+    expect(record.headers?.length).toBeGreaterThan(0);
+    expect(record.value?.sku).toBe(value.sku);
+    await expect(row.getByRole("status")).toContainText("Record copied");
   });
 });
 

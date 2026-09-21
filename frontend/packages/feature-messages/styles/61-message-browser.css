@@ -307,6 +307,28 @@
   color: var(--kui-color-warning);
 }
 
+.kui-browse__figure--warning {
+  color: var(--kui-color-warning);
+}
+
+/* Paging is a presentation choice, not part of the Kafka query. Both alternatives stay visible so
+ * the infinite option is discoverable without making it the default. */
+.kui-browse__view-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse__view-note,
+.kui-browse__offset-range {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .kui-browse__reading {
   display: flex;
   align-items: center;
@@ -333,11 +355,72 @@
   font-size: var(--kui-font-size-sm);
 }
 
-.kui-browse__more,
+.kui-browse__pagination,
+.kui-browse__infinite-sentinel,
 .kui-browse__produce {
   display: flex;
-  justify-content: center;
+  align-items: center;
   padding-block: var(--kui-space-2);
+}
+
+.kui-browse__pagination {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  border-block-start: var(--kui-card-border);
+}
+
+.kui-browse__page-actions,
+.kui-browse__preloading {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse__display-limit {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-browse__page-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  min-height: 30px;
+  padding-inline: var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-elevated);
+  color: var(--kui-color-text-strong);
+  font: inherit;
+  font-size: var(--kui-font-size-sm);
+  cursor: pointer;
+}
+
+.kui-browse__page-button:hover:not(:disabled) {
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-browse__page-button:disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.kui-browse__infinite-sentinel {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--kui-space-3);
+  min-height: 48px;
+}
+
+.kui-browse__preloading {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-browse__produce {
+  justify-content: center;
+  gap: calc(var(--kui-space-1) / 2);
 }
 
 /* At this width the bar's four controls no longer fit on one line at their natural sizes, and the
@@ -550,6 +633,87 @@
   display: flex;
   flex-direction: column;
   gap: var(--kui-space-4);
+}
+
+.kui-smart-filter__modes {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-smart-filter__mode {
+  min-block-size: 30px;
+  padding-inline: var(--kui-space-3);
+  border: 0;
+  border-radius: var(--kui-radius-sm);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kui-smart-filter__mode[aria-pressed="true"] {
+  background: var(--kui-color-surface-raised);
+  color: var(--kui-color-text-strong);
+  box-shadow: var(--kui-shadow-sm);
+}
+
+.kui-smart-filter__builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-smart-filter__builder-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(220px, 2fr) minmax(140px, 1fr);
+  align-items: start;
+  gap: var(--kui-space-3);
+}
+
+.kui-smart-filter__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-smart-filter__suggestions-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-smart-filter__suggestion {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-pill);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  cursor: pointer;
+}
+
+.kui-smart-filter__suggestion:hover {
+  border-color: var(--kui-color-primary);
+}
+
+.kui-smart-filter__compiled {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .kui-smart-filter__builder-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kui-smart-filter__field {

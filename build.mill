@@ -810,6 +810,15 @@ private def git(arguments: String*): Option[String] =
     .filter(_.exitCode == 0)
     .map(_.out.text())
 
+/** Git facts are inputs, not ordinary cached tasks. A checkout can move to another commit without
+  * changing a deployable source file (or can change only documentation), and an ordinary `Task`
+  * would then reuse the previous build-info source and OCI revision label. The resulting freshly
+  * built image truthfully contains current code but falsely names an older commit. `Task.Input`
+  * re-reads these small values on every Mill invocation and invalidates only when the fact changed.
+  */
+private def gitHead: T[Option[String]] = Task.Input { git("rev-parse", "HEAD") }
+private def gitWorkingTreeStatus: T[Option[String]] = Task.Input { git("status", "--porcelain") }
+
 /** A module that has the build's own facts compiled into it as `object BuildInfo`.
   *
   * A running process cannot look them up: a container has no git checkout and a browser has no
@@ -832,8 +841,8 @@ trait KuiBuildInfoModule extends KuiModule {
   def buildInfoSource: T[PathRef] = Task {
     val facts = BuildFacts.of(
       version = kuiVersion(),
-      revParse = git("rev-parse", "HEAD"),
-      status = git("status", "--porcelain"),
+      revParse = gitHead(),
+      status = gitWorkingTreeStatus(),
       builtAt = builtAt(),
       scalaVersion = Versions.scala,
       jdkVersion = System.getProperty("java.version", BuildFacts.Unknown)
@@ -2670,8 +2679,12 @@ object services extends Module {
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
         mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
         mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
         mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
@@ -2680,7 +2693,9 @@ object services extends Module {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
-          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
         )
       }
     }
@@ -4201,7 +4216,7 @@ private def stopDevServer(): Boolean =
   * which commit it came from, which the label then states plainly instead of guessing.
   */
 def gitRevision: T[String] = Task {
-  git("rev-parse", "HEAD").map(_.trim).filter(_.nonEmpty).getOrElse(BuildFacts.Unknown)
+  gitHead().map(_.trim).filter(_.nonEmpty).getOrElse(BuildFacts.Unknown)
 }
 
 /** Small programs the build runs. They are ordinary modules so that their logic is unit-tested like

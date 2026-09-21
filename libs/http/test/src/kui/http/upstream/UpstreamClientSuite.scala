@@ -3,11 +3,14 @@ package kui.http.upstream
 import scala.concurrent.duration.DurationInt
 
 import cats.data.NonEmptyList
-import cats.effect.IO
 import cats.effect.testkit.TestControl
+import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import munit.CatsEffectSuite
+import sttp.capabilities.StreamMaxLengthExceededException
 import sttp.client4.*
+import sttp.client4.impl.cats.implicits.*
+import sttp.client4.testing.{BackendStub, StubBody}
 import sttp.model.{Method, StatusCode}
 
 import kui.kernel.PositiveInt
@@ -371,6 +374,54 @@ final class UpstreamClientSuite extends CatsEffectSuite {
     )
   }
 
+  test("a response body limit remains a non-transport contract failure through wrapper exceptions") {
+    val limitFailure = new StreamMaxLengthExceededException(64L)
+    val wrapped = new RuntimeException("response body canary", limitFailure)
+
+    val error = errorFor(Left(wrapped)).getOrElse(fail("expected a classified response limit failure"))
+
+    assert(error.isInstanceOf[InfrastructureError.Remote], error.toString)
+    assertEquals(error.code, kui.kernel.error.ErrorCode.UpstreamUnavailable)
+    assert(!error.message.contains("64"), error.message)
+    assert(!error.message.contains("canary"), error.message)
+  }
+
+  test("a response body limit is terminal, circuit-neutral and identified without display-message matching") {
+    val configured = UpstreamFixture
+      .single("schema-registry")
+      .copy(
+        failureThreshold = PositiveInt.unsafe(2),
+        maxRetries = 2
+      )
+    val forged = InfrastructureError.Remote(
+      kui.kernel.error.ErrorCode.UpstreamUnavailable,
+      "unrelated response exceeded its configured size limit",
+      Nil
+    )
+
+    val program = for {
+      calls <- Ref.of[IO, Int](0)
+      backend = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest.thenRespondF { _ =>
+        calls.update(_ + 1) *>
+          IO.raiseError[Response[StubBody]](new StreamMaxLengthExceededException(64L))
+      }
+      observed <- UpstreamFixture.client(configured, backend).use { client =>
+        for {
+          outcomes <- request(Method.GET).send(client.backend).attempt.replicateA(3)
+          attempts <- calls.get
+          state <- client.currentState
+        } yield (outcomes, attempts, state)
+      }
+    } yield observed
+
+    TestControl.executeEmbed(program).map { case (outcomes, attempts, state) =>
+      assertEquals(attempts, 3, "a terminal body-limit failure was retried")
+      assertEquals(state, CircuitState.Closed)
+      assert(outcomes.forall(_.left.exists(UpstreamClient.isResponseLimitFailure)), outcomes.toString)
+      assert(!UpstreamClient.isResponseLimitFailure(UpstreamFailure(forged)))
+    }
+  }
+
   test("upstreamBodyIsNotIncludedInTheError") {
     // ADR-034: an upstream's body can carry its own internal detail, or its credentials. The type
     // carries a status and a name and has nowhere to put a body, which is what makes the rule
@@ -415,7 +466,7 @@ final class UpstreamClientSuite extends CatsEffectSuite {
       assertEquals(transitions.size, 1, s"expected one transition line, got ${transitions.map(_.message)}")
       assertEquals(transitions.head.level, "info")
       assertEquals(transitions.head.context.get("state"), Some("open"))
-      assert(transitions.head.context.contains("error.last"), transitions.head.context.toString)
+      assertEquals(transitions.head.context.get("error.last"), Some("connection"))
     }
   }
 

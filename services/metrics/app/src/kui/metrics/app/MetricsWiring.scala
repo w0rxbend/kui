@@ -18,11 +18,12 @@ import kui.config.{ClusterConfig, MetricsConfig, MetricsSourceSettings, UrlPolic
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
-import kui.http.upstream.{UpstreamClient, UpstreamConfig}
+import kui.http.upstream.{HttpTls, UpstreamClient, UpstreamConfig, UpstreamCredentials}
 import kui.kernel.{ClusterId, PositiveInt}
 import kui.metrics.api.{MetricsApi, MetricsCapabilities}
 import kui.metrics.application.{MetricsUseCases, SourceAccess, SourceProfile}
 import kui.metrics.domain.MetricsSourcePort
+import kui.metrics.infrastructure.prometheus.{PrometheusQueryClient, PrometheusQueryMetrics}
 import kui.metrics.infrastructure.{ConfiguredClusterSources, MetricsBuffer, PrometheusBrokerScrape}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
@@ -43,11 +44,10 @@ final case class MetricsServer[F[_]](
   *
   * ==What it contacts, and when==
   *
-  * One HTTP connection pool, and only when at least one cluster names a readable metrics source. Building it
-  * dials nothing: an `UpstreamClient` is a circuit breaker, a bulkhead and a failover list around a pool that
-  * connects on first use, so an exporter that is down delays no start-up and fails no start-up. What does
-  * begin here is one scrape fibre per such cluster, under this `Resource`'s lifetime, which is what makes the
-  * first chart after a restart a chart rather than an empty axis.
+  * Exposition sources share one HTTP connection pool and start one scrape fibre per source. Each Prometheus
+  * API source instead owns an on-demand TLS-configured transport and query client, with no scrape fibre or
+  * exposition buffer. Constructing either transport dials nothing, so an unavailable remote source delays no
+  * start-up and fails no start-up.
   *
   * A deployment where no cluster names a source builds **no** pool, no breaker and no fibre — the same
   * argument the schema service makes for a cluster with no registry. An idle upstream publishes a permanently
@@ -131,11 +131,17 @@ object MetricsWiring {
       interceptors <- Resource.eval(MetricsApi.interceptors[F](telemetry, rejections, logger))
 
       profiles = ConfiguredClusterSources.profilesOf(clusters, metrics)
-      _ <- Resource.eval(startupLog[F](profiles, logger))
+      querySourceIds = ConfiguredClusterSources.queryable(clusters, metrics).map(_._1).toSet
+      _ <- Resource.eval(startupLog[F](profiles, querySourceIds, logger))
 
       buffers <- collectors[F](clusters, metrics, policy, telemetry, meter, logger)
+      queries <- queryClients[F](clusters, metrics, policy, telemetry, meter, logger)
 
-      sources = new ConfiguredClusterSources[F](profiles, buffers.toMap[ClusterId, MetricsSourcePort[F]])
+      sources = new ConfiguredClusterSources[F](
+        profiles,
+        buffers.toMap[ClusterId, MetricsSourcePort[F]],
+        queries
+      )
       // The stale threshold is the scrape cadence, from the same section: a point-in-time reading older
       // than the interval that should have replaced it is last-known-good and is drawn as such.
       useCases = MetricsUseCases.make[F](sources, metrics.scrapeInterval)
@@ -240,6 +246,66 @@ object MetricsWiring {
       _ <- BrokerScrapeLoop.resource[F](cluster, scrape, buffer, metrics.scrapeInterval, logger)
     } yield buffer
 
+  /** One source-owned, on-demand query client for each explicit Prometheus API source.
+    *
+    * The empty branch precedes metric, TLS, credential and transport allocation. This keeps a deployment
+    * without query sources free of an idle HTTP pool and of telemetry instruments nothing can exercise.
+    */
+  private[app] def queryClients[F[_]: Async](
+      clusters: List[ClusterConfig],
+      metrics: MetricsConfig,
+      policy: UrlPolicy,
+      telemetry: Telemetry[F],
+      meter: Meter[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, Map[ClusterId, PrometheusQueryClient[F]]] = {
+    val configured = ConfiguredClusterSources.queryable(clusters, metrics)
+
+    if configured.isEmpty then Resource.pure[F, Map[ClusterId, PrometheusQueryClient[F]]](Map.empty)
+    else
+      Resource
+        .eval(PrometheusQueryMetrics.otel4s[F](meter))
+        .flatMap(queryMetrics =>
+          queryClientsFrom[F](clusters, metrics)((cluster, settings) =>
+            queryClientFor[F](cluster, settings, policy, telemetry, queryMetrics, logger)
+          )
+        )
+  }
+
+  /** Resource traversal isolated from HTTP construction so selection and release are deterministic tests. */
+  private[app] def queryClientsFrom[F[_]: Async](
+      clusters: List[ClusterConfig],
+      metrics: MetricsConfig
+  )(
+      build: (ClusterId, MetricsSourceSettings) => Resource[F, PrometheusQueryClient[F]]
+  ): Resource[F, Map[ClusterId, PrometheusQueryClient[F]]] = {
+    val configured = ConfiguredClusterSources.queryable(clusters, metrics)
+
+    if configured.isEmpty then Resource.pure[F, Map[ClusterId, PrometheusQueryClient[F]]](Map.empty)
+    else configured.traverse((cluster, settings) => build(cluster, settings).map(cluster -> _)).map(_.toMap)
+  }
+
+  private def queryClientFor[F[_]: Async](
+      cluster: ClusterId,
+      settings: MetricsSourceSettings,
+      policy: UrlPolicy,
+      telemetry: Telemetry[F],
+      metrics: PrometheusQueryMetrics[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, PrometheusQueryClient[F]] =
+    for {
+      transport <- HttpTls.resource[F](settings.tls)
+      credentials <- UpstreamCredentials.resource[F](settings.auth)
+      upstream <- UpstreamClient.resource[F](
+        queryUpstreamConfig(cluster, settings, policy),
+        transport,
+        telemetry,
+        MetricsApi.Id,
+        logger
+      )
+      client <- PrometheusQueryClient.resource[F](upstream, settings, credentials, cluster, metrics)
+    } yield client
+
   /** The resilience an exporter is called behind. One address, one call at a time, no retry — see the two
     * constants above for why each of those is the number it is.
     */
@@ -259,6 +325,21 @@ object MetricsWiring {
       urlPolicy = policy
     )
 
+  /** Per-source resilience for query API calls: one base URL, configured bulkhead, and no retries. */
+  private[app] def queryUpstreamConfig(
+      cluster: ClusterId,
+      settings: MetricsSourceSettings,
+      policy: UrlPolicy
+  ): UpstreamConfig =
+    UpstreamConfig(
+      name = s"prometheus-query-${cluster.value}",
+      urls = NonEmptyList.one(settings.url),
+      callTimeout = settings.callTimeout,
+      maxConcurrent = PositiveInt.unsafe(settings.maxConcurrentQueries),
+      maxRetries = MaxRetries,
+      urlPolicy = policy
+    )
+
   /** What this process will and will not measure, said out loud once at start-up.
     *
     * "Why is the throughput card showing a sentence?" is the first question this service will be asked, and
@@ -274,10 +355,14 @@ object MetricsWiring {
     */
   private def startupLog[F[_]: Async](
       profiles: List[SourceProfile],
+      querySources: Set[ClusterId],
       logger: StructuredLogger[F]
   ): F[Unit] = {
     val measured = profiles.filter(_.isMeasurable).map(_.cluster.value)
-    val unreadable = profiles.filter(profile => profile.hasSource && !profile.isMeasurable)
+    val queryable = profiles.filter(profile => querySources.contains(profile.cluster)).map(_.cluster.value)
+    val unreadable = profiles.filter(profile =>
+      profile.hasSource && !profile.isMeasurable && !querySources.contains(profile.cluster)
+    )
 
     logger
       .info(
@@ -291,6 +376,13 @@ object MetricsWiring {
             "kui.metrics.scrapeInterval; their throughput cards draw a series rather than a sentence"
         )
         .whenA(measured.nonEmpty) *>
+      logger
+        .info(Map("metrics.querySources" -> queryable.mkString(",")))(
+          s"${queryable.size} cluster(s) name a Prometheus API source and have an on-demand query provider; " +
+            "their public metric sections remain not configured until a server-owned Kafka metrics catalog " +
+            "maps those queries"
+        )
+        .whenA(queryable.nonEmpty) *>
       unreadable.traverse_(profile =>
         logger.warn(Map("metrics.unreadableSource" -> profile.cluster.value))(
           profile.unreadableReason.getOrElse(SourceAccess.unreadableSource(profile.cluster))

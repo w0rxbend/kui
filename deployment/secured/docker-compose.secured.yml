@@ -16,10 +16,11 @@
 # The KUI image is the one `./mill deployment.docker.allinone.docker.build` produces. Change the
 # `image:` line below if yours is tagged differently.
 #
-# `kui-secured.yaml` is `deployment/examples/production.yaml` with three lines changed: the two
-# bootstrap addresses, and `devInsecureCookies`, which plain HTTP on localhost needs and which no
-# real deployment may ever set. Keeping it a near-copy is the point -- what is being tested is the
-# example a newcomer copies, not a file written to pass.
+# `kui-secured.yaml` is `deployment/examples/production.yaml` with the two bootstrap addresses,
+# `devInsecureCookies`, and its local-only telemetry destination changed. Plain HTTP on localhost
+# needs the cookie override, while this self-contained fixture deliberately has no OTLP collector.
+# Keeping it a near-copy is the point -- what is being tested is the example a newcomer copies,
+# not a file written to pass.
 
 name: kui-secured
 
