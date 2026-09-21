@@ -11,7 +11,7 @@
  * So `inheritedFromGlobal` is carried through rather than flattened into a level string, and the
  * screens say "BACKWARD, inherited" and "BACKWARD, set on this subject" as different sentences.
  */
-import type { ApiResult, KuiApiClient } from "@kui/api";
+import type { ApiError, ApiResult, components, KuiApiClient } from "@kui/api";
 import { apiFailure, type Fetched } from "@kui/kernel";
 
 /**
@@ -57,7 +57,7 @@ export interface PageInfo {
 }
 
 export interface SubjectListResult {
-  readonly subjects: readonly string[];
+  readonly subjects: readonly SubjectRow[];
   readonly page: PageInfo;
 }
 
@@ -68,13 +68,28 @@ export interface SubjectQuery {
   readonly pageSize?: number | undefined;
 }
 
-interface SubjectsPayload {
-  readonly items?: readonly string[];
-  readonly page?: {
-    readonly page?: number;
-    readonly pageSize?: number;
-    readonly totalItems?: number;
-  } | null;
+/**
+ * A row is an object, not a bare name.
+ *
+ * The subjects endpoint used to answer with `items: string[]`. It now answers with a summary row
+ * per subject, and for a day the screen rendered `[object Object]` in a link because this mapping
+ * read the row where it used to read the name. Nothing caught it: `tsc` could not, because the
+ * answer was cast; the recorded fixture still held bare strings; and the only thing that saw it was
+ * a browser test looking for the subject's name on the page.
+ *
+ * So the row is carried whole, with every field the wire has, and the screen draws them. A field
+ * this browser drops is a field no test can be wrong about, which is how the last one was missed.
+ *
+ * The three facts after the name are each independently absent — the endpoint documents that the
+ * per-subject call filling them may not answer while the row is still returned — so each is
+ * `undefined` rather than defaulted. `versionCount` is never `0` and the level is never
+ * `BACKWARD`: those are a claim and a guess respectively, and both read as facts on screen.
+ */
+export interface SubjectRow {
+  readonly subject: string;
+  readonly format: string | undefined;
+  readonly versionCount: number | undefined;
+  readonly compatibility: Compatibility | undefined;
 }
 
 export async function fetchSubjects(
@@ -99,18 +114,41 @@ export async function fetchSubjects(
    * Not a section: this endpoint answers with the page directly, because a subject list has nothing
    * to be partial about — either the registry answered or it did not, and "did not" is a transport
    * failure that `apiFailure` has already turned into a value.
+   *
+   * And not a cast. `answer.value` is `PageDto_A` straight from the generated types, so a field the
+   * gateway renames or re-shapes fails `tsc` here, at the one place in this package that touches the
+   * wire. The double cast that used to sit on this line is why the widening that turned `items` from
+   * strings into rows was invisible until somebody looked at the screen — and it is why the grep for
+   * it in this packet's acceptance list is part of the gate rather than a tidying note.
    */
-  const payload = answer.value as unknown as SubjectsPayload;
+  const payload = answer.value;
+  const items = payload.items ?? [];
   return {
     kind: "ready",
     value: {
-      subjects: payload.items ?? [],
+      subjects: items.map(rowOf),
       page: {
-        page: payload.page?.page ?? 1,
-        pageSize: payload.page?.pageSize ?? (payload.items?.length ?? 0),
-        totalItems: typeof payload.page?.totalItems === "number" ? payload.page.totalItems : undefined,
+        page: payload.page.page,
+        pageSize: payload.page.pageSize,
+        totalItems: typeof payload.page.totalItems === "number" ? payload.page.totalItems : undefined,
       },
     },
+  };
+}
+
+/** One wire row as the screen's row. Every absence stays an absence. */
+function rowOf(row: components["schemas"]["SubjectSummaryDto"]): SubjectRow {
+  return {
+    subject: row.subject,
+    format: row.format,
+    versionCount: typeof row.versionCount === "number" ? row.versionCount : undefined,
+    compatibility:
+      row.compatibility === undefined
+        ? undefined
+        : {
+            level: levelOf(row.compatibility.level),
+            inherited: row.compatibility.inheritedFromGlobal === true,
+          },
   };
 }
 
@@ -378,4 +416,96 @@ export async function setCompatibility(
     params: { path: { clusterId, subject } },
     body: { level },
   });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Registering a schema
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * What the registry made of a schema it accepted.
+ *
+ * Both figures are optional because the browser must not claim one it was not given. The registry
+ * assigns the version within the subject and the id across the whole registry, and the toast that
+ * confirms a registration says which of the two it is quoting — a confirmation reading "registered
+ * as 4" is exactly the conflation `SubjectPage` exists to prevent.
+ */
+export interface RegisteredSchema {
+  readonly subject: string;
+  readonly version: number | undefined;
+  readonly id: number | undefined;
+}
+
+/**
+ * The registry's own words for a refusal, or the failure unchanged.
+ *
+ * A registry that rejects a schema answers `KUI-VALIDATION` whose envelope message says that the
+ * registry refused it and whose `details` carry what the registry actually said — the field path,
+ * the reader and writer types, the version it compared against. That second half is the only part
+ * an operator can act on, and `createMutation` keeps only `userMessage(error)`, which is the first.
+ *
+ * So the registry's sentence is lifted into the message here, before the mutation state is built.
+ * Not paraphrased and not summarised: this screen's whole contract with the registry is that a
+ * refusal is reproduced, and "not backward compatible" tells somebody nothing they did not already
+ * know from the fact that it failed.
+ */
+export function registryRefusal(error: ApiError): ApiError {
+  if (error.kind !== "envelope") return error;
+  // `restrictions` is optional on the generated `ErrorDetail`, so a detail carrying only a field
+  // name contributes nothing rather than an `undefined` that would render as the word.
+  const stated = error.details
+    .flatMap((detail) => detail.restrictions ?? [])
+    .filter((restriction) => restriction.trim() !== "");
+  if (stated.length === 0) return error;
+  return { ...error, message: `${error.message} The registry said: ${stated.join(" ")}` };
+}
+
+/**
+ * Registers a schema under a subject, creating the subject if the registry does not hold it.
+ *
+ * A `Promise<ApiResult<…>>` rather than a `Fetched`, because this is a write and the screen needs
+ * the running / done / failed / forbidden machine a `createMutation` gives — including the guard
+ * that stops a double press registering two versions, which for a registry means two ids and a
+ * version number nobody chose.
+ */
+export async function registerSchema(
+  api: KuiApiClient,
+  clusterId: string,
+  subject: string,
+  proposed: ProposedSchema,
+): Promise<ApiResult<RegisteredSchema>> {
+  const answer = await api.post(
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions",
+    {
+      params: { path: { clusterId, subject } },
+      body: { schemaType: proposed.schemaType, definition: proposed.definition },
+    },
+  );
+  if (!answer.ok) return { ok: false, error: registryRefusal(answer.error) };
+  return {
+    ok: true,
+    value: {
+      subject,
+      // Never coerced to a number the answer did not carry. A registry that accepted the schema and
+      // did not say which version it became is a real answer — the confirmation then names the
+      // subject and says the version was not reported, rather than printing a zero.
+      version: typeof answer.value.version === "number" ? answer.value.version : undefined,
+      id: typeof answer.value.id === "number" ? answer.value.id : undefined,
+    },
+  };
+}
+
+/**
+ * Why `Register schema` will not press, or `undefined`.
+ *
+ * Only a permission answer now: the endpoint exists, so "KUI cannot do this" is no longer one of
+ * the reasons. A read-only cluster is refused by the server (`KUI-READ-ONLY`, ADR-047) rather than
+ * predicted here, for the same reason every other write on this screen leaves it to the server —
+ * the browser holds no read-only flag, and a control disabled on a guess is a control that is
+ * wrong on the cluster where the guess is stale.
+ */
+export function registerBlockedReason(permitted: boolean): string | undefined {
+  return permitted
+    ? undefined
+    : "You do not have permission to register a schema in this cluster's registry.";
 }

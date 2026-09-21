@@ -8,7 +8,13 @@ import cats.effect.kernel.Ref
 import kui.consumer.domain.{OffsetWindow, ResetScope}
 import kui.kafka.admin.*
 import kui.kafka.{BatchResult, SkipReason}
-import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.group.{GroupProtocol, GroupState, LagAnomaly}
 import kui.kernel.{ClusterId, GroupId, Offset, PartitionId, TopicName, TopicPartition}
@@ -40,7 +46,10 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
   private def member(held: Set[Int]): GroupMember =
     GroupMember.of("m-1", None, "client", "10.0.0.7", MemberAssignment(held.map(partition)), None)
 
-  private def description(members: List[GroupMember], state: GroupState = GroupState.Stable): GroupDescription =
+  private def description(
+      members: List[GroupMember],
+      state: GroupState = GroupState.Stable
+  ): GroupDescription =
     GroupDescription(
       groupId = orders,
       isSimple = false,
@@ -57,7 +66,15 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       val listing: Ref[IO, Either[KuiError, GroupListingResult]],
       val described: Ref[IO, Either[KuiError, BatchResult[GroupId, GroupDescription]]],
       val committed: Ref[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]],
-      val altered: Ref[IO, List[(GroupId, Map[TopicPartition, Offset])]]
+      val altered: Ref[IO, List[(GroupId, Map[TopicPartition, Offset])]],
+      deleteSkips: Ref[IO, Map[GroupId, SkipReason]],
+      /** Every `requireStable` this fake was asked for, newest last.
+        *
+        * The flag used to be swallowed, which is why swapping the port's two call sites — `false` on the read
+        * path, `true` when a reset is being planned — left `./mill services.consumer.infrastructure.test` at
+        * 16/16 green. A fixture that cannot express an argument cannot gate it.
+        */
+      val stability: Ref[IO, List[Boolean]]
   ) extends GroupAdmin[IO] {
 
     def listGroups(conn: ClusterConnection, states: Set[GroupState]) = listing.get
@@ -70,7 +87,7 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
         groups: List[GroupId],
         partitions: Option[Set[TopicPartition]],
         requireStable: Boolean
-    ) = committed.get
+    ) = stability.update(_ :+ requireStable) *> committed.get
 
     def alterOffsets(conn: ClusterConnection, group: GroupId, offsets: Map[TopicPartition, Offset]) =
       altered.update(_ :+ (group -> offsets)).as(Right(()))
@@ -78,8 +95,13 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
     def deleteOffsets(conn: ClusterConnection, group: GroupId, partitions: Set[TopicPartition]) =
       IO.pure(Right(()))
 
+    /** What the broker answers a `deleteGroups` with. A skip here is a per-group refusal, which is the shape
+      * `BatchResult` exists to carry and the one a caller most easily reads as success.
+      */
+    val deletions: Ref[IO, Map[GroupId, SkipReason]] = deleteSkips
+
     def deleteGroups(conn: ClusterConnection, ids: List[GroupId]) =
-      IO.pure(Right(BatchResult.complete(ids.map(_ -> ()).toMap)))
+      deletions.get.map(skips => Right(BatchResult(ids.filterNot(skips.contains).map(_ -> ()).toMap, skips)))
   }
 
   final private class FakeOffsets(
@@ -95,27 +117,45 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
   }
 
   private def rig(
-      described: Either[KuiError, BatchResult[GroupId, GroupDescription]] =
-        Right(BatchResult.complete(Map(orders -> description(List(member(Set(0, 1))))))),
-      committed: Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]] =
-        Right(
-          BatchResult.complete(
-            Map(orders -> List(CommittedOffset(TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)), Offset.unsafe(90L), None, None)))
+      described: Either[KuiError, BatchResult[GroupId, GroupDescription]] = Right(
+        BatchResult.complete(Map(orders -> description(List(member(Set(0, 1))))))
+      ),
+      committed: Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]] = Right(
+        BatchResult.complete(
+          Map(
+            orders -> List(
+              CommittedOffset(
+                TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)),
+                Offset.unsafe(90L),
+                None,
+                None
+              )
+            )
           )
-        ),
-      ends: Either[KuiError, BatchResult[TopicPartition, Offset]] =
-        Right(BatchResult.complete(Map(TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)) -> Offset.unsafe(100L)))),
+        )
+      ),
+      ends: Either[KuiError, BatchResult[TopicPartition, Offset]] = Right(
+        BatchResult.complete(
+          Map(TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)) -> Offset.unsafe(100L))
+        )
+      ),
       endsSkipped: Map[TopicPartition, SkipReason] = Map.empty,
       offline: Set[TopicPartition] = Set.empty
   ): IO[(kui.consumer.domain.GroupAdminPort[IO], FakeAdmin)] =
     for {
       listing <- Ref.of[IO, Either[KuiError, GroupListingResult]](
-        Right(GroupListingResult.complete(List(GroupListing(orders, isSimple = false, GroupState.Stable, GroupProtocol.Classic))))
+        Right(
+          GroupListingResult.complete(
+            List(GroupListing(orders, isSimple = false, GroupState.Stable, GroupProtocol.Classic))
+          )
+        )
       )
       describedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, GroupDescription]]](described)
       committedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]](committed)
       altered <- Ref.of[IO, List[(GroupId, Map[TopicPartition, Offset])]](Nil)
-      admin = new FakeAdmin(listing, describedRef, committedRef, altered)
+      deleteSkips <- Ref.of[IO, Map[GroupId, SkipReason]](Map.empty)
+      stability <- Ref.of[IO, List[Boolean]](Nil)
+      admin = new FakeAdmin(listing, describedRef, committedRef, altered, deleteSkips, stability)
       lookup = new FakeOffsets(ends.map(batch => BatchResult(batch.values, endsSkipped)), ends, offline)
       logger <- FakeStructuredLogger[IO]
     } yield (KafkaGroupAdminPort.make[IO](admin, lookup, connection, logger), admin)
@@ -250,6 +290,81 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       (port, admin) = rigged
       _ <- port.applyOffsets(orders, Map(partition(0) -> Offset.unsafe(5L)))
       written <- admin.altered.get
-    } yield assertEquals(written.map((g, offsets) => g -> offsets.values.map(_.value).toList), List(orders -> List(5L)))
+    } yield assertEquals(
+      written.map((g, offsets) => g -> offsets.values.map(_.value).toList),
+      List(orders -> List(5L))
+    )
+  }
+
+  test("a group the broker refused to delete is a failure, and never an empty success") {
+    /*
+     * Ungated until now: answering `Right(())` for a per-group skip left
+     * `./mill services.consumer.__.test` at 201/201 green -- `FakeAdmin.deleteGroups` could only ever
+     * answer a complete success, so the branch that reads the skip had no input that reached it. Forget
+     * group is a destructive operation behind ADR-045's confirmation, and a refusal reported as success
+     * tells an operator the group is gone while it is still there with its offsets intact. The screen has
+     * no second way to find out.
+     */
+    for {
+      rigged <- rig()
+      (port, admin) = rigged
+      _ <- admin.deletions.set(Map(orders -> SkipReason.NotAuthorized("DELETE on group orders-consumer")))
+      refused <- port.deleteGroup(orders)
+      _ <- admin.deletions.set(Map.empty)
+      accepted <- port.deleteGroup(orders)
+    } yield {
+      assertEquals(refused.isLeft, true)
+      assertEquals(refused.left.toOption.map(_.code), Some(kui.kernel.error.ErrorCode.Forbidden))
+      // The other direction, so the case cannot pass by refusing everything.
+      assertEquals(accepted, Right(()))
+    }
+  }
+
+  test("a reset is planned against stable offsets, and a page is not made to wait for one") {
+    /*
+     * Ungated until now: swapping the two `requireStable` arguments in `KafkaGroupAdminPort` left
+     * `./mill services.consumer.infrastructure.test` at 16/16 green, because `FakeAdmin.committedOffsets`
+     * dropped the flag on the floor. The two call sites want opposite things and both matter. A plan is
+     * signed into a token and applied minutes later (ADR-045), so it must not be computed from an offset
+     * an open transaction can still roll back; the list and detail pages, by contrast, must not block
+     * behind a producer's in-flight transaction to draw a lag column.
+     */
+    for {
+      rigged <- rig()
+      (port, admin) = rigged
+      _ <- port.describe(List(orders))
+      afterRead <- admin.stability.get
+      _ <- admin.stability.set(Nil)
+      _ <- port.offsetWindow(orders, ResetScope(topic, Set(partition(0))), None)
+      afterPlan <- admin.stability.get
+    } yield {
+      assertEquals(afterRead, List(false), clue = "a read path asked for stable offsets and would block")
+      assertEquals(afterPlan, List(true), clue = "a reset was planned from offsets a transaction can undo")
+    }
+  }
+
+  test("a row built from a listing alone says what it does not know, rather than reporting zeros") {
+    /*
+     * Ungated until now: `completeness = GroupCompleteness.Complete` on a listing-derived summary left the
+     * suite at 201/201 green. A listing knows a group exists and nothing else, so its `memberCount`,
+     * `topicCount` and `partitionCount` are placeholders; marked complete, the list screen draws them as
+     * measurements and a running group reads as a group with no members and no lag. `GroupCompleteness`
+     * exists precisely so that "nobody is running this" and "KUI did not ask" cannot render the same.
+     */
+    for {
+      rigged <- rig()
+      (port, _) = rigged
+      listed <- port.list(Set.empty)
+    } yield {
+      val summary = listed.toOption.flatMap(_.groups.headOption).getOrElse(fail("the listing must answer"))
+
+      assertEquals(summary.groupId, orders)
+      assertEquals(summary.completeness.isComplete, false)
+      assertEquals(summary.completeness.membersKnown, false)
+      assertEquals(summary.completeness.committedOffsetsKnown, false)
+      assertEquals(summary.completeness.endOffsetsKnown, false)
+      // The three figures the flags are about, so the reason they must not be trusted is on the page.
+      assertEquals((summary.memberCount, summary.topicCount, summary.partitionCount), (0, 0, 0))
+    }
   }
 }

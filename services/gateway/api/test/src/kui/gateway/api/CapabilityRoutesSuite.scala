@@ -1,6 +1,7 @@
 package kui.gateway.api
 
 import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
@@ -10,6 +11,7 @@ import io.circe.parser.decode
 import munit.CatsEffectSuite
 import sttp.client4.*
 
+import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.{
   CapabilityEntry,
   CapabilityKey,
@@ -17,13 +19,7 @@ import kui.contracts.capability.{
   CapabilityState,
   ReasonCode
 }
-import kui.contracts.ErrorEnvelope
-import kui.gateway.application.capability.{
-  CapabilityRegistry,
-  CapabilitySignals,
-  RegistryConfig,
-  Trigger
-}
+import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig, Trigger}
 import kui.gateway.contract.GatewayEndpoints
 import kui.kernel.ServiceId
 import kui.testkit.fakes.FakeStructuredLogger
@@ -31,9 +27,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 /** That a browser can ask what works, and then be told about every change without asking again.
   *
   * Every assertion here goes over a real socket. The subject is the streaming wiring — whether the first
-  * frame really is a snapshot, whether a second browser really gets its own copy, whether one
-  * disconnecting really leaves the other alone — and a stub interpreter would be asserting the wiring it
-  * had replaced.
+  * frame really is a snapshot, whether a second browser really gets its own copy, whether one disconnecting
+  * really leaves the other alone — and a stub interpreter would be asserting the wiring it had replaced.
   */
 final class CapabilityRoutesSuite extends CatsEffectSuite {
 
@@ -100,10 +95,10 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
 
   /** A session and its CSRF token.
     *
-    * The probe is a `POST`, so the edge's CSRF check applies to it like any other mutation (ADR-019). It
-    * is not an exemption worth carving out: the endpoint makes the gateway call another service, and a
-    * page on another origin must not be able to make it do that. UI-010 sends the token the same way,
-    * having read it from `/api/v1/auth/me`.
+    * The probe is a `POST`, so the edge's CSRF check applies to it like any other mutation (ADR-019). It is
+    * not an exemption worth carving out: the endpoint makes the gateway call another service, and a page on
+    * another origin must not be able to make it do that. UI-010 sends the token the same way, having read it
+    * from `/api/v1/auth/me`.
     */
   private def session(server: GatewayTestServer.Running): IO[Map[String, String]] =
     server.get(s"${GatewayEndpoints.ApiPrefix}/auth/me").map { response =>
@@ -122,7 +117,8 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
   test("snapshotListsEveryConfiguredService") {
     fixture().use { (server, _, _) =>
       server.get(snapshotPath).map { response =>
-        val snapshot = decode[CapabilitySnapshot](response.body).fold(error => fail(error.getMessage), identity)
+        val snapshot =
+          decode[CapabilitySnapshot](response.body).fold(error => fail(error.getMessage), identity)
         assertEquals(snapshot.entries.map(_.key.service.value).sorted, List("cluster", "topic"))
         // A service that is configured but has not been checked yet must be present and starting, not
         // missing. "We have not asked" and "it is not deployed" are different answers, and the browser
@@ -152,7 +148,8 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
       frames(server, 1).map { received =>
         val first = received.head
         assertEquals(eventNameOf(first), CapabilityRoutes.EventName)
-        val snapshot = decode[CapabilitySnapshot](dataOf(first)).fold(error => fail(error.getMessage), identity)
+        val snapshot =
+          decode[CapabilitySnapshot](dataOf(first)).fold(error => fail(error.getMessage), identity)
         assertEquals(snapshot.entries.map(_.key.service.value).sorted, List("cluster", "topic"))
         // The exact wire framing, byte for byte, because the browser's parser is tested against these
         // same bytes. Anything that changes the framing has to break here first.
@@ -172,9 +169,7 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
         ).parMapN((frames, _) => frames)
       } yield {
         assertEquals(received.size, 3)
-        received.foreach(frame =>
-          assertEquals(eventNameOf(frame), CapabilityRoutes.EventName)
-        )
+        received.foreach(frame => assertEquals(eventNameOf(frame), CapabilityRoutes.EventName))
         // The snapshot, then exactly one frame per change, in the order the changes happened.
         val changes = received.tail.map(dataOf)
         assert(changes.head.contains("unavailable"), changes.head)
@@ -340,9 +335,7 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
         .get(server.at(streamPath))
         .response(asStreamAlwaysUnsafe(sttp.capabilities.fs2.Fs2Streams[IO]))
         .send(server.backend)
-        .flatMap(response =>
-          response.body.take(1).compile.drain.as(response.header("X-Kui-Correlation-Id"))
-        )
+        .flatMap(response => response.body.take(1).compile.drain.as(response.header("X-Kui-Correlation-Id")))
         .map(id => assert(id.exists(_.nonEmpty), "the stream response carries no correlation id"))
     }
   }

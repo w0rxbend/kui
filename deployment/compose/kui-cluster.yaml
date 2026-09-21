@@ -48,5 +48,37 @@ kui:
 
     hashUserIds: true
 
-  clusters: []
+  # ---------------------------------------------------------------------------------------------
+  # THE SAME TWO CLUSTERS `kui-service.yaml` DECLARES, AND THEY MUST STAY THE SAME TWO.
+  #
+  # The cluster service is what answers `/api/v1/clusters`, so a cluster it does not know about is a
+  # cluster nothing else can be asked about either. This file said `clusters: []` for three
+  # milestones because the topology's subject is process isolation rather than Kafka; M7 ended that,
+  # because no assertion about measuring a broker can be made against no broker.
+  #
+  # `kui.metrics.sources` is NOT repeated here. This process does not read it, and the difference
+  # between the two clusters — one has an exporter beside it and one does not — is a fact the
+  # metrics service holds, which is exactly why the two configuration files exist separately.
+  clusters:
+    - name: "Measured"
+      id: "measured"
+      bootstrapServers:
+        - "kafka:9092"
+      # The registry beside the broker. Both clusters name it: the difference this stack is built
+      # to show is about `kui.metrics.sources` and nothing else, so every other capability is the
+      # same on both, and a screen behaving differently between them is a defect not a setting.
+      schemaRegistry:
+        url:
+          - "http://schema-registry:8080/apis/ccompat/v7"
+    - name: "Unmeasured"
+      id: "unmeasured"
+      bootstrapServers:
+        - "kafka:9092"
+      # The registry beside the broker. Both clusters name it: the difference this stack is built
+      # to show is about `kui.metrics.sources` and nothing else, so every other capability is the
+      # same on both, and a screen behaving differently between them is a defect not a setting.
+      schemaRegistry:
+        url:
+          - "http://schema-registry:8080/apis/ccompat/v7"
+
   rbac: {}

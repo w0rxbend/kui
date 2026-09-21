@@ -133,14 +133,15 @@ object MutationGuard {
             op.guaranteeCase {
               // `guaranteeCase`, so a cancelled or errored mutation is recorded too. Kafka gives no
               // guarantee that a cancelled write was *not* applied, and a record claiming either way
-              // would be a lie; this one says the operation was cancelled, which tells an operator to
-              // go and look.
+              // would be a lie; `Unknown` tells an operator to go and look, which is the only honest
+              // thing this arm can offer. `Errored` is a different fact and stays `Failed`: the
+              // producer raised, so KUI knows the send did not complete.
               case Outcome.Succeeded(_) => Temporal[F].unit
               case Outcome.Errored(failure) =>
                 write(MutationOutcome.Failed, Map("reason" -> Option(failure.getMessage).getOrElse("")))
               case Outcome.Canceled() =>
                 write(
-                  MutationOutcome.Failed,
+                  MutationOutcome.Unknown,
                   Map("reason" -> "the operation was cancelled after the request was sent")
                 )
             }.flatMap {

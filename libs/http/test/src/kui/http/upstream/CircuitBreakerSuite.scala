@@ -7,13 +7,14 @@ import cats.effect.kernel.Ref
 import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import munit.CatsEffectSuite
+import sttp.capabilities.StreamMaxLengthExceededException
 
 import kui.kernel.PositiveInt
 
 /** That KUI stops calling something that is plainly down, and finds out when it is back.
   *
-  * Every case runs under `TestControl`, so the reset timer is asserted rather than waited for:
-  * there is no `sleep` in this suite and nothing in it can be flaky on a loaded CI machine.
+  * Every case runs under `TestControl`, so the reset timer is asserted rather than waited for: there is no
+  * `sleep` in this suite and nothing in it can be flaky on a loaded CI machine.
   */
 final class CircuitBreakerSuite extends CatsEffectSuite {
 
@@ -24,13 +25,23 @@ final class CircuitBreakerSuite extends CatsEffectSuite {
   private def breaker: IO[CircuitBreaker[IO]] =
     CircuitBreaker.make[IO](upstream, threshold, reset)
 
-  private val boom = new RuntimeException("connection refused")
+  private val boom = new RuntimeException(
+    "https://admin:secret@example.invalid/api/v1/query?query=sensitive_promql"
+  )
 
   private def fail(b: CircuitBreaker[IO]): IO[Unit] =
     b.protect(IO.raiseError[Unit](boom)).attempt.void
 
   private def succeed(b: CircuitBreaker[IO]): IO[Unit] =
     b.protect(IO.unit).attempt.void
+
+  private def ignore(b: CircuitBreaker[IO]): IO[Unit] =
+    b
+      .protectClassified(IO.raiseError[Unit](new StreamMaxLengthExceededException(64L)))(_ => true)(_ =>
+        false
+      )
+      .attempt
+      .void
 
   test("opensAfterConsecutiveFailuresAndNotAfterInterleavedSuccesses") {
     val consecutive = for {
@@ -50,6 +61,25 @@ final class CircuitBreakerSuite extends CatsEffectSuite {
     TestControl.executeEmbed((consecutive, interleaved).tupled).map { (opened, stillClosed) =>
       assertEquals(opened, CircuitState.Open)
       assertEquals(stillClosed, CircuitState.Closed)
+    }
+  }
+
+  test("a terminal non-counting failure preserves a real failure streak but never opens a circuit alone") {
+    val preserveStreak = for {
+      b <- CircuitBreaker.make[IO](upstream, PositiveInt.unsafe(2), reset)
+      _ <- fail(b) *> ignore(b) *> fail(b)
+      state <- b.state
+    } yield state
+
+    val ignoredOnly = for {
+      b <- CircuitBreaker.make[IO](upstream, PositiveInt.unsafe(2), reset)
+      _ <- ignore(b).replicateA_(10)
+      state <- b.state
+    } yield state
+
+    TestControl.executeEmbed((preserveStreak, ignoredOnly).tupled).map { (streakState, ignoredState) =>
+      assertEquals(streakState, CircuitState.Open)
+      assertEquals(ignoredState, CircuitState.Closed)
     }
   }
 
@@ -133,6 +163,26 @@ final class CircuitBreakerSuite extends CatsEffectSuite {
     }
   }
 
+  test("a terminal non-counting half-open probe reopens without wedging or immediately probing again") {
+    val program = for {
+      b <- breaker
+      _ <- fail(b).replicateA_(3)
+      _ <- IO.sleep(reset + 1.second)
+      _ <- ignore(b)
+      reopened <- b.state
+      immediate <- b.protect(IO.unit).attempt
+      _ <- IO.sleep(reset + 1.second)
+      _ <- succeed(b)
+      recovered <- b.state
+    } yield (reopened, immediate, recovered)
+
+    TestControl.executeEmbed(program).map { (reopened, immediate, recovered) =>
+      assertEquals(reopened, CircuitState.Open)
+      assert(immediate.left.toOption.exists(_.isInstanceOf[CircuitOpenException]))
+      assertEquals(recovered, CircuitState.Closed)
+    }
+  }
+
   test("a response that arrived but was not a success still counts as a failure") {
     // An upstream answering 503 to everything is as down as one refusing connections. A breaker
     // that only noticed exceptions would never open for it.
@@ -163,7 +213,9 @@ final class CircuitBreakerSuite extends CatsEffectSuite {
         List(CircuitState.Open, CircuitState.HalfOpen, CircuitState.Closed)
       )
       assert(events.forall(_.upstream == upstream), events.toString)
-      assertEquals(events.head.lastError, Some("connection refused"))
+      assertEquals(events.head.lastError, Some("transport"))
+      assert(!events.head.toString.contains("secret"), events.head.toString)
+      assert(!events.head.toString.contains("sensitive_promql"), events.head.toString)
       // The transition that closed it carries no error, so a reader can tell recovery from failure
       // without parsing the state name.
       assertEquals(events.last.lastError, None)

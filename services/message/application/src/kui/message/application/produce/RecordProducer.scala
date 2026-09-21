@@ -1,5 +1,7 @@
 package kui.message.application.produce
 
+import java.time.Instant
+
 import cats.effect.kernel.Resource
 
 import kui.kernel.error.KuiError
@@ -18,13 +20,18 @@ import kui.message.domain.ProducedAt
   * @param partition
   *   `None` lets Kafka's own partitioner choose: hash the key, or round-robin when there is no key. Naming a
   *   partition is the unusual case and reads as one.
+  * @param timestamp
+  *   `None` lets the broker stamp the record on arrival, which is what an ordinary produce wants. A resend
+  *   replaying a `CreateTime` source sets this to the original record's timestamp instead, so the replay
+  *   carries the moment the event actually happened rather than the moment it was replayed.
   */
 final case class RawProducerRecord(
     topic: TopicName,
     partition: Option[PartitionId],
     key: Option[Array[Byte]],
     value: Option[Array[Byte]],
-    headers: List[RawHeader]
+    headers: List[RawHeader],
+    timestamp: Option[Instant] = None
 )
 
 /** Writing records, stated so that the use cases above never see a Kafka type.

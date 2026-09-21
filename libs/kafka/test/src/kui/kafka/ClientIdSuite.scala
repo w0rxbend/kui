@@ -9,8 +9,8 @@ import kui.testkit.KuiIOSuite
 
 /** That two KUI clients never share a `client.id`.
   *
-  * A broker's request log and its quota accounting are both keyed by `client.id`. Two clients
-  * sharing one makes the log unattributable and makes a quota meant for one of them apply to both.
+  * A broker's request log and its quota accounting are both keyed by `client.id`. Two clients sharing one
+  * makes the log unattributable and makes a quota meant for one of them apply to both.
   */
 final class ClientIdSuite extends KuiIOSuite {
 

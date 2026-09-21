@@ -179,10 +179,12 @@ const SHAPES = {
   /* Save to a file. The tray-and-arrow, not the cloud: nothing in this product downloads from a
    * cloud, and the tray reads as "onto your machine". */
   download: { paths: ["M12 3v12", "M8 11l4 4 4-4", "M4 19h16"] },
-  /* A favourite. Drawn as an outline; the filled state is produced by the caller's CSS setting
-   * `fill: currentColor`, so that favourited and not are one glyph in two states rather than two
-   * glyphs that have to be kept in step. */
-  star: { paths: ["M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"] },
+  /* There is no favourite glyph here. The branch it was drawn for was removed in wave 4 and a
+   * repository-wide grep for its name has been empty since, so it was a member of `IconName` that
+   * nothing in the product could name. SCREENS-V4 §2.2 still draws two starred topics above the
+   * prefix groups and `shell/src/nav/topicTree.ts` records what bringing that back costs; the path
+   * data is five minutes' work and is in the history if it is wanted. A shape nobody can reach is
+   * not a head start, it is a claim that the feature is half-built. */
   /* Stored bytes. Stacked platters — the same picture the design puts beside "STORAGE" and
    * "SIZE ON DISK", and distinct from `brokers`, which is a machine. */
   disk: {

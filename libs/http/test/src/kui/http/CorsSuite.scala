@@ -13,8 +13,8 @@ import kui.config.{CorsConfig, KuiConfigSource, UrlPolicy}
 import kui.contracts.ErrorEnvelope
 import kui.contracts.ErrorEnvelope.given
 
-/** That cross-origin access is off unless someone turned it on, and that turning it on still means
-  * an explicit list.
+/** That cross-origin access is off unless someone turned it on, and that turning it on still means an
+  * explicit list.
   */
 final class CorsSuite extends CatsEffectSuite {
 

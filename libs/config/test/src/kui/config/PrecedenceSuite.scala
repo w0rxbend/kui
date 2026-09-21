@@ -12,9 +12,9 @@ import kui.testkit.KuiSuite
 
 /** That the four configuration layers are consulted in the documented order, always.
   *
-  * The order is command line, then environment, then file, then the built-in default. It matters
-  * in a very ordinary way: an operator debugging a container overrides one key on the command
-  * line, and if the file quietly won instead, they would conclude the setting does nothing.
+  * The order is command line, then environment, then file, then the built-in default. It matters in a very
+  * ordinary way: an operator debugging a container overrides one key on the command line, and if the file
+  * quietly won instead, they would conclude the setting does nothing.
   */
 final class PrecedenceSuite extends KuiSuite {
 

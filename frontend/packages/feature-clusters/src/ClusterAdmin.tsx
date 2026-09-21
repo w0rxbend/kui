@@ -31,6 +31,7 @@ import {
   Checkbox,
   ConfirmDialog,
   Select,
+  Skeleton,
   StatusPill,
   TextField,
   type Mutation,
@@ -93,6 +94,8 @@ export interface ClusterAdminProps {
   readonly deleteState: Mutation<unknown>;
   /** Absent when this principal may change clusters. Present disables every write control. */
   readonly disabledReason?: string | undefined;
+  /** Set when the initial `GET /clusters` call failed. Replaces the list with a retry card. */
+  readonly failure?: { readonly message: string; readonly code: string; readonly onRetry: () => void } | undefined;
 }
 
 export function ClusterAdmin(props: ClusterAdminProps): JSX.Element {
@@ -131,11 +134,37 @@ export function ClusterAdmin(props: ClusterAdminProps): JSX.Element {
         </Show>
       </header>
 
-      <ul class="kui-cluster-admin__list">
-        <For each={props.clusters}>
-          {(cluster) => (
-            <li>
-              <Card title={cluster.name}>
+      <Show
+        when={props.failure === undefined}
+        fallback={
+          <Card
+            title="Clusters"
+            state="unavailable"
+            message={props.failure?.message}
+            description="KUI could not read its cluster configuration."
+            code={props.failure?.code}
+            stateAction={
+              <Button variant="secondary" icon="refresh" onClick={() => props.failure?.onRetry()}>
+                Retry
+              </Button>
+            }
+            testId="cluster-admin-card"
+          />
+        }
+      >
+        <Show
+          when={props.loading !== true}
+          fallback={
+            <ul class="kui-cluster-admin__list" aria-hidden="true">
+              <For each={[0, 1, 2]}>{() => <li><Skeleton height="4rem" /></li>}</For>
+            </ul>
+          }
+        >
+          <ul class="kui-cluster-admin__list">
+            <For each={props.clusters}>
+              {(cluster) => (
+                <li>
+                  <Card title={cluster.name}>
                 <div class="kui-cluster-admin__row">
                   <code class="kui-cluster-admin__brokers">{cluster.bootstrapServers}</code>
                   <StatusPill tone="neutral">{cluster.security.protocol}</StatusPill>
@@ -199,10 +228,12 @@ export function ClusterAdmin(props: ClusterAdminProps): JSX.Element {
                   </Show>
                 </div>
               </Card>
-            </li>
-          )}
-        </For>
-      </ul>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </Show>
 
       <Show when={props.editing}>
         {(current) => (

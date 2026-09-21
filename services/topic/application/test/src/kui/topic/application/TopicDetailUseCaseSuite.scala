@@ -59,7 +59,9 @@ final class TopicDetailUseCaseSuite extends munit.CatsEffectSuite {
   test("aLiveReadIsReportedAsLive") {
     FakeTopicAdmin
       .of(List(live))
-      .flatMap(admin => TopicDetailUseCase.make[IO](admin, snapshotsOf(Some(withStaleRow))).detail(cluster, orders))
+      .flatMap(admin =>
+        TopicDetailUseCase.make[IO](admin, snapshotsOf(Some(withStaleRow))).detail(cluster, orders)
+      )
       .map {
         case Right(Fresh.Live(detail)) => assertEquals(detail.partitions.size, 1)
         case other => fail(s"expected a live read, got $other")
@@ -95,7 +97,9 @@ final class TopicDetailUseCaseSuite extends munit.CatsEffectSuite {
     // partitions for something that is gone, which is worse than a 404.
     FakeTopicAdmin
       .of(Nil)
-      .flatMap(admin => TopicDetailUseCase.make[IO](admin, snapshotsOf(Some(withStaleRow))).detail(cluster, orders))
+      .flatMap(admin =>
+        TopicDetailUseCase.make[IO](admin, snapshotsOf(Some(withStaleRow))).detail(cluster, orders)
+      )
       .map(result => assertEquals(result, Left(TopicError.NotFound(orders))))
   }
 

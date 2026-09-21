@@ -248,7 +248,7 @@ object ContractRouting {
     * The id always comes from the path. An inbound `X-Kui-Cluster-Id` header is stripped at the edge by
     * prefix (ADR-040) and is never read, so a caller cannot label another cluster's metrics as its own.
     */
-  private def callerOf[F[_]: Async](
+  private[api] def callerOf[F[_]: Async](
       request: ServerRequest
   ): F[Either[(ErrorEnvelope, StatusCode), (Principal, CorrelationId, Option[ClusterId], List[String])]] =
     ErrorInterceptor.correlationIdOf[F](request).flatMap { correlationId =>

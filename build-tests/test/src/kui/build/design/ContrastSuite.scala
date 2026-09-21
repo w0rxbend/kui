@@ -38,10 +38,10 @@ import munit.FunSuite
   * ## Why this is a JVM build test and not a frontend test
   *
   * It parses CSS and Markdown and does arithmetic. It imports `munit` and nothing else — no browser, no
-  * rendering framework, not one line that knows which language the interface is written in. When the
-  * browser moved from Scala.js to TypeScript (ADR-048) this suite had no reason to move with it, and
-  * rewriting a proven accessibility gate in a new language during a migration would have risked the gate
-  * for nothing. On the JVM it also got simpler: it opens two files instead of having them compiled in.
+  * rendering framework, not one line that knows which language the interface is written in. When the browser
+  * moved from Scala.js to TypeScript (ADR-048) this suite had no reason to move with it, and rewriting a
+  * proven accessibility gate in a new language during a migration would have risked the gate for nothing. On
+  * the JVM it also got simpler: it opens two files instead of having them compiled in.
   */
 final class ContrastSuite extends FunSuite {
 
@@ -327,16 +327,15 @@ private object ContrastSuite {
 
   /** Follows `var(--other-token)` until a real colour is reached.
     *
-    * A token is allowed to be an alias: `--kui-color-series-1: var(--kui-color-primary)` names "the
-    * first line on a chart" without inventing a colour for it, and — because a custom property
-    * holding a `var()` is substituted where it is *used* and not where it is declared — one
-    * declaration is correct in both themes. A browser resolves that chain before painting, so this
-    * has to as well, or an alias reads as an unparseable colour and every check that touches it is
-    * lost.
+    * A token is allowed to be an alias: `--kui-color-series-1: var(--kui-color-primary)` names "the first
+    * line on a chart" without inventing a colour for it, and — because a custom property holding a `var()` is
+    * substituted where it is *used* and not where it is declared — one declaration is correct in both themes.
+    * A browser resolves that chain before painting, so this has to as well, or an alias reads as an
+    * unparseable colour and every check that touches it is lost.
     *
-    * The depth limit is not defensive tidiness. CSS lets a `var()` chain refer to itself, and a
-    * browser answers such a cycle with the property's initial value rather than by hanging; here the
-    * honest answer is to fail loudly and name the token, because a cycle in this file is a mistake.
+    * The depth limit is not defensive tidiness. CSS lets a `var()` chain refer to itself, and a browser
+    * answers such a cycle with the property's initial value rather than by hanging; here the honest answer is
+    * to fail loudly and name the token, because a cycle in this file is a mistake.
     */
   private def resolve(name: String, value: String, palette: Map[String, String], depth: Int = 0): String =
     VarReference.findFirstMatchIn(value) match {
@@ -349,7 +348,12 @@ private object ContrastSuite {
           target,
           throw new IllegalArgumentException(s"$name refers to $target, which nothing declares")
         )
-        resolve(name, VarReference.replaceFirstIn(value, java.util.regex.Matcher.quoteReplacement(substituted)), palette, depth + 1)
+        resolve(
+          name,
+          VarReference.replaceFirstIn(value, java.util.regex.Matcher.quoteReplacement(substituted)),
+          palette,
+          depth + 1
+        )
     }
 
   /** The colour tokens a browser would end up with, for one state. */

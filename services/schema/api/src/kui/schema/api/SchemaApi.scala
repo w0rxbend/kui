@@ -56,7 +56,7 @@ object SchemaApi {
   /** The routes, in the order the router tries them.
     *
     * Health first, because nothing else can match its paths and a probe should travel the shortest route
-    * through the router. Then the five reads in the contract's own order, then the three bodied routes.
+    * through the router. Then the five reads in the contract's own order, then the four bodied routes.
     */
   def routes[F[_]: {Async, Parallel}](
       subjects: SubjectListUseCase[F],
@@ -64,6 +64,7 @@ object SchemaApi {
       schema: SchemaVersionUseCase[F],
       compatibility: CompatibilityReadUseCase[F],
       set: SetCompatibilityUseCase[F],
+      register: RegisterSchemaUseCase[F],
       check: CompatibilityCheckUseCase[F],
       readiness: List[ReadinessCheck[F]],
       capabilities: SchemaCapabilities[F],
@@ -75,7 +76,7 @@ object SchemaApi {
 
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
       SchemaRoutes[F](subjects, versions, schema, compatibility, secured) ++
-      SchemaMutationRoutes[F](set, check, secured)
+      SchemaMutationRoutes[F](set, register, check, secured)
   }
 
   /** The cross-cutting chain, outermost first, in the order `libs/http`'s server wants it: principal, then

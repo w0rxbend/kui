@@ -6,9 +6,9 @@ import org.scalacheck.Prop.forAll
 
 /** The arithmetic and the bounds of the kernel's value objects.
   *
-  * `OffsetRange` gets the most attention because it is the one place where an off-by-one is both
-  * easy to write and expensive to find: every message-browsing page in M3 is a range, and a range
-  * that is one record short is a bug nobody notices until a user says "a message is missing".
+  * `OffsetRange` gets the most attention because it is the one place where an off-by-one is both easy to
+  * write and expensive to find: every message-browsing page in M3 is a range, and a range that is one record
+  * short is a bug nobody notices until a user says "a message is missing".
   */
 final class ValuesSuite extends ScalaCheckSuite {
 
@@ -35,7 +35,7 @@ final class ValuesSuite extends ScalaCheckSuite {
   property("the size of a half-open range is exactly end minus start") {
     forAll(Gen.chooseNum(0L, 1000000L), Gen.chooseNum(0L, 1000000L)) { (a, b) =>
       val begin = math.min(a, b)
-      val end   = math.max(a, b)
+      val end = math.max(a, b)
       assertEquals(OffsetRange.from(offset(begin), offset(end)).map(_.size), Right(end - begin))
     }
   }

@@ -19,7 +19,7 @@ final class StringContainsFilterSuite extends KuiSuite {
   private def matches(needle: String, r: FilterableRecord): Boolean =
     StringContainsFilter[IO](needle).test(r).unsafeRunSync() match {
       case Right(result) => result
-      case Left(error)   => fail(s"the string filter cannot fail, and did: $error")
+      case Left(error) => fail(s"the string filter cannot fail, and did: $error")
     }
 
   test("it matches the key, the value and a header value, each on its own") {

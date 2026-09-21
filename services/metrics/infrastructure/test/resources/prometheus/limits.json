@@ -1,0 +1,107 @@
+{
+  "instantAtSeriesLimit": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        { "metric": { "a": "1", "bb": "22" }, "value": [0, "1"] },
+        { "metric": { "a": "2", "bb": "22" }, "value": [0, "2"] }
+      ]
+    }
+  },
+  "instantOverSeriesLimit": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        { "metric": { "a": "1" }, "value": [0, "1"] },
+        { "metric": { "a": "2" }, "value": [0, "2"] },
+        { "metric": { "a": "3" }, "value": [0, "3"] }
+      ]
+    }
+  },
+  "instantOverLabelCount": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        { "metric": { "a": "1", "b": "2", "c": "3" }, "value": [0, "1"] }
+      ]
+    }
+  },
+  "duplicateInstantSeries": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        { "metric": { "a": "1" }, "value": [0, "1"] },
+        { "metric": { "a": "1" }, "value": [1, "2"] }
+      ]
+    }
+  },
+  "rangeAtLimits": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        {
+          "metric": { "a": "1" },
+          "values": [[0, "1"], [60, "2"]]
+        },
+        {
+          "metric": { "a": "2" },
+          "values": [[0, "3"], [60, "4"]]
+        }
+      ]
+    }
+  },
+  "rangeOverPoints": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        {
+          "metric": { "a": "1" },
+          "values": [[0, "1"], [30, "2"], [60, "3"]]
+        }
+      ]
+    }
+  },
+  "duplicateRangeSeries": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        { "metric": { "a": "1" }, "values": [[0, "1"]] },
+        { "metric": { "a": "1" }, "values": [[60, "2"]] }
+      ]
+    }
+  },
+  "nonMonotonic": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        { "metric": {}, "values": [[0, "1"], [60, "2"], [60, "3"]] }
+      ]
+    }
+  },
+  "beforeWindow": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        { "metric": {}, "values": [[-1, "1"], [60, "2"]] }
+      ]
+    }
+  },
+  "afterWindow": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        { "metric": {}, "values": [[0, "1"], [61, "2"]] }
+      ]
+    }
+  }
+}

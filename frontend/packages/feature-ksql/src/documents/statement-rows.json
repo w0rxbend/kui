@@ -1,0 +1,25 @@
+{
+  "statement" : "SELECT ID, TOTAL, NOTE FROM ORDERS WHERE ID = '17';",
+  "shape" : "pull_query",
+  "outcome" : "rows",
+  "columns" : [
+    "ID",
+    "TOTAL",
+    "NOTE"
+  ],
+  "rows" : [
+    [
+      "17",
+      "42.50",
+      "gift wrap"
+    ],
+    [
+      "18",
+      "11.00",
+      null
+    ]
+  ],
+  "message" : null,
+  "entity" : null,
+  "executedAt" : "2026-09-03T10:11:12Z"
+}

@@ -10,18 +10,19 @@ import org.typelevel.log4cats.noop.NoOpFactory
 
 import kui.testkit.KuiIOSuite
 
-/** That KUI runs with no Kafka store at all: a mounted directory is the whole truth, reads work, writes
-  * say `NotConfigured` rather than failing, and one unreadable file costs one key instead of the store.
+/** That KUI runs with no Kafka store at all: a mounted directory is the whole truth, reads work, writes say
+  * `NotConfigured` rather than failing, and one unreadable file costs one key instead of the store.
   *
-  * This is the milestone's "with `kui.store.kafka.*` unset, everything else still passes" criterion, and
-  * it is also why the port ships with two implementations before it has any consumers — a port with one
+  * This is the milestone's "with `kui.store.kafka.*` unset, everything else still passes" criterion, and it
+  * is also why the port ships with two implementations before it has any consumers — a port with one
   * implementation is a port that has quietly assumed Kafka.
   */
 final class FileConfigStoreSuite extends KuiIOSuite {
 
   private given LoggerFactory[IO] = NoOpFactory[IO]
 
-  private def storeAt(root: Path): IO[ConfigStore[IO]] = FileConfigStore.resource[IO](root).allocated.map(_._1)
+  private def storeAt(root: Path): IO[ConfigStore[IO]] =
+    FileConfigStore.resource[IO](root).allocated.map(_._1)
 
   private def defaultStore: IO[ConfigStore[IO]] = storeAt(StoreFixtures.fileStoreRoot())
 
@@ -195,6 +196,8 @@ final class FileConfigStoreSuite extends KuiIOSuite {
   test("aDirectoryThatIsNotReadableJsonNeverStopsStartup") {
     val root = StoreFixtures.fileStoreRoot()
     val _ = Files.createDirectories(root.resolve("cluster/nested/deeper"))
-    storeAt(root).flatMap(_.list(StoreSection.Cluster)).map(records => assertEquals(records.map(_.key.render), List("cluster/local")))
+    storeAt(root)
+      .flatMap(_.list(StoreSection.Cluster))
+      .map(records => assertEquals(records.map(_.key.render), List("cluster/local")))
   }
 }

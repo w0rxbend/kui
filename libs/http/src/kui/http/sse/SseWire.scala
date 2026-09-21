@@ -22,9 +22,14 @@ import io.circe.parser.parse as parseJson
   *
   * ==What it deliberately does not implement==
   *
-  * The `retry:` field (the gateway does not reconnect upstream; the browser reconnects to the gateway) and
-  * comment lines beginning with `:` other than skipping them. Both are in the SSE specification and neither
-  * is used by any KUI producer, so implementing them would be untested code.
+  * The `retry:` field: the gateway does not reconnect upstream, the browser reconnects to the gateway, and
+  * neither uses it. It is in the SSE specification and implementing it would be untested code.
+  *
+  * Comment lines beginning with `:` are ignored, and it is [[field]] that ignores them rather than a filter
+  * of their own: a `:`-leading line has an empty field name, which none of the three `collect` patterns below
+  * matches. There was a `filterNot(_.startsWith(":"))` in [[parseFrame]] saying so twice; it was removed
+  * after a mutation proved it inert — deleting it left `SseWireSuite`'s two comment cases green, because they
+  * assert the behaviour rather than the line.
   */
 object SseWire {
 
@@ -50,7 +55,7 @@ object SseWire {
 
   /** One frame's field lines into an event, or `None` when the frame carries no `data:` at all. */
   def parseFrame(lines: List[String]): Option[SseEvent] = {
-    val fields = lines.filterNot(_.startsWith(":")).flatMap(field)
+    val fields = lines.flatMap(field)
     val data = fields.collect { case ("data", value) => value }
 
     Option.when(data.nonEmpty) {

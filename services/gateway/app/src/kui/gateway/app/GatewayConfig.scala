@@ -1,6 +1,6 @@
 package kui.gateway.app
 
-import kui.config.{AuthConfig, GatewayConfig, KuiConfig, ServerConfig, TelemetryConfig}
+import kui.config.{AuthConfig, GatewayConfig, KuiConfig, ServerConfig, TelemetryConfig, UrlPolicy}
 import kui.gateway.api.GatewayServiceConfigView
 import kui.kernel.ClusterId
 import kui.security.rbac.{ClusterFlags, RbacPolicy}
@@ -35,6 +35,12 @@ import kui.security.rbac.{ClusterFlags, RbacPolicy}
   *   cluster refuses — a file with no roles in it has not asked for authorization
   * @param clusterFlags
   *   what is true of each configured cluster regardless of who is asking. Read-only, today
+  * @param urlPolicy
+  *   the outbound address rule this process was loaded under. It is carried rather than re-derived because
+  *   the loader has already applied it once — `Main.loadConfig` calls `UrlPolicy.fromEnv` — and
+  *   `ResilientBackend` applies it again to every request and every redirect. Two derivations that can
+  *   disagree is how a gateway came to accept `http://localhost:8081` at start-up and refuse every call to it
+  *   afterwards
   */
 final case class GatewayServiceConfig(
     server: ServerConfig,
@@ -42,7 +48,8 @@ final case class GatewayServiceConfig(
     telemetry: TelemetryConfig,
     auth: AuthConfig,
     rbac: RbacPolicy,
-    clusterFlags: Map[ClusterId, ClusterFlags]
+    clusterFlags: Map[ClusterId, ClusterFlags],
+    urlPolicy: UrlPolicy = UrlPolicy.Strict
 ) {
 
   /** The two sections `GatewayApi.routes` reads.
@@ -58,8 +65,12 @@ final case class GatewayServiceConfig(
 
 object GatewayServiceConfig {
 
-  /** The gateway's slice of a loaded configuration. */
-  def from(config: KuiConfig): GatewayServiceConfig =
+  /** The gateway's slice of a loaded configuration.
+    *
+    * `policy` is the one the configuration was *loaded* under, which the caller holds and this type cannot
+    * re-derive: `KuiConfig` keeps no record of the rule its URLs were accepted against.
+    */
+  def from(config: KuiConfig, policy: UrlPolicy = UrlPolicy.Strict): GatewayServiceConfig =
     GatewayServiceConfig(
       config.server,
       config.gateway,
@@ -70,7 +81,8 @@ object GatewayServiceConfig {
       // step towards holding some: read-only is a fact about the deployment's own configuration file,
       // known before any broker is contacted, and the edge needs it to refuse a write without asking a
       // service whether it would have refused it too.
-      config.clusters.map(cluster => cluster.id -> ClusterFlags(cluster.readOnly)).toMap
+      config.clusters.map(cluster => cluster.id -> ClusterFlags(cluster.readOnly)).toMap,
+      policy
     )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no upstreams, no

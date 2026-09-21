@@ -11,16 +11,16 @@ import kui.kernel.error.*
 
 /** The error envelope, pinned to committed sample documents.
   *
-  * A round-trip test alone would let the shape change freely as long as both halves changed
-  * together, which is exactly what a contract must not allow: the other side of the wire is a
-  * browser, or somebody's script, that was not recompiled. The golden documents are the contract, and
-  * changing one is a deliberate act that shows up in a diff.
+  * A round-trip test alone would let the shape change freely as long as both halves changed together, which
+  * is exactly what a contract must not allow: the other side of the wire is a browser, or somebody's script,
+  * that was not recompiled. The golden documents are the contract, and changing one is a deliberate act that
+  * shows up in a diff.
   */
 final class ErrorEnvelopeSuite extends FunSuite {
 
-  private val at            = Instant.parse("2026-09-03T10:11:12Z")
+  private val at = Instant.parse("2026-09-03T10:11:12Z")
   private val correlationId = CorrelationId.unsafe("3b1fa9c2e4d54f0b")
-  private val prettyJson    = io.circe.Printer.spaces2
+  private val prettyJson = io.circe.Printer.spaces2
 
   private val validation = ApplicationError.Invalid(
     "Request is not valid",
@@ -46,7 +46,7 @@ final class ErrorEnvelopeSuite extends FunSuite {
   test("both envelope documents decode") {
     List(
       "error-envelope-validation.json" -> GoldenDocuments.errorEnvelopeValidation,
-      "error-envelope-upstream.json"   -> GoldenDocuments.errorEnvelopeUpstream
+      "error-envelope-upstream.json" -> GoldenDocuments.errorEnvelopeUpstream
     ).foreach { document =>
       assert(decode[ErrorEnvelope](document._2).isRight, s"${document._1} did not decode")
     }
@@ -108,9 +108,9 @@ final class ErrorEnvelopeSuite extends FunSuite {
 
   test("timestamps are RFC 3339 in UTC with exactly three fractional digits") {
     val cases = List(
-      Instant.parse("2026-09-03T10:11:12Z")         -> "2026-09-03T10:11:12.000Z",
-      Instant.parse("2026-09-03T10:11:12.5Z")       -> "2026-09-03T10:11:12.500Z",
-      Instant.parse("2026-09-03T10:11:12.123456Z")  -> "2026-09-03T10:11:12.123Z"
+      Instant.parse("2026-09-03T10:11:12Z") -> "2026-09-03T10:11:12.000Z",
+      Instant.parse("2026-09-03T10:11:12.5Z") -> "2026-09-03T10:11:12.500Z",
+      Instant.parse("2026-09-03T10:11:12.123456Z") -> "2026-09-03T10:11:12.123Z"
     )
 
     cases.foreach { row =>

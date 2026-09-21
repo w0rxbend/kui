@@ -14,7 +14,7 @@ import sttp.tapir.client.sttp4.SttpClientInterpreter
 import sttp.tapir.client.sttp4.stream.StreamSttpClientInterpreter
 import sttp.tapir.{DecodeResult, Endpoint, PublicEndpoint}
 
-import kui.config.UpstreamServiceConfig
+import kui.config.{UpstreamServiceConfig, UrlPolicy}
 import kui.contracts.ErrorEnvelope
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.{SseEvent, SseWire}
@@ -64,6 +64,14 @@ object SttpServiceClient {
     * `underlying` is the raw transport, supplied rather than constructed here so that a suite can hand in a
     * stub backend and exercise the whole assembly — signing, headers, error mapping — without a socket. The
     * composition root passes the process-wide HTTP backend.
+    *
+    * @param policy
+    *   the deployment's outbound address rule, which `ResilientBackend` re-applies to every request and to
+    *   every redirect. It is a parameter rather than the default because the two halves have to be the same
+    *   decision: the configuration loader already accepted this URL under the operator's
+    *   `KUI_ALLOW_PRIVATE_UPSTREAMS`, and a per-call check that disagrees with the loader refuses at request
+    *   time what start-up accepted. Defaulted to `Strict` so that a caller who says nothing gets the safe
+    *   answer rather than the convenient one.
     */
   def resource[F[_]: Async](
       service: ServiceId,
@@ -71,10 +79,11 @@ object SttpServiceClient {
       principals: PrincipalCodec[F],
       telemetry: Telemetry[F],
       logger: StructuredLogger[F],
-      underlying: StreamBackend[F, Fs2Streams[F]]
+      underlying: StreamBackend[F, Fs2Streams[F]],
+      policy: UrlPolicy = UrlPolicy.Strict
   ): Resource[F, ServiceClient[F]] =
     UpstreamClient
-      .resource[F](upstreamConfig(service, config), underlying, telemetry, service, logger)
+      .resource[F](upstreamConfig(service, config, policy), underlying, telemetry, service, logger)
       .map(upstream =>
         new Impl[F](
           service,
@@ -149,13 +158,28 @@ object SttpServiceClient {
     * Everything else is `UpstreamConfig`'s default, which is deliberate: an operator configures a URL, a
     * timeout and a concurrency cap per service, and the resilience behaviour behind those is one decision
     * (ADR-037) rather than eleven sets of tuning knobs nobody will keep consistent.
+    *
+    * The address rule is the exception, and it is threaded rather than defaulted for a reason that was
+    * measured rather than argued. `UpstreamConfig.urlPolicy` defaults to `Strict`, and `ResilientBackend`
+    * applies it to every request; leaving the default in place here meant that a gateway configured with
+    * `KUI_ALLOW_PRIVATE_UPSTREAMS=true` and a loopback or ClusterIP upstream *loaded* that address happily —
+    * `Main.loadConfig` uses `UrlPolicy.fromEnv` — and then refused every call to it as
+    * `KUI-UPSTREAM-UNAVAILABLE` with no connection ever attempted. The distributed Compose stack is not
+    * affected, because `SafeUrl` never resolves a host *name* and `kui-cluster` is a name; a developer
+    * running the gateway against `http://localhost:8081`, which is the case the environment variable exists
+    * for, was. `MetricsWiring` and `SchemaWiring` already thread the policy the same way.
     */
-  def upstreamConfig(service: ServiceId, config: UpstreamServiceConfig): UpstreamConfig =
+  def upstreamConfig(
+      service: ServiceId,
+      config: UpstreamServiceConfig,
+      policy: UrlPolicy = UrlPolicy.Strict
+  ): UpstreamConfig =
     UpstreamConfig(
       name = service.value,
       urls = NonEmptyList.one(config.url),
       callTimeout = config.timeout,
-      maxConcurrent = config.maxConcurrent
+      maxConcurrent = config.maxConcurrent,
+      urlPolicy = policy
     )
 
   /** Turns an upstream's error response back into the `KuiError` the service raised.

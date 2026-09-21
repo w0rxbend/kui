@@ -1,8 +1,14 @@
 package kui.gateway.api.auth
 
+import java.time.Instant
+
+import scala.concurrent.duration.DurationInt
+
+import cats.effect.IO
 import io.circe.parser.decode
 
-import kui.gateway.api.GatewayTestServer
+import kui.gateway.api.{GatewayApi, GatewayTestServer}
+import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionId, SessionRef}
 import kui.gateway.contract.GatewayEndpoints
 import kui.gateway.contract.dto.AuthMeResponse
 import kui.security.rbac.{ClusterScope, Resource}
@@ -44,7 +50,8 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
   test("authMeAnswersAnonymousInM0") {
     GatewayTestServer.resource().use { server =>
       server.get(meUri).map { response =>
-        val body = decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
+        val body =
+          decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
         assertEquals(body.authType, "disabled")
         assertEquals(body.principal.kind, "anonymous")
         assertEquals(body.principal.name, "anonymous")
@@ -59,7 +66,8 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
     // hide every write control in the deployment that has asked for no authorization at all.
     GatewayTestServer.resource().use { server =>
       server.get(meUri).map { response =>
-        val body = decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
+        val body =
+          decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
 
         assertEquals(body.permissions.map(_.resource).toSet, Resource.values.map(_.wire).toSet)
         assert(body.permissions.forall(_.clusters == List(ClusterScope.EveryWire)))
@@ -84,7 +92,10 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         secondCookie = cookieOf(second)
         // Logging out cleared the session; the new cookie belongs to a fresh session with a different
         // token, so replaying the first token against it must fail.
-        stale <- server.post(logoutUri, Map("Cookie" -> secondCookie, SessionMiddleware.CsrfHeaderName -> token))
+        stale <- server.post(
+          logoutUri,
+          Map("Cookie" -> secondCookie, SessionMiddleware.CsrfHeaderName -> token)
+        )
       } yield {
         assertEquals(allowed.code.code, 200, allowed.body)
         assertEquals(stale.code.code, 403, stale.body)
@@ -105,17 +116,75 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
     }
   }
 
+  test("aCsrfRejectionIsLoggedAtWarnAndNamesTheSessionByItsRefRatherThanItsId") {
+    // Two rules on one log line, and W12-03 measured both ungated over the *whole* gateway module on
+    // 2026-09-12 — `./mill --no-daemon services.gateway.api.test` printed `1270/1270, SUCCESS` under each:
+    //
+    //   `SessionRef.of(active.id).value` -> `active.id.value`    — the rejection line carries the cookie
+    //   `logger.warn(...)`               -> `logger.debug(...)`  — the rejection stops being a signal
+    //
+    // The first is the serious one, and this is the only place in the gateway that logs anything about a
+    // session at all. `Session.scala` states the rule the `SessionRef` type exists for — a rejected request
+    // is logged with `session.ref`, never the id, "so that a log file is not itself a way to hijack the
+    // session it describes" — and a CSRF rejection is precisely what an attack produces, so the attacker's
+    // own noise is what fills the file with live session ids. Anyone who can read a log could then replay
+    // them: the id is the whole credential, and `Secret` protects the CSRF token but the cookie value is a
+    // plain `String`.
+    //
+    // The second is what `SessionMiddleware`'s own scaladoc argues for in its own words — a CSRF rejection
+    // is "a signal worth alerting on, not a client error to note and move past". At `debug` it sits below
+    // every deployment's default level, and the alert nobody is watching is the alert that does not exist.
+    GatewayTestServer.resource().use { server =>
+      for {
+        first <- server.get(meUri)
+        cookie = cookieOf(first)
+        id = cookie.split('=').last
+        refused <- server.post(logoutUri, Map("Cookie" -> cookie))
+        logged <- server.logger.entriesWith("session.ref")
+      } yield {
+        assertEquals(refused.code.code, 403, refused.body)
+        // The vacuity guard: with nothing logged at all, every assertion below holds over an empty list.
+        val entry = logged.headOption.getOrElse(fail(s"the CSRF rejection logged no session at all: $logged"))
+
+        assertEquals(entry.level, "warn", s"a CSRF rejection was logged at ${entry.level}: $entry")
+        assertEquals(entry.context.get("path"), Some(logoutUri), entry.context.toString)
+        assertEquals(
+          entry.context.get("session.ref"),
+          Some(SessionRef.of(SessionId.unsafe(id)).value),
+          "the rejection did not name the session by its one-way ref"
+        )
+        // The direction that matters, asserted over the whole line rather than over the one field, so that
+        // a key added later cannot reintroduce the leak past this case.
+        assert(!entry.message.contains(id), s"the session id reached the log message: ${entry.message}")
+        assert(
+          entry.context.values.forall(!_.contains(id)),
+          s"the session id reached the log context: ${entry.context}"
+        )
+      }
+    }
+  }
+
   test("logoutRequiresPostAndClearsTheCookie") {
     GatewayTestServer.resource().use { server =>
       for {
         first <- server.get(meUri)
         cookie = cookieOf(first)
         token = tokenOf(first)
-        loggedOut <- server.post(logoutUri, Map("Cookie" -> cookie, SessionMiddleware.CsrfHeaderName -> token))
+        loggedOut <- server.post(
+          logoutUri,
+          Map("Cookie" -> cookie, SessionMiddleware.CsrfHeaderName -> token)
+        )
         afterLogout <- server.get(meUri, Map("Cookie" -> cookie))
         afterBody = decode[AuthMeResponse](afterLogout.body).toOption.get
+        // W11-A1: nothing here asked the *store*. Replacing `store.delete(session.id)` with `unit` — a
+        // logout that logs nobody out — left the whole gateway module green, because every assertion
+        // below is satisfied by a session that is still very much alive: the reply is still `200`, and
+        // `/auth/me` still says `disabled` whether the old session survived or a new one replaced it.
+        // A revoked session that is not revoked is the failure an operator reaches for logout to prevent.
+        revoked <- server.sessions.get(SessionId.unsafe(cookie.split('=').last), Instant.now())
       } yield {
         assertEquals(loggedOut.code.code, 200, loggedOut.body)
+        assertEquals(revoked, None, "the session survived the logout that was supposed to delete it")
         // The old session is gone; a request that presents its cookie again gets a *new* anonymous
         // session rather than an error — anonymous mode has nothing to fail on, and a fresh session is
         // exactly what ADR-019 says happens for a cookie the store no longer recognises.
@@ -180,6 +249,150 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         val body = decode[AuthMeResponse](response.body).toOption.get
         assertEquals(body.principal.name, "anonymous")
         assertEquals(body.principal.kind, "anonymous")
+      }
+    }
+  }
+
+  test("theSessionCookieIsFoundByItsExactNameAndNotBySubstring") {
+    // W10-A1: `_.find(_.name == CookieName)` had no case, and loosening it to `_.name.contains(...)` left
+    // the whole gateway module green. A `Cookie` header carries every cookie for the domain, so a reverse
+    // proxy or another application on the same host setting `kui_session_backup` — or an attacker setting
+    // one from a subdomain — would be picked up first and the operator's real session would be dropped on
+    // the floor, silently, on every request.
+    GatewayTestServer.resource().use { server =>
+      for {
+        first <- server.get(meUri)
+        session = cookieOf(first)
+        token = tokenOf(first)
+        again <- server.get(meUri, Map("Cookie" -> s"kui_session_backup=planted; $session"))
+        body = decode[AuthMeResponse](again.body).fold(error => fail(s"${again.body} ($error)"), identity)
+      } yield
+        // Same session, so the CSRF secret the browser already holds still works. Under a substring match
+        // the decoy is found first, `planted` resolves to nothing, and a brand new session is minted.
+        assertEquals(body.csrfToken, token, "a decoy cookie displaced the real session")
+    }
+  }
+
+  test("aDeploymentUnderABasePathStillGetsASessionAndScopesItsCookieToThatPath") {
+    // W10-A1: two rules, both ungated, both only visible when `server.basePath` is set — which no case in
+    // this tree did while asserting a cookie. `needsSession` drops the base path's segments before it looks
+    // for the API prefix, and `setCookie` scopes `Path` to the base path. Dropping either left the whole
+    // gateway module green: without the first, a deployment behind a reverse proxy issues no session at
+    // all and every mutation is refused for want of a CSRF token; without the second, the cookie is
+    // written at `/` and two KUI deployments on one host overwrite each other's sessions.
+    GatewayTestServer.resource(basePath = "/kui", devInsecureCookies = false).use { server =>
+      for {
+        mounted <- server.get(s"/kui$meUri")
+        health <- server.get(s"/kui${GatewayEndpoints.ApiPrefix}/health/live")
+      } yield {
+        val cookie = mounted.header("Set-Cookie").getOrElse(fail(s"no session under /kui: ${mounted.body}"))
+        assert(cookie.startsWith(s"${SessionMiddleware.CookieName}="), cookie)
+        assert(cookie.contains("Path=/kui/"), cookie)
+        // The health exclusion moves with the base path too, so an orchestrator's timer still mints
+        // nothing and cannot evict the bounded store one probe at a time.
+        assertEquals(health.header("Set-Cookie"), None, "a health probe under a base path mints a session")
+      }
+    }
+  }
+
+  test("everyMutatingRouteTheGatewayServesSitsInsideTheSessionMintingSet") {
+    // W11-A1, and it is an *invariant* rather than a behaviour: `SessionMiddleware`'s CSRF step reads
+    // `session.fold(PrincipalKind.Anonymous)(_.principal.kind)`, and replacing that default with
+    // `PrincipalKind.Bearer` is a fail-open — a mutation with no session at all would be exempted from the
+    // CSRF check outright. W10-A1 argued that mutant down as equivalent, correctly, and said why it is only
+    // equivalent *by accident of the route table*: nothing outside `/api/v1` declares a non-safe method, so
+    // no request that reaches the check can be missing a session.
+    //
+    // "By accident of the route table" is not a property anything was checking. The first `POST` added
+    // under `/ui/`, or under a new prefix, turns an equivalent mutant into a live CSRF hole with no test
+    // going red anywhere. This case is the guard on that accident: every endpoint this gateway serves whose
+    // method is not safe must sit on a path `needsSession` says gets one.
+    val safeMethods = Set("GET", "HEAD", "OPTIONS")
+
+    InMemorySessionStore.resource[IO](SessionConfig.Default).use { sessions =>
+      IO {
+        val routes = GatewayApi.routes[IO](GatewayTestServer.configView("/"), Nil, sessions)
+
+        val mutating = routes.flatMap { route =>
+          val method = route.endpoint.method.map(_.method).getOrElse("GET")
+          Option.when(!safeMethods.contains(method))(
+            method -> route.endpoint.showPathTemplate().split('/').toList.filter(_.nonEmpty)
+          )
+        }
+
+        // If this is ever empty the case has stopped measuring anything, which is the failure mode a
+        // green gate hides best.
+        assert(mutating.nonEmpty, "no non-safe-method endpoint was found, so this case proves nothing")
+
+        mutating.foreach { (method, path) =>
+          assert(
+            SessionMiddleware.needsSession(path, ""),
+            s"$method /${path.mkString("/")} is served outside the session-minting set, so a request to " +
+              "it can reach the CSRF check with no session — and the Anonymous default is what refuses it"
+          )
+        }
+      }
+    }
+  }
+
+  test("aSessionPastItsIdleTimeoutIsRefusedOnTheRequestPathAndReplaced") {
+    // FILED AS V2 BY THIS WAVE'S VERIFICATION PASS OVER W12-03, and it is the serious one.
+    //
+    // `store.get(id, now)` inside `SessionMiddleware.ensureSession` is the ONLY expiry check a browser
+    // request ever meets, and `attachInterceptor` is its only caller for one: it both refuses a session
+    // past `SessionConfig`'s idleTimeout and absoluteTimeout, and slides `lastSeenAt` for one that is
+    // still alive. Measured on 2026-09-12 with `now <- Clock[F].realTimeInstant` in `attachInterceptor`
+    // replaced by `now <- Sync[F].pure(Instant.EPOCH)` — one line —
+    // `./mill --no-daemon services.gateway.api.test` printed `1270/1270, SUCCESS` in 108s over all 303
+    // cases. With the clock frozen, `Session.isExpired(now, idleTimeout)` is
+    // `now.isAfter(absoluteExpiry) || now.isAfter(lastSeenAt.plus(idleTimeout))`, which is false for ever:
+    // no session in the deployment expires, and a captured cookie is valid for the life of the process.
+    //
+    // `InMemorySessionStoreSuite` asserts the STORE's arithmetic against an `Instant` it chooses itself,
+    // which is a different statement: it says the rule is computable, not that anything applies it to a
+    // real request with a real clock. Nothing could say the second, because every gateway this tree builds
+    // ran on `SessionConfig.Default` — thirty minutes idle, twelve hours absolute. So the seam is a
+    // `sessionConfig` parameter on `GatewayTestServer.resource` and the timeout is shorter than the test.
+    //
+    // The assertion is on the ID, not on a status code: `/auth/me` answers 200 either way, because a
+    // request whose session has expired is given a NEW one rather than refused. A different id in the
+    // second response's `Set-Cookie` is exactly what "the cookie the browser presented no longer resolves"
+    // looks like from outside, and it is the only externally visible difference there is.
+    val brief = SessionConfig.Default.copy(idleTimeout = 1.second, absoluteTimeout = 1.hour)
+    GatewayTestServer.resource(sessionConfig = brief).use { server =>
+      for {
+        first <- server.get(meUri)
+        cookie = cookieOf(first)
+        // Well inside the idle timeout: the same cookie must come back resolving to the same session, or
+        // the case below would pass on a gateway that simply minted a new session on every request.
+        stillAlive <- server.get(meUri, Map("Cookie" -> cookie))
+        _ <- IO.sleep(1600.millis)
+        afterIdle <- server.get(meUri, Map("Cookie" -> cookie))
+      } yield {
+        val presented = cookie.stripPrefix(s"${SessionMiddleware.CookieName}=")
+        assert(presented.nonEmpty, cookie)
+
+        // The anchor, and it is the half that makes the rule below mean anything. The stamp interceptor
+        // re-stamps the cookie on every response that has a session behind it, so a live request answers
+        // with the SAME id; a gateway that recognised no cookie at all would answer with a different one
+        // here too, and the rule below would pass while measuring nothing.
+        assertEquals(
+          cookieOf(stillAlive).stripPrefix(s"${SessionMiddleware.CookieName}="),
+          presented,
+          "a request presenting a live session cookie came back carrying a different session id, so the " +
+            "gateway did not recognise the session it was given and the expiry rule below is being " +
+            "asserted over a gateway that mints a new session on every request"
+        )
+
+        val replaced = cookieOf(afterIdle).stripPrefix(s"${SessionMiddleware.CookieName}=")
+        assertNotEquals(
+          replaced,
+          presented,
+          "a session presented after its idle timeout had passed was accepted and stamped back " +
+            "unchanged, so nothing on the request path applies SessionConfig.idleTimeout. ADR-019's " +
+            "session lifetime is then configuration that no request ever reads, and a captured cookie " +
+            "stays valid for the life of the process."
+        )
       }
     }
   }

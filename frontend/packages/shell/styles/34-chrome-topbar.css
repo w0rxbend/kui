@@ -176,6 +176,17 @@
   outline-offset: 2px;
 }
 
+/* The line under the results naming a service the fold could not ask. A rule above it rather than
+ * a tone: it is not a failure — the distributed stack routes no schema service by design — and
+ * colouring it amber would teach the reader that a normal deployment is broken. */
+.kui-global-search__partial {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  margin: var(--kui-space-2) 0 0;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  border-top: 1px solid var(--kui-color-border);
+}
+
 /* The search overlay's skeleton rows. The `.kui-skeleton` block itself belongs to the kernel
  * (`28-surfaces.css`) and is used here rather than redeclared: two skeletons in one stylesheet
  * means two shimmer speeds on one screen, and the second one always looks like a fault. Only the
@@ -183,129 +194,6 @@
 .kui-global-search__skeleton {
   flex: 1 1 auto;
   height: 14px;
-}
-
-/* --- Cluster selector -------------------------------------------------------------------------- */
-
-.kui-cluster-select {
-  position: relative;
-}
-
-.kui-cluster-select__trigger {
-  display: flex;
-  gap: var(--kui-space-2);
-  align-items: center;
-  height: 38px;
-  padding: 0 var(--kui-space-3);
-  font: inherit;
-  font-size: var(--kui-font-size-sm);
-  font-weight: var(--kui-font-weight-medium);
-  color: var(--kui-color-text-strong);
-  background: var(--kui-color-surface-hover);
-  border: 0;
-  border-radius: var(--kui-radius-md);
-  cursor: pointer;
-}
-
-.kui-cluster-select__trigger:hover {
-  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
-}
-
-.kui-cluster-select__trigger:focus-visible,
-.kui-cluster-select__options:focus-visible,
-.kui-cluster-select__add:focus-visible {
-  outline: 2px solid var(--kui-color-focus);
-  outline-offset: 2px;
-}
-
-.kui-cluster-select__name {
-  max-width: 14ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kui-cluster-select__dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--kui-radius-pill);
-  background: var(--kui-color-text-subtle);
-}
-
-.kui-cluster-select__dot--healthy {
-  background: var(--kui-color-success);
-}
-
-.kui-cluster-select__dot--degraded {
-  background: var(--kui-color-warning);
-}
-
-.kui-cluster-select__dot--unreachable {
-  background: var(--kui-color-danger);
-}
-
-.kui-cluster-select__menu {
-  position: absolute;
-  top: calc(100% + var(--kui-space-2));
-  right: 0;
-  z-index: var(--kui-z-dropdown);
-  min-width: 260px;
-  padding: var(--kui-space-2);
-  background: var(--kui-color-surface-overlay);
-  border-radius: var(--kui-radius-md);
-  box-shadow: var(--kui-shadow-md);
-}
-
-.kui-cluster-select__options {
-  outline-offset: -2px;
-}
-
-.kui-cluster-select__option {
-  display: flex;
-  gap: var(--kui-space-2);
-  align-items: center;
-  padding: var(--kui-space-2);
-  font-size: var(--kui-font-size-md);
-  color: var(--kui-color-text);
-  border-radius: var(--kui-radius-sm);
-  cursor: pointer;
-}
-
-.kui-cluster-select__option--active {
-  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
-}
-
-.kui-cluster-select__option-name {
-  font-weight: var(--kui-font-weight-medium);
-  color: var(--kui-color-text-strong);
-}
-
-.kui-cluster-select__option-detail {
-  font-size: var(--kui-font-size-xs);
-  color: var(--kui-color-text-muted);
-}
-
-.kui-cluster-select__check {
-  margin-left: auto;
-  color: var(--kui-color-primary);
-}
-
-.kui-cluster-select__add {
-  display: flex;
-  gap: var(--kui-space-2);
-  align-items: center;
-  width: 100%;
-  padding: var(--kui-space-2);
-  margin-top: var(--kui-space-1);
-  font: inherit;
-  font-size: var(--kui-font-size-md);
-  color: var(--kui-color-primary);
-  background: none;
-  border: 0;
-  border-top: 1px solid var(--kui-color-border);
-  border-radius: 0 0 var(--kui-radius-sm) var(--kui-radius-sm);
-  cursor: pointer;
 }
 
 /* --- Icon buttons and the notification marker -------------------------------------------------- */
@@ -350,9 +238,88 @@
   border-radius: var(--kui-radius-pill);
 }
 
-/* The cluster menu never grows past the window: it scrolls inside itself, like every other list in
- * this product. */
-.kui-cluster-select__menu {
-  max-height: 60vh;
-  overflow-y: auto;
+/* --- The appearance popover (SCREENS-V4.md §3.10) ---------------------------------------------- */
+
+/* The glyph takes a filled backing while its popover is open, exactly as the bell does.
+ *
+ * §7.5 records that the design draws these two inconsistently — the bell backed, the sliders glyph
+ * not — and asks for one of them to be settled. This is the settlement, and it goes to the bell's
+ * behaviour rather than the sliders': a control that has opened a scrim-less panel somewhere else
+ * on the page is the only thing on screen saying which control the panel belongs to, and taking the
+ * backing away leaves a card floating with no visible owner. */
+.kui-topbar__icon-button--open {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-topbar__appearance-anchor {
+  position: relative;
+  display: flex;
+}
+
+/* Below the glyph and hard against the right edge of the band, because the glyph is the second
+ * control from the right and a panel centred on it would hang off the window. `--kui-z-dropdown`
+ * and not `--kui-z-dialog`: it is scrim-less and the page behind it stays live, which is exactly
+ * what that layer is for. */
+.kui-topbar__appearance-panel {
+  position: absolute;
+  top: calc(100% + var(--kui-space-2));
+  right: 0;
+  z-index: var(--kui-z-dropdown);
+}
+
+.kui-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  /* Wide enough for four named accent segments at the small size. A narrower card would put
+     "Comfortable" on two lines, and a wrapped segment label is where a control starts looking like
+     a paragraph. */
+  width: 268px;
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-overlay);
+  border-radius: var(--kui-radius-lg);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-appearance__title {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-appearance__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+/* The lettered caption over each control. Decoration — the control below carries its own accessible
+ * name — so it is `aria-hidden` in the markup and styled to match the drawer's group headings, which
+ * is the same kind of label doing the same job one column to the left. */
+.kui-appearance__caption {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-appearance__help {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-appearance__persistence {
+  margin: calc(-1 * var(--kui-space-1)) 0 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+.kui-appearance__persistence[data-state="local-only"] {
+  color: var(--kui-color-warning);
 }

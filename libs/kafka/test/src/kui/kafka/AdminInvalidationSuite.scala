@@ -8,10 +8,10 @@ import kui.testkit.KuiSuite
 
 /** The set that decides whether a failure kills the connection or only the request.
   *
-  * The negative half of this table is the important half. Kafbat recreates its admin client on any
-  * admin error, which means a user asking about a topic they are not authorized for costs a full
-  * reconnect including the SASL handshake. Every class in the second list below is one that must
-  * *not* have that effect.
+  * The negative half of this table is the important half. Kafbat recreates its admin client on any admin
+  * error, which means a user asking about a topic they are not authorized for costs a full reconnect
+  * including the SASL handshake. Every class in the second list below is one that must *not* have that
+  * effect.
   */
 final class AdminInvalidationSuite extends KuiSuite {
 

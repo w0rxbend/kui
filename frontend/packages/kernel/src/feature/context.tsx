@@ -53,6 +53,15 @@ export interface KuiPaths {
   readonly settings: () => string;
   readonly clusters: () => string;
   readonly manageClusters: () => string;
+  /**
+   * The cluster's dashboard, on the named tab.
+   *
+   * `tab` is optional and the implementation supplies the default, so that every caller that just
+   * wants "the cluster's page" produces the same address as the tab strip's first tab. A default
+   * chosen per call site is how two links to the same page end up spelled differently, and only one
+   * of them then matches whatever the navigation highlights.
+   */
+  readonly dashboard: (cluster: string, tab?: string) => string;
   readonly brokers: (cluster: string) => string;
   readonly broker: (cluster: string, brokerId: number) => string;
   readonly topics: (cluster: string) => string;
@@ -80,6 +89,15 @@ export type CallScope = "shell" | "feature";
  * call sites that name it rather than silently answering `false` at run time.
  */
 export type KnownAction = (typeof Actions)[keyof typeof Actions];
+
+/** The two bounded-browse presentations a message screen can start in. */
+export type MessageViewMode = "pages" | "infinite";
+
+/** Reactive defaults supplied by the shell; explicit values in a message URL still win. */
+export interface MessageBrowserDefaults {
+  readonly pageSize: () => number;
+  readonly mode: () => MessageViewMode;
+}
 
 export interface KuiContextValue {
   readonly api: KuiApiClient;
@@ -111,6 +129,8 @@ export interface KuiContextValue {
   readonly paths: KuiPaths;
   /** Report a call's outcome. `undefined` means it succeeded. */
   readonly report: (scope: CallScope, failed: boolean) => void;
+  /** Principal-and-cluster-scoped message browsing defaults, when the shell has them. */
+  readonly messageBrowser?: MessageBrowserDefaults | undefined;
 }
 
 /**

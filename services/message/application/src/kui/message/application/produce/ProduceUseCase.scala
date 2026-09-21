@@ -125,8 +125,8 @@ object ProduceUseCase {
               partition = request.partition,
               key = key,
               value = value,
-              headers = request.headers.map((name, text) =>
-                RawHeader(name, Some(text.getBytes(StandardCharsets.UTF_8)))
+              headers = request.headers.map((name, value) =>
+                RawHeader(name, value.map(_.getBytes(StandardCharsets.UTF_8)))
               )
             )
 

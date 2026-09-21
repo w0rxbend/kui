@@ -150,7 +150,7 @@
           "schema"
         ],
         "summary" : "The subjects registered on this cluster's Schema Registry",
-        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned. pageSize=0 answers the total with no rows and asks the registry nothing beyond the subject list.",
         "operationId" : "schema.subjects",
         "parameters" : [
           {
@@ -203,7 +203,7 @@
           {
             "name" : "pageSize",
             "in" : "query",
-            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "description" : "How many rows a page holds, up to 100. A value above that is clamped, not refused. Exactly 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment; anything below that is clamped up to one row rather than read as a count",
             "required" : false,
             "schema" : {
               "default" : 25,
@@ -452,6 +452,93 @@
           },
           "400" : {
             "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Register a schema under this subject",
+        "description" : "Mutation (schema.subject.version.register). This call adds a version to the subject and cannot be undone from KUI. The registry decides whether the schema is accepted; a rejection comes back as 400 KUI-VALIDATION carrying the registry's own explanation in details[0], because that sentence names the field that broke the rule and is the only part of the answer anybody can act on. Registering a schema that is already registered under this subject is what the registry calls idempotent: it answers the existing id and version and adds no version. The answer's version is absent when the registry stored the schema and then would not say which version it became, which is a registration that succeeded and a number KUI does not know.",
+        "operationId" : "schema.subject.version.register",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RegisterSchemaRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RegisteredVersionDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
             "content" : {
               "text/plain" : {
                 "schema" : {
@@ -800,7 +887,6 @@
         "description" : "A proposed schema to check against a subject. Nothing is registered",
         "type" : "object",
         "required" : [
-          "schemaType",
           "definition"
         ],
         "properties" : {
@@ -923,8 +1009,7 @@
           "items" : {
             "type" : "array",
             "items" : {
-              "description" : "a schema registry subject",
-              "type" : "string"
+              "$ref" : "#/components/schemas/SubjectSummaryDto"
             }
           },
           "page" : {
@@ -980,6 +1065,51 @@
           "at" : {
             "description" : "RFC 3339 timestamp in UTC",
             "type" : "string"
+          }
+        }
+      },
+      "RegisterSchemaRequest" : {
+        "title" : "RegisterSchemaRequest",
+        "description" : "The schema to register under this subject, and what it is written in",
+        "type" : "object",
+        "required" : [
+          "definition"
+        ],
+        "properties" : {
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "RegisteredVersionDto" : {
+        "title" : "RegisteredVersionDto",
+        "description" : "The registered schema's id, and the version it became where the registry reported one",
+        "type" : "object",
+        "required" : [
+          "subject",
+          "id"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -1071,6 +1201,30 @@
         "properties" : {
           "level" : {
             "type" : "string"
+          }
+        }
+      },
+      "SubjectSummaryDto" : {
+        "title" : "SubjectSummaryDto",
+        "description" : "A subject list row: the name, and the facts a row shows when they could be read",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "format" : {
+            "type" : "string"
+          },
+          "versionCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "compatibility" : {
+            "$ref" : "#/components/schemas/CompatibilityDto"
           }
         }
       },

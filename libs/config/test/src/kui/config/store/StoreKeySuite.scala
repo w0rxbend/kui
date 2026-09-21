@@ -14,7 +14,14 @@ final class StoreKeySuite extends KuiSuite {
 
   private val sections: Gen[StoreSection] =
     Gen.oneOf(
-      Gen.oneOf(StoreSection.Cluster, StoreSection.Settings, StoreSection.Rbac, StoreSection.Masking, StoreSection.File),
+      Gen.oneOf(
+        StoreSection.Cluster,
+        StoreSection.Settings,
+        StoreSection.Alerts,
+        StoreSection.Rbac,
+        StoreSection.Masking,
+        StoreSection.File
+      ),
       Gen.identifier.map(raw => StoreSection.Other(raw.toLowerCase))
     )
 
@@ -61,5 +68,6 @@ final class StoreKeySuite extends KuiSuite {
     assertEquals(StoreKey.SettingsGlobal.render, "settings/global")
     assertEquals(StoreKey.RbacRoles.render, "rbac/roles")
     assertEquals(StoreKey.cluster("prod-eu").map(_.render), Right("cluster/prod-eu"))
+    assertEquals(StoreKey(StoreSection.Alerts, "prod-eu").render, "alerts/prod-eu")
   }
 }

@@ -92,7 +92,8 @@ final class PageDtoSuite extends ScalaCheckSuite {
     // A producer that sent a pageCount disagreeing with its own totalItems must not be taken at its word:
     // the decoder ignores the field and the accessor recomputes it. This is the reference product's bug
     // (its count is computed before its filter runs) made unrepresentable.
-    val lying = """{"items":[],"page":{"page":1,"pageSize":25,"totalItems":100,"pageCount":99,"nextPageToken":null}}"""
+    val lying =
+      """{"items":[],"page":{"page":1,"pageSize":25,"totalItems":100,"pageCount":99,"nextPageToken":null}}"""
     val decoded = parse(lying).flatMap(_.as[PageDto[String]])
     assertEquals(decoded.map(_.page.pageCount), Right(Some(4)))
   }

@@ -93,6 +93,28 @@ export function shellRoutes(views: RouteViews) {
             // The parent nodes carry no `component` on purpose: a parent's component is a *layout*
             // that must render `props.children`, and a feature root has no children slot, so a
             // component here would draw the feature and swallow the matched child.
+
+            // `/clusters/<id>` with no page named at all. It is the shortest thing anybody types
+            // and the shape a colleague pastes, and until this node existed it fell through to the
+            // wildcard at the foot of the table and drew the 404 page for a cluster that plainly
+            // exists — with the drawer beside it correctly naming that cluster's topics.
+            //
+            // It resolves to the dashboard rather than redirecting to it. A redirect would rewrite
+            // the address bar, so the next person to copy the link would copy the longer spelling
+            // and the short one would go on being the address nobody has ever seen work.
+            { path: "/", component: views.home },
+
+            // The cluster's own landing page. Its tab is a *parameter*, not a different page, so
+            // `/dashboard` and `/dashboard/overview` are one address under two spellings — and
+            // `paths.dashboard` supplies the default, so no call site has to decide what a missing
+            // tab means and end up spelling the same page differently from the tab strip.
+            {
+              path: "/dashboard",
+              children: [
+                { path: "/", component: views.home },
+                { path: "/:tab", component: views.home },
+              ],
+            },
             {
               path: "/brokers",
               children: [
@@ -125,6 +147,28 @@ export function shellRoutes(views: RouteViews) {
                 { path: "/:groupId", component: gate("consumers") },
               ],
             },
+            /* The alerts screen is a **route and a nav destination**, not a dashboard tab, and that
+               is settled here rather than discovered. A tab would put it in `overview/`, which the
+               dashboard owns, and `@kui/feature-alerts` reaching into the shell's dashboard would
+               invert the dependency the whole feature split exists to keep. One address, no
+               parameters below it: the feed is filtered in the screen, and a filter is not a
+               page. */
+            { path: "/alerts", component: gate("alerts") },
+            /* Kafka Connect (M9), and a **route and a nav destination** rather than a dashboard tab
+               for the same reason Alerts is: a tab would live in the shell's `overview/`, and
+               `@kui/feature-connect` reaching into the dashboard would invert the dependency the
+               feature split exists to keep. One address with no parameters below it — a connector
+               is selected inside the screen, and a selection is not a page, which is also what
+               keeps the connector's own name out of an address an operator would paste. */
+            { path: "/connect", component: gate("connect") },
+            /* ksqlDB (M9's second service, and `ECOSYSTEM`'s third row), on the same shape as
+               Connect and Alerts: one address, no parameters below it. A stream or a table is
+               *selected* inside the workspace and a selection is not a page — which also keeps an
+               object name out of an address an operator would paste, and keeps the push-query
+               editor's state where it belongs, in the screen rather than in the URL. §3.16 draws
+               the two panes as one workspace; two addresses would make the left pane a navigation
+               and the right one a page, which is not what the capture shows. */
+            { path: "/ksql", component: gate("ksql") },
             {
               path: "/schemas",
               children: [
@@ -180,13 +224,21 @@ export function landingFor(
   const paths = router.paths;
   switch (feature) {
     case "clusters":
-      return paths.clusters();
+      // The sidebar entry now lands on the chosen cluster's own brokers, not the cross-cluster
+      // registry — see the comment on the "clusters" registration in `features/registry.ts`.
+      return cluster === undefined ? undefined : paths.clusters(cluster).brokers();
     case "topics":
       return cluster === undefined ? undefined : paths.clusters(cluster).topics();
     case "consumers":
       return cluster === undefined ? undefined : paths.clusters(cluster)["consumer-groups"]();
     case "schemas":
       return cluster === undefined ? undefined : paths.clusters(cluster).schemas();
+    case "alerts":
+      return cluster === undefined ? undefined : paths.clusters(cluster).alerts();
+    case "connect":
+      return cluster === undefined ? undefined : paths.clusters(cluster).connect();
+    case "ksql":
+      return cluster === undefined ? undefined : paths.clusters(cluster).ksql();
     case "messages":
       // Its URL names a topic as well as a cluster, and the navigation has no topic to name.
       return undefined;

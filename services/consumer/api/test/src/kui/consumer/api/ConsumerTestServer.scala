@@ -18,16 +18,13 @@ import kui.cache.{Snapshot, SnapshotCell, SnapshotStatus}
 import kui.consumer.application.*
 import kui.consumer.domain.*
 import kui.contracts.capability.ClusterCapability
-import kui.http.principal.PrincipalVerification
-import kui.security.Principal
+import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.group.{GroupProtocol, GroupState}
-import kui.kernel.Page
-import kui.kernel.{ClusterId, GroupId, RoleName, Secret, ServiceId, TopicName, UserName}
+import kui.kernel.{ClusterId, GroupId, Page, RoleName, Secret, ServiceId, TopicName, UserName}
 import kui.observability.Telemetry
-import kui.http.principal.RbacGuard
-import kui.security.*
 import kui.security.rbac.{ClusterFlags, RbacPolicy}
+import kui.security.{Principal, *}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The consumer service, assembled the way `services/consumer/app` assembles it, with no socket.
@@ -90,8 +87,7 @@ object ConsumerTestServer {
           issuedAt = now,
           expiresAt = now.plusSeconds(validFor.toSeconds),
           audience = audience,
-          requestDigest =
-            RequestDigests.of(method, requestPath.takeWhile(_ != '?'), body)
+          requestDigest = RequestDigests.of(method, requestPath.takeWhile(_ != '?'), body)
         )
       )
     )
@@ -169,9 +165,11 @@ object ConsumerTestServer {
         scope: ResetScope,
         spec: ResetSpec
     ): IO[Either[KuiError, PlannedReset]] =
-      planned.update(_ :+ (group -> spec)).as(
-        Right(PlannedReset(emptyPlan(group, scope), "a-plan-token", At.plusSeconds(300)))
-      )
+      planned
+        .update(_ :+ (group -> spec))
+        .as(
+          Right(PlannedReset(emptyPlan(group, scope), "a-plan-token", At.plusSeconds(300)))
+        )
 
     def apply(
         principal: Principal,
@@ -239,7 +237,8 @@ object ConsumerTestServer {
 
   def listView(groups: List[GroupSummary]): GroupListView =
     GroupListView(
-      page = Page(groups, page = 1, pageSize = 25, totalItems = Some(groups.size.toLong), nextPageToken = None),
+      page =
+        Page(groups, page = 1, pageSize = 25, totalItems = Some(groups.size.toLong), nextPageToken = None),
       freshness = Fresh,
       incompleteCoordinators = 0,
       stateCounts = Map.empty,

@@ -6,6 +6,7 @@ import cats.effect.kernel.Async
 import cats.syntax.all.*
 import org.apache.kafka.clients.admin.{
   Admin,
+  Config,
   DescribeConfigsOptions,
   DescribeLogDirsOptions,
   ListTopicsOptions,
@@ -81,12 +82,19 @@ final class KafkaTopicAdmin[F[_]: Async](
         // it is made once per scrape, not once per page view, which is what makes it affordable here and
         // not on the topic detail page.
         sizes <- replicaSizes(connection, described.values.toList)
+        // The list's cleanup column, in as few round trips as the batch size allows. One
+        // `describeConfigs` per row is what made this field expensive enough that nobody added it: on ten
+        // thousand topics that is ten thousand calls for one string each. Batched at `ConfigBatch` = 200, it
+        // is fifty.
+        policies <- cleanupPolicies(connection, described.keys.toList)
         rows = described.toList.map { case (name, description) =>
           dom.TopicSummary.of(
             name = name,
             isInternal = InternalTopics
               .isInternal(name, listings.getOrElse(name, description.isInternal), internalPrefix),
-            partitions = description.partitions.asScala.toList.flatMap(partitionView(name, _, offsets, sizes))
+            partitions =
+              description.partitions.asScala.toList.flatMap(partitionView(name, _, offsets, sizes)),
+            cleanupPolicy = policies.get(name)
           )
         }
         incomplete = listings.keySet.diff(described.keySet).map(_ -> UnreadableTopic).toMap
@@ -314,6 +322,60 @@ final class KafkaTopicAdmin[F[_]: Async](
       .map(_.find(_.name == CleanupPolicy).flatMap(_.value))
       .handleError(_ => None)
 
+  /** Every topic's `cleanup.policy`, batched, for the topics the batch could cover.
+    *
+    * ==Batched, and one future per topic inside each batch==
+    *
+    * `describeConfigs` takes a collection of resources, and its `values` map gives a future per resource, so
+    * this borrows [[describeTopics]]'s shape for the same reason: a topic KUI may see and may not describe
+    * costs that topic's policy and not the whole batch. A batch that fails as a whole — the call refused, the
+    * connection dropped — costs the policies of the topics in it and nothing else. Either way the rows are
+    * still returned with `cleanupPolicy = None`, because a scrape that dropped its rows over a cosmetic
+    * column would be a worse answer than the em dash.
+    *
+    * No synonyms and no documentation: this asks for one key of each topic's configuration and the Settings
+    * tab's own read is what needs the rest. Including them here would multiply the size of a response
+    * covering two hundred topics for two fields nothing on the list renders.
+    */
+  private def cleanupPolicies(
+      connection: ClusterConnection,
+      topics: List[TopicName]
+  ): F[Map[TopicName, String]] =
+    if topics.isEmpty then Map.empty[TopicName, String].pure[F]
+    else
+      topics
+        .grouped(ConfigBatch)
+        .toList
+        .flatTraverse { batch =>
+          pool
+            .run(connection, "describeConfigs.batch") { admin =>
+              val resources = batch.map(topic => new ConfigResource(ConfigResource.Type.TOPIC, topic.value))
+              val result = admin.describeConfigs(resources.asJava, new DescribeConfigsOptions())
+
+              result.values.asScala.toList.traverse { case (resource, future) =>
+                KafkaFutures
+                  .fromFuture(Async[F].delay(future))
+                  .map(config => cleanupPolicyOf(config).map(TopicName.unsafe(resource.name) -> _))
+                  .handleErrorWith(failure =>
+                    logger
+                      .debug(failure)(
+                        s"the cleanup policy of '${resource.name}' could not be read; its row reports none"
+                      )
+                      .as(None)
+                  )
+              }
+            }
+            .handleErrorWith(failure =>
+              logger
+                .debug(failure)(
+                  s"cluster ${connection.id.value} did not answer describeConfigs for a batch of " +
+                    s"${batch.size} topics; those rows report no cleanup policy"
+                )
+                .as(Nil)
+            )
+        }
+        .map(_.flatten.toMap)
+
   // ---------------------------------------------------------------------------------- plumbing
 
   /** Resolves the cluster, runs the call, and turns anything thrown into a `TopicError`. */
@@ -360,6 +422,14 @@ object KafkaTopicAdmin {
 
   /** The same, for partitions: a cluster with ten thousand topics has far more partitions than topics. */
   private val OffsetBatch: Int = 2000
+
+  /** How many topics' configurations are asked for in one `describeConfigs`.
+    *
+    * Smaller than [[DescribeBatch]] because a config response carries every key of every topic in it, which
+    * is two orders of magnitude more bytes per topic than a description. The number that matters is that it
+    * is not one: the reason the list's cleanup column did not exist is that a call per row is a call per row.
+    */
+  private val ConfigBatch: Int = 200
 
   private val CleanupPolicy: String = "cleanup.policy"
 
@@ -481,6 +551,16 @@ object KafkaTopicAdmin {
       )
       .toOption
   }
+
+  /** One topic's `cleanup.policy`, out of the configuration the broker reported for it.
+    *
+    * `None` for a key the broker did not report and for one it reported without a value. Never a default
+    * substituted here: `delete` is Kafka's default and writing it in would turn "KUI could not read this
+    * topic's configuration" into a confident statement about a topic whose policy might be `compact`, which
+    * is the difference between a topic that keeps its records and one that does not.
+    */
+  private[infrastructure] def cleanupPolicyOf(config: Config): Option[String] =
+    Option(config.get(CleanupPolicy)).flatMap(entry => Option(entry.value))
 
   /** Kafka's `ConfigEntry` in the topic domain's words, synonyms included.
     *

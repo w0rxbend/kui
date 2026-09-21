@@ -11,11 +11,13 @@ import kui.schema.contract.dto.*
 import kui.schema.contract.dto.CompatibilityCheckDto.given
 import kui.schema.contract.dto.CompatibilityCheckRequest.given
 import kui.schema.contract.dto.CompatibilityDto.given
+import kui.schema.contract.dto.RegisterSchemaRequest.given
+import kui.schema.contract.dto.RegisteredVersionDto.given
 import kui.schema.contract.dto.SetCompatibilityRequest.given
 import kui.security.SignedPrincipal
 import kui.security.rbac.{Action, Resource}
 
-/** The endpoints that carry a request body: two that change a setting, and one that changes nothing.
+/** The endpoints that carry a request body: three that change something, and one that changes nothing.
   *
   * ==Why the compatibility check is in this file and is not a mutation==
   *
@@ -33,12 +35,18 @@ import kui.security.rbac.{Action, Resource}
   * It lives here because it has a body, and a bodied endpoint is verified differently (ADR-020 Amendment 1) —
   * which is a property of the request shape, not of whether it mutates.
   *
-  * ==The two writes==
+  * ==The three writes==
   *
-  * Both carry `KuiEndpoint.MutationKey` and the CSRF header, and both are marked `destructive = false`:
-  * setting a compatibility level loses no data and can be set back. It is still a mutation with real
-  * consequences — lowering a level to `NONE` removes the check that stops an unreadable schema from being
-  * registered — which is why it is audited and refused on a read-only cluster.
+  * All three carry `KuiEndpoint.MutationKey` and the CSRF header, and all three are marked
+  * `destructive = false`. Setting a compatibility level loses no data and can be set back; registering a
+  * schema adds a version and removes nothing, and the registry's own compatibility check is what stands
+  * between a registration and a subject its consumers can no longer read. They are still mutations with real
+  * consequences — lowering a level to `NONE` removes that check for every subject following it — which is why
+  * each is refused on a read-only cluster.
+  *
+  * `registerVersion` is a POST onto the same path `versions` is a GET on. That is one path with two methods
+  * in the published document rather than a new path, which is the shape the two topic collections already
+  * have.
   */
 object SchemaMutationEndpoints {
 
@@ -54,6 +62,15 @@ object SchemaMutationEndpoints {
     */
   val SetGlobalCompatibilityOperation: String = "schema.compatibility.global.set"
   val SetSubjectCompatibilityOperation: String = "schema.compatibility.subject.set"
+
+  /** Registration's operation name.
+    *
+    * The audit vocabulary has **no** case for it: `MutationKind` is a sealed enum in `libs/security-core` and
+    * this string is not one of its twelve `operation` values, so this is the one mutation in the product that
+    * writes no `MutationRecord`. `SchemaEndpointClassificationSuite` asserts that gap rather than letting it
+    * be discovered, and `RegisterSchemaUseCase` explains what closing it costs.
+    */
+  val RegisterVersionOperation: String = "schema.subject.version.register"
 
   private val clustersBase = "internal" / "v1" / ClustersSegment
 
@@ -132,6 +149,55 @@ object SchemaMutationEndpoints {
       )
       .tag("schema")
 
+  /** Register a schema under a subject, creating the subject if it is new.
+    *
+    * The one endpoint in this service that adds to a registry's contents. It is a POST onto the version
+    * *collection* — the same path `SchemaEndpoints.versions` reads — because that is what it appends to, and
+    * because it is also the registry's own shape.
+    *
+    * `Action.SchemaCreate` was declared with the rest of the vocabulary and used by nothing until now. It is
+    * altering, so ADR-047's read-only rule refuses it on a read-only cluster without a second rule being
+    * written, and `RbacLawsSuite` already covers its implication of `SchemaView`.
+    */
+  val registerVersion: Endpoint[
+    SignedPrincipal,
+    (String, ClusterId, Subject, RegisterSchemaRequest),
+    ErrorEnvelope,
+    RegisteredVersionDto,
+    Any
+  ] =
+    KuiEndpoint
+      .mutation(RegisterVersionOperation, destructive = false)
+      .post
+      .in(clustersBase / clusterIdPath / SchemasSegment / SubjectsSegment / subjectPath / VersionsSegment)
+      .in(jsonBody[RegisterSchemaRequest])
+      .out(jsonBody[RegisteredVersionDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          RegisterVersionOperation,
+          ResourceRequirement.named(Resource.Schema, SchemaEndpoints.SubjectParam, Action.SchemaCreate)
+        )
+      )
+      .name(RegisterVersionOperation)
+      .summary("Register a schema under this subject")
+      .description(
+        // Deliberately not `KuiEndpoint.mutationNote`. Its non-destructive text is "This call changes
+        // nothing", which is true of a compatibility level that can be set back and false of a
+        // registration: it adds a version, and a registry has no way to remove one except a soft delete.
+        // The operation name is spelled the same way so the generated reference still reads as one family.
+        s"Mutation ($RegisterVersionOperation). This call adds a version to the subject and cannot be " +
+          "undone from KUI. " +
+          "The registry decides whether the schema is accepted; a rejection comes back as 400 " +
+          "KUI-VALIDATION carrying the registry's own explanation in details[0], because that sentence " +
+          "names the field that broke the rule and is the only part of the answer anybody can act on. " +
+          "Registering a schema that is already registered under this subject is what the registry calls " +
+          "idempotent: it answers the existing id and version and adds no version. The answer's version is " +
+          "absent when the registry stored the schema and then would not say which version it became, " +
+          "which is a registration that succeeded and a number KUI does not know."
+      )
+      .tag("schema")
+
   /** Would the registry accept this schema for this subject? Changes nothing. */
   val checkCompatibility: Endpoint[
     SignedPrincipal,
@@ -166,9 +232,11 @@ object SchemaMutationEndpoints {
 
   /** Every bodied endpoint this service serves.
     *
-    * The two writes and the check are one list because the gateway proxies them identically — it rewrites the
-    * prefix and forwards the inputs, and the mutation marker is read by policy rather than by routing.
+    * The three writes and the check are one list because the gateway proxies them identically — it rewrites
+    * the prefix and forwards the inputs, and the mutation marker is read by policy rather than by routing.
+    * `ServiceContracts.byService` reads this value, so a route for the registration appears at the gateway
+    * with no gateway change at all.
     */
   val all: List[AnyEndpoint] =
-    List(setGlobalCompatibility, setSubjectCompatibility, checkCompatibility)
+    List(setGlobalCompatibility, setSubjectCompatibility, registerVersion, checkCompatibility)
 }

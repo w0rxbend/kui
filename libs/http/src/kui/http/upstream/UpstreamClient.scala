@@ -10,12 +10,12 @@ import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import fs2.Stream
 import org.typelevel.log4cats.StructuredLogger
-import sttp.capabilities.Effect
+import sttp.capabilities.{Effect, StreamMaxLengthExceededException}
 import sttp.client4.wrappers.DelegateBackend
 import sttp.client4.{Backend, GenericRequest, Response}
 
 import kui.config.{SafeUrl, UrlPolicy}
-import kui.kernel.error.{InfrastructureError, KuiError}
+import kui.kernel.error.{ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.{PositiveInt, ServiceId}
 import kui.observability.{MetricNames, Telemetry, UpstreamInstrumentation}
 
@@ -189,6 +189,9 @@ object UpstreamClient {
 
       case Left(UpstreamFailure(error)) => Some(error)
 
+      case Left(error) if isResponseLimitCause(error) =>
+        Some(responseLimitFailure(config.name))
+
       case Left(error) =>
         Some(
           InfrastructureError.Unreachable(
@@ -197,6 +200,42 @@ object UpstreamClient {
           )
         )
     }
+
+  private[upstream] def isResponseLimitCause(error: Throwable): Boolean = {
+    @annotation.tailrec
+    def loop(current: Throwable, remaining: Int): Boolean =
+      if current.isInstanceOf[StreamMaxLengthExceededException] then true
+      else if remaining <= 0 then false
+      else
+        Option(current.getCause) match {
+          case Some(cause) if cause ne current => loop(cause, remaining - 1)
+          case _ => false
+        }
+
+    loop(error, 16)
+  }
+
+  /** Stable classification for a streamed response that crossed its configured byte ceiling.
+    *
+    * The marker is private and attached only while translating the typed transport failure. Callers can
+    * therefore distinguish this case without interpreting user-visible error text, while the long-standing
+    * [[UpstreamFailure]] apply/unapply API remains unchanged.
+    */
+  def isResponseLimitFailure(error: Throwable): Boolean =
+    error match {
+      case failure: UpstreamFailure => Option(failure.getCause).contains(ResponseLimitMarker)
+      case _ => false
+    }
+
+  private def responseLimitFailure(upstream: String): KuiError =
+    InfrastructureError.Remote(
+      ErrorCode.UpstreamUnavailable,
+      s"$upstream$ResponseLimitMessageSuffix",
+      Nil
+    )
+
+  private val ResponseLimitMessageSuffix = " response exceeded its configured size limit"
+  private object ResponseLimitMarker extends RuntimeException("response_limit")
 
   /** From this status upwards the upstream is telling us it is broken, not that we are.
     *
@@ -218,7 +257,10 @@ object UpstreamClient {
 
     override def send[T](request: GenericRequest[T, Any & Effect[F]]): F[Response[T]] = {
       val call = bulkhead.protect(
-        breaker.protect(attempt(request, 0))(response => response.code.code < ServerErrorFrom)
+        breaker
+          .protectClassified(attempt(request, 0))(response => response.code.code < ServerErrorFrom)(error =>
+            !isResponseLimitCause(error)
+          )
       )
 
       call
@@ -251,7 +293,9 @@ object UpstreamClient {
             val isRefusal =
               error.isInstanceOf[CircuitOpenException] || error.isInstanceOf[BulkheadFullException]
 
-            if retryable && !isRefusal && retries < config.maxRetries then
+            val isResponseLimit = isResponseLimitCause(error)
+
+            if retryable && !isRefusal && !isResponseLimit && retries < config.maxRetries then
               waitThen(retries) *> attempt(request, retries + 1)
             else Async[F].raiseError(error)
         }
@@ -314,6 +358,13 @@ object UpstreamClient {
       * rather than a mixture of transport exceptions and KUI errors.
       */
     private def translate(error: Throwable): Throwable =
-      errorFor(config, Left(error)).fold(error)(UpstreamFailure.apply)
+      if isResponseLimitCause(error) then markedResponseLimitFailure(config.name)
+      else errorFor(config, Left(error)).fold(error)(UpstreamFailure.apply)
+
+    private def markedResponseLimitFailure(upstream: String): UpstreamFailure = {
+      val failure = UpstreamFailure(responseLimitFailure(upstream))
+      val _ = failure.initCause(ResponseLimitMarker)
+      failure
+    }
   }
 }

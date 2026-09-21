@@ -1,11 +1,11 @@
 package kui.cluster.infrastructure
 
+import org.scalacheck.Prop.forAll
+
 import kui.cluster.domain as dom
-import kui.kafka.admin as adm
-import kui.kafka.{BatchResult, SkipReason as KafkaSkipReason}
+import kui.kafka.{admin as adm, BatchResult, SkipReason as KafkaSkipReason}
 import kui.kernel.BrokerId
 import kui.testkit.KuiSuite
-import org.scalacheck.Prop.forAll
 
 /** The seam between `libs/kafka`'s vocabulary and the cluster domain's, asserted without a broker.
   *
@@ -128,7 +128,10 @@ final class KafkaToDomainSuite extends KuiSuite {
     val detected =
       adm.BrokerVersion(Some(adm.KafkaVersion(4, 4, 0)), Some("level 45"), adm.VersionSource.FeaturesAtLeast)
 
-    assertEquals(KafkaToDomain.version(detected).map(_.source), Some(dom.VersionSource.MetadataVersionAtLeast))
+    assertEquals(
+      KafkaToDomain.version(detected).map(_.source),
+      Some(dom.VersionSource.MetadataVersionAtLeast)
+    )
     assertEquals(KafkaToDomain.version(detected).map(_.display), Some("4.4 or newer"))
   }
 
@@ -157,7 +160,10 @@ final class KafkaToDomainSuite extends KuiSuite {
       KafkaToDomain.configSource(adm.ConfigSource.DynamicBrokerLoggerConfig),
       dom.ConfigSource.Unknown
     )
-    assertEquals(KafkaToDomain.configSource(adm.ConfigSource.StaticBrokerConfig), dom.ConfigSource.StaticBroker)
+    assertEquals(
+      KafkaToDomain.configSource(adm.ConfigSource.StaticBrokerConfig),
+      dom.ConfigSource.StaticBroker
+    )
   }
 
   test("anOfflineDirectoryIsCarriedAsDataAndNotDropped") {

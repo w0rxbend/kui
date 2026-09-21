@@ -17,7 +17,8 @@ final class PartitionAggregatesSuite extends KuiSuite {
 
   property("messageCountIsNoneIfAnyPartitionIsMissing") {
     forAll(partitions) { parts =>
-      val expected = if parts.exists(_.messageCount.isEmpty) then None else Some(parts.flatMap(_.messageCount).sum)
+      val expected =
+        if parts.exists(_.messageCount.isEmpty) then None else Some(parts.flatMap(_.messageCount).sum)
 
       assertEquals(PartitionAggregates.messageCount(parts), expected)
     }

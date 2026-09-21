@@ -259,6 +259,83 @@
   gap: var(--kui-space-3);
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * The topology: one lane per rack, one node per broker. See BrokerTopology.tsx.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-brk-topology {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  margin-bottom: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+.kui-brk-topology__lane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-brk-topology__rack {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brk-topology__nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-3);
+}
+
+.kui-brk-topology__node {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+.kui-brk-topology__node:hover {
+  background-color: var(--kui-color-surface-hover);
+}
+
+.kui-brk-topology__id {
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-brk-topology__health {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brk-topology__health[data-tone="danger"] {
+  color: var(--kui-color-danger);
+}
+
+.kui-brk-topology__health[data-tone="warning"] {
+  color: var(--kui-color-warning);
+}
+
+.kui-brk-topology__health[data-tone="success"] {
+  color: var(--kui-color-success);
+}
+
+.kui-brk-topology__health[data-tone="accent"] {
+  color: var(--kui-color-accent);
+}
+
 .kui-brkcard {
   border: var(--kui-card-border);
   border-radius: var(--kui-radius-lg);
@@ -343,6 +420,28 @@ a.kui-brkcard__name:hover {
 
 .kui-brkcard__disk {
   min-width: 0;
+}
+
+/* The sentence under a disk bar with no percentage in it.
+ *
+ * Small and muted, and always beneath the bar rather than beside it: an empty track next to an em
+ * dash reads as an empty disk, and this is the line that says which of the two silences it is. It
+ * wraps, so the card grows rather than the sentence being clipped — a truncated explanation is
+ * worse than none, because the reader believes they have read it. */
+.kui-brkcard__disk-note {
+  margin: var(--kui-space-1) 0 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* Where the design's `uptime 41d` tag would be, saying why there is not one. Sits under the tag row
+ * rather than in it: a tag is this product's shape for a fact about the broker, and "we cannot
+ * measure this" is a fact about KUI. */
+.kui-brkcard__tag-note {
+  margin: calc(-1 * var(--kui-space-2)) 0 var(--kui-space-4);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
 }
 
 .kui-brkcard__toggle {
@@ -530,4 +629,15 @@ a.kui-brkcard__name:hover {
   cursor: pointer;
   font-size: var(--kui-font-size-sm);
   font-weight: var(--kui-font-weight-medium);
+}
+
+/* The cluster's opinion of this broker, inside the expansion.
+ *
+ * Muted and small, like the disk note and the uptime note it sits with: it qualifies the figures
+ * above rather than being one of them, and a sentence set at figure weight would compete with the
+ * numbers it is about. */
+.kui-brkcard__skew {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
 }

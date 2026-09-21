@@ -33,11 +33,13 @@ object TopicGoldenDocuments {
       |  "outOfSyncReplicas" : 0,
       |  "offlinePartitions" : 0,
       |  "messageCount" : 1048576,
-      |  "sizeBytes" : 734003200
+      |  "sizeBytes" : 734003200,
+      |  "produceRate" : null,
+      |  "cleanupPolicy" : null
       |}""".stripMargin
 
-  /** A topic with one offline partition: `leader` is null, and every count that would have had to
-    * include that partition is null too, on the partition row and on the topic row alike.
+  /** A topic with one offline partition: `leader` is null, and every count that would have had to include
+    * that partition is null too, on the partition row and on the topic row alike.
     */
   val topicDetail: String =
     """{
@@ -49,7 +51,9 @@ object TopicGoldenDocuments {
       |    "outOfSyncReplicas" : 1,
       |    "offlinePartitions" : 1,
       |    "messageCount" : null,
-      |    "sizeBytes" : null
+      |    "sizeBytes" : null,
+      |    "produceRate" : null,
+      |    "cleanupPolicy" : null
       |  },
       |  "partitions" : [
       |    {

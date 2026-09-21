@@ -47,26 +47,35 @@ final class OpenApiMergeSuite extends FunSuite {
         "/api/v1/capabilities/{service}/probe",
         "/api/v1/clusters",
         "/api/v1/clusters/{clusterId}",
+        "/api/v1/clusters/{clusterId}/alerts/stream",
         "/api/v1/clusters/{clusterId}/brokers",
         "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
+        "/api/v1/clusters/{clusterId}/ksql/stream",
         "/api/v1/clusters/{clusterId}/log-dirs",
         "/api/v1/clusters/{clusterId}/refresh",
+        "/api/v1/clusters/{clusterId}/settings/messages",
+        "/api/v1/clusters/{clusterId}/settings/ui",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/overview",
-        "/api/v1/info"
+        "/api/v1/info",
+        // Cross-entity search: the gateway's own endpoint, with no service behind it at all — it folds
+        // over three services' list endpoints rather than proxying any of them (ADR-049).
+        "/api/v1/search"
       )
     )
   }
 
   test("theTopicServicesPathsAreMerged") {
-    // Five proxied paths, at their public prefix, alongside the two the gateway serves itself: the topic
+    // Seven proxied paths, at their public prefix, alongside the two the gateway serves itself: the topic
     // overview, which it aggregates, and the message browse stream, which it relays. A service's
     // endpoints reaching the published document is what makes an integrator able to find them.
     assertEquals(
       OpenApiMerge.paths(merged(List(gatewayDoc, clusterDoc, topicDoc))).filter(_.contains("/topics")),
       List(
         "/api/v1/clusters/{clusterId}/topics",
+        "/api/v1/clusters/{clusterId}/topics/names",
         "/api/v1/clusters/{clusterId}/topics/refresh",
+        "/api/v1/clusters/{clusterId}/topics/statistics",
         "/api/v1/clusters/{clusterId}/topics/{topicName}",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/config",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream",

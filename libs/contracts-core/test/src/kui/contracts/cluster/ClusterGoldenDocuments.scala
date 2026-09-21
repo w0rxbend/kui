@@ -32,7 +32,8 @@ object ClusterGoldenDocuments {
       |    "DESCRIBE_LOG_DIRS",
       |    "DESCRIBE_QUORUM"
       |  ],
-      |  "scrapedAt" : "2026-09-03T10:11:12.000Z"
+      |  "scrapedAt" : "2026-09-03T10:11:12.000Z",
+      |  "controllerUptime" : null
       |}""".stripMargin
 
   val clusterRow: String =
@@ -63,7 +64,8 @@ object ClusterGoldenDocuments {
       |        "DESCRIBE_LOG_DIRS",
       |        "DESCRIBE_QUORUM"
       |      ],
-      |      "scrapedAt" : "2026-09-03T10:11:12.000Z"
+      |      "scrapedAt" : "2026-09-03T10:11:12.000Z",
+      |      "controllerUptime" : null
       |    },
       |    "fetchedAt" : "2026-09-03T10:11:12.000Z"
       |  },

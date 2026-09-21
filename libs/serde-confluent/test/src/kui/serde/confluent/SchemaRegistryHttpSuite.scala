@@ -110,14 +110,19 @@ final class SchemaRegistryHttpSuite extends KuiIOSuite {
 
   test("a transport failure becomes an unreachable upstream, and its sentence names only the upstream") {
     val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
-      .thenRespondF(_ => IO.raiseError[sttp.client4.Response[StubBody]](new java.net.ConnectException("refused")))
+      .thenRespondF(_ =>
+        IO.raiseError[sttp.client4.Response[StubBody]](new java.net.ConnectException("refused"))
+      )
     SchemaRegistry.http[IO](backend, base, SchemaRegistryAuth.Anonymous).schemaById(1).map {
       case Left(InfrastructureError.Unreachable(upstream, cause)) =>
         assertEquals(upstream, SchemaRegistry.UpstreamName)
         // The cause is for the log and does carry the exception's own text; the *message* - the sentence a
         // user sees - names only the upstream, which is `Unreachable`'s whole reason for splitting the two.
         assert(cause.startsWith("ConnectException:"), cause)
-        assertEquals(InfrastructureError.Unreachable(upstream, cause).message, "schema-registry could not be reached")
+        assertEquals(
+          InfrastructureError.Unreachable(upstream, cause).message,
+          "schema-registry could not be reached"
+        )
       case other => fail(s"expected an unreachable upstream, got $other")
     }
   }

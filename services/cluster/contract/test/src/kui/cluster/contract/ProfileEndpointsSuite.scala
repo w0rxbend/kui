@@ -26,8 +26,8 @@ import kui.kernel.cluster.{
 }
 import kui.kernel.{ClusterId, Secret}
 
-/** That the profile a service fetches carries exactly what a Kafka client is built from, and that its ETag
-  * is the store version.
+/** That the profile a service fetches carries exactly what a Kafka client is built from, and that its ETag is
+  * the store version.
   *
   * M1's version of this suite asserted the opposite — that the document carried no credential — because M1
   * had no consumer that built a client from it. ADR-046 is the decision that changed that, and the

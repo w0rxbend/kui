@@ -48,8 +48,8 @@ final class ClusterStreamEndpointSuite extends FunSuite {
 
   test("the body is an event stream, not JSON") {
     // A client opens this with an EventSource, which refuses anything but text/event-stream.
-    val mediaTypes = outputLeaves(streamed.output).collect {
-      case body: EndpointIO.StreamBodyWrapper[?, ?] => body.wrapped.codec.format.mediaType
+    val mediaTypes = outputLeaves(streamed.output).collect { case body: EndpointIO.StreamBodyWrapper[?, ?] =>
+      body.wrapped.codec.format.mediaType
     }
 
     assertEquals(mediaTypes, List(MediaType.TextEventStream))

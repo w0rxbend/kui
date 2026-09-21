@@ -1,0 +1,295 @@
+import { describe, expect, it } from "vitest";
+import type { FeatureId } from "@kui/kernel";
+import { createShellRouter, landingFor, type ShellRouter } from "./routes.jsx";
+import { shellPaths } from "./paths.js";
+
+/**
+ * The route table, matched rather than rendered.
+ *
+ * `paths.test.ts` asserts that a link comes out spelled the way the design writes it. That is only
+ * half of a working address: a link is correct when the router *resolves* it, and the two halves
+ * are written in different files, so nothing in the type system connects them. The shipped symptom
+ * of a disagreement is the 404 page on a URL the product itself just produced — which is precisely
+ * what `/clusters/<id>` did before this table had a dashboard node.
+ *
+ * So these tests take the string `shellPaths` builds, hand it to the router, and insist that
+ * something other than the wildcard matched. `match()` is pure — no rendering, no feature chunk
+ * downloaded — so a deep link is checked here exactly as the first load would see it.
+ */
+const noop = () => null;
+const views = {
+  home: noop,
+  settings: noop,
+  forbidden: noop,
+  notFound: noop,
+  feature: () => noop,
+};
+
+/** The wildcard is last in the table, so falling through to it is the 404 page. */
+const NotFoundPattern = "/ui/*attempted";
+
+/**
+ * The route table with each feature gate labelled, so a pattern can be asked *which* feature it
+ * renders.
+ *
+ * The reason this exists rather than a fifth `noop`: `views.feature` is the only thing in the table
+ * that carries an argument, and every test in this repository passed a stub that discarded it. So
+ * `{ path: "/alerts", component: gate("alerts") }` could be rewritten `gate("topics")` with every
+ * case in this package green — the *address* is gated by the case below it, and the address is the
+ * half that was never wrong. What shipped instead was the other half: an operator clicking Alerts
+ * reaching a URL that resolves, in a drawer that highlights Alerts, over a screen drawn by a
+ * different feature's chunk.
+ *
+ * `router.match()` answers a pattern and no component, so the binding is read off the router's own
+ * `routes` — the table the matcher was built from, not a copy of it.
+ */
+type TaggedGate = { readonly featureId: FeatureId };
+type TableNode = {
+  readonly path?: string;
+  readonly component?: Partial<TaggedGate>;
+  readonly children?: readonly TableNode[];
+};
+
+function taggedRouter(basePath = ""): ShellRouter {
+  return createShellRouter(basePath, {
+    ...views,
+    feature: (id) => Object.assign(() => null, { featureId: id }),
+  });
+}
+
+/** Every pattern in the table that renders a feature, mapped to the feature it renders. */
+function featureBindings(router: ShellRouter, basePath = ""): ReadonlyMap<string, FeatureId> {
+  const found = new Map<string, FeatureId>();
+  const walk = (nodes: readonly TableNode[], prefix: string): void => {
+    for (const node of nodes) {
+      const here = `${prefix}${node.path ?? ""}`;
+      const id = node.component?.featureId;
+      // A trailing `/` is how an index child is written; the router's own pattern has none.
+      if (id !== undefined) found.set(here.replace(/(.)\/$/, "$1"), id);
+      if (node.children !== undefined) walk(node.children, here);
+    }
+  };
+  walk(router.routes as unknown as readonly TableNode[], `${basePath}/ui`);
+  return found;
+}
+
+describe("the cluster-scoped dashboard address", () => {
+  const router = createShellRouter("", views);
+  const paths = shellPaths(router);
+
+  it("resolves the address the tab strip builds", () => {
+    const matched = router.match(paths.dashboard("prod-kyiv-01", "storage"));
+    const leaf = matched.at(-1);
+
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId/dashboard/:tab");
+    /* Both parameters, because wave 2's Overview reads its cluster and its tab from here rather
+       than from the stored selection — a pasted link has to carry both. */
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01", tab: "storage" });
+  });
+
+  it("resolves the tabless address to the same node, not to the 404 page", () => {
+    // `/dashboard` and `/dashboard/overview` are one page under two spellings, and only the longer
+    // one is ever built. The shorter one is what somebody types, and it has to land somewhere.
+    const matched = router.match("/ui/clusters/prod-kyiv-01/dashboard");
+
+    expect(matched.length).toBeGreaterThan(0);
+    expect(matched.at(-1)?.pattern).not.toBe(NotFoundPattern);
+    expect(matched.at(-1)?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("resolves the cluster's own address to the dashboard, not to the 404 page", () => {
+    /* `/clusters/<id>` with no page named is the shortest thing anybody types and the shape a
+       colleague pastes, and it used to fall through to the wildcard — so the product drew "that
+       page does not exist" over a drawer that was, at the same moment, correctly listing that
+       cluster's topics. Three signals agreed and the page disagreed with all of them. */
+    const matched = router.match("/ui/clusters/prod-kyiv-01");
+    const leaf = matched.at(-1);
+
+    expect(leaf?.pattern).not.toBe(NotFoundPattern);
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId");
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("resolves behind a reverse proxy, where the prefix is not /ui", () => {
+    const behindProxy = createShellRouter("/kui", views);
+    const link = shellPaths(behindProxy).dashboard("prod-kyiv-01");
+
+    expect(link).toBe("/kui/ui/clusters/prod-kyiv-01/dashboard/overview");
+    expect(behindProxy.match(link).at(-1)?.pattern).toBe(
+      "/kui/ui/clusters/:clusterId/dashboard/:tab",
+    );
+  });
+
+  it("leaves the addresses that already worked alone", () => {
+    /* A new sibling under `/:clusterId` is the kind of change that shadows its neighbours: the
+       cluster id is itself a parameter, so a table that grew `/dashboard` in the wrong place would
+       start swallowing `/clusters/dashboard/...` or, worse, match `topics` as a tab. */
+    expect(router.match(paths.home()).at(-1)?.pattern).not.toBe(NotFoundPattern);
+    const topics = router.match(paths.topics("prod")).at(-1);
+    expect(topics?.pattern).toBe("/ui/clusters/:clusterId/topics");
+    expect(router.match(paths.topicMessages("prod", "orders")).at(-1)?.pattern).toBe(
+      "/ui/clusters/:clusterId/topics/:topicName/messages",
+    );
+    expect(router.match(paths.manageClusters()).at(-1)?.pattern).toBe("/ui/clusters/manage");
+    /* A tab is one segment. Anything deeper is genuinely not a page. */
+    expect(router.match("/ui/clusters/prod/dashboard/overview/extra").at(-1)?.pattern).toBe(
+      NotFoundPattern,
+    );
+  });
+});
+
+/**
+ * Kafka Connect, which is this wave's new destination and the same shape as Alerts.
+ *
+ * `@kui/feature-connect` ships the screen and the shell ships the address, and the two are
+ * written in different packages — so the case that binds them is here, in the shell, where the
+ * table is. The feature reaches its own page through `landingFor` and builds no URL of its own.
+ */
+describe("the Connect address", () => {
+  const router = createShellRouter("", views);
+
+  it("resolves the address the drawer's Connect row links to", () => {
+    const link = landingFor(router, "connect", "prod-kyiv-01");
+    expect(link).toBe("/ui/clusters/prod-kyiv-01/connect");
+    const leaf = router.match(link!).at(-1);
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId/connect");
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("has nowhere to point until a cluster is chosen", () => {
+    /* `/ui/clusters//connect` collapses to `/ui/clusters/connect`, which would match the cluster
+       list's own neighbourhood rather than a Connect screen. The row stays out of the drawer. */
+    expect(landingFor(router, "connect", undefined)).toBeUndefined();
+  });
+
+  it("draws the connect feature there, and not the one whose route it was copied from", () => {
+    expect(featureBindings(taggedRouter()).get("/ui/clusters/:clusterId/connect")).toBe("connect");
+  });
+});
+
+/**
+ * ksqlDB, `ECOSYSTEM`'s third row and the eleventh service's address.
+ *
+ * The same three cases Connect has, and for the same reason: `@kui/feature-ksql` ships the screen
+ * and the shell ships the address, so the two are written in different packages and nothing in the
+ * type system joins them. The third case is the one that has caught a real defect twice — a pattern
+ * aimed at the wrong feature still matches, `landingFor` still builds the link, and the drawer
+ * still marks ksqlDB as current, while the content area draws somebody else's screen.
+ */
+describe("the ksqlDB address", () => {
+  const router = createShellRouter("", views);
+
+  it("resolves the address the drawer's ksqlDB row links to", () => {
+    const link = landingFor(router, "ksql", "prod-kyiv-01");
+    expect(link).toBe("/ui/clusters/prod-kyiv-01/ksql");
+    const leaf = router.match(link!).at(-1);
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId/ksql");
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("has nowhere to point until a cluster is chosen", () => {
+    /* `/ui/clusters//ksql` collapses to `/ui/clusters/ksql`, which lands in the cluster list's own
+       neighbourhood rather than on a workspace. The row stays out of the drawer instead. */
+    expect(landingFor(router, "ksql", undefined)).toBeUndefined();
+  });
+
+  it("draws the ksql feature there, and not the one whose route it was copied from", () => {
+    expect(featureBindings(taggedRouter()).get("/ui/clusters/:clusterId/ksql")).toBe("ksql");
+  });
+
+  it("puts no object name in the address: a selection is not a page", () => {
+    /* §3.16's two panes are one workspace. A `/ksql/:stream` sibling would make the left pane a
+       navigation, and the first thing to break would be the editor's contents on every click. */
+    expect(router.match("/ui/clusters/prod/ksql/PAGEVIEWS_ENRICHED").at(-1)?.pattern).toBe(
+      NotFoundPattern,
+    );
+  });
+});
+
+/**
+ * Alerts is a route, not a dashboard tab, and the address the drawer links to is the one the
+ * router resolves.
+ *
+ * The two halves are still written in different files — `landingFor` builds the link and the table
+ * matches it — so nothing in the type system connects them and a 404 on an address the product
+ * itself produced is the shipped symptom. `/clusters/<id>` had exactly that defect until wave 5.
+ *
+ * The tab alternative is ruled out here rather than left to be discovered: a tab would live in the
+ * shell's `overview/`, and `@kui/feature-alerts` reaching into it would invert the dependency the
+ * feature split exists to keep. So `/dashboard/alerts` is deliberately *not* a page, and this case
+ * says so out loud, because nothing else would notice if somebody added it.
+ */
+describe("the alerts address", () => {
+  const router = createShellRouter("", views);
+
+  it("resolves the address the drawer's Alerts row links to", () => {
+    const link = landingFor(router, "alerts", "prod-kyiv-01");
+    expect(link).toBe("/ui/clusters/prod-kyiv-01/alerts");
+    const leaf = router.match(link!).at(-1);
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId/alerts");
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("has nowhere to point until a cluster is chosen", () => {
+    /* The rule every cluster-scoped entry keeps: an empty segment collapses, so
+       `/ui/clusters//alerts` is `/ui/clusters/alerts`, which matches the cluster list's own
+       `/manage` neighbourhood rather than an alerts screen. `undefined` keeps the row out of the
+       drawer instead. */
+    expect(landingFor(router, "alerts", undefined)).toBeUndefined();
+  });
+
+  /**
+   * The other half of the address, and the half nothing has ever looked at.
+   *
+   * Deleting `{ path: "/alerts", … }` is caught by the case above — the link stops resolving.
+   * Aiming it at another feature is not: the pattern still matches, `landingFor` still builds the
+   * link, the drawer still marks Alerts as current, and the content area draws the topic list.
+   * Three signals agree and the screen disagrees with all of them, which is the exact shape
+   * `/clusters/<id>` had before wave 5 and the shape this case exists to stop coming back.
+   */
+  it("draws the alerts feature there, and not whichever feature is next in the table", () => {
+    const bound = featureBindings(taggedRouter());
+    expect(bound.get("/ui/clusters/:clusterId/alerts")).toBe("alerts");
+  });
+
+  it("gives every other feature route the feature whose screen belongs at it", () => {
+    /* The whole map rather than one row, because a mis-binding is a *swap*: asserting only the
+       alerts row leaves `gate("alerts")` free to appear under `/topics` as well, which would draw
+       the alerts screen for the drawer's Topics entry and still satisfy the case above. Written out
+       so that a route added without a feature decision behind it fails here rather than being
+       discovered in a browser. */
+    expect(Object.fromEntries(featureBindings(taggedRouter()))).toEqual({
+      "/ui/clusters": "clusters",
+      "/ui/clusters/manage": "clusters",
+      "/ui/clusters/:clusterId/brokers": "clusters",
+      "/ui/clusters/:clusterId/brokers/:brokerId": "clusters",
+      "/ui/clusters/:clusterId/topics": "topics",
+      "/ui/clusters/:clusterId/topics/:topicName": "topics",
+      "/ui/clusters/:clusterId/topics/:topicName/messages": "messages",
+      "/ui/clusters/:clusterId/messages/track": "messages",
+      "/ui/clusters/:clusterId/consumer-groups": "consumers",
+      "/ui/clusters/:clusterId/consumer-groups/:groupId": "consumers",
+      "/ui/clusters/:clusterId/alerts": "alerts",
+      "/ui/clusters/:clusterId/connect": "connect",
+      "/ui/clusters/:clusterId/ksql": "ksql",
+      "/ui/clusters/:clusterId/schemas": "schemas",
+      "/ui/clusters/:clusterId/schemas/:subject": "schemas",
+    });
+  });
+
+  it("keeps the binding under a mount prefix, where the patterns all move", () => {
+    /* The base is prepended to every pattern, and the feature each one renders must not move with
+       it. A reverse proxy is where this product's addresses have broken before. */
+    const bound = featureBindings(taggedRouter("/kui"), "/kui");
+    expect(bound.get("/kui/ui/clusters/:clusterId/alerts")).toBe("alerts");
+    expect(bound.get("/kui/ui/clusters/:clusterId/topics")).toBe("topics");
+  });
+
+  it("leaves the dashboard's tabs alone: alerts is not one of them", () => {
+    const tab = router.match("/ui/clusters/prod-kyiv-01/dashboard/alerts").at(-1);
+    // It *matches* — every one-segment tab does — and it matches the dashboard, which is the point:
+    // the alerts screen is somewhere else entirely, and the two must not be one address.
+    expect(tab?.pattern).toBe("/ui/clusters/:clusterId/dashboard/:tab");
+    expect(tab?.pattern).not.toBe("/ui/clusters/:clusterId/alerts");
+  });
+});

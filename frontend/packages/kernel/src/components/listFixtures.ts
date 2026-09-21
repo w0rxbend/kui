@@ -186,7 +186,7 @@ export const UNDECODABLE: KafkaRecord = {
   },
 };
 
-/** Too large to preview inline. The size is shown and the payload is fetched on demand. */
+/** Too large to retain. The size is shown and the copy action explains that only metadata remains. */
 export const TOO_LARGE: KafkaRecord = {
   offset: "18442896",
   partition: 5,

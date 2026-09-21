@@ -953,6 +953,13 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "coordinatorHost" : {
+            "type" : "string"
+          },
+          "coordinatorPort" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "members" : {
             "type" : "array",
             "items" : {
@@ -1028,6 +1035,13 @@
             "format" : "int32"
           },
           "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "coordinatorHost" : {
+            "type" : "string"
+          },
+          "coordinatorPort" : {
             "type" : "integer",
             "format" : "int32"
           },

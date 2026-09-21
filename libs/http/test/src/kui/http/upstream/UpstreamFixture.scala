@@ -32,9 +32,9 @@ enum ResponseKind {
 
 /** A stubbed upstream that remembers how it was used.
   *
-  * The counts are the point. Several of HTTP-003's promises can only be checked by watching the
-  * backend rather than the result: "an open circuit does not call the backend" is a statement about
-  * calls that did *not* happen, and "the bulkhead caps concurrency" is about how many overlapped.
+  * The counts are the point. Several of HTTP-003's promises can only be checked by watching the backend
+  * rather than the result: "an open circuit does not call the backend" is a statement about calls that did
+  * *not* happen, and "the bulkhead caps concurrency" is about how many overlapped.
   */
 trait RecordingUpstream {
   def backend: Backend[IO]
@@ -47,9 +47,8 @@ trait RecordingUpstream {
 
   /** How many are in flight *now*.
     *
-    * The live count, not the high-water mark: it is how a suite observes that a cancelled call
-    * actually reached the backend's finaliser rather than being abandoned with the effect still
-    * running.
+    * The live count, not the high-water mark: it is how a suite observes that a cancelled call actually
+    * reached the backend's finaliser rather than being abandoned with the effect still running.
     */
   def inFlight: IO[Int]
 
@@ -70,8 +69,8 @@ object UpstreamFixture {
   def url(raw: String): SafeUrl =
     SafeUrl.from(raw, UrlPolicy.Dev).fold(error => sys.error(error.message), identity)
 
-  /** A config with everything turned down to test-sized numbers, and the development URL policy so
-    * that loopback stubs are reachable.
+  /** A config with everything turned down to test-sized numbers, and the development URL policy so that
+    * loopback stubs are reachable.
     */
   def config(name: String, urls: NonEmptyList[SafeUrl]): UpstreamConfig =
     UpstreamConfig(

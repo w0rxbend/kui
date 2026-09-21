@@ -102,7 +102,6 @@
  * shell ones: the two sets style different class names (`.kui-brokers-*` and `.kui-brk-*`) and the
  * pre-migration order above is preserved on purpose. */
 @import "../../feature-clusters/styles/42-cluster-screens.css";
-@import "../../feature-consumers/styles/70-consumers.css";
 /* The SolidJS consumer-group screens (ADR-048): the list, the detail and the offset-reset wizard.
  * Its class names are prefixed `.kui-cg-` so that nothing here restyles the Laminar screens above,
  * which keep the appearance they were reviewed with until they are retired. */
@@ -142,5 +141,45 @@
  * its headline, and one subject's versions and schema text. */
 @import "../../feature-schemas/styles/60-schemas.css";
 
-/* Kafka Connect and ksqlDB. No service behind either; see `29-connect-ksql.css`. */
+/* The alerts feed and the alerts screen (M8). One sheet for both widths — §3.8 draws the same rows
+ * one third wide on the dashboard and full width on the Alerts screen — and its class names are
+ * prefixed `.kui-alerts-`, so it restyles nothing above it. Appended after the other feature sheets
+ * rather than interleaved by number, for the reason at the top of this file: the pre-migration order
+ * is preserved on purpose and a new screen joins the end of it.
+ *
+ * The file is `@kui/feature-alerts`'s and the line is the kernel's, because `build-tests`'
+ * `CssReferences` requires every stylesheet on disk to be named here exactly once and this index is
+ * the only place that can name it. */
+@import "../../feature-alerts/styles/80-alerts.css";
+
+/* The kernel's Connect and ksqlDB primitives: `ConnectorCard`, `TaskBar` and `KsqlWorkspace`. They
+ * were written before either service existed and keep their place in the order for the reason at
+ * the top of this file — `services/connect` arriving does not make this a screen sheet. */
 @import "./29-connect-ksql.css";
+
+/* The Kafka Connect screen (M9), and everything *around* the connector card: the failure reason,
+ * the refusal sentence, and the panel for a connector whose tasks the worker would not describe.
+ * After `29-connect-ksql.css` deliberately — that sheet styles the card this screen composes, and a
+ * screen must be able to adjust a primitive inside itself without winning a specificity war, which
+ * is the fourth rule at the top of this file. Its own class names are prefixed `.kui-connect__` and
+ * `.kui-connect-`, so it restyles nothing above it either way.
+ *
+ * The file is `@kui/feature-connect`'s and this line is the kernel's, for the same reason the
+ * alerts line above is: `build-tests`' `CssReferences` requires every stylesheet on disk to be
+ * named here exactly once, and this index is the only place that can name it. Two packets, one
+ * line each. */
+@import "../../feature-connect/styles/81-connect.css";
+
+/* The ksqlDB screens (M9): the object list, the statement editor and the result region. After
+ * `29-connect-ksql.css` for the same reason the Connect line above is — that sheet styles the
+ * `KsqlWorkspace` primitive this screen composes, and a screen must be able to adjust a primitive
+ * inside itself — and last in the file because the pre-migration order at the top of this file is
+ * preserved on purpose and a new screen joins the end of it.
+ *
+ * The file is `@kui/feature-ksql`'s and this line is the kernel's, for the third time and the same
+ * reason: `build-tests`' `CssReferences` requires every stylesheet on disk to be named here exactly
+ * once, and this index is the only file that can name it. **The path is the contract between the two
+ * packets** — `CssReferences.violations` reports an import of a file that is not on disk, so this
+ * line is red until `frontend/packages/feature-ksql/styles/82-ksql.css` exists at exactly this
+ * name, and the feature's stylesheet is red the moment it is committed under any other one. */
+@import "../../feature-ksql/styles/82-ksql.css";

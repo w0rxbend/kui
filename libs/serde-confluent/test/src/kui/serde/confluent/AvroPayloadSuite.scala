@@ -47,4 +47,43 @@ final class AvroPayloadSuite extends FunSuite {
   test("schema text that is not a schema fails at parse time, not at decode time") {
     assert(AvroPayload.parse("not a schema").left.exists(_.contains("could not be parsed")))
   }
+
+  private val nestedDefinition: String =
+    """{
+      |  "type": "record",
+      |  "name": "OrderPlacedWithShipping",
+      |  "fields": [
+      |    {"name": "id", "type": "string"},
+      |    {"name": "tags", "type": {"type": "array", "items": "string"}},
+      |    {
+      |      "name": "shipping",
+      |      "type": {
+      |        "type": "record",
+      |        "name": "Shipping",
+      |        "fields": [
+      |          {"name": "city", "type": "string"},
+      |          {"name": "cost", "type": "double"}
+      |        ]
+      |      }
+      |    }
+      |  ]
+      |}""".stripMargin
+
+  private val nestedSchema: org.apache.avro.Schema =
+    AvroPayload.parse(nestedDefinition).fold(why => fail(why), identity)
+
+  test("a nested record field and an array field decode to real nested-object and array JSON shapes") {
+    val json =
+      """{"id":"o-4","tags":["fragile","express"],"shipping":{"city":"Prague","cost":9.5}}"""
+    val bytes = AvroPayload.encode(nestedSchema, json).fold(why => fail(why), identity)
+    val decoded = AvroPayload.decode(nestedSchema, bytes).fold(why => fail(why), identity)
+    assertEquals(decoded, json)
+
+    val parsed = io.circe.parser.parse(decoded).fold(why => fail(why.getMessage), identity)
+    val cursor = parsed.hcursor
+    assertEquals(cursor.downField("tags").focus.flatMap(_.asArray).map(_.size), Some(2))
+    assertEquals(cursor.downField("tags").downArray.as[String], Right("fragile"))
+    assertEquals(cursor.downField("shipping").downField("city").as[String], Right("Prague"))
+    assertEquals(cursor.downField("shipping").downField("cost").as[Double], Right(9.5))
+  }
 }

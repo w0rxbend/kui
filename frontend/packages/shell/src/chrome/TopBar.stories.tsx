@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { userEvent, within } from "storybook/test";
+import { createRootPreference } from "@kui/kernel";
+import type { AccentChoice, DensityChoice, ThemeChoice } from "@kui/kernel";
 import { TopBar } from "./TopBar.jsx";
+import type { AppearancePreferences } from "./AppearancePopover.jsx";
 import { LONG_TOPIC } from "./fixtures.js";
 
 /**
@@ -126,3 +129,56 @@ export const NarrowWindow: Story = {
     ),
   ],
 };
+
+/**
+ * The appearance popover, open under the sliders glyph.
+ *
+ * Its preferences write to a detached element and to no storage, for the reason
+ * `AppearancePopover.stories.tsx` gives at length: a story that drove the application's singletons
+ * would repaint Storybook and remember it across a reload.
+ *
+ * Note the glyph's filled backing while the panel is open. `SCREENS-V4.md` §7.5 records that the
+ * design draws this control and the bell inconsistently and asks for one of them to be settled;
+ * this is the settlement, in the bell's favour — a scrim-less panel needs something on screen
+ * saying which control it belongs to.
+ */
+export const AppearanceOpen: Story = {
+  args: { ...base, appearance: detachedAppearance() },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByTestId("appearance-control"));
+  },
+};
+
+/** Preferences that paint an element nothing is styled against. See the story above. */
+function detachedAppearance(): AppearancePreferences {
+  const root = document.createElement("div");
+  return {
+    theme: createRootPreference<ThemeChoice>({
+      attribute: "data-theme",
+      storageKey: "kui.theme",
+      values: ["auto", "light", "dark"],
+      fallback: "auto",
+      attributeValue: (chosen) => (chosen === "auto" ? null : chosen),
+      storage: null,
+      root,
+    }),
+    accent: createRootPreference<AccentChoice>({
+      attribute: "data-accent",
+      storageKey: "kui.accent",
+      values: ["blue", "teal", "green", "amber"],
+      fallback: "blue",
+      attributeValue: (chosen) => (chosen === "blue" ? null : chosen),
+      storage: null,
+      root,
+    }),
+    density: createRootPreference<DensityChoice>({
+      attribute: "data-density",
+      storageKey: "kui.density",
+      values: ["comfortable", "compact"],
+      fallback: "comfortable",
+      attributeValue: (chosen) => (chosen === "compact" ? "compact" : null),
+      storage: null,
+      root,
+    }),
+  };
+}

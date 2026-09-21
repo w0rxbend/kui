@@ -2,10 +2,11 @@ package kui.cluster.infrastructure
 
 import java.time.Instant
 
+import org.scalacheck.Prop.forAll
+import org.scalacheck.{Arbitrary, Gen}
+
 import kui.kernel.error.{ApplicationError, DomainError, ErrorCode, FieldError, InfrastructureError, KuiError}
 import kui.testkit.KuiSuite
-import org.scalacheck.{Arbitrary, Gen}
-import org.scalacheck.Prop.forAll
 
 /** The invalidation policy of `research/kafka/admin-capabilities.md` §0, asserted case by case.
   *
@@ -15,7 +16,9 @@ import org.scalacheck.Prop.forAll
 final class ReconnectPolicySuite extends KuiSuite {
 
   test("unreachableTimeoutAndAuthFailedInvalidate") {
-    assert(ReconnectPolicy.shouldInvalidate(InfrastructureError.Unreachable("kafka:local", "TimeoutException")))
+    assert(
+      ReconnectPolicy.shouldInvalidate(InfrastructureError.Unreachable("kafka:local", "TimeoutException"))
+    )
     assert(ReconnectPolicy.shouldInvalidate(InfrastructureError.Timeout("describeCluster", 30000L)))
     assert(ReconnectPolicy.shouldInvalidate(InfrastructureError.AuthFailed("kafka:local")))
   }
@@ -26,7 +29,9 @@ final class ReconnectPolicySuite extends KuiSuite {
     assert(!ReconnectPolicy.shouldInvalidate(InfrastructureError.Upstream("kui-store", 503)))
     assert(!ReconnectPolicy.shouldInvalidate(InfrastructureError.CircuitOpen("kafka:local", Instant.EPOCH)))
     assert(
-      !ReconnectPolicy.shouldInvalidate(InfrastructureError.Remote(ErrorCode.Timeout, "upstream timed out", Nil))
+      !ReconnectPolicy.shouldInvalidate(
+        InfrastructureError.Remote(ErrorCode.Timeout, "upstream timed out", Nil)
+      )
     )
   }
 
@@ -45,7 +50,9 @@ final class ReconnectPolicySuite extends KuiSuite {
   }
 
   test("domainErrorsDoNotInvalidate") {
-    assert(!ReconnectPolicy.shouldInvalidate(DomainError.InvariantViolation("isr must be a subset of replicas")))
+    assert(
+      !ReconnectPolicy.shouldInvalidate(DomainError.InvariantViolation("isr must be a subset of replicas"))
+    )
   }
 
   property("thePolicyIsTotal") {
@@ -64,26 +71,28 @@ object ReconnectPolicySuite {
 
   private val code: Gen[ErrorCode] = Gen.oneOf(ErrorCode.values.toIndexedSeq)
 
-  /** Every `KuiError` case the kernel declares, one branch each. Listing them by hand rather than deriving
-    * is the point: a new case has to be added here, and that is the moment somebody reconsiders the policy.
+  /** Every `KuiError` case the kernel declares, one branch each. Listing them by hand rather than deriving is
+    * the point: a new case has to be added here, and that is the moment somebody reconsiders the policy.
     */
-  val anyKuiError: Gen[KuiError] = Gen.oneOf[Gen[KuiError]](
-    text.map(r => DomainError.InvariantViolation(r)),
-    for w <- text; i <- text; c <- code yield ApplicationError.NotFound(w, i, c),
-    text.map(ApplicationError.Conflict.apply),
-    text.map(ApplicationError.Forbidden.apply),
-    text.map(ApplicationError.Unauthenticated.apply),
-    text.map(ApplicationError.Unsupported.apply),
-    text.map(ApplicationError.InvalidState.apply),
-    text.map(m => ApplicationError.Invalid(m, Nil)),
-    for c <- code; m <- text yield ApplicationError.Remote(c, m, Nil),
-    for u <- text; c <- text yield InfrastructureError.Unreachable(u, c),
-    for o <- text; ms <- Gen.chooseNum(0L, 60000L) yield InfrastructureError.Timeout(o, ms),
-    text.map(InfrastructureError.AuthFailed.apply),
-    for u <- text; s <- Gen.chooseNum(400, 599) yield InfrastructureError.Upstream(u, s),
-    text.map(u => InfrastructureError.CircuitOpen(u, Instant.EPOCH)),
-    for c <- code; m <- text yield InfrastructureError.Remote(c, m, Nil)
-  ).flatMap(identity)
+  val anyKuiError: Gen[KuiError] = Gen
+    .oneOf[Gen[KuiError]](
+      text.map(r => DomainError.InvariantViolation(r)),
+      for w <- text; i <- text; c <- code yield ApplicationError.NotFound(w, i, c),
+      text.map(ApplicationError.Conflict.apply),
+      text.map(ApplicationError.Forbidden.apply),
+      text.map(ApplicationError.Unauthenticated.apply),
+      text.map(ApplicationError.Unsupported.apply),
+      text.map(ApplicationError.InvalidState.apply),
+      text.map(m => ApplicationError.Invalid(m, Nil)),
+      for c <- code; m <- text yield ApplicationError.Remote(c, m, Nil),
+      for u <- text; c <- text yield InfrastructureError.Unreachable(u, c),
+      for o <- text; ms <- Gen.chooseNum(0L, 60000L) yield InfrastructureError.Timeout(o, ms),
+      text.map(InfrastructureError.AuthFailed.apply),
+      for u <- text; s <- Gen.chooseNum(400, 599) yield InfrastructureError.Upstream(u, s),
+      text.map(u => InfrastructureError.CircuitOpen(u, Instant.EPOCH)),
+      for c <- code; m <- text yield InfrastructureError.Remote(c, m, Nil)
+    )
+    .flatMap(identity)
 
   given Arbitrary[KuiError] = Arbitrary(anyKuiError)
 }

@@ -10,6 +10,7 @@ import munit.CatsEffectSuite
 import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
 
 import kui.cluster.contract.ClusterEndpoints
+import kui.config.{SafeUrl, UpstreamServiceConfig, UrlPolicy}
 import kui.gateway.api.client.ServiceClientFixture as Fixture
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.{BrokerId, ClusterId}
@@ -19,17 +20,17 @@ import kui.security.{PrincipalClaims, PrincipalCodec, RequestDigests}
 /** That a call the gateway makes on another service's behalf carries exactly what ADR-020 and
   * `ARCHITECTURE.md` §5 say it carries, and that every failure comes back as a value.
   *
-  * The suite is written against the *real* published endpoint of the cluster service rather than a
-  * locally invented one. That is the point of GW-002: a route the gateway calls is a value the owning
-  * team wrote, so a test that used its own endpoint definition would be testing a copy and would pass on
-  * the day the two drifted apart.
+  * The suite is written against the *real* published endpoint of the cluster service rather than a locally
+  * invented one. That is the point of GW-002: a route the gateway calls is a value the owning team wrote, so
+  * a test that used its own endpoint definition would be testing a copy and would pass on the day the two
+  * drifted apart.
   */
 final class SttpServiceClientSuite extends CatsEffectSuite {
 
   /** One real published endpoint of the cluster service, driven end to end through the client.
     *
-    * `getCluster` rather than the list, because it has a path parameter: a client that dropped or mangled
-    * one would still pass every assertion made against a parameterless route.
+    * `getCluster` rather than the list, because it has a path parameter: a client that dropped or mangled one
+    * would still pass every assertion made against a parameterless route.
     */
   private val getCluster = ClusterEndpoints.getCluster
 
@@ -89,6 +90,33 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
   private def claimsOf(token: String): PrincipalClaims =
     decode[PrincipalClaims](token).fold(failure => fail(s"the token is not claims JSON: $failure"), identity)
 
+  test("theAddressRuleTheCallerHoldsIsTheOneEveryRequestIsCheckedAgainst") {
+    // `ResilientBackend` re-applies `UpstreamConfig.urlPolicy` to every request and to every redirect, so
+    // this is not a start-up setting that has already done its work — it decides, per call, whether the
+    // address may be reached at all. Until wave 6 it was left at the type's strict default here, and a
+    // gateway an operator had deliberately relaxed with `KUI_ALLOW_PRIVATE_UPSTREAMS=true` accepted a
+    // loopback upstream at start-up and then refused every call to it, with no connection ever attempted.
+    //
+    // Both directions, because the default is a fail-safe: `Strict` when nobody says otherwise is the whole
+    // protection against a configured URL turning the gateway into a reader of the link-local metadata
+    // address, and a default that drifted to `Dev` would be silent.
+    val upstream = UpstreamServiceConfig(
+      url = SafeUrl.unsafe("http://127.0.0.1:8081"),
+      timeout = 1.second,
+      maxConcurrent = kui.kernel.PositiveInt.unsafe(4)
+    )
+    val service = kui.kernel.ServiceId.unsafe("cluster")
+
+    assertEquals(SttpServiceClient.upstreamConfig(service, upstream).urlPolicy, UrlPolicy.Strict)
+    assertEquals(
+      SttpServiceClient.upstreamConfig(service, upstream, UrlPolicy.Dev).urlPolicy,
+      UrlPolicy.Dev
+    )
+    // And the two knobs an operator really does set travel with it, unchanged.
+    assertEquals(SttpServiceClient.upstreamConfig(service, upstream).callTimeout, 1.second)
+    assertEquals(SttpServiceClient.upstreamConfig(service, upstream).name, "cluster")
+  }
+
   test("sendsTheFourStandardHeaders") {
     // A recording tracer, because `traceparent` is only propagated when there is a real span to
     // propagate; with the no-op tracer the header would be legitimately absent and the assertion would
@@ -97,7 +125,8 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
       for {
         stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
         tracer <- traces.tracerProvider.get("kui.test")
-        telemetry = Telemetry.fromProviders[IO](traces.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
+        telemetry = Telemetry
+          .fromProviders[IO](traces.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
         _ <- kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>
           SttpServiceClient
             .resource[IO](
@@ -109,9 +138,11 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
               stub.backend
             )
             .use(client =>
-              tracer.span("inbound").surround(
-                client.call(getCluster, cluster)(Fixture.context(Some(ClusterId.unsafe("local"))))
-              )
+              tracer
+                .span("inbound")
+                .surround(
+                  client.call(getCluster, cluster)(Fixture.context(Some(ClusterId.unsafe("local"))))
+                )
             )
         }
         sent <- stub.sent.map(_.head)
@@ -313,5 +344,61 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
       stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
       result <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
     } yield assertEquals(result.map(_.cluster.name), Right("Production EU"))
+  }
+
+  test("aClientBuiltThroughResourceWithNoPolicyRefusesALoopbackUpstream") {
+    // `resource`'s `policy` parameter defaults to `UrlPolicy.Strict`, and that default is the SSRF guard's
+    // fail-safe: a composition root that says nothing gets the safe answer rather than the convenient one.
+    // Until this case existed the default could be changed to `UrlPolicy.Dev` with every gateway suite
+    // green, because the only caller that exercised it — `ServiceClientFixture.client` — pointed at
+    // `http://cluster:8081`, and `SafeUrl` never resolves a host *name*, so `Strict` and `Dev` decide that
+    // address identically. A loopback literal is the cheapest address the two policies disagree about.
+    //
+    // The refusal is asserted through a real call rather than by reading the parameter back, because the
+    // parameter is not where the rule bites: it is threaded into `UpstreamConfig.urlPolicy` and re-applied
+    // by `ResilientBackend` to every request and every redirect.
+    val loopback = Fixture.config(base = "http://127.0.0.1:8081")
+
+    for {
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
+      logger <- kui.testkit.fakes.FakeStructuredLogger[IO]
+      // `SttpServiceClient.resource` is called here rather than through `ServiceClientFixture.client`,
+      // deliberately. The fixture is the only other caller that omits the policy, and a later edit adding
+      // an explicit `UrlPolicy.Strict` there would look harmless and would silently re-open this hole. The
+      // argument list below is the assertion: there is no `policy` at the end of it.
+      refused <- SttpServiceClient
+        .resource[IO](
+          Fixture.Cluster,
+          loopback,
+          PrincipalCodec.inProcess[IO],
+          Telemetry.noop[IO],
+          logger,
+          stub.backend
+        )
+        .use(_.call(getCluster, cluster)(Fixture.context()))
+      afterRefusal <- stub.sent
+      // The other direction, so that a case which passed because *nothing* can reach the stub would fail:
+      // told `Dev` explicitly, the very same address and the very same stub answer.
+      allowed <- Fixture
+        .clientUnder(Fixture.Cluster, stub, loopback, UrlPolicy.Dev)
+        .use(_.call(getCluster, cluster)(Fixture.context()))
+      afterAllowed <- stub.sent
+    } yield {
+      // `message` is the sentence a browser is shown — "cluster could not be reached" — so the reason is
+      // read off the typed value's `cause`, which is where `ResilientBackend` puts the violation.
+      val cause = refused.left.toOption.collect { case InfrastructureError.Unreachable(_, why) => why }
+
+      assertEquals(refused.left.map(_.code), Left(ErrorCode.UpstreamUnavailable), refused.toString)
+      assert(cause.exists(_.contains("refused by the URL policy")), refused.toString)
+      assert(
+        cause.exists(_.contains("a loopback address is only allowed in development")),
+        refused.toString
+      )
+      // Refused before a connection is attempted: the stub records every request that reaches it, and the
+      // policy check runs in front of the transport rather than after a failed dial.
+      assertEquals(afterRefusal, Nil, "the refused call still reached the upstream")
+      assertEquals(allowed.map(_.cluster.name), Right("Production EU"))
+      assertEquals(afterAllowed.size, 1, afterAllowed.toString)
+    }
   }
 }

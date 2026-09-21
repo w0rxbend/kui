@@ -1,8 +1,9 @@
 package kui.kernel.browse
 
-import kui.kernel.ValidationError
 import munit.ScalaCheckSuite
 import org.scalacheck.Prop.forAll
+
+import kui.kernel.ValidationError
 
 /** The browse vocabulary's closed sets, asserted against literal wire strings.
   *
@@ -69,7 +70,7 @@ final class SeekModeSuite extends ScalaCheckSuite {
         assertEquals(
           SeekMode.AtOffsets(perPartition) match {
             case SeekMode.AtOffsets(m) => m.size
-            case _                     => -1
+            case _ => -1
           },
           perPartition.size
         )

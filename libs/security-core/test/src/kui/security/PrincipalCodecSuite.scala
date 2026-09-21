@@ -9,16 +9,16 @@ import kui.kernel.{RoleName, ServiceId, UserName}
 
 /** The rules a principal token is checked against, exercised through the unsigned in-process codec.
   *
-  * They are asserted here rather than only in the JVM suite on purpose: the checks are shared code,
-  * so the all-in-one deployment and the distributed one cannot disagree about what a valid token is,
-  * and this suite runs on both platforms.
+  * They are asserted here rather than only in the JVM suite on purpose: the checks are shared code, so the
+  * all-in-one deployment and the distributed one cannot disagree about what a valid token is, and this suite
+  * runs on both platforms.
   */
 final class PrincipalCodecSuite extends FunSuite {
 
-  private val now: Instant     = Instant.parse("2026-09-03T10:00:00Z")
-  private val service          = ServiceId.unsafe("topic")
-  private val digest           = RequestDigest.ofRequestLine("get", "/internal/v1/topics")
-  private val codec            = PrincipalCodec.inProcess[Id]
+  private val now: Instant = Instant.parse("2026-09-03T10:00:00Z")
+  private val service = ServiceId.unsafe("topic")
+  private val digest = RequestDigest.ofRequestLine("get", "/internal/v1/topics")
+  private val codec = PrincipalCodec.inProcess[Id]
 
   private def claims(
       audience: ServiceId = service,
@@ -37,7 +37,7 @@ final class PrincipalCodecSuite extends FunSuite {
     )
 
   test("a token the in-process codec minted verifies back to the principal it asserts") {
-    val token  = codec.sign(claims())
+    val token = codec.sign(claims())
     val result = codec.verify(token, service, digest, now)
 
     assertEquals(
@@ -62,13 +62,13 @@ final class PrincipalCodecSuite extends FunSuite {
 
   test("a token that has expired is refused") {
     val expiry = now.minusSeconds(60)
-    val token  = codec.sign(claims(expiresAt = expiry))
+    val token = codec.sign(claims(expiresAt = expiry))
     assertEquals(codec.verify(token, service, digest, now), Left(PrincipalError.Expired(expiry)))
   }
 
   test("a token is still accepted five seconds past its expiry, and refused six") {
     val expiry = now.minusSeconds(5)
-    val token  = codec.sign(claims(expiresAt = expiry))
+    val token = codec.sign(claims(expiresAt = expiry))
 
     assert(codec.verify(token, service, digest, now).isRight, "five seconds of skew is allowed")
     assert(
@@ -85,7 +85,7 @@ final class PrincipalCodecSuite extends FunSuite {
   test("something that is not a token at all is refused as malformed, not as a bad signature") {
     codec.verify(SignedPrincipal.unsafe("not json"), service, digest, now) match {
       case Left(PrincipalError.Malformed(_)) => ()
-      case other                             => fail(s"expected a malformed token, got $other")
+      case other => fail(s"expected a malformed token, got $other")
     }
   }
 
@@ -97,13 +97,16 @@ final class PrincipalCodecSuite extends FunSuite {
 
   test("the claims round-trip through their JSON with every field intact") {
     val original = claims()
-    val json     = io.circe.syntax.EncoderOps(original).asJson.noSpaces
+    val json = io.circe.syntax.EncoderOps(original).asJson.noSpaces
     assertEquals(io.circe.parser.decode[PrincipalClaims](json), Right(original))
   }
 
   test("the claim names on the wire are the short ones ADR-020 fixes") {
     val json = io.circe.syntax.EncoderOps(claims()).asJson
-    assertEquals(json.hcursor.keys.map(_.toList.sorted), Some(List("aud", "exp", "iat", "kind", "req", "roles", "sid", "sub")))
+    assertEquals(
+      json.hcursor.keys.map(_.toList.sorted),
+      Some(List("aud", "exp", "iat", "kind", "req", "roles", "sid", "sub"))
+    )
     assertEquals(json.hcursor.downField("req").keys.map(_.toList.sorted), Some(List("b", "m", "p")))
   }
 

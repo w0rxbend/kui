@@ -22,6 +22,12 @@ function broker(row: Partial<Broker> & Pick<Broker, "id" | "host">): Broker {
     outOfSyncReplicas: 0,
     diskUsedBytes: 610 * GB,
     diskTotalBytes: 1_000 * GB,
+    // What Kafka's own replicas occupy, which is a fraction of a disk it shares with everything
+    // else on the machine. The gap between this and `diskUsedBytes` is the point of having both.
+    heldBytes: 128 * GB,
+    // An evenly balanced broker, so the sample cards say so rather than saying nothing. The
+    // degraded set below overrides it where the point is that one broker is carrying the cluster.
+    leaderSkewPercent: 0,
     ...row,
   };
 }
@@ -42,9 +48,40 @@ export const RACKED_BROKERS: readonly Broker[] = SAMPLE_BROKERS.map((one, index)
 /** Everything that can go wrong on one screen: down, unreachable, full, and unreadable. */
 export const DEGRADED_BROKERS: readonly Broker[] = [
   broker({ id: 1, host: "broker-1.kyiv", isController: true, diskUsedBytes: 610 * GB }),
-  broker({ id: 2, host: "broker-2.kyiv", health: "offline", leaderPartitions: 0, replicaPartitions: 0, outOfSyncReplicas: null, diskUsedBytes: null, diskTotalBytes: null }),
-  broker({ id: 3, host: "broker-3.kyiv", health: "unknown", leaderPartitions: null, replicaPartitions: null, outOfSyncReplicas: null, diskUsedBytes: null, diskTotalBytes: null }),
-  broker({ id: 4, host: "broker-4.kyiv", health: "degraded", outOfSyncReplicas: 47, diskUsedBytes: 940 * GB, replicaPartitions: 3_140 }),
+  broker({ id: 2, host: "broker-2.kyiv", health: "offline", leaderPartitions: 0, replicaPartitions: 0, outOfSyncReplicas: null, diskUsedBytes: null, diskTotalBytes: null, heldBytes: null }),
+  broker({ id: 3, host: "broker-3.kyiv", health: "unknown", leaderPartitions: null, replicaPartitions: null, outOfSyncReplicas: null, diskUsedBytes: null, diskTotalBytes: null, heldBytes: null }),
+  broker({
+    id: 4,
+    host: "broker-4.kyiv",
+    health: "degraded",
+    outOfSyncReplicas: 47,
+    diskUsedBytes: 940 * GB,
+    replicaPartitions: 3_140,
+    // One broker carrying twice its share of the leaderships, which is the reading the expanded
+    // card exists to give and which no tile on this page can.
+    leaderSkewPercent: 104,
+  }),
+];
+
+/**
+ * The shape a real single-broker cluster arrives in before anything has scraped it, and the one the
+ * screen used to get wrong: Kafka's own usage is known, the disk beneath it was never measured, and
+ * the under-replicated partition count is absent rather than zero.
+ */
+export const UNMEASURED_BROKERS: readonly Broker[] = [
+  broker({
+    id: 1,
+    host: "kafka",
+    isController: true,
+    leaderPartitions: null,
+    replicaPartitions: 86,
+    diskUsedBytes: null,
+    diskTotalBytes: null,
+    heldBytes: 95_320,
+    // The quickstart's own answer: the topic sweep has not produced a census, so there is no share
+    // to be measured against and the card says so rather than drawing a zero.
+    leaderSkewPercent: null,
+  }),
 ];
 
 export const SAMPLE_CLUSTERS: readonly ClusterSummary[] = [
@@ -53,6 +90,7 @@ export const SAMPLE_CLUSTERS: readonly ClusterSummary[] = [
     name: "prod-kyiv-01",
     health: "healthy",
     version: "v3.7.0",
+    controllerKind: "kraft",
     brokersOnline: 3,
     brokersTotal: 3,
     topics: 128,
@@ -66,6 +104,7 @@ export const SAMPLE_CLUSTERS: readonly ClusterSummary[] = [
     name: "staging-fra",
     health: "degraded",
     version: "v3.6.1",
+    controllerKind: "kraft",
     brokersOnline: 2,
     brokersTotal: 3,
     topics: 74,
@@ -79,6 +118,7 @@ export const SAMPLE_CLUSTERS: readonly ClusterSummary[] = [
     name: "archive-eu",
     health: "unknown",
     version: null,
+    controllerKind: null,
     brokersOnline: null,
     brokersTotal: null,
     topics: null,

@@ -9,7 +9,7 @@ import kui.http.principal.SecuredRoutes
 import kui.kernel.error.{ApplicationError, FieldError, KuiError}
 import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, OffsetRange, TopicName}
-import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
+import kui.message.application.produce.{ProduceUseCase, ResendLimits, ResendUseCase}
 import kui.message.application.purge.{PurgeOffer, PurgeUseCase}
 import kui.message.contract.*
 import kui.message.domain.*
@@ -221,7 +221,8 @@ object MessageMutationRoutes {
   private[api] def resendRequests(
       cluster: ClusterId,
       source: TopicName,
-      request: ResendRequestDto
+      request: ResendRequestDto,
+      limits: ResendLimits = ResendLimits.Default
   ): Either[KuiError, List[ResendRequest]] =
     if request.ranges.isEmpty then
       Left(
@@ -231,27 +232,43 @@ object MessageMutationRoutes {
         )
       )
     else
-      request.ranges.traverse(range =>
-        OffsetRange
-          .from(range.from, range.until)
-          .leftMap(invalid =>
-            ApplicationError
-              .Invalid(invalid.message, List(FieldError.of("ranges", "from at or before until")))
-          )
-          .flatMap(offsets =>
-            ResendRequest.of(
-              cluster = cluster,
-              source = SourceRange(source, range.partition, offsets),
-              // No destination partition: a resend lets Kafka's partitioner place the record, which keeps
-              // key-based ordering in the destination topic. Pinning every copied record to one partition
-              // is a way to make a replay behave unlike the traffic it is replaying.
-              destination = Destination(request.toTopic, None),
-              // Headers always travel. A resend that could drop them would be a resend that changes the
-              // records, and an operator replaying a dead-letter queue would have no way to know.
-              keepHeaders = true
+      for {
+        offsetsByRange <- request.ranges.traverse(range =>
+          OffsetRange
+            .from(range.from, range.until)
+            .leftMap(invalid =>
+              ApplicationError
+                .Invalid(invalid.message, List(FieldError.of("ranges", "from at or before until")))
             )
+            .map(range.partition -> _)
+        )
+        // Checked once, on the total, rather than per range: a caller cannot turn a single request into
+        // an unbounded copy by splitting it into many ranges that are each individually under the cap.
+        total = offsetsByRange.map(_._2.size).sum
+        _ <-
+          if total > limits.maxRecords then
+            Left(
+              ApplicationError.Invalid(
+                s"a resend may copy at most ${limits.maxRecords} records at a time, and this request's " +
+                  s"ranges hold $total in total; copy it in several requests",
+                List(FieldError.of("ranges", s"ranges totalling at most ${limits.maxRecords} offsets"))
+              )
+            )
+          else Right(())
+        requests <- offsetsByRange.traverse((partition, offsets) =>
+          ResendRequest.of(
+            cluster = cluster,
+            source = SourceRange(source, partition, offsets),
+            // No destination partition: a resend lets Kafka's partitioner place the record, which keeps
+            // key-based ordering in the destination topic. Pinning every copied record to one partition
+            // is a way to make a replay behave unlike the traffic it is replaying.
+            destination = Destination(request.toTopic, None),
+            // Headers always travel. A resend that could drop them would be a resend that changes the
+            // records, and an operator replaying a dead-letter queue would have no way to know.
+            keepHeaders = true
           )
-      )
+        )
+      } yield requests
 
   private def serdeOf(field: String, raw: Option[String]): Either[KuiError, Option[SerdeName]] =
     raw.filter(_.nonEmpty) match {
@@ -265,14 +282,15 @@ object MessageMutationRoutes {
           )
     }
 
-  /** Headers as the domain wants them: name and text, in order.
+  /** Headers as the domain wants them: name and an optional value, in order.
     *
-    * A header with no value is carried as an empty string rather than dropped. Kafka distinguishes a header
-    * present with a null value from one that is absent, and some frameworks — Spring's dead-letter machinery
-    * among them — read that difference; dropping it here would quietly change the record.
+    * A header explicitly marked as having no value stays `None` rather than becoming an empty string. Kafka
+    * distinguishes a header present with a null value from one that is present with an empty payload, and
+    * some frameworks — Spring's dead-letter machinery among them — read that difference; collapsing it here
+    * would quietly change the record.
     */
-  private def headersOf(headers: List[HeaderDto]): List[(String, String)] =
-    headers.map(header => header.name -> header.value.getOrElse(""))
+  private def headersOf(headers: List[HeaderDto]): List[(String, Option[String])] =
+    headers.map(header => header.name -> header.value)
 
   private def produced(at: ProducedAt): ProducedRecordDto =
     ProducedRecordDto(partition = at.partition, offset = at.offset, timestamp = at.timestamp)

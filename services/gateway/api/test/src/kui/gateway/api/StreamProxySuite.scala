@@ -6,7 +6,7 @@ import java.time.Instant
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.testkit.TestControl
-import cats.effect.{IO, Ref}
+import cats.effect.{Deferred, IO, Ref}
 import fs2.{Chunk, Stream}
 import io.circe.Json
 import munit.CatsEffectSuite
@@ -26,8 +26,8 @@ final class StreamProxySuite extends CatsEffectSuite {
   /** MUnit's default is 30 seconds, and one test here pushes a million events through the relay. On an idle
     * machine that takes about nine seconds; in a full `__.test` run it shares the CPU with a dozen
     * Testcontainers suites starting brokers, and it has been seen to exceed thirty. The timeout is a safety
-    * net against a stream that never finishes, not an assertion about speed, so widening it costs nothing:
-    * a relay that really did accumulate would never finish at any timeout.
+    * net against a stream that never finishes, not an assertion about speed, so widening it costs nothing: a
+    * relay that really did accumulate would never finish at any timeout.
     */
   override def munitIOTimeout: scala.concurrent.duration.Duration = 3.minutes
 
@@ -126,6 +126,33 @@ final class StreamProxySuite extends CatsEffectSuite {
     } yield assert(seen)
   }
 
+  test("cancellingWithAFullQueueDoesNotWaitForAConsumerThatHasStopped") {
+    // Hold the consumer after its first byte. That lets the producer fill the one-slot queue with the second
+    // chunk and block while offering the third. Once the consumer is released, `take(1)` cancels the relay.
+    // Its producer finaliser must not try to enqueue a termination marker into that still-full queue: nobody
+    // is left to remove it, so such an offer makes cancellation itself hang.
+    for {
+      releaseConsumer <- Deferred[IO, Unit]
+      thirdChunkReached <- Deferred[IO, Unit]
+      upstream =
+        Stream.chunk(Chunk.singleton(1.toByte)) ++
+          Stream.chunk(Chunk.singleton(2.toByte)) ++
+          Stream.eval(thirdChunkReached.complete(())).drain ++
+          Stream.chunk(Chunk.singleton(3.toByte)) ++
+          Stream.never[IO]
+      relay <- StreamProxy
+        .relay(upstream, queueSize = 1)
+        .evalTap(_ => releaseConsumer.get)
+        .take(1)
+        .compile
+        .drain
+        .start
+      _ <- thirdChunkReached.get.timeout(5.seconds)
+      _ <- releaseConsumer.complete(())
+      _ <- relay.joinWithNever.timeout(5.seconds)
+    } yield assert(true)
+  }
+
   test("backpressuresRatherThanDropping") {
     // Dropping here would lose records the service has already counted as delivered in its `consumed` event,
     // and no client could detect the discrepancy. A consumer slower than the producer must therefore slow the
@@ -167,6 +194,30 @@ final class StreamProxySuite extends CatsEffectSuite {
       .map(text => assert(text.contains("\"offset\":1"), text))
   }
 
+  test("aNegativeQueueSizeStillMoves") {
+    // W13-A1: `aQueueSizeBelowOneStillMoves` drives exactly 0, and 0 is the one value below one that needs
+    // no floor — `Queue.bounded(0)` is a rendezvous queue and relays perfectly well. Deleting
+    // `math.max(1, queueSize)` therefore left all 1,270 cases in `services.gateway.api.test` green while
+    // leaving `Queue.bounded(-1)` to raise `IllegalArgumentException` out of a stream the browser is
+    // already reading. The scaladoc's rule is "values below one are treated as one", and -1 is below one.
+    textOf(StreamProxy.relay(render(List(messageEvent(1))), queueSize = -1))
+      .map(text => assert(text.contains("\"offset\":1"), text))
+  }
+
+  test("aTerminalEventWrittenWithCrlfLineEndingsIsRecognised") {
+    // Every other fixture here is built by `SseEvent.bytes`, which writes LF, so no case drove a CRLF body
+    // — and the SSE grammar allows CRLF, LF and CR alike. This case holds the property rather than one
+    // line of it: W13-A1 deleted `isTerminalLine`'s `stripSuffix("\r")` and the suite stayed green with
+    // this case in it, because `text.drop("event:".length).trim` already trims the CR. That `stripSuffix`
+    // is therefore redundant, and this case is a gate on the behaviour and not on that expression.
+    val body = "event: message\r\ndata: {}\r\n\r\nevent: done\r\ndata: {}\r\n\r\n"
+    val crlf = Stream.chunk(Chunk.array(body.getBytes(StandardCharsets.UTF_8)))
+
+    textOf(StreamProxy.withTerminalEvent(crlf, envelope)).map(text =>
+      assert(!text.contains(envelope.code), text)
+    )
+  }
+
   test("anUpstreamThatEndsWithoutATerminalEventGetsOne") {
     // The reference product's failure mode, and the one this milestone exists to replace: a connection that
     // simply stops. The browser cannot tell that from a finished search, so it shows what it has and says
@@ -187,7 +238,8 @@ final class StreamProxySuite extends CatsEffectSuite {
   test("anUpstreamThatFailsMidBodyKeepsTheBytesItAlreadySentAndGainsAnErrorEvent") {
     // ADR-032's stale-data rule: what arrived stands. Discarding a half page because the last poll failed is
     // the behaviour the research records as a defect.
-    val failing = render(List(messageEvent(1))) ++ Stream.raiseError[IO](new RuntimeException("upstream died"))
+    val failing =
+      render(List(messageEvent(1))) ++ Stream.raiseError[IO](new RuntimeException("upstream died"))
 
     StreamProxy
       .withTerminalEvent(failing, envelope)
@@ -227,9 +279,66 @@ final class StreamProxySuite extends CatsEffectSuite {
       }
   }
 
+  test("aCrLfTerminatedUpstreamsOwnTerminalEventIsRecognised") {
+    // W9-A1. Every fixture in this file is built by `SseEvent.bytes`, which ends its lines with a bare
+    // `\n`, so nothing here had ever put a CR LF stream through the detector — and the event-stream
+    // format allows one. A CR LF upstream's frames parse correctly on both sides of this hop
+    // (`SseWire` splits with `fs2.text.lines`, which treats CR LF as one break), so if the detector alone
+    // missed the terminal, the gateway would append an `error` after a `done` the upstream really sent and
+    // a stream that ended perfectly would reach the browser as one that broke.
+    //
+    // **This case is a regression guard and not a closed mutation, and the distinction is stated rather
+    // than implied.** Deleting `.stripSuffix("\r")` from `isTerminalLine` leaves it green, because the
+    // `trim` on the next line already removes the carriage return: the strip is provably redundant today
+    // and the mutation is an equivalent one. What this holds is the *property*, against the next person
+    // who replaces that `trim` with an exact comparison.
+    val crlf =
+      "event: message\r\ndata: {}\r\n\r\n" +
+        "event: done\r\ndata: {\"reason\":\"exhausted\"}\r\n\r\n"
+
+    textOf(
+      StreamProxy.withTerminalEvent(
+        Stream.emits(crlf.getBytes(StandardCharsets.UTF_8).toList).covary[IO],
+        envelope
+      )
+    ).map { body =>
+      assertEquals(body, crlf, "the upstream bytes must be forwarded unchanged")
+      assert(
+        !body.contains(envelope.code),
+        s"the gateway appended its own error after an upstream that had already said done: $body"
+      )
+    }
+  }
+
   test("aTerminalEventSplitAcrossChunkBoundariesIsStillSeen") {
     // The detection reads bytes as they pass. A chunk boundary inside `event: done` must not hide it — which
     // would append a second terminal event and break the browser's "exactly one" assumption.
+    //
+    // **This case USUALLY does not reach the carry, and "usually" is the corrected word.** It feeds
+    // `chunkLimit(1)` into `withTerminalEvent`; `relay`'s bounded queue normally puts the pieces back
+    // together before `observe` runs, and W10-06 wrote here — and `StreamProxy.scala`'s own scaladoc went on
+    // writing, as production fact — that the carry is unreachable from `withTerminalEvent` and that the
+    // suite stayed green with it deleted. **That was not true**, W11-A2 was asked to settle it, and W12-03
+    // brought the production paragraph into line with the table below rather than leaving the two at odds.
+    //
+    // Measured on 2026-09-12, four consecutive `./mill --no-daemon services.gateway.api.test` runs with
+    // `(pieces.last, pieces.init)` -> `(Vector.empty, pieces.init)` in `TerminalWatch.observe` and nothing
+    // else changed:
+    //
+    //   run 1   theTailOfAChunkIsCarriedIntoTheNextOne red;  THIS CASE GREEN
+    //   run 2   both red — this case failed on `List(message)` against `List(message, done)`
+    //   run 3   the tail case red;  this case green
+    //   run 4   the tail case red;  this case green
+    //
+    // One run in four. `relay`'s queue is a `Queue.bounded` drained by a second fibre, so how many source
+    // chunks are coalesced into one dequeued chunk depends on how the two fibres interleave — it is a
+    // scheduling outcome, not a property. So this case is honest about what it holds and only that: the
+    // end-to-end property — one terminal event out, no second one appended — for a source that produces
+    // tiny chunks. It is NOT a gate on the carry, and it must never be counted as one; on the runs where
+    // the split does survive to `observe` it becomes a second, non-deterministic reading of the two cases
+    // below, which is worth less than nothing because a gate that fires a quarter of the time reads as a
+    // flake and gets quarantined. The two cases below hold the carry itself, deterministically, at the
+    // level the split always survives to.
     val complete = render(List(messageEvent(1), SseEvent.done(DoneReason.Limit, Some("cursor-9"))))
       .chunkLimit(1)
       .flatMap(Stream.chunk)
@@ -240,5 +349,86 @@ final class StreamProxySuite extends CatsEffectSuite {
       .compile
       .toList
       .map(events => assertEquals(events.map(_.name), List("message", SseEventName.Done)))
+  }
+
+  /* ---------------------------------------------------------------------------------------------------- *
+   * The carry, driven at the level the bytes actually arrive in.
+   *
+   * W10-06. `TerminalWatch` holds two rules and both were held by nothing: the tail of a chunk is carried
+   * into the next one, and an incomplete trailing line is *not* examined. Deleting either left all fourteen
+   * cases above green, because every one of them goes through `relay` and `relay` re-chunks. So these drive
+   * `observe` directly — which is what `private[api]` on the class is for — and each names the mutation it
+   * refuses.
+   * ---------------------------------------------------------------------------------------------------- */
+
+  private def chunkOf(text: String): Chunk[Byte] = Chunk.array(text.getBytes(StandardCharsets.UTF_8))
+
+  test("theTailOfAChunkIsCarriedIntoTheNextOne") {
+    // The mutation: `(Vector.empty, pieces.init)` instead of `(pieces.last, pieces.init)`. A terminal event
+    // whose bytes arrive either side of a chunk boundary is then never seen, the gateway appends an `error`
+    // after a `done` the upstream really sent, and a stream that ended perfectly reaches the browser as one
+    // that broke — the exact defect `withTerminalEvent` exists to prevent, caused by the thing that prevents
+    // it. Three pieces rather than two, so that a carry which survives one boundary and is dropped at the
+    // next does not pass.
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- watch.observe(chunkOf("event: message\ndata: {}\n\nev"))
+      afterFirst <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("ent"))
+      afterSecond <- watch.sawTerminal
+      _ <- watch.observe(chunkOf(": done\ndata: {\"reason\":\"exhausted\"}\n\n"))
+      afterThird <- watch.sawTerminal
+    } yield {
+      assert(!afterFirst, "a `message` event was read as a terminal one")
+      assert(!afterSecond, "a terminal event was announced before its line was complete")
+      assert(afterThird, "a terminal event split across two chunk boundaries was not seen")
+    }
+  }
+
+  test("anIncompleteTrailingLineIsNotReadAsACompleteOne") {
+    // The mutation: `(pieces.last, pieces)` instead of `(pieces.last, pieces.init)`, which examines the
+    // unterminated tail as though a newline had arrived. It invents terminal events: an upstream that dies
+    // in the middle of writing `event: done-ish` — or `event: done` with the newline still to come and the
+    // connection cut — would be recorded as having said `done`, and `withTerminalEvent` would then stay
+    // silent about a stream that really was truncated.
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- watch.observe(chunkOf("event: done"))
+      unterminated <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("-ish\ndata: {}\n\n"))
+      completed <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("event: error\ndata: {}\n\n"))
+      terminal <- watch.sawTerminal
+    } yield {
+      assert(!unterminated, "an unterminated line was read as a complete one")
+      assert(!completed, "`event: done-ish` was read as `event: done`")
+      // Not a vacuous pass: a watch that answered `false` to everything would satisfy both lines above.
+      assert(terminal, "a complete `event: error` line was not seen")
+    }
+  }
+
+  test("theTerminalLatchIsNotClearedByTheBytesThatFollowIt") {
+    // The mutation: `seen.update(_ => complete.exists(isTerminalLine))` instead of `seen.update(_ || ...)`.
+    // `seen` is a latch and the disjunction is the whole of it. Drop it and every chunk that carries no
+    // terminal line clears the flag, so any byte after the terminal frame — a `:` keepalive comment, a final
+    // flush, a stray newline — makes `withTerminalEvent` append an `event: error` after a stream that ended
+    // cleanly. That is verbatim the defect this mechanism exists to prevent, produced by the mechanism
+    // itself, and the tail it needs is the ordinary shape of an SSE body rather than an exotic one.
+    //
+    // The three cases above cannot see it: each of them observes its terminal chunk last, so a latch that
+    // merely remembers the most recent chunk answers exactly as a latch does.
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- watch.observe(chunkOf("event: done\ndata: {\"reason\":\"exhausted\"}\n\n"))
+      afterTerminal <- watch.sawTerminal
+      _ <- watch.observe(chunkOf(": keepalive\n\n"))
+      afterKeepalive <- watch.sawTerminal
+      _ <- watch.observe(chunkOf("\n"))
+      afterFlush <- watch.sawTerminal
+    } yield {
+      assert(afterTerminal, "a complete `event: done` line was not seen")
+      assert(afterKeepalive, "a keepalive comment after the terminal event cleared the latch")
+      assert(afterFlush, "a trailing newline after the terminal event cleared the latch")
+    }
   }
 }

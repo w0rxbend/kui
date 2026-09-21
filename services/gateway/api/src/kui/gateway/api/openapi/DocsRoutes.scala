@@ -39,11 +39,23 @@ object DocsRoutes {
       // The topic page's aggregation, for the same reason: a public path the gateway answers itself, whose
       // response shape is the gateway's own and not the topic service's.
       kui.gateway.contract.TopicOverviewEndpoints.all ++
+      // Cross-entity search, which is the gateway's own endpoint in the strongest sense: it has no
+      // service behind it at all, only a fold over three services' list endpoints (ADR-049). Nothing in
+      // `ServiceContracts` could ever produce it, so it is documented from here or nowhere.
+      kui.gateway.contract.SearchEndpoints.all ++
       // The message browse stream. It is documented from the gateway's list rather than from the message
       // service's proxied endpoints for the same reason the capability stream is: it is not a derived
       // proxy route at all — a stream is relayed, not called and re-encoded — so nothing in
       // `ServiceContracts` would ever produce it.
-      kui.gateway.api.MessageStreamRoutes.endpoints[F]
+      kui.gateway.api.MessageStreamRoutes.endpoints[F] ++
+      // The alerts change stream has the same shape: its request/response endpoints are derived, while its
+      // long-lived body is relayed by `AlertsStreamRoutes` and therefore has to be documented here.
+      kui.gateway.api.AlertsStreamRoutes.endpoints[F] ++
+      // The ksqlDB push query, for the third time the same shape: `KsqlEndpoints.all` holds the object
+      // listing, the plan and the apply and is derived; the push query never finishes, so it is relayed by
+      // `KsqlStreamRoutes` and documented from here. An integrator who cannot find this address in the
+      // document has no way to learn it exists.
+      kui.gateway.api.KsqlStreamRoutes.endpoints[F]
 
   /** Everything the gateway documents: its own endpoints plus every configured service it can route. */
   def documentation[F[_]](services: List[ServiceId]): List[ServiceDoc] =

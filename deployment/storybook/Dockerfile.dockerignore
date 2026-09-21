@@ -39,7 +39,6 @@ frontend/storybook-static/
 libs/
 services/
 apps/
-e2e/
 build-tests/
 deployment/
 docs/

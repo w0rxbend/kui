@@ -11,8 +11,8 @@ import kui.kernel.ServiceId
 
 /** One case per house rule, and a clean document that breaks none of them.
   *
-  * Each rule is a promise an integrator relies on and cannot verify for themselves, so each needs a test
-  * that would fail if the rule stopped being enforced -- not only a test that the current document passes.
+  * Each rule is a promise an integrator relies on and cannot verify for themselves, so each needs a test that
+  * would fail if the rule stopped being enforced -- not only a test that the current document passes.
   */
 final class OpenApiStyleCheckSuite extends FunSuite {
 

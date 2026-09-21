@@ -219,6 +219,38 @@ describe("a stream over EventSource", () => {
     const { subscriber } = recorder(["done"]);
     expect(() => openEventSourceWith(() => fakeSource(), subscriber)).toThrow(/must not be listed/);
   });
+
+  it("closes itself if the connection goes silent for too long, rather than reading 'open' forever", () => {
+    vi.useFakeTimers();
+    try {
+      const source = fakeSource();
+      const { errors, subscriber } = recorder();
+
+      createRoot((dispose) => {
+        const handle = openEventSourceWith(() => source, subscriber);
+        source.emit("open");
+        flush();
+        expect(handle.connection().phase).toBe("open");
+
+        // A heartbeat shortly before the deadline keeps the connection alive.
+        vi.advanceTimersByTime(40_000);
+        source.emit("heartbeat", "{}");
+        flush();
+        expect(handle.connection().phase).toBe("open");
+
+        // But once nothing arrives at all for that long, the connection is presumed wedged.
+        vi.advanceTimersByTime(45_000);
+        flush();
+
+        expect(handle.connection()).toEqual({ phase: "closed", reason: "no heartbeat received" });
+        expect(errors).toEqual([{ kind: "transport", cause: "stream went silent" }]);
+        expect(source.closed).toBe(true);
+        dispose();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /** A response whose chunks the test hands over one at a time. */
@@ -248,6 +280,32 @@ function fakeResponse(status: number, body = ""): StreamResponse & {
   };
 }
 
+/**
+ * A transport whose request never resolves until the test says so, and whose failure is the one
+ * `fetch` actually produces on the teardown path: the browser rejects the in-flight promise with an
+ * `AbortError` the moment the `AbortSignal` fires. `fakeTransport` below cannot reach that branch
+ * at all — its send promise is already settled — which is why the rule guarding it went unnoticed.
+ */
+function abortingTransport(): StreamTransport & { failSend: () => void; isAborted: boolean } {
+  let fail: ((cause: unknown) => void) | undefined;
+  const pending = new Promise<StreamResponse>((_resolve, reject) => {
+    fail = reject;
+  });
+  return {
+    isAborted: false,
+    send: () => pending,
+    abort(): void {
+      this.isAborted = true;
+    },
+    aborted(): boolean {
+      return this.isAborted;
+    },
+    failSend(): void {
+      fail?.(new Error("AbortError: The user aborted a request."));
+    },
+  };
+}
+
 function fakeTransport(response: Promise<StreamResponse>): StreamTransport & { isAborted: boolean } {
   return {
     isAborted: false,
@@ -266,18 +324,25 @@ describe("a stream over fetch", () => {
     const response = fakeResponse(200);
     const transport = fakeTransport(Promise.resolve(response));
     const { values, subscriber } = recorder();
+    const done: string[] = [];
+    const subscriberWithDone = Object.assign(subscriber, {
+      onDone: (data: string) => done.push(data),
+    });
 
     await createRoot(async (dispose) => {
-      const handle = openFetchStreamWith(transport, subscriber);
+      const handle = openFetchStreamWith(transport, subscriberWithDone);
       await Promise.resolve();
       flush();
 
       // Split across chunk boundaries, because that is what a network does.
       response.push('event: row\ndata: {"value":"one"}\n\nevent: hea');
-      response.push("rtbeat\ndata: {}\n\nevent: done\nid: eyJ2Ijox\ndata: {}\n\n");
+      response.push(
+        'rtbeat\ndata: {}\n\nevent: done\nid: eyJ2Ijox\ndata: {"reason":"budget","cursor":"eyJ2Ijox"}\n\n',
+      );
       flush();
 
       expect(values).toEqual(["one"]);
+      expect(done).toEqual(['{"reason":"budget","cursor":"eyJ2Ijox"}']);
       expect(handle.endMarker()).toBe("eyJ2Ijox");
       expect(handle.connection()).toEqual({ phase: "closed", reason: "the stream finished" });
       dispose();
@@ -347,6 +412,34 @@ describe("a stream over fetch", () => {
     });
   });
 
+  it("a client-initiated close is not reported as a transport failure", async () => {
+    const transport = abortingTransport();
+    const { errors, subscriber } = recorder();
+
+    await createRoot(async (dispose) => {
+      const handle = openFetchStreamWith(transport, subscriber);
+      await Promise.resolve();
+      flush();
+
+      // The user navigates away, or the browse is stopped. `close()` aborts the request, and the
+      // abort is what makes the request the browser had in flight reject.
+      handle.close();
+      flush();
+      transport.failSend();
+      await Promise.resolve();
+      await Promise.resolve();
+      flush();
+
+      // The rejection is the *consequence* of the close, not a failure to report: without the
+      // `aborted()` check every ordinary close raises a transport error at the subscriber, and a
+      // message browser the operator closed on purpose would offer to retry a connection that was
+      // never broken.
+      expect(errors).toEqual([]);
+      expect(handle.connection()).toEqual({ phase: "closed", reason: "closed by the client" });
+      dispose();
+    });
+  });
+
   it("reports a connection that could never be established", async () => {
     const transport = fakeTransport(Promise.reject(new Error("network down")));
     const { errors, subscriber } = recorder();
@@ -385,6 +478,38 @@ describe("a stream over fetch", () => {
       expect(handle.connection().phase).toBe("open");
       dispose();
     });
+  });
+
+  it("closes itself and aborts the request if the body goes silent for too long", async () => {
+    vi.useFakeTimers();
+    try {
+      const response = fakeResponse(200);
+      const transport = fakeTransport(Promise.resolve(response));
+      const { errors, subscriber } = recorder();
+
+      await createRoot(async (dispose) => {
+        const handle = openFetchStreamWith(transport, subscriber);
+        await vi.advanceTimersByTimeAsync(0);
+        flush();
+
+        // A chunk shortly before the deadline keeps the connection alive.
+        await vi.advanceTimersByTimeAsync(40_000);
+        response.push('event: heartbeat\ndata: {}\n\n');
+        flush();
+        expect(handle.connection().phase).toBe("open");
+
+        // But once nothing arrives at all for that long, the connection is presumed wedged.
+        await vi.advanceTimersByTimeAsync(45_000);
+        flush();
+
+        expect(handle.connection()).toEqual({ phase: "closed", reason: "no heartbeat received" });
+        expect(errors).toEqual([{ kind: "transport", cause: "stream went silent" }]);
+        expect(transport.isAborted).toBe(true);
+        dispose();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

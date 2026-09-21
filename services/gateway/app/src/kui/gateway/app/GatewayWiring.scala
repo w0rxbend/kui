@@ -18,13 +18,17 @@ import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.api.openapi.DocsRoutes
 import kui.gateway.api.routing.{ContractRouting, PolicyRbacPreCheck, RbacPreCheck, ServiceContracts}
+import kui.gateway.api.search.{GroupSearchSource, SubjectSearchSource, TopicSearchSource}
 import kui.gateway.api.{
+  AlertsStreamRoutes,
   CapabilityRoutes,
   ClusterOverviewRoutes,
   EdgeHeaders,
   GatewayApi,
   InfoRoutes,
+  KsqlStreamRoutes,
   MessageStreamRoutes,
+  SearchRoutes,
   TopicOverviewRoutes
 }
 import kui.gateway.application.capability.{
@@ -34,8 +38,9 @@ import kui.gateway.application.capability.{
   ReadinessPoller,
   RegistryConfig
 }
-import kui.gateway.application.client.ServiceClients
+import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.gateway.application.cluster.ClusterOverviewUseCase
+import kui.gateway.application.search.{SearchSource, SearchUseCase}
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
 import kui.gateway.application.topic.{ConsumerGroupsSource, TopicOverviewUseCase}
 import kui.http.health.ReadinessCheck
@@ -210,10 +215,26 @@ object GatewayWiring {
       topicOverview <- topicClient.traverse(
         TopicOverviewUseCase.resource[F](_, signals, telemetry, overviewSources)
       )
+      // Cross-entity search (ADR-049), on the same terms as the dashboard: it needs the cluster list to
+      // know what to search, so a deployment with no cluster service has no route rather than an
+      // endpoint that answers an empty document to every query. The three services it folds over are
+      // each optional, and one that is missing is named in `partial` rather than silently dropped —
+      // which is the whole reason the fold walks `SearchUseCase.Services` instead of whatever happens
+      // to be configured.
+      searchSources = SearchUseCase.Services.flatMap(clients.get).flatMap(searchSourceOf[F])
+      search = clients.all.find(_.service == ClusterServiceId).map(SearchUseCase.of[F](_, searchSources))
       // The message browse stream, relayed rather than proxied. A deployment with no message service
       // configured has no client and therefore no route, so the address 404s instead of opening a
       // stream that could only ever end in an error.
       messages = clients.all.find(_.service == MessageServiceId)
+      // The alerts change stream follows the same relay path. Its feed and acknowledgement are ordinary
+      // derived proxy routes; only the event stream needs this client to be mounted separately.
+      alerts = clients.all.find(_.service == AlertsServiceId)
+      // The ksqlDB push query, relayed for the same reason and on the same terms: a deployment with no
+      // ksql service configured has no client and therefore no stream route, so the address 404s rather
+      // than opening a subscription that could only ever end in an error. Its object listing, plan and
+      // apply are ordinary derived proxy routes and are unaffected by this line.
+      ksql = clients.all.find(_.service == KsqlServiceId)
       // The identity service, which the sign-in routes call one hop inward. It is the one service whose
       // contract the gateway does *not* proxy: a login is the moment a browser is given a session, and
       // sessions live here, so `AuthRoutes` serves `/api/v1/auth/*` itself and calls this client.
@@ -229,7 +250,10 @@ object GatewayWiring {
         CapabilityRoutes[F](registry, trigger, telemetry, logger) ++
           overview.toList.flatMap(ClusterOverviewRoutes[F](_)) ++
           topicOverview.toList.flatMap(TopicOverviewRoutes[F](_)) ++
+          search.toList.flatMap(SearchRoutes[F](_)) ++
           messages.toList.flatMap(MessageStreamRoutes[F](_)) ++
+          alerts.toList.flatMap(AlertsStreamRoutes[F](_, rbac)) ++
+          ksql.toList.flatMap(KsqlStreamRoutes[F](_, rbac)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath)),
         identity
@@ -304,7 +328,12 @@ object GatewayWiring {
       .resource[F]()
       .flatMap(backend => upstreams[F](config, telemetry, logger, backend))
 
-  /** One client per configured service, each with its own bulkhead and circuit breaker (PLAN §16.4). */
+  /** One client per configured service, each with its own bulkhead and circuit breaker (PLAN §16.4).
+    *
+    * `config.urlPolicy` is passed through rather than left at `UpstreamConfig`'s strict default: the address
+    * rule is re-applied to every request, so the client has to hold the same answer the configuration loader
+    * held. See `SttpServiceClient.upstreamConfig` for what the mismatch cost.
+    */
   def upstreams[F[_]: Async](
       config: GatewayServiceConfig,
       telemetry: Telemetry[F],
@@ -317,7 +346,8 @@ object GatewayWiring {
         config.gateway.services.toList
           .sortBy(_._1.value)
           .traverse((service, upstream) =>
-            SttpServiceClient.resource[F](service, upstream, codec, telemetry, logger, backend)
+            SttpServiceClient
+              .resource[F](service, upstream, codec, telemetry, logger, backend, config.urlPolicy)
           )
           .map(ServiceClients.of[F])
       )
@@ -368,6 +398,31 @@ object GatewayWiring {
     * re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
     */
   val MessageServiceId: ServiceId = ServiceId.unsafe("message")
+
+  /** The service whose feed-change stream is relayed. Its JSON feed and acknowledgement remain ordinary
+    * contract-derived proxy routes.
+    */
+  val AlertsServiceId: ServiceId = ServiceId.unsafe("alerts")
+
+  /** The service whose push query is relayed. Its object listing, statement plan and statement apply remain
+    * ordinary contract-derived proxy routes; only the unbounded query result needs this client mounted
+    * separately, because a route that decoded and re-encoded it would never answer.
+    */
+  val KsqlServiceId: ServiceId = ServiceId.unsafe("ksql")
+
+  /** Which search source a client answers for, or none when the search does not fold over that service.
+    *
+    * A `match` on the id rather than a map built at the call site, so that adding a fourth searchable service
+    * is one case here and one entry in `SearchUseCase.Services` — and so that the compiler, rather than a
+    * reader, is what notices when the two lists stop agreeing.
+    */
+  def searchSourceOf[F[_]: Async](client: ServiceClient[F]): Option[SearchSource[F]] =
+    client.service match {
+      case SearchUseCase.TopicService => Some(TopicSearchSource[F](client))
+      case SearchUseCase.ConsumerService => Some(GroupSearchSource[F](client))
+      case SearchUseCase.SchemaService => Some(SubjectSearchSource[F](client))
+      case _ => None
+    }
 
   /** The service that decides who somebody is. Its endpoints are never proxied: `ServiceContracts` says so at
     * the one place they would otherwise be registered, and `AuthRoutes` calls them itself so that a

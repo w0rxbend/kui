@@ -527,6 +527,64 @@ services:
       retries: 5
       start_period: 20s
 
+  # ===============================================================================================
+  # THE INTERFACE. Since ADR-048 the browser bundle is its own image, built from the pnpm workspace
+  # under `frontend/`, and the all-in-one jar above contains none of it -- so a demonstration
+  # without this container is one nobody can look at, which for a demonstration is fatal rather than
+  # merely inconvenient.
+  #
+  # The browser talks only to this container: nginx serves /ui/ and proxies /api/ to KUI, so the two
+  # share an origin and the session cookie and the CSRF header behave as they do when one process
+  # serves both (ADR-019). See ../frontend/README.md.
+  #
+  # Everything this demonstration is about happens behind it and is unchanged by it: three clusters,
+  # one of them stoppable, seen through one interface.
+  # ===============================================================================================
+  frontend:
+    image: kui-frontend:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    # Built from source, like the KUI image above and for the same reason -- except that this one is
+    # not even a Mill target: Mill never builds the browser bundle, which is what makes the two
+    # halves separable in the first place.
+    build:
+      context: ../..
+      dockerfile: deployment/frontend/Dockerfile
+    container_name: kui-demo-frontend
+    ports:
+      # 18090 rather than 8090, for the same reason KUI is on 18080 here: the quickstart owns the
+      # low numbers, and somebody who wants to see both at once should not have to think about it.
+      - "${KUI_DEMO_FRONTEND_PORT:-18090}:8082"
+    environment:
+      # A service name on this network. KUI's own port is published above only so a `curl` against
+      # the API is possible; the browser never uses it.
+      KUI_GATEWAY_URL: http://kui:8080
+      KUI_BASE_PATH: ${KUI_BASE_PATH:-}
+      KUI_BUILD_VERSION: ${KUI_VERSION:-0.1.0-SNAPSHOT}
+    depends_on:
+      kui:
+        # A hard gate, unlike every other `depends_on` in this file. nginx resolves `kui` once at
+        # start, so a KUI that is not there yet is a container that answers 502 for ever with
+        # nothing to say that waiting would have fixed it.
+        condition: service_healthy
+    networks: [kui-demo]
+    # Nothing in a static file server has any business writing to its own image. The entrypoint
+    # renders the nginx server block and the page's two markers into tmpfs at start instead.
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      # The long form because this one needs a mode: a tmpfs is mounted root-owned, this image runs
+      # as uid 101, and the entrypoint's write would otherwise fail with "Permission denied" on a
+      # directory that plainly exists.
+      - type: tmpfs
+        target: /etc/nginx/conf.d
+        tmpfs:
+          mode: 0777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
 networks:
   kui-demo:
     driver: bridge

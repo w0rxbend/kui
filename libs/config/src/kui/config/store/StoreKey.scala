@@ -10,6 +10,7 @@ package kui.config.store
 enum StoreSection(val name: String) {
   case Cluster extends StoreSection("cluster")
   case Settings extends StoreSection("settings")
+  case Alerts extends StoreSection("alerts")
   case Rbac extends StoreSection("rbac")
   case Masking extends StoreSection("masking")
   case File extends StoreSection("file")
@@ -23,6 +24,7 @@ object StoreSection {
     List(
       StoreSection.Cluster,
       StoreSection.Settings,
+      StoreSection.Alerts,
       StoreSection.Rbac,
       StoreSection.Masking,
       StoreSection.File

@@ -1,0 +1,12 @@
+{
+  "statement" : "DROP STREAM ORDERS DELETE TOPIC;",
+  "shape" : "statement",
+  "destructive" : true,
+  "deletesTopic" : true,
+  "warnings" : [
+    "This deletes the Kafka topic 'orders' and every record in it. Nothing in KUI can undo it."
+  ],
+  "token" : "eyJ2IjoxfQ.c2ln",
+  "expiresAt" : "2026-09-03T10:16:12Z",
+  "computedAt" : "2026-09-03T10:11:12Z"
+}

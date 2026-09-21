@@ -11,10 +11,33 @@
  * legible, and not a topic list.
  */
 
-export { TopicListPage, matchCount, formatBytes, type TopicListPageProps } from "./TopicListPage.jsx";
+export {
+  TopicListPage,
+  isServerFacet,
+  matchCount,
+  /* The kernel's `formatBytes`, which this package used to have a second implementation of. It
+     stays on the public surface because this package's own tests and four of its components import
+     it from here, and one name reaching one function is the whole of the repair — but anything
+     outside this package should import it from `@kui/kernel`, which is where it lives. */
+  formatBytes,
+  type TopicListPageProps,
+  type TopicListQuery,
+} from "./TopicListPage.jsx";
 export { TopicPage, healthChip, type TopicPageProps, type TopicAction } from "./TopicPage.jsx";
+export { TopicStatisticsRegion, type TopicStatisticsRegionProps } from "./TopicStatisticsRegion.jsx";
+export { TopicOverviewTab, type TopicOverviewTabProps } from "./TopicOverviewTab.jsx";
+export { topicsCsv, topicsVoice, matchesFilter, type TopicFilter } from "./topicList.js";
 export type { TopicHealth, TopicRow, TopicTab } from "./types.js";
 
-export { fetchTopics, fetchTopicOverview, healthOf, type PartitionRow, type TopicListResult, type TopicOverview } from "./data.js";
+export {
+  fetchTopics,
+  fetchTopicOverview,
+  fetchTopicStatistics,
+  healthOf,
+  type PartitionRow,
+  type TopicListResult,
+  type TopicOverview,
+  type TopicStatistics,
+} from "./data.js";
 
 export { default } from "./TopicsRoute.jsx";

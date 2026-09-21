@@ -8,8 +8,8 @@ import kui.kernel.ClusterId
 /** An `AdminMetrics` that records what it was asked to measure instead of exporting it.
   *
   * It lives in this module's test sources rather than in `libs/testkit` because `AdminMetrics` is a
-  * `libs/kafka` type, and `libs/testkit` is on the classpath of modules that layering rule A10
-  * forbids from seeing a Kafka client.
+  * `libs/kafka` type, and `libs/testkit` is on the classpath of modules that layering rule A10 forbids from
+  * seeing a Kafka client.
   */
 final class FakeAdminMetrics[F[_]: Sync] private (
     recorded: Ref[F, List[FakeAdminMetrics.Entry]]

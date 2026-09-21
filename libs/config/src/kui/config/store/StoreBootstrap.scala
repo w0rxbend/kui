@@ -1,5 +1,6 @@
 package kui.config.store
 
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.Async
@@ -23,6 +24,18 @@ import org.typelevel.log4cats.LoggerFactory
   * expected and the value it found — which is a named exit criterion of this milestone.
   */
 object StoreBootstrap {
+
+  /** How long to keep asking for a topic this process has just created, before giving up on it.
+    *
+    * `createTopics` returns when the controller has accepted the request, not when every broker will answer
+    * for the topic — the metadata propagates afterwards. So the describe that follows a create can
+    * legitimately report the topic as absent, and on a loaded cluster it routinely does.
+    *
+    * Five seconds is chosen so that a cluster which genuinely will not serve these topics still fails fast
+    * enough for the reason to be read in a container log, rather than looking like a hang.
+    */
+  private val VisibilityAttempts = 20
+  private val VisibilityDelay = 250.millis
 
   /** What `describeTopics` says about a topic that exists. */
   final private case class TopicShape(partitions: Int, replicationFactor: Int)
@@ -68,6 +81,24 @@ object StoreBootstrap {
         )
         .map(_.sequence.map(_.flatten.toMap))
 
+    /* Waits for topics this process has just created to become describable.
+     *
+     * Before this existed the symptom was a start-up failure that blamed the broker. The describe after a
+     * create found nothing, `validate` then asked `describeConfigs` about a topic no broker would admit to,
+     * and `classify`'s catch-all rendered the resulting `UnknownTopicOrPartitionException` as
+     * `Unreachable(bootstrapServers, ...)` — so KUI refused to start against a healthy cluster, citing a
+     * connection problem, over a topic it had itself created microseconds earlier.
+     *
+     * It is entered only after a create. A *first* describe that finds nothing is the ordinary first-start
+     * case and must not pay five seconds for it.
+     */
+    def awaitVisible(remaining: Int): F[Either[StoreError, Map[String, TopicShape]]] =
+      describe(wanted.map(_.name)).flatMap {
+        case Right(shapes) if remaining > 0 && wanted.exists(topic => !shapes.contains(topic.name)) =>
+          Async[F].sleep(VisibilityDelay) *> awaitVisible(remaining - 1)
+        case settled => Async[F].pure(settled)
+      }
+
     for {
       existing <- describe(wanted.map(_.name))
       result <- existing match {
@@ -82,7 +113,8 @@ object StoreBootstrap {
                 )
             }
             // Re-describe after creating. A concurrent replica may have won the race, and the topic that
-            // now exists is not necessarily the one this replica asked for.
+            // now exists is not necessarily the one this replica asked for. `awaitVisible` rather than a
+            // bare `describe`, because a create is not a promise that the next describe will answer.
             afterCreate <-
               if created.exists(_.isLeft) then
                 Async[F].pure(
@@ -92,7 +124,8 @@ object StoreBootstrap {
                     }
                     .getOrElse(Right(Map.empty[String, TopicShape]))
                 )
-              else describe(wanted.map(_.name))
+              else if created.isEmpty then describe(wanted.map(_.name))
+              else awaitVisible(VisibilityAttempts)
             validated <- afterCreate match {
               case Left(error) => Async[F].pure(Left(error))
               case Right(shapes) => validate(admin, wanted, shapes, replicationFactor, bootstrapServers)
@@ -216,6 +249,16 @@ object StoreBootstrap {
     */
   private def classify(error: Throwable, bootstrapServers: String): StoreError =
     error match {
+      case _: UnknownTopicOrPartitionException =>
+        // Reached only when `awaitVisible` has already given up, so this is no longer the ordinary
+        // just-created race. Naming it is the point: the catch-all below would render it as a connection
+        // failure, and an operator sent to check the network over a metadata-propagation problem is an
+        // operator who stops believing the diagnosis.
+        StoreError.Unreachable(
+          bootstrapServers,
+          "the store's topics were accepted by the controller but the brokers are still not serving " +
+            "metadata for them; the cluster is reachable but has not settled"
+        )
       case _: TopicAuthorizationException =>
         StoreError.Unreachable(
           bootstrapServers,

@@ -11,12 +11,12 @@ import org.scalacheck.{Gen, Prop}
 import kui.kernel.cluster.{ClusterSecurity, SaslMechanism, SaslProtocol}
 import kui.testkit.KuiSuite
 
-/** That an operator pointing KUI at a store cluster is told everything that is wrong with their
-  * configuration at once, and that nothing in that message is a key or a password.
+/** That an operator pointing KUI at a store cluster is told everything that is wrong with their configuration
+  * at once, and that nothing in that message is a key or a password.
   *
-  * The presence of `kui.store.kafka.bootstrapServers` is the whole on/off switch. There is no `enabled`
-  * flag, because two settings that must agree eventually disagree, and the disagreement here would read as
-  * "why is nothing being saved" rather than as a startup error.
+  * The presence of `kui.store.kafka.bootstrapServers` is the whole on/off switch. There is no `enabled` flag,
+  * because two settings that must agree eventually disagree, and the disagreement here would read as "why is
+  * nothing being saved" rather than as a startup error.
   */
 final class StoreConfigSuite extends KuiSuite {
 
@@ -220,18 +220,19 @@ final class StoreConfigSuite extends KuiSuite {
     Gen.oneOf("ssl.keystore.password", "sasl.jaas.config", "some.api.token", "MY_SECRET", "x.credential.y")
 
   property("everyRenderingRedactsSecrets") {
-    Prop.forAllNoShrink(secretPropertyNames, Gen.alphaNumStr.map(text => s"$text-canary-value")) { (name, value) =>
-      val properties = Map(name -> value, "client.id" -> "kui")
-      val redacted = ClientPropertyOverrides.redact(properties)
-      val kafka = StoreKafkaConfig(
-        kui.kernel.cluster.BootstrapServers.unsafe("kafka-1:9092"),
-        ClusterSecurity.Plaintext,
-        properties
-      )
-      !redacted.values.toList.contains(value) &&
-      redacted("client.id") == "kui" &&
-      !kafka.toString.contains(value) &&
-      !ClientPropertyOverrides.render(properties).contains(value)
+    Prop.forAllNoShrink(secretPropertyNames, Gen.alphaNumStr.map(text => s"$text-canary-value")) {
+      (name, value) =>
+        val properties = Map(name -> value, "client.id" -> "kui")
+        val redacted = ClientPropertyOverrides.redact(properties)
+        val kafka = StoreKafkaConfig(
+          kui.kernel.cluster.BootstrapServers.unsafe("kafka-1:9092"),
+          ClusterSecurity.Plaintext,
+          properties
+        )
+        !redacted.values.toList.contains(value) &&
+        redacted("client.id") == "kui" &&
+        !kafka.toString.contains(value) &&
+        !ClientPropertyOverrides.render(properties).contains(value)
     }
   }
 

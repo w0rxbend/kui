@@ -14,8 +14,8 @@ final class ClusterSerdesSuite extends KuiIOSuite {
   private val cluster: ClusterId = ClusterId.unsafe("prod-eu")
   private val topic: TopicName = TopicName.unsafe("orders-v2")
 
-  /** A stand-in for the Schema-Registry serde: a `Resource` whose release is observable, which either
-    * builds or reports why it could not.
+  /** A stand-in for the Schema-Registry serde: a `Resource` whose release is observable, which either builds
+    * or reports why it could not.
     */
   private def factory(
       built: Either[String, Unit],
@@ -107,13 +107,15 @@ final class ClusterSerdesSuite extends KuiIOSuite {
 
   test("resolve follows the configured pattern") {
     serdes(List(factory(Right(()))), rules).use { cs =>
-      cs.resolve(topic, Target.Value, None).map(r => assertEquals(r.map(_.name), Right(SerdeName.SchemaRegistry)))
+      cs.resolve(topic, Target.Value, None)
+        .map(r => assertEquals(r.map(_.name), Right(SerdeName.SchemaRegistry)))
     }
   }
 
   test("an explicit choice wins") {
     serdes(List(factory(Right(()))), rules).use { cs =>
-      cs.resolve(topic, Target.Value, Some(SerdeName.Hex)).map(r => assertEquals(r.map(_.name), Right(SerdeName.Hex)))
+      cs.resolve(topic, Target.Value, Some(SerdeName.Hex))
+        .map(r => assertEquals(r.map(_.name), Right(SerdeName.Hex)))
     }
   }
 

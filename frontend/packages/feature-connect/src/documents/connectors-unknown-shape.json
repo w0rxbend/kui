@@ -1,0 +1,15 @@
+{
+  "connectors" : {
+    "status" : "ok",
+    "data" : {
+      "connectors" : [
+        {
+          "connect" : "payments",
+          "name" : "orders-source",
+          "state" : "RUNNING"
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

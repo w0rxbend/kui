@@ -1,16 +1,20 @@
 package kui.cluster.api
 
+import java.nio.charset.StandardCharsets
+
 import scala.io.Source
 import scala.util.Using
 
 import cats.effect.IO
+import io.circe.Json
 import io.circe.parser.parse
 import munit.CatsEffectSuite
 import sttp.client4.*
 
 import kui.cluster.contract.ClusterEndpoints
-import kui.contracts.KuiEndpoint
+import kui.contracts.{HttpHeaders, KuiEndpoint}
 import kui.observability.KuiInterceptors
+import kui.security.RequestDigests
 
 /** That the routes this service serves are the routes its contract publishes, and that they behave.
   *
@@ -46,6 +50,108 @@ final class ClusterApiSuite extends CatsEffectSuite {
       } yield {
         assertEquals(response.code.code, 200, response.body)
         assertEquals(body.get[List[io.circe.Json]]("items"), Right(Nil))
+      }
+    }
+  }
+
+  test("appearance settings default, validate and round-trip through the route") {
+    val path = "/internal/v1/clusters/prod-eu/settings/ui"
+    val valid = Json.obj(
+      "theme" -> Json.fromString("dark"),
+      "accent" -> Json.fromString("teal"),
+      "density" -> Json.fromString("compact")
+    )
+    val invalid = valid.deepMerge(Json.obj("theme" -> Json.fromString("sepia")))
+
+    ClusterTestServer.resource(profiles = List(ClusterFixtures.profile())).use { server =>
+      def put(body: Json) = {
+        val bytes = body.noSpaces.getBytes(StandardCharsets.UTF_8)
+        for {
+          token <- ClusterTestServer.token(digest = RequestDigests.of("PUT", path, bytes))
+          response <- basicRequest
+            .put(uri"http://cluster/internal/v1/clusters/prod-eu/settings/ui")
+            .header(KuiEndpoint.PrincipalHeader, token.value)
+            .header(HttpHeaders.Csrf, "test-csrf")
+            .contentType("application/json")
+            .body(body.noSpaces)
+            .response(asStringAlways)
+            .send(server.backend)
+        } yield response
+      }
+
+      for {
+        getToken <- ClusterTestServer.token(
+          digest = kui.security.RequestDigest.ofRequestLine("GET", path)
+        )
+        defaults <- basicRequest
+          .get(uri"http://cluster/internal/v1/clusters/prod-eu/settings/ui")
+          .header(KuiEndpoint.PrincipalHeader, getToken.value)
+          .response(asStringAlways)
+          .send(server.backend)
+        saved <- put(valid)
+        rejected <- put(invalid)
+      } yield {
+        assertEquals(defaults.code.code, 200, defaults.body)
+        assertEquals(
+          parse(defaults.body).flatMap(_.hcursor.get[String]("theme")),
+          Right("auto")
+        )
+        assertEquals(saved.code.code, 200, saved.body)
+        assertEquals(parse(saved.body), Right(valid))
+        assertEquals(rejected.code.code, 400, rejected.body)
+        assertEquals(
+          parse(rejected.body).flatMap(_.hcursor.get[String]("code")),
+          Right("KUI-VALIDATION")
+        )
+      }
+    }
+  }
+
+  test("message browser settings default, validate and round-trip through the route") {
+    val path = "/internal/v1/clusters/prod-eu/settings/messages"
+    val valid = Json.obj(
+      "pageSize" -> Json.fromInt(250),
+      "mode" -> Json.fromString("infinite")
+    )
+    val invalid = Json.obj(
+      "pageSize" -> Json.fromInt(501),
+      "mode" -> Json.fromString("stream")
+    )
+
+    ClusterTestServer.resource(profiles = List(ClusterFixtures.profile())).use { server =>
+      def put(body: Json) = {
+        val bytes = body.noSpaces.getBytes(StandardCharsets.UTF_8)
+        for {
+          token <- ClusterTestServer.token(digest = RequestDigests.of("PUT", path, bytes))
+          response <- basicRequest
+            .put(uri"http://cluster/internal/v1/clusters/prod-eu/settings/messages")
+            .header(KuiEndpoint.PrincipalHeader, token.value)
+            .header(HttpHeaders.Csrf, "test-csrf")
+            .contentType("application/json")
+            .body(body.noSpaces)
+            .response(asStringAlways)
+            .send(server.backend)
+        } yield response
+      }
+
+      for {
+        getToken <- ClusterTestServer.token(
+          digest = kui.security.RequestDigest.ofRequestLine("GET", path)
+        )
+        defaults <- basicRequest
+          .get(uri"http://cluster/internal/v1/clusters/prod-eu/settings/messages")
+          .header(KuiEndpoint.PrincipalHeader, getToken.value)
+          .response(asStringAlways)
+          .send(server.backend)
+        saved <- put(valid)
+        rejected <- put(invalid)
+      } yield {
+        assertEquals(defaults.code.code, 200, defaults.body)
+        assertEquals(parse(defaults.body).flatMap(_.hcursor.get[Int]("pageSize")), Right(100))
+        assertEquals(parse(defaults.body).flatMap(_.hcursor.get[String]("mode")), Right("pages"))
+        assertEquals(saved.code.code, 200, saved.body)
+        assertEquals(parse(saved.body), Right(valid))
+        assertEquals(rejected.code.code, 400, rejected.body)
       }
     }
   }

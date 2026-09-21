@@ -39,6 +39,17 @@ final class WireFormatSuite extends FunSuite {
     assert(WireFormat.read(negative).left.exists(_.contains("not a Schema Registry payload")))
   }
 
+  test("schema id zero is refused, because a registry allocates from one upwards") {
+    // The existing case above uses -1, which leaves `id <= 0` and `id < 0` indistinguishable: the
+    // weakening was green across all 279 cases of this module and its two neighbours. Zero is the
+    // value four bytes of ordinary data most often produce after a leading zero byte.
+    val zeroId = Array[Byte](0, 0, 0, 0, 0, 9)
+    assert(
+      WireFormat.read(zeroId).left.exists(_.contains("never issues an id below 1")),
+      clue = WireFormat.read(zeroId).toString
+    )
+  }
+
   test("detection needs a body, not merely a header") {
     assert(!WireFormat.looksLikeRegistryPayload(WireFormat.frame(1, Array.empty)))
     assert(WireFormat.looksLikeRegistryPayload(WireFormat.frame(1, body)))

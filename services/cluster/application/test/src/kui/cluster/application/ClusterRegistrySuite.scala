@@ -8,8 +8,8 @@ import cats.syntax.all.*
 
 import kui.cluster.application.fakes.FakeClusterConfigStore
 import kui.cluster.domain.*
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.cluster.{ClusterSecurity, SaslMechanism, SaslProtocol}
+import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.{ClusterId, Secret}
 import kui.testkit.fakes.{FakeClock, FakeStructuredLogger}
 

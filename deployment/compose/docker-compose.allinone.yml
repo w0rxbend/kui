@@ -1,16 +1,17 @@
-# KUI in its all-in-one shape: the gateway and every service in one container (ADR-005).
+# KUI in its all-in-one shape: the gateway and every service in one container (ADR-005), plus the
+# interface, which is its own image in every shape of this product (ADR-048).
 #
 # THIS IS A DEVELOPMENT ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. There is no TLS and the session
 # cookie is served without `Secure` so that plain HTTP on localhost works.
 #
-# This is the fastest way to see KUI running: one image, one container, one port.
+# This is the fastest way to see KUI running: two containers, one of which is a static file server.
 #
-#   docker compose -f deployment/compose/docker-compose.allinone.yml up -d
-#   open http://localhost:8080/ui/
+#   docker compose -f deployment/compose/docker-compose.allinone.yml up -d --wait
+#   open http://localhost:8090/ui/
 #   docker compose -f deployment/compose/docker-compose.allinone.yml down
 #
-# What it cannot show you is fault isolation between processes, because there is only one process.
-# Use docker-compose.yml for that; see README.md.
+# What it cannot show you is fault isolation between processes, because the whole backend is one
+# process. Use docker-compose.yml for that; see README.md.
 
 name: kui-allinone
 
@@ -48,3 +49,45 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+
+  # The interface. One process serving the whole backend still does not serve the browser bundle:
+  # since ADR-048 that is a separate image built from the pnpm workspace under `frontend/`, and the
+  # all-in-one jar contains none of it. Without this container `/ui/` answers 503 and the fastest
+  # way to see KUI running shows nothing.
+  #
+  # nginx serves /ui/ and proxies /api/ to the container above, so the two share an origin — see
+  # ../frontend/README.md for why that one `proxy_pass` is worth a second container.
+  kui-frontend:
+    image: kui-frontend:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    # As above: Mill never builds the browser bundle, so this image is not one of the ones
+    # `./mill deployment.docker.__.build` produces and Compose has to build it.
+    build:
+      context: ../..
+      dockerfile: deployment/frontend/Dockerfile
+    container_name: kui-allinone-frontend
+    ports:
+      - "${KUI_FRONTEND_PORT:-8090}:8082"
+    environment:
+      KUI_GATEWAY_URL: http://kui:8080
+      KUI_BASE_PATH: ${KUI_BASE_PATH:-}
+      KUI_BUILD_VERSION: ${KUI_VERSION:-0.1.0-SNAPSHOT}
+    depends_on:
+      kui:
+        # nginx resolves `kui` once at start, so a backend that is not there yet is a 502 for ever
+        # rather than a slow first request.
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      # A mode is needed: the tmpfs is mounted root-owned, this image runs as uid 101, and the
+      # entrypoint's write would otherwise fail on a directory that plainly exists.
+      - type: tmpfs
+        target: /etc/nginx/conf.d
+        tmpfs:
+          mode: 0777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

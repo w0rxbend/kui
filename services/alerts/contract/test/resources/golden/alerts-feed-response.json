@@ -1,0 +1,93 @@
+{
+  "events" : {
+    "status" : "ok",
+    "data" : {
+      "items" : [
+        {
+          "id" : "offline-partitions.cluster.1756890672000",
+          "severity" : "critical",
+          "tone" : "danger",
+          "category" : "partition",
+          "glyph" : "partition",
+          "openedAt" : "2026-09-03T09:11:12Z",
+          "lastSeenAt" : "2026-09-03T10:11:12Z",
+          "title" : "2 partitions offline",
+          "detail" : "no leader · threshold 1",
+          "resolution" : null
+        },
+        {
+          "id" : "disk-usage.broker-1-.var.lib.kafka.1756887072000",
+          "severity" : "warning",
+          "tone" : "success",
+          "category" : "storage",
+          "glyph" : "storage",
+          "openedAt" : "2026-09-03T08:11:12Z",
+          "lastSeenAt" : "2026-09-03T09:11:12Z",
+          "title" : "Log directory /var/lib/kafka is 82% full on broker 1",
+          "detail" : "threshold 80% · broker-1:/var/lib/kafka",
+          "resolution" : {
+            "at" : "2026-09-03T10:11:12Z",
+            "kind" : "acknowledged",
+            "by" : "ada"
+          }
+        }
+      ],
+      "total" : 2,
+      "openCount" : 1,
+      "unreadCount" : 1,
+      "lastReadAt" : "2026-09-03T09:11:12Z",
+      "evaluatedAt" : "2026-09-03T10:11:12Z",
+      "rules" : [
+        {
+          "rule" : "offline-partitions",
+          "category" : "partition",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 1,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "rule" : "under-replicated-partitions",
+          "category" : "replication",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "rule" : "stuck-rebalance",
+          "category" : "rebalance",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "rule" : "disk-usage",
+          "category" : "storage",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 1
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

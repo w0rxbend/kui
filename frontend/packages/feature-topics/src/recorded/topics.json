@@ -11,7 +11,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 36,
-                    "sizeBytes": 2180
+                    "sizeBytes": 2162,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "delete"
                 },
                 {
                     "name": "audit.log.raw",
@@ -21,7 +23,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 16,
-                    "sizeBytes": 2202
+                    "sizeBytes": 2202,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "delete"
                 },
                 {
                     "name": "customers.profiles",
@@ -31,7 +35,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 12,
-                    "sizeBytes": 2649
+                    "sizeBytes": 2649,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "compact"
                 },
                 {
                     "name": "inventory.stock-levels",
@@ -41,7 +47,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 13,
-                    "sizeBytes": 2892
+                    "sizeBytes": 2892,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "compact,delete"
                 },
                 {
                     "name": "orders.avro",
@@ -51,7 +59,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 5,
-                    "sizeBytes": 627
+                    "sizeBytes": 627,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "delete"
                 },
                 {
                     "name": "orders.v1",
@@ -61,7 +71,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 16,
-                    "sizeBytes": 5114
+                    "sizeBytes": 5114,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "delete"
                 },
                 {
                     "name": "orders.v1.DLQ",
@@ -71,7 +83,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 4,
-                    "sizeBytes": 1491
+                    "sizeBytes": 1491,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "delete"
                 },
                 {
                     "name": "payments.transactions",
@@ -81,7 +95,9 @@
                     "outOfSyncReplicas": 0,
                     "offlinePartitions": 0,
                     "messageCount": 10,
-                    "sizeBytes": 2641
+                    "sizeBytes": 2641,
+                    "produceRate": 0.0,
+                    "cleanupPolicy": "delete"
                 }
             ],
             "page": {
@@ -92,7 +108,7 @@
                 "nextPageToken": null
             }
         },
-        "fetchedAt": "2026-09-05T15:44:51.441Z"
+        "fetchedAt": "2026-09-06T15:58:03.489Z"
     },
     "incompleteTopics": 0
 }

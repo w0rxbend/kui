@@ -19,9 +19,9 @@ import kui.kernel.{ClusterId, Secret}
   * ==Why recorded bytes and not a hand-built value==
   *
   * M1's second integration defect was a browser decoding a document nobody sends: two components, each
-  * correct, each unit-tested against a value its own test had constructed, and never run against each
-  * other's bytes. This module is the same shape of risk one hop further out — the cluster service encodes a
-  * profile, this client decodes it, and every test on either side could pass while the two disagreed.
+  * correct, each unit-tested against a value its own test had constructed, and never run against each other's
+  * bytes. This module is the same shape of risk one hop further out — the cluster service encodes a profile,
+  * this client decodes it, and every test on either side could pass while the two disagreed.
   *
   * So the fixtures here are *recordings*. `cluster-profile-200.json` is byte-for-byte the golden document
   * `services/cluster/contract` commits for its own encoder, and `theRecordedResponseIsWhatTheServiceWrites`
@@ -73,7 +73,10 @@ final class ProfileDecodingSuite extends FunSuite {
 
   test("theRecordedResponseDecodes") {
     // The assertion M1's second integration defect would have failed.
-    assertEquals(parse(recorded("cluster-profile-200.json")).flatMap(_.as[ClusterProfileDto]), Right(expected))
+    assertEquals(
+      parse(recorded("cluster-profile-200.json")).flatMap(_.as[ClusterProfileDto]),
+      Right(expected)
+    )
   }
 
   test("theRecordedResponseIsWhatTheServiceWrites") {

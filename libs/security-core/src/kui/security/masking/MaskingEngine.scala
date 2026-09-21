@@ -1,16 +1,18 @@
 package kui.security.masking
 
-import io.circe.{Json, JsonObject}
+import io.circe.{parser, Json, JsonObject}
 
 import kui.kernel.TopicName
-import kui.kernel.serde.Target
+import kui.kernel.serde.{PayloadKind, Target}
 
 /** The masking rules, applied. Pure functions over `Json` and `String`, with no effect and no failure path.
   *
   * Every function here is total and the identity is a legal result, which is why none of them returns an
   * `Either`. The one dangerous case — a rule that matches nothing because of a typo — cannot be caught here
-  * at all; it is caught at startup, where an unusable regex is a configuration error, and
-  * `docs/operations/masking.md` tells the operator to check a rule against a real record before trusting it.
+  * at all; it is caught at startup, where an unusable regex is a configuration error
+  * (`kui.clusters[].masking[]`, `MaskingConfig`). `docs/operations/masking.md` is the operator's guide to
+  * writing one; it exists as of wave 10, and the sentence that stood here for nine waves — saying the file
+  * had never existed — is what it replaces.
   *
   * ## The application order
   *
@@ -50,6 +52,45 @@ object MaskingEngine {
   /** The first matching rule's string form, for a payload that is not JSON. */
   def maskText(rules: List[MaskingRule], topic: TopicName, target: Target, text: String): String =
     rules.find(scopeMatches(_, topic, target)).fold(text)(rule => maskString(rule.kind, text))
+
+  /** One decoded payload's text, masked, whichever of the two forms the serde said it is in.
+    *
+    * This is the entry point a *service* calls, and it exists so that a caller does not have to hold circe in
+    * order to mask a record. `services/message` sees a `Decoded(text, kind, …)` and nothing else; making it
+    * parse the text itself would put the parse, the fallback below and the re-serialisation in a layer that
+    * ADR-041 rule A3 forbids JSON to, and would put a second copy of the choice between [[maskJson]] and
+    * [[maskText]] next to every caller.
+    *
+    * ==Why the kind decides, and not a parse attempt==
+    *
+    * Trying `parse` first and treating anything that succeeds as JSON is wrong for a payload the serde
+    * already called text: `42` and `true` are valid JSON documents, so a plain-text topic whose records
+    * happen to be numbers would take the document path, and a whole-value rule would then render `42` as
+    * `"**"` — quotes and all — where the text path renders `**`. The serde has already decided what it
+    * produced; re-deciding here is how two layers come to disagree about the same record.
+    *
+    * ==The fallback, which is the part that matters==
+    *
+    * A payload labelled JSON that will not parse still gets the **text** form rather than being returned
+    * untouched. That case is reachable — a serde reporting a kind it did not verify, a truncated document —
+    * and the alternative is publishing in full the field the rule exists to hide, which is the one outcome
+    * masking may never have. Masking too much is recoverable; masking nothing is not.
+    */
+  def maskPayload(
+      rules: List[MaskingRule],
+      topic: TopicName,
+      target: Target,
+      kind: PayloadKind,
+      text: String
+  ): String =
+    kind match {
+      case PayloadKind.Text => maskText(rules, topic, target, text)
+      case PayloadKind.Json =>
+        parser.parse(text) match {
+          case Right(json) => maskJson(rules, topic, target, json).noSpaces
+          case Left(_) => maskText(rules, topic, target, text)
+        }
+    }
 
   /** Header values, masked by header name against the same field rules.
     *
@@ -189,6 +230,23 @@ object MaskingEngine {
       case MaskingKind.Mask(chars, keep) => maskKeepingEnds(text, chars, keep)
     }
 
+  /** A mask whose kept ends leave nothing to mask masks the **whole** value.
+    *
+    * This is the fail-safe direction, and it is the direction this file argues for everywhere else:
+    * [[maskPayload]]'s own rule is that *masking too much is recoverable and masking nothing is not*. The
+    * branch used to return `text` — the input, in full, from a rule whose author wrote it to hide the input.
+    *
+    * It was reachable from a configuration file, which is why it is repaired here and not only at the loader.
+    * `MaskingConfig.MaxKeep` bounds each end at 20 and the bound was enforced per end, so
+    * `keep: {prefix: 20, suffix: 20}` loaded and returned a sixteen-digit card number untouched; the loader
+    * now refuses that pair as well. But `KeepEnds` is a plain pair of `Int`s that any caller can build —
+    * `MaskingRule.onFields(MaskingKind.Mask("*", KeepEnds(8, 8)), "pin")` in code reaches this function
+    * without passing a loader at all — and a four-character `last4` under an honest `keep: {suffix: 4}`
+    * reaches it on every record. The engine is where the guarantee has to hold.
+    *
+    * The result is still never longer than the input: every kept end is dropped and one replacement code
+    * point is written per input code point.
+    */
   private def maskKeepingEnds(text: String, chars: String, keep: KeepEnds): String = {
     val points: Vector[Int] = codePoints(text)
     val total = points.length
@@ -199,24 +257,26 @@ object MaskingEngine {
     val suffix = keep.suffix.max(0).min(total - prefix)
     val maskedCount = total - prefix - suffix
 
-    if maskedCount <= 0 then text
-    else {
-      val replacement =
-        if chars.isEmpty then "*" * maskedCount
-        else {
-          val cycle = codePoints(chars)
-          // Cycling through the replacement characters is Kafbat's behaviour, and it is one replacement
-          // code point per input code point — never more — which is what keeps the result no longer than
-          // the input.
-          (0 until maskedCount)
-            .map(index => new String(Character.toChars(cycle(index % cycle.length))))
-            .mkString
-        }
+    if maskedCount <= 0 then replacementFor(chars, total)
+    else
       new String(points.take(prefix).flatMap(Character.toChars).toArray) +
-        replacement +
+        replacementFor(chars, maskedCount) +
         new String(points.takeRight(suffix).flatMap(Character.toChars).toArray)
-    }
   }
+
+  /** `count` replacement code points, cycling through `chars`.
+    *
+    * Cycling is Kafbat's behaviour, and it is one replacement code point per masked input code point — never
+    * more — which is what keeps the result no longer than the input.
+    */
+  private def replacementFor(chars: String, count: Int): String =
+    if chars.isEmpty then "*" * count
+    else {
+      val cycle = codePoints(chars)
+      (0 until count)
+        .map(index => new String(Character.toChars(cycle(index % cycle.length))))
+        .mkString
+    }
 
   /** Code points, not `Char`s. A `Char` is half of an emoji, and half of an emoji is invalid text.
     *

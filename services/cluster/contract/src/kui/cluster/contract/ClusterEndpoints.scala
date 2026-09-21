@@ -34,6 +34,9 @@ object ClusterEndpoints {
   val ConfigsSegment: String = "configs"
   val LogDirsSegment: String = "log-dirs"
   val RefreshSegment: String = "refresh"
+  val SettingsSegment: String = "settings"
+  val UiSegment: String = "ui"
+  val MessagesSegment: String = "messages"
 
   val ClusterIdParam: String = "clusterId"
   val BrokerIdParam: String = "brokerId"
@@ -162,6 +165,86 @@ object ClusterEndpoints {
       )
       .tag("cluster")
 
+  /** The current principal's appearance settings for this cluster. */
+  val getUiSettings: Endpoint[SignedPrincipal, ClusterId, ErrorEnvelope, UiAppearanceDto, Any] =
+    KuiEndpoint.internal.get
+      .in(clustersBase / clusterIdPath / SettingsSegment / UiSegment)
+      .out(jsonBody[UiAppearanceDto])
+      .name("cluster.uiSettings.get")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.clusterScoped("cluster.uiSettings.get")
+      )
+      .summary("Read this principal's appearance settings for one cluster")
+      .description(
+        "Returns the server-side value, or the product defaults when this principal has not saved one."
+      )
+      .tag("cluster")
+
+  /** Replaces the current principal's complete appearance snapshot for this cluster. */
+  val putUiSettings
+      : Endpoint[SignedPrincipal, (String, ClusterId, UiAppearanceDto), ErrorEnvelope, UiAppearanceDto, Any] =
+    KuiEndpoint
+      .mutation("cluster.uiSettings.put", destructive = false)
+      .put
+      .in(clustersBase / clusterIdPath / SettingsSegment / UiSegment)
+      .in(jsonBody[UiAppearanceDto])
+      .out(jsonBody[UiAppearanceDto])
+      .name("cluster.uiSettings.put")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.clusterScoped("cluster.uiSettings.put")
+      )
+      .summary("Persist this principal's appearance settings for one cluster")
+      .description(
+        "Mutation (cluster.uiSettings.put). Replaces theme, accent and density atomically in KUI's " +
+          "metadata store; it does not alter the Kafka cluster itself."
+      )
+      .tag("cluster")
+
+  /** The current principal's default message browsing settings for this cluster. */
+  val getMessageBrowserSettings
+      : Endpoint[SignedPrincipal, ClusterId, ErrorEnvelope, MessageBrowserSettingsDto, Any] =
+    KuiEndpoint.internal.get
+      .in(clustersBase / clusterIdPath / SettingsSegment / MessagesSegment)
+      .out(jsonBody[MessageBrowserSettingsDto])
+      .name("cluster.messageBrowserSettings.get")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.clusterScoped("cluster.messageBrowserSettings.get")
+      )
+      .summary("Read this principal's message browser defaults for one cluster")
+      .description(
+        "Returns the saved page size and presentation mode, or product defaults when none were saved."
+      )
+      .tag("cluster")
+
+  /** Replaces the current principal's message browsing defaults for this cluster. */
+  val putMessageBrowserSettings: Endpoint[
+    SignedPrincipal,
+    (String, ClusterId, MessageBrowserSettingsDto),
+    ErrorEnvelope,
+    MessageBrowserSettingsDto,
+    Any
+  ] =
+    KuiEndpoint
+      .mutation("cluster.messageBrowserSettings.put", destructive = false)
+      .put
+      .in(clustersBase / clusterIdPath / SettingsSegment / MessagesSegment)
+      .in(jsonBody[MessageBrowserSettingsDto])
+      .out(jsonBody[MessageBrowserSettingsDto])
+      .name("cluster.messageBrowserSettings.put")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.clusterScoped("cluster.messageBrowserSettings.put")
+      )
+      .summary("Persist this principal's message browser defaults for one cluster")
+      .description(
+        "Mutation (cluster.messageBrowserSettings.put). Replaces the bounded browse page size and " +
+          "presentation mode in KUI metadata; it does not alter Kafka."
+      )
+      .tag("cluster")
+
   /** Every endpoint this service serves. The gateway and the OpenAPI generator read this.
     *
     * The health and capability endpoints are deliberately absent: they are identical in all eleven services
@@ -169,5 +252,16 @@ object ClusterEndpoints {
     * copies of the same path end up disagreeing.
     */
   val all: List[AnyEndpoint] =
-    List(listClusters, getCluster, listBrokers, brokerConfigs, logDirs, refresh)
+    List(
+      listClusters,
+      getCluster,
+      listBrokers,
+      brokerConfigs,
+      logDirs,
+      refresh,
+      getUiSettings,
+      putUiSettings,
+      getMessageBrowserSettings,
+      putMessageBrowserSettings
+    )
 }

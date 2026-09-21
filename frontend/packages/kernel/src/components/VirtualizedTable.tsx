@@ -1,10 +1,12 @@
 import type { JSX } from "@solidjs/web";
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from "solid-js";
-import type { Column, Sort } from "./DataTable.jsx";
+import { Checkbox } from "./Checkbox.jsx";
+import type { Column, Sort, TableSelection } from "./DataTable.jsx";
 import { nextSort } from "./DataTable.jsx";
 import { EmptyState } from "./EmptyState.jsx";
 import { COMPACT_ROW_SAVING_PX, createIsCompact } from "./density.js";
 import { Icon } from "./Icon.jsx";
+import { activatesRow } from "./rowActivation.js";
 import { slice, trailingHeightPx } from "./window.js";
 
 /**
@@ -69,6 +71,30 @@ import { slice, trailingHeightPx } from "./window.js";
  * thousand rows it has never seen, of which it holds five hundred — and a table that quietly
  * re-sorted its own page would show the right rows in an order no page boundary matches.
  *
+ * ## Selection, and the two things windowing does to it
+ *
+ * The selection is `DataTable`'s `TableSelection` — the same three properties, taken from the same
+ * module rather than redeclared here, because a second vocabulary for one idea is how a screen ends
+ * up holding two sets and reconciling them by hand. The set lives with the caller; this component
+ * only reads it and asks for a new one.
+ *
+ * Windowing makes two claims about that set that a plain table never has to think about.
+ *
+ * **A selected row that scrolls out of the window is still selected.** The rows leave the document
+ * — that is the whole point of the component — and nothing here prunes the set when they do. That
+ * sounds like the absence of a bug rather than a decision, and it is a decision: the obvious
+ * implementations of select-all and of clear both walk *the rows the component can see*, and each
+ * of them silently drops a selection made two thousand rows ago. So `toggleAll` walks
+ * `props.rows`, never `windowed()`, and `toggleOne` copies the incoming set rather than rebuilding
+ * one from what is on screen.
+ *
+ * **The header checkbox is indeterminate against the page, not against the cluster.** It answers
+ * "are all of the rows I was handed selected", and the rows it was handed are one page of a list
+ * the server holds ten thousand of. It cannot answer anything about the rest, and a header that
+ * went checked while five hundred of ten thousand topics were selected would be a claim that a
+ * subsequent Delete would act on all ten thousand. Selecting across pages is a product feature —
+ * an explicit "select all 10,000" banner — and not something a checkbox can imply.
+ *
  * ## Accessibility
  *
  * `aria-rowcount` is the length of the *whole* list and each row's `aria-rowindex` is its position
@@ -125,6 +151,12 @@ export interface VirtualizedTableProps<Row> {
 
   readonly sort?: Sort | null;
   readonly onSortChange?: (next: Sort | null) => void;
+
+  /**
+   * Row selection, in `DataTable`'s vocabulary. Present adds a leading checkbox column; absent
+   * costs nothing at all, not even a column of empty cells.
+   */
+  readonly selection?: TableSelection | undefined;
 
   readonly onRowClick?: (row: Row) => void;
 
@@ -260,7 +292,40 @@ export function VirtualizedTable<Row>(props: VirtualizedTableProps<Row>): JSX.El
     moveFocus(target);
   }
 
-  const columnCount = () => Math.max(1, props.columns.length);
+  /* Selection is arithmetic over `props.rows` — the page — and never over `windowed()`. See the
+   * note at the top of this file: walking the window is how a selection made two thousand rows ago
+   * gets silently discarded by a select-all. */
+  const pageKeys = (): string[] => props.rows.map(props.rowKey);
+
+  const selectedOnPage = (): number => {
+    const selection = props.selection;
+    if (selection === undefined) return 0;
+    return pageKeys().filter((key) => selection.selectedKeys.has(key)).length;
+  };
+
+  function toggleAll(checked: boolean): void {
+    const selection = props.selection;
+    if (selection === undefined) return;
+    // A copy of the incoming set, not a fresh one: any key selected on another page stays.
+    const next = new Set(selection.selectedKeys);
+    for (const key of pageKeys()) {
+      if (checked) next.add(key);
+      else next.delete(key);
+    }
+    selection.onChange(next);
+  }
+
+  function toggleOne(key: string, checked: boolean): void {
+    const selection = props.selection;
+    if (selection === undefined) return;
+    const next = new Set(selection.selectedKeys);
+    if (checked) next.add(key);
+    else next.delete(key);
+    selection.onChange(next);
+  }
+
+  const columnCount = () =>
+    Math.max(1, props.columns.length + (props.selection === undefined ? 0 : 1));
 
   return (
     <div
@@ -279,6 +344,24 @@ export function VirtualizedTable<Row>(props: VirtualizedTableProps<Row>): JSX.El
           <caption class="kui-visually-hidden">{props.caption}</caption>
           <thead>
             <tr>
+              <Show when={props.selection !== undefined}>
+                <th scope="col" class="kui-table__header-cell kui-table__header-cell--select">
+                  <Checkbox
+                    labelHidden
+                    label={`Select all ${props.rows.length} rows`}
+                    checked={selectedOnPage() > 0 && selectedOnPage() === props.rows.length}
+                    // Mixed, not unchecked, and mixed against the page. A header that showed
+                    // unchecked while three of this page's rows were ticked would be lying about
+                    // what is underneath it, and clicking it would then select everything rather
+                    // than clear the three.
+                    indeterminate={selectedOnPage() > 0 && selectedOnPage() < props.rows.length}
+                    disabled={total() === 0}
+                    onChange={toggleAll}
+                    testId="select-all"
+                  />
+                </th>
+              </Show>
+
               <For each={props.columns}>
                 {(column) => (
                   <th
@@ -335,11 +418,14 @@ export function VirtualizedTable<Row>(props: VirtualizedTableProps<Row>): JSX.El
               {(item) => (
                 <VirtualRow
                   index={item().index}
+                  rowKey={item().key}
                   columns={props.columns}
                   row={item().row}
                   focused={focusedIndex() === item().index}
                   keyboardEngaged={keyboardEngaged()}
                   onFocused={setFocusedIndex}
+                  selection={props.selection}
+                  onToggle={toggleOne}
                   // Spread rather than passed, because `exactOptionalPropertyTypes` treats an
                   // explicit `undefined` as different from an absent property.
                   {...(props.onRowClick === undefined ? {} : { onActivate: props.onRowClick })}
@@ -382,11 +468,14 @@ function Spacer(props: { readonly height: number; readonly columns: number }): J
 
 interface VirtualRowProps<Row> {
   readonly index: number;
+  readonly rowKey: string;
   readonly columns: readonly Column<Row>[];
   readonly row: Row;
   readonly focused: boolean;
   readonly keyboardEngaged: boolean;
   readonly onFocused: (index: number) => void;
+  readonly selection?: TableSelection | undefined;
+  readonly onToggle: (key: string, checked: boolean) => void;
   readonly onActivate?: (row: Row) => void;
 }
 
@@ -400,18 +489,56 @@ function VirtualRow<Row>(props: VirtualRowProps<Row>): JSX.Element {
     () => element,
   );
 
+  const selected = (): boolean => props.selection?.selectedKeys.has(props.rowKey) === true;
+
   return (
     <tr
-      class={["kui-table__row", "kui-vtable__row"]}
+      class={[
+        "kui-table__row",
+        "kui-vtable__row",
+        { "kui-table__row--selected": selected() },
+      ]}
       ref={(el: HTMLTableRowElement) => (element = el)}
+      aria-selected={props.selection === undefined ? undefined : selected() ? "true" : "false"}
       // Absolute, not relative to the window. `aria-rowindex` is 1-based.
       aria-rowindex={props.index + 1}
       // A roving tabindex: exactly one row is tabbable, so Tab enters the table once and the arrow
       // keys do the rest. Every other row is reachable but not in the tab order.
       tabindex={props.focused ? 0 : -1}
       onFocus={() => props.onFocused(props.index)}
-      onClick={props.onActivate === undefined ? undefined : () => props.onActivate?.(props.row)}
+      // The same rule as `DataTable`'s row, from the same function: a modified click asks for the
+      // target to be opened elsewhere and this handler can only navigate the current document, so
+      // honouring it would move the tab the operator is reading out from under them while the
+      // browser opens the background tab they actually asked for. See `./rowActivation.ts`.
+      onClick={
+        props.onActivate === undefined
+          ? undefined
+          : (event: MouseEvent) => {
+              if (!activatesRow(event)) return;
+              props.onActivate?.(props.row);
+            }
+      }
     >
+      <Show when={props.selection}>
+        {(selection) => (
+          <td
+            class="kui-table__cell kui-table__cell--select"
+            /* A row with `onRowClick` is a control, and the checkbox is inside it. Without this,
+               ticking a row would also open the object — and the list the operator was selecting
+               from would be gone, along with the ticks. `DataTable` draws the same cell with the
+               same guard, and `surfaces.test.tsx` asserts both; the note that used to stand here
+               saying the other table had not been fixed yet outlived the fix. */
+            onClick={(event: MouseEvent) => event.stopPropagation()}
+          >
+            <Checkbox
+              labelHidden
+              label={`Select ${selection().rowLabel?.(props.rowKey) ?? props.rowKey}`}
+              checked={selected()}
+              onChange={(checked) => props.onToggle(props.rowKey, checked)}
+            />
+          </td>
+        )}
+      </Show>
       <For each={props.columns}>
         {(column) => (
           <td

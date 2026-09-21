@@ -59,15 +59,29 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
   private def rig(
       features: ClusterFeatures = TopologyFixtures.allFeatures,
       logDirs: Either[KuiError, PartialResult[BrokerId, List[LogDir]]] = Right(everyBroker),
-      configs: Map[BrokerId, Either[KuiError, List[ConfigEntry]]] = Map.empty
+      configs: Map[BrokerId, Either[KuiError, List[ConfigEntry]]] = Map.empty,
+      sweep: Either[KuiError, TopicSweep] = Right(TopicSweep.emptyCluster)
   ) =
     ClusterRig
       .resource(
         List(prod),
         features = features,
-        setup = _.set(_.copy(logDirs = logDirs, configs = configs))
+        setup = _.set(_.copy(logDirs = logDirs, configs = configs, sweep = sweep))
       )
       .evalTap(ClusterRig.settled)
+
+  /** Four partitions across the three brokers of the default description: broker 1 leads two, brokers 2 and 3
+    * one each, and every partition is replicated everywhere.
+    */
+  private val fourPartitions: TopicSweep = TopologyFixtures.sweep(
+    List(
+      TopologyFixtures.placement(leader = 1),
+      TopologyFixtures.placement(leader = 1),
+      TopologyFixtures.placement(leader = 2),
+      TopologyFixtures.placement(leader = 3)
+    ),
+    topics = 2
+  )
 
   test("brokerListComesFromTheSnapshotAndMakesNoAdminCall") {
     rig().use { built =>
@@ -112,10 +126,42 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
       }
   }
 
-  test("brokerListRendersLeadersAsNone") {
-    // The M1 contract. When the topic service can supply leadership, this test has to be deleted
-    // deliberately rather than discovered by accident.
-    rig().use { built =>
+  test("brokerListCarriesThePartitionAndLeaderCountsOfACompleteSweep") {
+    rig(sweep = Right(fourPartitions)).use { built =>
+      built.brokers.brokers(prod.id).map { result =>
+        // Every broker holds a replica of all four partitions, and the leader counts add up to four —
+        // which is the invariant a reader checks the column against without being told to.
+        assertEquals(result.map(_.brokers.flatMap(_.partitions)), Right(List(4, 4, 4)))
+        assertEquals(result.map(_.brokers.flatMap(_.leaders)), Right(List(2, 1, 1)))
+        assertEquals(result.map(_.brokers.flatMap(_.leaders).sum), Right(4))
+        // The leader skew comes off the same census: four leaderships over three brokers is 1.33 each, so
+        // broker 1's two are half again over its share and the other two are a quarter under theirs.
+        assertEquals(result.map(_.brokers.flatMap(_.leaderSkewPercent)), Right(List(50.0d, -25.0d, -25.0d)))
+      }
+    }
+  }
+
+  test("oneUnreadableTopicWithholdsEveryBrokerRowsPartitionAndLeaderCount") {
+    // Not "the affected brokers" and not a smaller number: a sweep that missed a topic cannot say which
+    // brokers that topic was on, so every row's figure is withheld. The disk figures beside them are from
+    // a different call and survive, which is the point of their being separately optional.
+    val partial = fourPartitions.copy(unreadable = Set(kui.kernel.TopicName.unsafe("payments")))
+
+    rig(sweep = Right(partial)).use { built =>
+      built.brokers.brokers(prod.id).map { result =>
+        assertEquals(result.map(_.brokers.flatMap(_.partitions)), Right(Nil))
+        assertEquals(result.map(_.brokers.flatMap(_.leaders)), Right(Nil))
+        // It refuses with the count it is derived from, and not with the replica skew beside it, which
+        // comes from the log directories and is still a number.
+        assertEquals(result.map(_.brokers.flatMap(_.leaderSkewPercent)), Right(Nil))
+        assertEquals(result.map(_.brokers.flatMap(_.replicas)), Right(List(2, 2, 2)))
+        assertEquals(result.map(_.brokers.flatMap(_.skewPercent)), Right(List(0.0d, 0.0d, 0.0d)))
+      }
+    }
+  }
+
+  test("aSweepThatFailedOutrightWithholdsTheSameFigures") {
+    rig(sweep = Left(unreachable)).use { built =>
       built.brokers.brokers(prod.id).map { result =>
         assertEquals(result.map(_.brokers.flatMap(_.leaders)), Right(Nil))
       }
@@ -292,11 +338,10 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
   test("configsReturnUnsupportedAndNotAnEmptyList") {
     // The named managed-service defect: an empty configuration table and "this cluster does not
     // expose broker configuration" look identical to a user and mean opposite things.
-    rig(configs = Map(broker1 -> Left(ApplicationError.Unsupported("broker configuration")))).use {
-      built =>
-        built.brokers.configs(prod.id, broker1, includeDocs = false).map { result =>
-          assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unsupported))
-        }
+    rig(configs = Map(broker1 -> Left(ApplicationError.Unsupported("broker configuration")))).use { built =>
+      built.brokers.configs(prod.id, broker1, includeDocs = false).map { result =>
+        assertEquals(result.left.toOption.map(_.code), Some(ErrorCode.Unsupported))
+      }
     }
   }
 

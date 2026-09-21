@@ -1,0 +1,6 @@
+{
+  "connect" : "payments",
+  "connector" : "elastic-sink",
+  "operation" : "connect.connector.restart",
+  "acceptedAt" : "2026-09-03T10:11:12Z"
+}

@@ -41,6 +41,10 @@ describe("shellPaths", () => {
     expect(paths.clusters()).toBe("/ui/clusters");
     expect(paths.manageClusters()).toBe("/ui/clusters/manage");
 
+    expect(paths.dashboard("prod-kyiv-01", "storage")).toBe(
+      "/ui/clusters/prod-kyiv-01/dashboard/storage",
+    );
+
     expect(paths.brokers("prod")).toBe("/ui/clusters/prod/brokers");
     expect(paths.broker("prod", 3)).toBe("/ui/clusters/prod/brokers/3");
 
@@ -52,6 +56,14 @@ describe("shellPaths", () => {
 
     expect(paths.consumerGroups("prod")).toBe("/ui/clusters/prod/consumer-groups");
     expect(paths.consumerGroup("prod", "etl")).toBe("/ui/clusters/prod/consumer-groups/etl");
+  });
+
+  it("defaults the dashboard tab, so the short address and the first tab are one page", () => {
+    // The route table maps `/dashboard` and `/dashboard/:tab` onto the same component, and this is
+    // the half of that arrangement a type cannot check: an omitted tab has to come out as the tab
+    // the strip marks active, or arriving from a link built without one highlights nothing.
+    expect(paths.dashboard("prod-kyiv-01")).toBe("/ui/clusters/prod-kyiv-01/dashboard/overview");
+    expect(paths.dashboard("prod-kyiv-01")).toBe(paths.dashboard("prod-kyiv-01", "overview"));
   });
 
   it("encodes parameters exactly once", () => {
@@ -74,6 +86,7 @@ describe("shellPaths", () => {
     const behindProxy = shellPaths(createShellRouter("/kui", views));
     expect(behindProxy.home()).toBe("/kui/ui");
     expect(behindProxy.topicMessages("prod", "orders")).toBe("/kui/ui/clusters/prod/topics/orders/messages");
+    expect(behindProxy.dashboard("prod")).toBe("/kui/ui/clusters/prod/dashboard/overview");
   });
 
   it("returns strings, not path nodes", () => {
@@ -85,6 +98,7 @@ describe("shellPaths", () => {
       paths.topic("prod", "t"),
       paths.topicMessages("prod", "t"),
       paths.consumerGroup("prod", "g"),
+      paths.dashboard("prod"),
     ]) {
       expect(typeof link).toBe("string");
     }

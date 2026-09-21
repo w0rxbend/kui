@@ -6,15 +6,15 @@ import org.scalacheck.Prop.forAll
 
 /** The properties that make an error code usable as a contract.
   *
-  * None of these are about one code in particular. They are about the whole table staying
-  * well-formed as cases are added, which is when a duplicate or a typo actually happens.
+  * None of these are about one code in particular. They are about the whole table staying well-formed as
+  * cases are added, which is when a duplicate or a typo actually happens.
   */
 final class ErrorCodeSuite extends ScalaCheckSuite {
 
   private val allCodes: List[ErrorCode] = ErrorCode.values.toList
 
   test("no two codes share a wire string") {
-    val wires      = allCodes.map(_.wire)
+    val wires = allCodes.map(_.wire)
     val duplicates = wires.groupBy(identity).filter(_._2.sizeIs > 1).keys.toList.sorted
     assertEquals(duplicates, Nil, clue = "a duplicate wire string makes two failures indistinguishable")
   }
@@ -60,9 +60,9 @@ final class ErrorCodeSuite extends ScalaCheckSuite {
     assertEquals(ErrorCode.Validation.area, "VALIDATION")
   }
 
-  /** The wire strings of ADR-034, written out. This table is the contract: if a rename ever makes it
-    * past review, this is the test that says so, and the fix is to revert the rename rather than to
-    * update the table.
+  /** The wire strings of ADR-034, written out. This table is the contract: if a rename ever makes it past
+    * review, this is the test that says so, and the fix is to revert the rename rather than to update the
+    * table.
     */
   test("the wire strings and statuses are the ones ADR-034 assigns") {
     val expected: List[(ErrorCode, String, Int, Boolean)] = List(

@@ -1,8 +1,9 @@
 package kui.consumer.application
 
+import munit.FunSuite
+
 import kui.kernel.group.GroupState
 import kui.kernel.{ClusterId, GroupId}
-import munit.FunSuite
 
 /** The delta, and the token that makes it safe.
   *
@@ -15,7 +16,8 @@ final class LagPollUseCaseSuite extends FunSuite {
   private def snapshot(version: Long, groups: List[(String, Long)]): GroupSnapshot =
     GroupSnapshot(
       version = version,
-      summaries = groups.map((id, committed) => ConsumerRig.group(id, committed = committed).summary).toVector,
+      summaries =
+        groups.map((id, committed) => ConsumerRig.group(id, committed = committed).summary).toVector,
       groups = Map.empty,
       paceSamples = Map.empty,
       incompleteCoordinators = 0,
@@ -77,6 +79,9 @@ final class LagPollUseCaseSuite extends FunSuite {
 
     assertEquals(LagToken.parse(token.value), Some((ConsumerRig.Cluster, 7L)))
     assertEquals(LagToken.parse("not-a-token"), None)
-    assertNotEquals(LagToken.parse(LagToken.of(ClusterId.unsafe("staging"), 7L).value), Some((ConsumerRig.Cluster, 7L)))
+    assertNotEquals(
+      LagToken.parse(LagToken.of(ClusterId.unsafe("staging"), 7L).value),
+      Some((ConsumerRig.Cluster, 7L))
+    )
   }
 }

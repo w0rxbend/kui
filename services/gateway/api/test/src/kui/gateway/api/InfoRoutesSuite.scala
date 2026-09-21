@@ -116,7 +116,8 @@ final class InfoRoutesSuite extends KuiIOSuite {
     GatewayTestServer.resource().use { server =>
       server.get(s"${GatewayEndpoints.ApiPrefix}/info").map { response =>
         assertEquals(response.code.code, 200, response.body)
-        val document = decode[AppInfo](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
+        val document =
+          decode[AppInfo](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
         assertEquals(document.authType, "disabled")
         assert(!response.body.contains("http"), response.body)
       }

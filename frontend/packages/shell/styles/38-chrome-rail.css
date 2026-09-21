@@ -287,6 +287,21 @@
 
 /* --- Notifications ------------------------------------------------------------------------------ */
 
+.kui-topbar__bell-anchor {
+  position: relative;
+  display: flex;
+}
+
+/* Below the glyph and hard against the right edge of the band, same placement contract as
+ * `.kui-topbar__appearance-panel` in 34-chrome-topbar.css: scrim-less, so `--kui-z-dropdown` and
+ * not `--kui-z-dialog`, and anchored rather than portalled so it stays under the bell on resize. */
+.kui-topbar__bell-panel {
+  position: absolute;
+  top: calc(100% + var(--kui-space-2));
+  right: 0;
+  z-index: var(--kui-z-dropdown);
+}
+
 .kui-bell {
   display: inline-flex;
   align-items: center;
@@ -326,6 +341,15 @@
   line-height: 14px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* Alerts this principal has already read. The count stays — an open alert is open whether or not
+ * somebody has looked at it, and the card beside the bell draws the same figure — but it stops
+ * being an alarm and becomes a tally, so it loses the danger fill. The distinction is also in the
+ * bell's accessible name in words, because this rule is a colour and nothing else. */
+.kui-bell__badge--read {
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
 }
 
 .kui-notices {

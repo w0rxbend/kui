@@ -3,19 +3,17 @@ package kui.kafka.admin
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import munit.FunSuite
-
 import org.apache.kafka.clients.admin.Admin
 
 import kui.kafka.AdminClientPool
-import kui.kernel.ClusterId
 import kui.kernel.cluster.ClusterConnection
 import kui.kernel.group.{GroupProtocol, GroupState}
-import kui.kernel.{GroupId, PartitionId, TopicName, TopicPartition}
+import kui.kernel.{ClusterId, GroupId, PartitionId, TopicName, TopicPartition}
 
 /** The rules the group result types carry in their own shape, asserted where they are stated.
   *
-  * None of these need a broker. They are the decisions a caller would otherwise have to remember —
-  * "both halves of the precondition", "`None` is not an empty set" — and each one has a screen behind it.
+  * None of these need a broker. They are the decisions a caller would otherwise have to remember — "both
+  * halves of the precondition", "`None` is not an empty set" — and each one has a screen behind it.
   */
 final class GroupTypesSuite extends FunSuite {
 

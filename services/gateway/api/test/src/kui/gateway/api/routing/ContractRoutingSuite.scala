@@ -1,6 +1,7 @@
 package kui.gateway.api.routing
 
 import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
@@ -12,33 +13,27 @@ import munit.CatsEffectSuite
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 
-import kui.cluster.contract.dto.ClustersResponse
 import kui.cluster.contract.ClusterEndpoints
-import kui.contracts.Section
-import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
+import kui.cluster.contract.dto.ClustersResponse
 import kui.contracts.capability.{CapabilityKey, CapabilityState}
-import kui.contracts.{ErrorEnvelope, KuiEndpoint}
+import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
+import kui.contracts.{ErrorEnvelope, KuiEndpoint, Section}
 import kui.gateway.api.GatewayTestServer
-import kui.gateway.application.capability.{
-  CapabilityRegistry,
-  CapabilitySignals,
-  RegistryConfig
-}
+import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.ServiceId
+import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.observability.Correlation
 import kui.security.SignedPrincipal
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** That the gateway serves another service's API without containing a single path of its own.
   *
-  * The suite deliberately routes the *real* `ClusterEndpoints.all`. Deriving routes from a locally
-  * invented endpoint would test the derivation against a copy, and would keep passing on the day the copy
-  * and the published contract diverged -- which is the failure this whole mechanism exists to make
-  * impossible.
+  * The suite deliberately routes the *real* `ClusterEndpoints.all`. Deriving routes from a locally invented
+  * endpoint would test the derivation against a copy, and would keep passing on the day the copy and the
+  * published contract diverged -- which is the failure this whole mechanism exists to make impossible.
   */
 final class ContractRoutingSuite extends CatsEffectSuite {
 
@@ -71,8 +66,8 @@ final class ContractRoutingSuite extends CatsEffectSuite {
 
   /** A streaming endpoint under `/internal/v1`, which M0 has no real example of.
     *
-    * Writing the SSE passthrough now, against a stub, is cheaper than writing it in M3 under the pressure
-    * of a feature that needs it, and it means the derivation is known to handle both shapes before eleven
+    * Writing the SSE passthrough now, against a stub, is cheaper than writing it in M3 under the pressure of
+    * a feature that needs it, and it means the derivation is known to handle both shapes before eleven
     * services start relying on it.
     */
   private val events: Endpoint[SignedPrincipal, Unit, ErrorEnvelope, Stream[IO, Byte], Fs2Streams[IO]] =
@@ -314,6 +309,53 @@ final class ContractRoutingSuite extends CatsEffectSuite {
           .get("/api/v1/clusters")
           .map(response => assertEquals(response.code.code, 200))
       }
+    }
+  }
+
+  test("eachTransportFailureDimsTheCapabilityWithItsOwnReason") {
+    // W10-A1: `reasonOf`'s four-way mapping had no case. Both directions of *whether* a failure dims are
+    // asserted above; *why* it dimmed was not, and permuting the three named arms left the whole gateway
+    // module green. The reason code is not decoration: ADR-032 draws a different sentence for each, and
+    // `CircuitOpen` ("calls are suspended while it recovers", which ends on its own) against
+    // `UpstreamAuth` ("KUI's credentials were rejected", which never ends on its own) is the difference
+    // between waiting and editing a configuration file.
+    def reasonFor(error: KuiError): IO[kui.contracts.capability.ReasonCode] =
+      signals.use { (signal, registry) =>
+        ContractRouting.reportIfInfrastructure[IO](cluster, signal, error) *>
+          IO.sleep(100.milliseconds) *>
+          registry.state(clusterKey).map {
+            case CapabilityState.Unavailable(reason, _, _) => reason
+            case other => fail(s"expected the capability to be dimmed, got $other")
+          }
+      }
+
+    for {
+      open <- reasonFor(InfrastructureError.CircuitOpen("cluster", at))
+      slow <- reasonFor(InfrastructureError.Timeout("cluster", 2000))
+      refused <- reasonFor(InfrastructureError.AuthFailed("cluster"))
+      down <- reasonFor(InfrastructureError.Unreachable("cluster", "connection refused"))
+    } yield {
+      assertEquals(open, kui.contracts.capability.ReasonCode.CircuitOpen)
+      assertEquals(slow, kui.contracts.capability.ReasonCode.UpstreamTimeout)
+      assertEquals(refused, kui.contracts.capability.ReasonCode.UpstreamAuth)
+      assertEquals(down, kui.contracts.capability.ReasonCode.UpstreamUnavailable)
+    }
+  }
+
+  test("rejectsAContractUnderInternalAtTheWrongVersion") {
+    // W10-A1: `segments.take(2) == InternalPrefix` had a case for the *first* segment being wrong and none
+    // for the second, so weakening the check to `take(1)` left the whole gateway module green. A contract
+    // published at `/internal/v2` would then be rewritten by dropping two segments and prefixing
+    // `/api/v1` — so `/internal/v2/ping` is served as `/api/v1/ping`, at a version nobody agreed to, and
+    // the browser's generated client calls it believing it is v1.
+    val futureVersion: AnyEndpoint =
+      KuiEndpoint.internal.get.in("internal" / "v2" / "ping").name("cluster.future")
+
+    ContractRouting.publicPathOf(futureVersion) match {
+      case Left(problem) =>
+        assert(problem.contains("cluster.future"), problem)
+        assert(problem.contains("/internal/v2/ping"), problem)
+      case Right(path) => fail(s"a contract at /internal/v2 must not produce a route, but it produced $path")
     }
   }
 }

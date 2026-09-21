@@ -8,7 +8,7 @@
  */
 
 /**
- * `series-1..5` are the neutral choice for "a different line, and nothing more". The status
+ * `series-1..6` are the neutral choice for "a different line, and nothing more". The status
  * tones are for marks that genuinely mean healthy / degraded / failed — SPEC §1.6 is explicit
  * that series colour carries no meaning in a throughput chart, so never reach for `warning`
  * merely because a series happens to be the fourth one.
@@ -19,6 +19,7 @@ export type ChartTone =
   | "series-3"
   | "series-4"
   | "series-5"
+  | "series-6"
   | "success"
   | "warning"
   | "danger"
@@ -32,6 +33,7 @@ const TOKENS: Readonly<Record<ChartTone, string>> = {
   "series-3": "var(--kui-color-series-3)",
   "series-4": "var(--kui-color-series-4)",
   "series-5": "var(--kui-color-series-5)",
+  "series-6": "var(--kui-color-series-6)",
   success: "var(--kui-color-success)",
   warning: "var(--kui-color-warning)",
   danger: "var(--kui-color-danger)",

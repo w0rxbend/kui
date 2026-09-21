@@ -20,7 +20,8 @@ final class ClusterWiringSuite extends CatsEffectSuite {
 
   private def wiring =
     FakeStructuredLogger[IO].toResource.flatMap(logger =>
-      ClusterWiring.make[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], PrincipalCodec.inProcess[IO], logger)
+      ClusterWiring
+        .make[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], PrincipalCodec.inProcess[IO], logger)
     )
 
   test("wiringProducesEveryEndpointInTheContract") {
@@ -51,6 +52,8 @@ final class ClusterWiringSuite extends CatsEffectSuite {
             "/internal/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
             "/internal/v1/clusters/{clusterId}/log-dirs",
             "/internal/v1/clusters/{clusterId}/refresh",
+            "/internal/v1/clusters/{clusterId}/settings/ui",
+            "/internal/v1/clusters/{clusterId}/settings/messages",
             "/internal/v1/clusters/{clusterId}/profile",
             "/internal/v1/clusters/stream",
             // The connection test. It has no cluster id because the whole point is to answer before
@@ -58,7 +61,7 @@ final class ClusterWiringSuite extends CatsEffectSuite {
             "/internal/v1/clusters/connection-test"
           )
         )
-        // The six read endpoints, the three writes, the profile, the change stream and the three every
+        // The cluster endpoints, the three writes, the profile, the change stream and the three every
         // KUI service serves. `put` and `delete` share a path and are two routes, which is why this is a
         // count of endpoints and the set above is a set of paths.
         assertEquals(

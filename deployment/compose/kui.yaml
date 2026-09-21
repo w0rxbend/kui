@@ -47,6 +47,77 @@ kui:
         url: "http://kui-consumer:8080"
         timeout: "10s"
         maxConcurrent: 32
+      # The metrics service measures nothing in this build — there is no JMX client and no
+      # Prometheus parser — so every one of its answers is a 200 saying `not_configured`. It is
+      # addressed here anyway, because the gateway derives a service's public routes from the
+      # contract it holds *and* the address it was given: with no entry here it holds the metrics
+      # contract and publishes none of it, so the dashboard's cards have nothing to read their
+      # "not measured" sentence from and show an outage instead. The two look different on screen
+      # and mean different things.
+      metrics:
+        url: "http://kui-metrics:8080"
+        timeout: "10s"
+        maxConcurrent: 32
+      # The sixth contract the gateway holds, and for one milestone the last one. It was missing
+      # from this list for a whole milestone: `services/schema` was in `ServiceContracts.byService`,
+      # had a container image nothing built, and appeared in neither this file nor
+      # `docker-compose.yml` — so the gateway published none of its routes and every schema screen
+      # reached a 404. That is the same defect the `metrics` block above was written to close, one
+      # service over, and it survived because the smoke test compared the configured addresses
+      # against the running containers and never against the contracts. It now derives all three
+      # sets, so an unaddressed contract fails the stack rather than quietly costing a screen.
+      schema:
+        url: "http://kui-schema:8080"
+        timeout: "10s"
+        maxConcurrent: 32
+      # The seventh, and the ninth service KUI has. The feed is a read of an in-memory event store
+      # and the acknowledgement is one write, so ten seconds is generous rather than tight; the
+      # bulkhead is the same 32 as everything except the message service, which is the only one
+      # that holds a connection open while a broker decides whether it has anything to send.
+      #
+      # An address here and a container in `docker-compose.yml` are two of the three facts a
+      # service needs to be reachable. The third is the contract in `ServiceContracts.byService`,
+      # and `smoke.sh` reads all three before it starts anything, because a contract with no
+      # address is absent from BOTH sides of an addresses-against-containers comparison -- which is
+      # how the metrics service and then the schema service each went a milestone unreachable.
+      alerts:
+        url: "http://kui-alerts:8080"
+        timeout: "10s"
+        maxConcurrent: 32
+      # The eighth address, and the tenth service KUI has. Every read is one call to a Connect
+      # worker's REST API and every write is one more, so ten seconds is the same budget the topic
+      # and consumer services get; the message service's sixty is for the one endpoint that holds a
+      # connection open while a broker decides whether it has anything to send, and nothing here
+      # does that. Connect publishes no change feed of its own, so unlike alerts this service has no
+      # stream to relay and there is nothing here that outlives a request.
+      #
+      # The three facts a service needs to be reachable are this address, a container in
+      # `docker-compose.yml`, and the contract in `ServiceContracts.byService`. `smoke.sh` reads all
+      # three before it starts anything -- and its failure message now says which of the three is
+      # missing, because in wave 6 it fired with the container and the address both present and
+      # named the two that were there.
+      connect:
+        url: "http://kui-connect:8080"
+        timeout: "10s"
+        maxConcurrent: 32
+      # The ninth address, and the eleventh service KUI has. Listing objects and running one
+      # statement are ordinary calls against ksqlDB's REST API, so the budget is the same ten
+      # seconds the topic, consumer and connect services get.
+      #
+      # A PUSH QUERY IS NOT COVERED BY THIS TIMEOUT AND MUST NOT BE. It is a stream: it does not
+      # finish, and a request budget applied to it would cut every one of them off at ten seconds.
+      # The gateway carries it through a hand-written relay rather than through the derived proxy,
+      # exactly as the alerts feed and the message browse are carried, and the budget it runs under
+      # is `kui.clusters[].ksql.streamTimeout` in `kui-service.yaml` -- one key per promise, which
+      # is the distinction `KsqlSettings` exists to keep.
+      #
+      # The three facts a service needs to be reachable are this address, a container in
+      # `docker-compose.yml`, and the contract in `ServiceContracts.byService`; `smoke.sh` reads all
+      # three before it starts anything.
+      ksql:
+        url: "http://kui-ksql:8080"
+        timeout: "10s"
+        maxConcurrent: 32
 
     # How often the gateway asks each service whether it is ready, to keep the capability registry
     # (and therefore the greyed-out parts of the UI) current.

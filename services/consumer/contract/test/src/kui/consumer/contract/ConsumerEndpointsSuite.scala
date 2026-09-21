@@ -70,7 +70,10 @@ final class ConsumerEndpointsSuite extends FunSuite {
   test("theStateFilterAcceptsEveryStateTheKernelDeclares") {
     // Read from `GroupState.All`, never typed out: a state added to the enum is accepted by the filter by
     // the act of adding it, and this assertion is what says so.
-    assertEquals(GroupState.All.map(_.wire).toSet, Set("STABLE", "EMPTY", "DEAD", "PREPARING_REBALANCE", "COMPLETING_REBALANCE", "UNKNOWN"))
+    assertEquals(
+      GroupState.All.map(_.wire).toSet,
+      Set("STABLE", "EMPTY", "DEAD", "PREPARING_REBALANCE", "COMPLETING_REBALANCE", "UNKNOWN")
+    )
   }
 
   test("sortFieldsAreTheFiveTheListCanActuallyOrderBy") {
@@ -84,7 +87,10 @@ final class ConsumerEndpointsSuite extends FunSuite {
     val refusal = GroupSortField.from("lagg")
     assert(refusal.isLeft)
     refusal.left.foreach { error =>
-      assert(error.message.contains("lag"), s"the refusal does not list the accepted values: ${error.message}")
+      assert(
+        error.message.contains("lag"),
+        s"the refusal does not list the accepted values: ${error.message}"
+      )
     }
   }
 

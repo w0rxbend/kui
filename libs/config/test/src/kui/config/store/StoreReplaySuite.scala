@@ -10,8 +10,8 @@ import fs2.Stream
 import fs2.concurrent.Topic
 import io.circe.Json
 import io.circe.syntax.*
-import org.typelevel.log4cats.noop.NoOpFactory
 import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.noop.NoOpFactory
 
 import kui.testkit.KuiIOSuite
 
@@ -19,13 +19,13 @@ import kui.testkit.KuiIOSuite
   * running.
   *
   * This is the milestone's highest-risk loop. The roadmap's own risk register says a bug in the store's
-  * bootstrap makes the service **hang** rather than fail, which is the worst failure shape a startup path
-  * can have: no error, no readiness, and nothing to search a log for. The mitigation is entirely in this
-  * file's subject — the end offset is taken once, the loop stops at it, and the whole thing is under a
-  * timeout that names how far it got.
+  * bootstrap makes the service **hang** rather than fail, which is the worst failure shape a startup path can
+  * have: no error, no readiness, and nothing to search a log for. The mitigation is entirely in this file's
+  * subject — the end offset is taken once, the loop stops at it, and the whole thing is under a timeout that
+  * names how far it got.
   *
-  * It runs against a fake log rather than a broker on purpose. A container could not express "the log
-  * never produces the record replay is waiting for", which is exactly the case that has to fail fast.
+  * It runs against a fake log rather than a broker on purpose. A container could not express "the log never
+  * produces the record replay is waiting for", which is exactly the case that has to fail fast.
   */
 final class StoreReplaySuite extends KuiIOSuite {
 
@@ -51,7 +51,10 @@ final class StoreReplaySuite extends KuiIOSuite {
     KafkaConfigStore.LogRecord(key.render, Some(record.asJson.noSpaces), offset)
   }
 
-  private def fakeLog(end: Long, entries: Stream[IO, KafkaConfigStore.LogRecord]): KafkaConfigStore.StoreLog[IO] =
+  private def fakeLog(
+      end: Long,
+      entries: Stream[IO, KafkaConfigStore.LogRecord]
+  ): KafkaConfigStore.StoreLog[IO] =
     new KafkaConfigStore.StoreLog[IO] {
       def endOffset: IO[Long] = IO.pure(end)
       def records: Stream[IO, KafkaConfigStore.LogRecord] = entries
@@ -83,7 +86,8 @@ final class StoreReplaySuite extends KuiIOSuite {
   test("replayStopsAtTheEndOffsetItTookBeforeConsuming") {
     // The log keeps producing after the end offset. Replay must not chase it: a replay that followed a
     // moving target would never terminate on a busy topic.
-    val infinite = Stream.emits((0 until 100).toList.map(i => entry(s"c$i", 1L, i.toLong))) ++ Stream.never[IO]
+    val infinite =
+      Stream.emits((0 until 100).toList.map(i => entry(s"c$i", 1L, i.toLong))) ++ Stream.never[IO]
     TestControl.executeEmbed(run(3L, infinite)).map { (outcome, state) =>
       assert(outcome.isRight, outcome.toString)
       assertEquals(state.lastAppliedOffset, 2L)
@@ -128,7 +132,9 @@ final class StoreReplaySuite extends KuiIOSuite {
       _ <- fiber.cancel
       count <- released.get
     } yield count
-    TestControl.executeEmbed(test).map(count => assertEquals(count, 1, "the log's release must run exactly once"))
+    TestControl
+      .executeEmbed(test)
+      .map(count => assertEquals(count, 1, "the log's release must run exactly once"))
   }
 
   test("cancellingTheFollowerReleasesTheLogExactlyOnce") {
@@ -137,7 +143,8 @@ final class StoreReplaySuite extends KuiIOSuite {
       started <- Deferred[IO, Unit]
       state <- Ref.of[IO, StoreState](StoreState.empty)
       changes <- Topic[IO, StoreChange]
-      log = (Stream.eval(started.complete(()).void).drain ++ Stream.never[IO]).onFinalize(released.update(_ + 1))
+      log = (Stream.eval(started.complete(()).void).drain ++ Stream.never[IO])
+        .onFinalize(released.update(_ + 1))
       fiber <- KafkaConfigStore.follow[IO](fakeLog(0L, log), state, changes, crypto, None, logger).start
       _ <- started.get
       _ <- fiber.cancel

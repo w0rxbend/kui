@@ -2,15 +2,14 @@ package kui.cluster.infrastructure
 
 import java.time.Instant
 
-import kui.kafka.BatchResult
-import kui.kafka.admin as adm
+import kui.kafka.{admin as adm, BatchResult}
 import kui.kernel.{BrokerId, KafkaClusterId, PartitionId, TopicName}
 
 /** `libs/kafka` values shaped like a small, healthy, three-broker cluster.
   *
-  * Every field a real broker can leave out is present here in its *populated* form; the tests that care
-  * about absence build their own value from these by copying. That way a test named
-  * "no controller is representable" reads as the one difference from a normal cluster.
+  * Every field a real broker can leave out is present here in its *populated* form; the tests that care about
+  * absence build their own value from these by copying. That way a test named "no controller is
+  * representable" reads as the one difference from a normal cluster.
   */
 object KafkaFixtures {
 
@@ -50,7 +49,8 @@ object KafkaFixtures {
       isReadOnly = false,
       isDefault = false,
       documentation = Some("How long a log segment is kept"),
-      synonyms = List(adm.ConfigSynonym("log.retention.hours", Some("168"), adm.ConfigSource.StaticBrokerConfig))
+      synonyms =
+        List(adm.ConfigSynonym("log.retention.hours", Some("168"), adm.ConfigSource.StaticBrokerConfig))
     ),
     // Kafka sends `null` for the value of a sensitive setting; `None` is what that has to stay.
     adm.ConfigEntry(
@@ -85,7 +85,8 @@ object KafkaFixtures {
 
   val logDirs: BatchResult[BrokerId, List[adm.LogDir]] =
     BatchResult(
-      values = Map(BrokerId.unsafe(1) -> List(healthyDir, offlineDir), BrokerId.unsafe(2) -> List(healthyDir)),
+      values =
+        Map(BrokerId.unsafe(1) -> List(healthyDir, offlineDir), BrokerId.unsafe(2) -> List(healthyDir)),
       skipped = Map(BrokerId.unsafe(3) -> kui.kafka.SkipReason.NotAuthorized("no DESCRIBE on the cluster"))
     )
 

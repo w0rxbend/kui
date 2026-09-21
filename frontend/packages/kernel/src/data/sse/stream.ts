@@ -116,6 +116,14 @@ export interface SseSubscriber<A> {
    * care about progress should not have to handle it at all — hence optional.
    */
   readonly onPhase?: ((data: string) => void) | undefined;
+  /**
+   * Called with the terminal `done` frame's raw payload before the connection closes.
+   *
+   * The payload names why the server stopped (`limit`, `exhausted`, `budget`, or `cancelled`).
+   * Most streams only need the connection state and can omit this callback; consumers that offer
+   * continuation controls use it to distinguish a complete range from a safety-budget pause.
+   */
+  readonly onDone?: ((data: string) => void) | undefined;
 }
 
 /**
@@ -162,6 +170,18 @@ export interface EventSourceLike {
 
 const EVENT_SOURCE_CLOSED = 2;
 
+/**
+ * How long a stream may go without a byte before it is presumed wedged.
+ *
+ * The server sends a heartbeat every 15 idle seconds (`Sse.scala`'s `heartbeatInterval`) for the sole
+ * purpose of proving liveness. Neither transport enforced that on the browser side: a connection whose
+ * bytes simply stop arriving — a dropped network path, a middlebox that swallows packets without
+ * resetting the socket — never fires `error`, so `readyState`/the abort signal never change and the
+ * connection indicator was stuck on "open" forever, with no way out short of the user pressing Stop.
+ * Three times the interval, so one merely slow heartbeat is not mistaken for a dead connection.
+ */
+const HEARTBEAT_WATCHDOG_MS = 45_000;
+
 /** Subscribes to a `GET` stream through the browser's own `EventSource`. */
 export function openEventSource<A>(url: string, subscriber: SseSubscriber<A>): SseHandle {
   return openEventSourceWith(
@@ -189,16 +209,39 @@ export function openEventSourceWith<A>(
   // own attempt, and sharing a counter would make one of them report the other's history.
   let attempts = 0;
   let closed = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+
+  const clearWatchdog = (): void => {
+    if (watchdog !== undefined) {
+      clearTimeout(watchdog);
+      watchdog = undefined;
+    }
+  };
+
+  // Rearmed by every frame that proves the connection is still alive. If it ever fires, nothing has
+  // arrived for three heartbeat intervals, so the connection is presumed wedged rather than left to
+  // read "open" indefinitely.
+  const armWatchdog = (): void => {
+    clearWatchdog();
+    watchdog = setTimeout(() => {
+      subscriber.onError({ kind: "transport", cause: "stream went silent" });
+      closeWith("no heartbeat received");
+    }, HEARTBEAT_WATCHDOG_MS);
+  };
 
   const closeWith = (reason: string): void => {
     if (closed) return;
     closed = true;
+    clearWatchdog();
     source.close();
     setConnection({ phase: "closed", reason });
   };
 
   source.addEventListener("open", () => {
-    if (!closed) setConnection({ phase: "open" });
+    if (!closed) {
+      setConnection({ phase: "open" });
+      armWatchdog();
+    }
   });
 
   // `EventSource` reports both a transport failure and a server-sent event *named* `error` as a DOM
@@ -222,27 +265,38 @@ export function openEventSourceWith<A>(
     }
   });
 
-  source.addEventListener(SseEventNames.Done, () => {
-    closeWith("the stream finished");
+  source.addEventListener(SseEventNames.Done, (event: Event) => {
+    if (closed) return;
+    try {
+      subscriber.onDone?.(payloadOf(event) ?? "");
+    } finally {
+      closeWith("the stream finished");
+    }
   });
 
   // Forwarded raw: `phase` is shared, so it never goes through `decode`, which is keyed on the
   // caller's own event names. See `SseSubscriber.onPhase`.
   source.addEventListener(SseEventNames.Phase, (event: Event) => {
     if (closed) return;
+    armWatchdog();
     const payload = payloadOf(event);
     if (payload !== undefined) subscriber.onPhase?.(payload);
   });
 
   // Heartbeats are deliberately not forwarded: they carry `{}` and exist only to keep the
-  // connection from being reaped. They do prove it is alive, which is why one re-asserts `open`.
+  // connection from being reaped. They do prove it is alive, which is why one re-asserts `open`
+  // and rearms the watchdog above.
   source.addEventListener(SseEventNames.Heartbeat, () => {
-    if (!closed) setConnection({ phase: "open" });
+    if (!closed) {
+      setConnection({ phase: "open" });
+      armWatchdog();
+    }
   });
 
   for (const name of subscriber.events) {
     source.addEventListener(name, (event: Event) => {
       if (closed) return;
+      armWatchdog();
       const payload = payloadOf(event);
       if (payload === undefined) return;
       deliver(subscriber, name, payload);
@@ -350,6 +404,26 @@ export function openFetchStreamWith<A>(
   );
   let marker: string | undefined;
   let ended = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+
+  const clearWatchdog = (): void => {
+    if (watchdog !== undefined) {
+      clearTimeout(watchdog);
+      watchdog = undefined;
+    }
+  };
+
+  // Rearmed by every chunk the body delivers, heartbeats included. If it ever fires, nothing has
+  // arrived for three heartbeat intervals — the connection is presumed wedged rather than left to
+  // read "open" indefinitely, which is all `fetch`'s reader would otherwise ever tell us.
+  const armWatchdog = (): void => {
+    clearWatchdog();
+    watchdog = setTimeout(() => {
+      subscriber.onError({ kind: "transport", cause: "stream went silent" });
+      end("no heartbeat received");
+      transport.abort();
+    }, HEARTBEAT_WATCHDOG_MS);
+  };
 
   /**
    * Ends the stream, unless something already said why it ended — a `done` event or the client's own
@@ -358,6 +432,7 @@ export function openFetchStreamWith<A>(
   const end = (reason: string): void => {
     if (ended) return;
     ended = true;
+    clearWatchdog();
     setConnection({ phase: "closed", reason });
   };
 
@@ -377,7 +452,11 @@ export function openFetchStreamWith<A>(
         // recorded before the connection is closed, so a caller watching `connection` for the end
         // finds the marker already there rather than a tick later.
         marker = raw.id;
-        end("the stream finished");
+        try {
+          subscriber.onDone?.(raw.data);
+        } finally {
+          end("the stream finished");
+        }
         return;
       case SseEventNames.Error:
         subscriber.onError(serverError(raw.data));
@@ -392,9 +471,12 @@ export function openFetchStreamWith<A>(
   const accept = (response: StreamResponse): void => {
     if (ended) return;
     setConnection({ phase: "open" });
+    armWatchdog();
     let state: ParserState = EMPTY_PARSER_STATE;
     response.readChunks({
       onChunk: (chunk) => {
+        if (ended) return;
+        armWatchdog();
         const fed = feed(state, chunk);
         state = fed.state;
         for (const event of fed.events) handle(event);

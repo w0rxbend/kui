@@ -13,8 +13,8 @@ import kui.kernel.{BrokerId, ClusterId}
 /** A cluster admin port a suite can drive, and which remembers what it was asked.
   *
   * Two of its controls carry most of the suites above it. `delay` makes every method sleep before answering,
-  * which under virtual time is how "the dashboard never waits on a broker" becomes an assertion rather than
-  * a hope. `calls` records every invocation with the cluster it was for, which is how "the quorum was never
+  * which under virtual time is how "the dashboard never waits on a broker" becomes an assertion rather than a
+  * hope. `calls` records every invocation with the cluster it was for, which is how "the quorum was never
   * asked for" and "the deleted cluster's loop stopped" are assertions about behaviour rather than about
   * timing.
   */
@@ -44,6 +44,9 @@ final class FakeClusterAdmin[F[_]: Temporal] private (state: Ref[F, FakeClusterA
       brokers: NonEmptyList[BrokerId]
   ): F[Either[KuiError, PartialResult[BrokerId, List[LogDir]]]] =
     answer(profile, "describeLogDirs")(_.logDirs)
+
+  def sweepPartitions(profile: ClusterProfile): F[Either[KuiError, TopicSweep]] =
+    answer(profile, "sweepPartitions")(_.sweep)
 
   def capabilities(profile: ClusterProfile): F[ClusterFeatures] =
     record(profile, "capabilities", false) >> pause >> state.get.map(_.features)
@@ -95,6 +98,7 @@ object FakeClusterAdmin {
       quorum: Either[KuiError, Option[QuorumInfo]],
       configs: Map[BrokerId, Either[KuiError, List[ConfigEntry]]],
       logDirs: Either[KuiError, PartialResult[BrokerId, List[LogDir]]],
+      sweep: Either[KuiError, TopicSweep],
       features: ClusterFeatures,
       /** How long every method sleeps before answering. */
       delay: FiniteDuration,
@@ -116,6 +120,9 @@ object FakeClusterAdmin {
           quorum = Right(None),
           configs = Map.empty,
           logDirs = Right(PartialResult.empty[BrokerId, List[LogDir]]),
+          // A cluster with no topics, complete: the default has to be a *measured* nothing rather than a
+          // refusal, so that a suite about disks does not have to think about the partition sweep.
+          sweep = Right(TopicSweep.emptyCluster),
           features = features,
           delay = delay,
           calls = Nil,

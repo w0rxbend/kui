@@ -1,6 +1,7 @@
 package kui.gateway.application.capability
 
 import java.time.Instant
+
 import scala.concurrent.duration.{DurationInt, DurationLong, FiniteDuration}
 
 import org.scalacheck.{Arbitrary, Gen, Prop}
@@ -9,13 +10,13 @@ import kui.contracts.capability.{CapabilityState, ClusterCapability, DegradedRea
 import kui.http.upstream.CircuitState
 import kui.testkit.KuiSuite
 
-/** The executable specification of KU-001: "a broken part of KUI never breaks the rest, and the user is
-  * told which part and why".
+/** The executable specification of KU-001: "a broken part of KUI never breaks the rest, and the user is told
+  * which part and why".
   *
-  * Read this suite against ADR-039 line by line. Every row of the precedence table there is a test here,
-  * and a change to the product's behaviour has to appear in both. It is deliberately a table over a pure
-  * function rather than a set of scenarios over a running registry: scenarios prove that a path works,
-  * tables prove that every combination was considered.
+  * Read this suite against ADR-039 line by line. Every row of the precedence table there is a test here, and
+  * a change to the product's behaviour has to appear in both. It is deliberately a table over a pure function
+  * rather than a set of scenarios over a running registry: scenarios prove that a path works, tables prove
+  * that every combination was considered.
   */
 final class CapabilityFoldSuite extends KuiSuite {
 
@@ -64,8 +65,35 @@ final class CapabilityFoldSuite extends KuiSuite {
       ),
       (
         "not configured outranks an open circuit",
-        inputs(circuit = Some(CircuitState.Open), serviceReport = Some(report(configured = false, "available"))),
+        inputs(
+          circuit = Some(CircuitState.Open),
+          serviceReport = Some(report(configured = false, "available"))
+        ),
         _ == CapabilityState.NotConfigured
+      ),
+      (
+        // W13-A1: `readinessFailure.orElse(circuitFailure)` is an ordering nothing drove. Swapping the two
+        // left all 803 cases in `services.gateway.application.test` green, because no row until now put a
+        // readiness failure and an open circuit together — and that pair is the ordinary shape of an
+        // outage, not an exotic one: the breaker opens *because* the service is failing, and the poll then
+        // fails too. The reason and the message an operator reads are the difference.
+        "a readiness failure outranks an open circuit, and keeps the check's own message",
+        inputs(readiness = Some(notReady), circuit = Some(CircuitState.Open)),
+        _ == CapabilityState.Unavailable(ReasonCode.UpstreamUnavailable, "connection refused", earlier)
+      ),
+      (
+        // W13-A1: `reportedDegraded` filters with `filterNot(_.status == Status.Available)` precisely so
+        // that a status this build has never heard of is carried through rather than dropped. Narrowing it
+        // to `filter(_.status == Status.Degraded)` left every case green: the generator above produces
+        // "something-from-a-newer-service" and only the purity and totality properties ever looked at it.
+        "a status this build has never heard of is degraded-unknown rather than available",
+        inputs(serviceReport = Some(report(configured = true, "something-from-a-newer-service"))),
+        {
+          case CapabilityState.Degraded(reason) =>
+            reason.code == ReasonCode.Unknown &&
+            reason.message == "the service reports itself something-from-a-newer-service"
+          case _ => false
+        }
       ),
       (
         "a service that reports itself degraded is degraded",
@@ -136,7 +164,12 @@ final class CapabilityFoldSuite extends KuiSuite {
     // life nothing has been polled, and showing every feature as broken would train operators to ignore
     // the one signal that is supposed to mean something.
     val folded = CapabilityFold.fold(None, CapabilityInputs.unknown, now)
-    assertEquals(folded, CapabilityState.Degraded(DegradedReason(ReasonCode.Starting, "waiting for the first readiness check", None, None)))
+    assertEquals(
+      folded,
+      CapabilityState.Degraded(
+        DegradedReason(ReasonCode.Starting, "waiting for the first readiness check", None, None)
+      )
+    )
   }
 
   test("aServiceWithNoInputsAtAllIsStartingRatherThanAvailable") {
@@ -159,6 +192,19 @@ final class CapabilityFoldSuite extends KuiSuite {
     }
   }
 
+  test("theSuggestedPollIntervalIsTwiceTheP95AndNotMerelyAtLeastIt") {
+    // W13-A1: the case above asserts `>= 3000`, which `PollIntervalFactor = 1` satisfies — and setting the
+    // factor to 1 left all 803 cases green. The factor is not decoration: at exactly the p95 the browser
+    // asks again just as half the distribution is still unanswered, which is the overload the doubling
+    // exists to avoid. The figure is asserted rather than the inequality.
+    CapabilityFold.fold(None, inputs(p95 = Some(3.seconds)), now) match {
+      case CapabilityState.Degraded(reason) =>
+        assertEquals(reason.p95Ms, Some(3000L))
+        assertEquals(reason.suggestedPollIntervalMs, Some(6000L))
+      case other => fail(s"expected degraded, got $other")
+    }
+  }
+
   test("aBusinessErrorHasNoWayToReachTheFold") {
     // ADR-039 §6, asserted structurally rather than behaviourally: `CapabilityInputs` has four fields and
     // none of them can carry a proxied 404. A user typing a topic name that does not exist therefore
@@ -172,11 +218,13 @@ final class CapabilityFoldSuite extends KuiSuite {
   private given Arbitrary[CapabilityInputs] = Arbitrary(
     for {
       readiness <- Gen.option(
-        Gen.oneOf(
-          Gen.const(ReadinessSignal.Ready),
-          Gen.const(ReadinessSignal.Unknown),
-          Gen.const(notReady)
-        ).flatMap(identity)
+        Gen
+          .oneOf(
+            Gen.const(ReadinessSignal.Ready),
+            Gen.const(ReadinessSignal.Unknown),
+            Gen.const(notReady)
+          )
+          .flatMap(identity)
       )
       circuit <- Gen.option(Gen.oneOf(CircuitState.values.toList))
       status <- Gen.oneOf("available", "degraded", "unavailable", "something-from-a-newer-service")

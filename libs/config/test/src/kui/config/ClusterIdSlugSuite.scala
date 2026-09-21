@@ -51,7 +51,8 @@ final class ClusterIdSlugSuite extends KuiSuite {
   }
 
   property("everyDerivedIdIsAValidClusterId") {
-    val names = Gen.nonEmptyListOf(Gen.oneOf(Gen.alphaNumChar, Gen.const(' '), Gen.oneOf('-', '_', '/', '.', 'é')))
+    val names =
+      Gen.nonEmptyListOf(Gen.oneOf(Gen.alphaNumChar, Gen.const(' '), Gen.oneOf('-', '_', '/', '.', 'é')))
 
     Prop.forAll(names.map(_.mkString)) { name =>
       ClusterConfig.slug(name) match {

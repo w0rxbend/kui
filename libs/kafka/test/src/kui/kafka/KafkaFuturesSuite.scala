@@ -12,9 +12,9 @@ import kui.testkit.KuiIOSuite
 
 /** The bridge, checked against the two things that actually go wrong.
   *
-  * A `KafkaFuture` reports failures wrapped, so a mapper that matches on the thrown type matches
-  * the wrapper. And every completion callback runs on the admin client's single network thread, so
-  * a continuation that runs there stalls every other in-flight request on that connection.
+  * A `KafkaFuture` reports failures wrapped, so a mapper that matches on the thrown type matches the wrapper.
+  * And every completion callback runs on the admin client's single network thread, so a continuation that
+  * runs there stalls every other in-flight request on that connection.
   */
 final class KafkaFuturesSuite extends KuiIOSuite {
 

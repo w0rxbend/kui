@@ -1,34 +1,50 @@
 /**
- * The four preferences an operator sets once, and the build they are looking at.
+ * Preferences an operator sets once, and the build they are looking at.
  *
- * ## Why this page reads nothing from any service
+ * ## Why the controls arrive as props
  *
- * It is one of two screens that has to keep working when everything behind KUI is down. Every value
- * on it is either a browser preference or a build string the shell already holds, so a gateway that
- * has stopped answering takes nothing away from it. Adding a server call here would remove the page
- * at exactly the moment somebody is on it trying to work out what has happened.
- *
- * ## Why the preferences arrive as props
- *
- * The preference objects in the kernel are module-level singletons backed by `localStorage`, which
- * is right for the application and wrong for a test: a suite that drove them would share state with
- * the next suite and would need a working browser storage. So the page is handed them, and the shell
- * is the one place that hands it the real ones. That is what makes it possible to assert "changing
- * this control writes to this preference and to nothing else".
+ * The shell owns immediate browser state plus durable principal-and-cluster synchronization. The
+ * page only renders the preferences it is handed, so it stays usable while the gateway is down and
+ * tests can drive it without sharing storage. A failed save is reported inline while the locally
+ * cached choice keeps working.
  *
  * ## Every control takes effect immediately
  *
- * There is no Save. These are four attributes on the `<html>` element and each is written the moment
- * it is chosen, so the page you are changing is the demonstration of the change. A Save button would
- * imply a round trip that does not exist and a state — chosen but not applied — that cannot occur.
+ * There is no Save. Appearance paints immediately and message defaults affect the next browse;
+ * persistence follows in the background. A Save button would create an unnecessary chosen-but-not-
+ * applied state.
+ *
+ * ## Why there is no timezone and no refresh rate
+ *
+ * Both are on the settings screens of every product this one is compared to, and both are absent
+ * here on purpose: nothing in KUI reads either preference. A control that writes a value no code
+ * consults is worse than a missing control, because it answers the operator's question — "can I
+ * change this?" — with a yes that is false, and the timestamps go on being rendered in the browser's
+ * own zone while the setting says otherwise. `docs/FEATURE_MATRIX.md` records the absence as an
+ * absence rather than as a gap. They arrive with the code that reads them.
  */
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Card, Select } from "@kui/kernel";
-import type { AccentChoice, DensityChoice, RootPreference, ThemeChoice } from "@kui/kernel";
+import type {
+  AccentChoice,
+  DensityChoice,
+  MessageViewMode,
+  RootPreference,
+  ThemeChoice,
+} from "@kui/kernel";
+import type { AppearanceSyncStatus } from "../data/appearance.js";
+import type { MessageBrowserSyncStatus } from "../data/messageBrowser.js";
+
+import {
+  ACCENT_OPTIONS,
+  DENSITY_OPTIONS,
+  THEME_OPTIONS,
+  appearanceHelp,
+} from "../chrome/appearance.js";
 
 /** One preference, as this page needs it: what it is now, and how to change it. */
-export interface Preference<A extends string> {
+export interface Preference<A extends string | number> {
   readonly choice: () => A;
   readonly select: (chosen: A) => void;
 }
@@ -37,31 +53,17 @@ export interface SettingsPageProps {
   readonly theme: Preference<ThemeChoice>;
   readonly accent: Preference<AccentChoice>;
   readonly density: Preference<DensityChoice>;
+  readonly messagePageSize: Preference<number>;
+  readonly messageViewMode: Preference<MessageViewMode>;
+  /** Whether the current cluster's choices have reached durable server storage. */
+  readonly persistence?: AppearanceSyncStatus | undefined;
+  /** Whether message browsing defaults have reached durable server storage. */
+  readonly messagePersistence?: MessageBrowserSyncStatus | undefined;
   /** The build, for a bug report. `undefined` when the shell was not told. */
   readonly version?: string | undefined;
   /** Which gateway this browser is talking to, for the same reason. */
   readonly apiBase?: string | undefined;
 }
-
-const THEMES: readonly { readonly value: ThemeChoice; readonly label: string }[] = [
-  // `auto` first, because it is the default and the one that is right for most people: a laptop
-  // switching to dark at sunset re-themes an open tab without anybody choosing anything.
-  { value: "auto", label: "Match the system" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-];
-
-const ACCENTS: readonly { readonly value: AccentChoice; readonly label: string }[] = [
-  { value: "blue", label: "Blue" },
-  { value: "teal", label: "Teal" },
-  { value: "green", label: "Green" },
-  { value: "amber", label: "Amber" },
-];
-
-const DENSITIES: readonly { readonly value: DensityChoice; readonly label: string }[] = [
-  { value: "comfortable", label: "Comfortable" },
-  { value: "compact", label: "Compact" },
-];
 
 export function SettingsPage(props: SettingsPageProps): JSX.Element {
   return (
@@ -73,35 +75,72 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
           <Select
             label="Theme"
             value={props.theme.choice()}
-            options={THEMES}
+            options={THEME_OPTIONS}
             onChange={(value) => props.theme.select(value as ThemeChoice)}
           />
-          {/* `Select` carries no help text of its own, so the explanation is a sibling. It is worth
-              the line: "auto" is the default and nobody guesses that it keeps following the system
-              rather than resolving once at load. */}
-          <p class="kui-settings__help">
-            Match the system follows the operating system, including when it changes at sunset.
-          </p>
+          {/* `Select` carries no help text of its own, so the explanation is a sibling — and it
+              comes out of the shared table rather than being written here. This page used to spell
+              the sentence itself, and its option "Match the system" while the popover's said
+              "Auto": one preference with two names, which an operator can only reconcile by
+              changing one control and watching the other. */}
+          <Help of={appearanceHelp(THEME_OPTIONS)} />
           <Select
             label="Accent"
             value={props.accent.choice()}
-            options={ACCENTS}
+            options={ACCENT_OPTIONS}
             onChange={(value) => props.accent.select(value as AccentChoice)}
           />
-          {/* Not "colour scheme": the accent is one hue used for selection and primary actions, and
-              it does not change whether the interface is light or dark. */}
-          <p class="kui-settings__help">
-            The colour used for the selected item and the primary action.
-          </p>
+          {/* The sentence is "the colour used for the selected item and the primary action" and not
+              "colour scheme": the accent is one hue for selection and primary actions, and it does
+              not change whether the interface is light or dark. */}
+          <Help of={appearanceHelp(ACCENT_OPTIONS)} />
           <Select
             label="Density"
             value={props.density.choice()}
-            options={DENSITIES}
+            options={DENSITY_OPTIONS}
             onChange={(value) => props.density.select(value as DensityChoice)}
           />
+          <Help of={appearanceHelp(DENSITY_OPTIONS)} />
+          <Show when={props.persistence}>
+            {(persistence) => <PersistenceStatus status={persistence()} subject="appearance" />}
+          </Show>
+        </div>
+      </Card>
+
+      <Card title="Message browsing">
+        <div class="kui-settings__fields">
+          <Select
+            label="Default page size"
+            value={String(props.messagePageSize.choice())}
+            options={[
+              { value: "25", label: "25 records" },
+              { value: "50", label: "50 records" },
+              { value: "100", label: "100 records" },
+              { value: "250", label: "250 records" },
+              { value: "500", label: "500 records" },
+            ]}
+            onChange={(value) => props.messagePageSize.select(Number(value))}
+          />
           <p class="kui-settings__help">
-            Compact fits more rows on screen by tightening the tables, and changes nothing else.
+            Used when a message URL does not include its own <code>limit</code>.
           </p>
+          <Select
+            label="Default mode"
+            value={props.messageViewMode.choice()}
+            options={[
+              { value: "pages", label: "Pages" },
+              { value: "infinite", label: "Infinite scroll" },
+            ]}
+            onChange={(value) => props.messageViewMode.select(value as MessageViewMode)}
+          />
+          <p class="kui-settings__help">
+            Pages keep one offset range visible; infinite scroll preloads the next range near the end.
+          </p>
+          <Show when={props.messagePersistence}>
+            {(persistence) => (
+              <PersistenceStatus status={persistence()} subject="message browsing defaults" />
+            )}
+          </Show>
         </div>
       </Card>
 
@@ -132,6 +171,50 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
         </dl>
       </Card>
     </div>
+  );
+}
+
+function PersistenceStatus(props: {
+  readonly status: AppearanceSyncStatus | MessageBrowserSyncStatus;
+  readonly subject: string;
+}): JSX.Element {
+  const copy = (): string => {
+    switch (props.status.kind) {
+      case "idle":
+        return `Choose a cluster to sync ${props.subject}.`;
+      case "loading":
+        return `Loading this cluster's saved ${props.subject}…`;
+      case "saving":
+        return `Saving ${props.subject}…`;
+      case "saved":
+        return "Saved for this cluster.";
+      case "local-only":
+        return props.status.message;
+    }
+  };
+
+  return (
+    <p
+      class="kui-settings__persistence"
+      data-state={props.status.kind}
+      role={props.status.kind === "local-only" ? "alert" : "status"}
+      aria-live="polite"
+    >
+      {copy()}
+    </p>
+  );
+}
+
+/**
+ * The sentence under a control, drawn only when the vocabulary carries one.
+ *
+ * `Show` rather than an empty paragraph, because `.kui-settings__help` has margins: an element with
+ * no text still moves the control below it, and a preference whose options all explain themselves
+ * would open a gap that reads as a missing line.
+ */
+function Help(props: { readonly of: string | undefined }): JSX.Element {
+  return (
+    <Show when={props.of}>{(help) => <p class="kui-settings__help">{help()}</p>}</Show>
   );
 }
 

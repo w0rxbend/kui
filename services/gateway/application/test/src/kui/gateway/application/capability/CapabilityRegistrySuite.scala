@@ -1,6 +1,7 @@
 package kui.gateway.application.capability
 
 import java.time.Instant
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
@@ -17,8 +18,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 /** That the registry's concurrency behaves, given that the fold already decides correctly.
   *
   * Everything here is about timing, ordering and isolation, and all of it runs on `TestControl`'s virtual
-  * clock: a suite that asserts a ten-second debounce by sleeping for ten seconds is both slow and flaky,
-  * and the flakiness lands on the one component that must never be flaky.
+  * clock: a suite that asserts a ten-second debounce by sleeping for ten seconds is both slow and flaky, and
+  * the flakiness lands on the one component that must never be flaky.
   */
 final class CapabilityRegistrySuite extends CatsEffectSuite {
 
@@ -30,7 +31,10 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
 
   private def registry(config: RegistryConfig = RegistryConfig.Default) =
     for {
-      logger <- fs2.Stream.resource(cats.effect.kernel.Resource.eval(FakeStructuredLogger[IO])).compile.lastOrError
+      logger <- fs2.Stream
+        .resource(cats.effect.kernel.Resource.eval(FakeStructuredLogger[IO]))
+        .compile
+        .lastOrError
       resource = CapabilityRegistry.resource[IO](config, Telemetry.noop[IO], logger)
     } yield (resource, logger)
 
@@ -139,9 +143,11 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
     }
 
     TestControl.executeEmbed(program).map { changes =>
-      val outages = changes.collect { case CapabilityChange(entry, _) =>
-        entry.state
-      }.collect { case unavailable @ CapabilityState.Unavailable(_, _, _) => unavailable }
+      val outages = changes
+        .collect { case CapabilityChange(entry, _) =>
+          entry.state
+        }
+        .collect { case unavailable @ CapabilityState.Unavailable(_, _, _) => unavailable }
 
       outages.headOption match {
         case None => fail(s"the outage was never published: $changes")
@@ -362,25 +368,25 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
       key <- services
     } yield (key, statuses((round + services.indexOf(key)) % statuses.size))
 
-    val program = registry(RegistryConfig.Default.copy(debounce = 1.millisecond)).flatMap {
-      (resource, _) =>
-        resource.use { registry =>
-          for {
-            seen <- Ref.of[IO, Vector[CapabilityChange]](Vector.empty)
-            initial <- registry.snapshot
-            reader <- registry.changes.evalMap(change => seen.update(_ :+ change)).compile.drain.start
-            _ <- IO.sleep(1.second)
-            _ <- reports.traverse_((key, state) => registry.report(key, state) *> IO.sleep(10.milliseconds))
-            _ <- IO.sleep(1.second)
-            deltas <- seen.get
-            snapshot <- registry.snapshot
-            _ <- reader.cancel
-          } yield (initial, deltas.toList, snapshot)
-        }
+    val program = registry(RegistryConfig.Default.copy(debounce = 1.millisecond)).flatMap { (resource, _) =>
+      resource.use { registry =>
+        for {
+          seen <- Ref.of[IO, Vector[CapabilityChange]](Vector.empty)
+          initial <- registry.snapshot
+          reader <- registry.changes.evalMap(change => seen.update(_ :+ change)).compile.drain.start
+          _ <- IO.sleep(1.second)
+          _ <- reports.traverse_((key, state) => registry.report(key, state) *> IO.sleep(10.milliseconds))
+          _ <- IO.sleep(1.second)
+          deltas <- seen.get
+          snapshot <- registry.snapshot
+          _ <- reader.cancel
+        } yield (initial, deltas.toList, snapshot)
+      }
     }
 
     TestControl.executeEmbed(program).map { (initial, deltas, snapshot) =>
-      val replayed = deltas.foldLeft(initial)((acc, change) => acc.updated(change.entry.key, change.entry.state))
+      val replayed =
+        deltas.foldLeft(initial)((acc, change) => acc.updated(change.entry.key, change.entry.state))
       assertEquals(replayed, snapshot)
     }
   }

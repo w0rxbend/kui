@@ -7,9 +7,9 @@ import munit.FunSuite
 
 /** That every golden constant is exactly the file committed beside it.
   *
-  * The constants exist because a Scala.js suite cannot read a file (`GoldenDocuments` explains why),
-  * and a duplicated contract is only safe if something checks the copies against each other. This is
-  * that check, and it is JVM-only because it is the half that touches a filesystem.
+  * The constants exist because a Scala.js suite cannot read a file (`GoldenDocuments` explains why), and a
+  * duplicated contract is only safe if something checks the copies against each other. This is that check,
+  * and it is JVM-only because it is the half that touches a filesystem.
   */
 final class GoldenFilesSuite extends FunSuite {
 

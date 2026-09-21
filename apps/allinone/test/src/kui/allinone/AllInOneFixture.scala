@@ -8,8 +8,7 @@ import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServer, ClusterServiceConfig, ClusterWiring}
-import kui.config.ServerConfig
-import kui.config.UpstreamServiceConfig
+import kui.config.{ServerConfig, UpstreamServiceConfig}
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.KuiServer
@@ -20,11 +19,11 @@ import kui.testkit.fakes.FakeStructuredLogger
 
 /** The cluster service, reachable both ways at once.
   *
-  * Every suite in this module needs the same two things: the service wired exactly as
-  * `services/cluster/app` wires it, and a way to call it that is either a socket or a function call. Building
-  * both from the *same* `ClusterServer` value is what makes `InProcessServiceClientSuite`'s central
-  * assertion meaningful — the two clients are not talking to two similar services, they are talking to one
-  * service through two transports, so any difference in the answer can only have come from the transport.
+  * Every suite in this module needs the same two things: the service wired exactly as `services/cluster/app`
+  * wires it, and a way to call it that is either a socket or a function call. Building both from the *same*
+  * `ClusterServer` value is what makes `InProcessServiceClientSuite`'s central assertion meaningful — the two
+  * clients are not talking to two similar services, they are talking to one service through two transports,
+  * so any difference in the answer can only have come from the transport.
   */
 object AllInOneFixture {
 

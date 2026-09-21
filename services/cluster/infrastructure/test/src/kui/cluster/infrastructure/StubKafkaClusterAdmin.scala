@@ -4,8 +4,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import cats.effect.{IO, Ref, Temporal}
 
-import kui.kafka.BatchResult
-import kui.kafka.admin as adm
+import kui.kafka.{admin as adm, BatchResult}
 import kui.kernel.BrokerId
 import kui.kernel.cluster.ClusterConnection
 import kui.kernel.error.KuiError

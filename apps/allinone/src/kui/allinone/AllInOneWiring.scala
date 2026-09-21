@@ -8,17 +8,23 @@ import cats.syntax.all.*
 import fs2.io.file.Files
 import org.typelevel.log4cats.StructuredLogger
 
+import kui.alerts.api.AlertsApi
+import kui.alerts.app.AlertsWiring
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
 import kui.config.{
+  AlertsConfig,
   AuthConfig,
   ClusterConfig,
   ConsumersConfig,
+  MetricsConfig,
   StoreConfig,
   StreamingConfig,
   TopicsConfig,
   UrlPolicy
 }
+import kui.connect.api.ConnectApi
+import kui.connect.app.ConnectWiring
 import kui.consumer.api.ConsumerApi
 import kui.consumer.app.ConsumerWiring
 import kui.gateway.api.InfoRoutes
@@ -27,8 +33,12 @@ import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.identity.api.IdentityApi
 import kui.identity.app.IdentityWiring
 import kui.kernel.ServiceId
+import kui.ksql.api.KsqlApi
+import kui.ksql.app.KsqlWiring
 import kui.message.api.MessageApi
 import kui.message.app.MessageWiring
+import kui.metrics.api.MetricsApi
+import kui.metrics.app.MetricsWiring
 import kui.observability.Telemetry
 import kui.schema.api.SchemaApi
 import kui.schema.app.SchemaWiring
@@ -130,6 +140,8 @@ object AllInOneWiring {
         config.auth,
         config.rbac,
         config.store,
+        config.metrics,
+        config.alerts,
         telemetry,
         principals,
         logger
@@ -155,7 +167,18 @@ object AllInOneWiring {
     * `AllInOneWiringSuite` asserts that it does rather than leaving the two to drift.
     */
   val Services: List[ServiceId] =
-    List(ClusterApi.Id, ConsumerApi.Id, IdentityApi.Id, MessageApi.Id, SchemaApi.Id, TopicApi.Id)
+    List(
+      AlertsApi.Id,
+      ClusterApi.Id,
+      ConnectApi.Id,
+      ConsumerApi.Id,
+      IdentityApi.Id,
+      KsqlApi.Id,
+      MessageApi.Id,
+      MetricsApi.Id,
+      SchemaApi.Id,
+      TopicApi.Id
+    )
 
   /** Every KUI service, wired in this process and reachable in memory.
     *
@@ -173,6 +196,20 @@ object AllInOneWiring {
       auth: AuthConfig,
       rbac: RbacPolicy,
       store: StoreConfig,
+      // Passed rather than defaulted. It used to carry `MetricsConfig.Default` because `AllInOneConfig`
+      // had no field to pass, which made the all-in-one deployment answer as though the operator had
+      // configured nothing — the same status as a real source with no collector behind it, and a
+      // different *reason*, which is the only thing separating "you configured nothing" from "we cannot
+      // measure what you configured". Nothing observable differed while no collector existed; the reason
+      // did, and a reason is what an operator reads.
+      metrics: MetricsConfig,
+      // Passed for the reason `metrics` above is passed, and the reason is worth repeating because the
+      // defect it prevents is silent in a different way. A dropped `kui.metrics` makes a configured
+      // deployment answer as though nothing were configured, which an operator eventually notices. A
+      // dropped `kui.alerts` changes no status anywhere: the feed answers `ok`, the rules run, and the
+      // thresholds are simply the defaults instead of the ones somebody wrote -- so a cluster tuned to
+      // tolerate a migration starts opening events again and nothing says why.
+      alerts: AlertsConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -246,6 +283,80 @@ object AllInOneWiring {
         principals,
         logger
       )
+      // The metrics service, which in every deployment there is today measures nothing: this build has
+      // no collector, so every cluster reports `not_configured` and the dashboard's metrics cards keep
+      // their written "not measured" sentence. It is wired anyway, for the reason the schema service is
+      // — "this deployment has no metrics source" is an answer the browser needs from a running service,
+      // and a service missing from the process reads instead as a service that is down.
+      metricsService <- MetricsWiring.make[F](clusters, metrics, telemetry, principals, logger)
+      // The alerts service, and the ninth. It reads the same `kui.clusters[]` the topic, consumer and
+      // message services read, for the same reason: this process is holding the list, and calling itself
+      // over a socket to read it would add a listener, a timeout and a failure mode to a lookup that
+      // cannot fail.
+      //
+      // It takes `rbac` because an acknowledgement is a mutation -- `AlertsAcknowledge` on
+      // `Resource.Alerts` -- and is refused on a read-only cluster. It takes no cursor key: an
+      // acknowledgement loses nothing, so it carries no ADR-045 plan token and there is nothing here to
+      // sign.
+      //
+      // And the line before it, which is the only thing in this process that can tell a tuned deployment
+      // from an untuned one. See `logAlertThresholds`.
+      _ <- Resource.eval(logAlertThresholds[F](logger, alerts))
+      alertsService <- AlertsWiring.make[F](
+        clusters,
+        alerts,
+        store,
+        rbac,
+        telemetry,
+        principals,
+        logger
+      )
+      // The connect service, and the tenth. It reads the same `kui.clusters[]` as the four services
+      // above -- the Connect workers' addresses are a per-cluster key, `kui.clusters.<n>.connect[]` --
+      // and it holds no Kafka client at all: every fact it reports comes from a worker's REST API.
+      //
+      // It takes `rbac` because pause, resume and restart are mutations on `Resource.Connect` and are
+      // refused on a read-only cluster. It takes no cursor key: none of the three loses anything the
+      // opposite button cannot undo, so none carries an ADR-045 plan token and there is nothing to sign.
+      //
+      // Its URL policy comes from the process environment, exactly as the schema service's does and for
+      // the same reason: a worker at `http://kafka-connect:8083` is the ordinary arrangement inside a
+      // Compose network, and a stricter policy here than the one that accepted the address would mean a
+      // worker KUI logged at startup and could never call.
+      connectService <- ConnectWiring.make[F](
+        clusters,
+        UrlPolicy.fromEnv(schemaEnvironment),
+        rbac,
+        telemetry,
+        principals,
+        logger
+      )
+      // The ksql service, and the eleventh. It reads the same `kui.clusters[]` as the five services
+      // above -- a ksqlDB address is the per-cluster key `kui.clusters.<n>.ksql` -- and, like the
+      // connect service, it holds no Kafka client at all: every fact it reports comes from a ksqlDB
+      // server's REST API.
+      //
+      // Its URL policy comes from the process environment, for the reason the schema and connect
+      // services' does: a server at `http://ksqldb-server:8088` is the ordinary arrangement inside a
+      // Compose network, and a stricter policy here than the one that accepted the address would mean
+      // a server KUI logged at startup and could never call.
+      //
+      // IT IS THE ONLY OPTIONAL SERVICE IN THIS PROCESS THAT TAKES THE CURSOR KEY. A statement that
+      // drops a stream, a table or a topic loses data that no opposite button restores, so it is an
+      // ADR-045 plan->token->confirm mutation and `streaming.cursorKey` is what signs the token --
+      // the same key ADR-026 already made an operator configure for the browse cursor, so a
+      // deployment configures one secret rather than two. `KsqlWiring` decides what to do when the
+      // key is absent and says so in its own start-up line; this file's job is only to hand it the
+      // one the operator configured rather than a default of its own.
+      ksqlService <- KsqlWiring.make[F](
+        clusters,
+        UrlPolicy.fromEnv(schemaEnvironment),
+        rbac,
+        streaming.cursorKey,
+        telemetry,
+        principals,
+        logger
+      )
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](
@@ -283,9 +394,76 @@ object AllInOneWiring {
           identityService.routes,
           identityService.interceptors,
           principals
+        ),
+        InProcessServiceClient.make[F](
+          MetricsApi.Id,
+          metricsService.routes,
+          metricsService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          AlertsApi.Id,
+          alertsService.routes,
+          alertsService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          ConnectApi.Id,
+          connectService.routes,
+          connectService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          KsqlApi.Id,
+          ksqlService.routes,
+          ksqlService.interceptors,
+          principals
         )
       )
     )
+
+  /** The numbers the alert rules in this process will actually compare against.
+    *
+    * IT EXISTS BECAUSE THE SEAM ABOVE IT COULD NOT FAIL. Until this line, replacing `config.alerts` with
+    * `AlertsConfig.Default` in [[resource]]'s call to [[services]] left `./mill apps.allinone.test` entirely
+    * green -- an operator's tuned thresholds silently swapped for the shipped ones, with nothing observable
+    * anywhere. It is the same defect `kui.metrics` had and it fails more quietly: a dropped `kui.metrics`
+    * makes a configured deployment answer `not_configured`, which somebody eventually argues with, while a
+    * dropped `kui.alerts` changes no status at all. The feed answers `ok`, the rules run, and a cluster
+    * deliberately tuned to tolerate a migration starts opening events again with nothing saying why.
+    *
+    * `MetricsWiring` writes the equivalent line inside the metrics service; this one is written here rather
+    * than inside `AlertsWiring`, because the seam that needed gating is the argument [[resource]] passes to
+    * [[services]] and this file is where that argument is chosen. It is produced from the `alerts` parameter
+    * [[services]] actually received, so a caller that handed it the defaults cannot produce the tuned line —
+    * which is exactly what makes the mutation visible.
+    *
+    * INFO and not WARN: nothing is wrong with either answer. `source` is what an operator reads -- it says
+    * whether these five numbers came out of their YAML or out of the jar.
+    */
+  def logAlertThresholds[F[_]](
+      logger: StructuredLogger[F],
+      alerts: AlertsConfig
+  ): F[Unit] = {
+    val tuned = alerts != AlertsConfig.Default
+    val thresholds = alerts.thresholds
+
+    logger.info(
+      Map(
+        "alerts.source" -> (if tuned then "kui.alerts" else "shipped defaults"),
+        "alerts.retention" -> alerts.retention.toString,
+        "alerts.evaluationInterval" -> alerts.evaluationInterval.toString,
+        "alerts.offlinePartitions" -> thresholds.offlinePartitions.toString,
+        "alerts.underReplicatedPartitions" -> thresholds.underReplicatedPartitions.toString,
+        "alerts.rebalanceDuration" -> thresholds.rebalanceDuration.toString,
+        "alerts.diskUsedWarningPercent" -> thresholds.diskUsedWarningPercent.toString,
+        "alerts.diskUsedCriticalPercent" -> thresholds.diskUsedCriticalPercent.toString
+      )
+    )(
+      if tuned then "alert thresholds taken from kui.alerts"
+      else "no kui.alerts section; the alert rules use the shipped default thresholds"
+    )
+  }
 
   /** Says out loud which configured keys this deployment shape is not going to act on.
     *

@@ -19,8 +19,9 @@ final class DeserializersSuite extends KuiSuite {
   private val topic: TopicName = TopicName.unsafe("orders")
   private val name: SerdeName = SerdeName.unsafe("Boom")
 
-  private def deserializer(run: (List[RawHeader], Array[Byte]) => IO[Either[DeserializeFailure, DeserializeResult]])
-      : Deserializer[IO] =
+  private def deserializer(
+      run: (List[RawHeader], Array[Byte]) => IO[Either[DeserializeFailure, DeserializeResult]]
+  ): Deserializer[IO] =
     new Deserializer[IO] {
       val serde: SerdeName = name
       def deserialize(
@@ -73,7 +74,9 @@ final class DeserializersSuite extends KuiSuite {
 
   test("withFallback returns both the fallback's text and the failure that caused it") {
     val (result, failure) =
-      fallback.flatMap(f => Deserializers.withFallback(raises, f, Nil, Some("hello".getBytes))).unsafeRunSync()
+      fallback
+        .flatMap(f => Deserializers.withFallback(raises, f, Nil, Some("hello".getBytes)))
+        .unsafeRunSync()
     assertEquals(result.text, "hello")
     assertEquals(result.kind, PayloadKind.Text)
     assertEquals(failure, Some(DeserializeFailure(name, "the payload is truncated")))

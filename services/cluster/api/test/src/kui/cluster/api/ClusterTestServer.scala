@@ -7,17 +7,25 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.kernel.Resource
-import io.circe.parser.parse
 import io.circe.Json
+import io.circe.parser.parse
 import org.typelevel.otel4s.metrics.Counter
 import org.typelevel.otel4s.oteljava.testkit.OtelJavaTestkit
 import sttp.capabilities.fs2.Fs2Streams
+import sttp.client4.StreamBackend
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.StreamBackendStub
-import sttp.client4.StreamBackend
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
-import kui.cluster.application.{CapabilityReportUseCase, ClusterService}
+import kui.cluster.application.{
+  CapabilityReportUseCase,
+  ClusterService,
+  MessageBrowserSettings,
+  UiAppearance,
+  UiSettingsStore,
+  UiSettingsUseCase
+}
+import kui.cluster.domain.ClusterProfile
 import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kernel.{ClusterId, RoleName, Secret, ServiceId, UserName}
 import kui.observability.Telemetry
@@ -116,6 +124,7 @@ object ClusterTestServer {
   def resource(
       configured: Boolean = true,
       available: Boolean = true,
+      profiles: List[ClusterProfile] = Nil,
       // What this service allows on its own account, independently of whatever the gateway decided. It
       // defaults to allowing everything so that a suite about clusters is about clusters; the suite that
       // is about the guard passes a real policy.
@@ -132,12 +141,28 @@ object ClusterTestServer {
           logger
         )
       } yield {
+        val registry = new ClusterFixtures.StubRegistry(profiles)
+        val uiSettings = new UiSettingsUseCase[IO](
+          registry,
+          new UiSettingsStore[IO] {
+            def get(cluster: ClusterId, principal: Principal) = IO.pure(Right(None))
+            def put(cluster: ClusterId, principal: Principal, appearance: UiAppearance) =
+              IO.pure(Right(appearance))
+            def getMessageBrowser(cluster: ClusterId, principal: Principal) = IO.pure(Right(None))
+            def putMessageBrowser(
+                cluster: ClusterId,
+                principal: Principal,
+                settings: MessageBrowserSettings
+            ) = IO.pure(Right(settings))
+          }
+        )
         val routes = ClusterApi.routes[IO](
-          new ClusterFixtures.StubRegistry(Nil),
+          registry,
           new ClusterFixtures.StubTopology(Nil),
           new ClusterFixtures.StubBrokers(),
           new ClusterFixtures.StubWrites(),
           new ClusterFixtures.StubProbe(),
+          uiSettings,
           capabilities(configured, available),
           Nil,
           codec,

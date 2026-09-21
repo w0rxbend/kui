@@ -6,8 +6,8 @@ import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, Clus
 
 /** Profiles for the suites in this module.
   *
-  * Built through `ClusterProfile.from` rather than by copying a case class, so that a domain rule which
-  * later refuses one of these values fails the tests here rather than being quietly bypassed by a test-only
+  * Built through `ClusterProfile.from` rather than by copying a case class, so that a domain rule which later
+  * refuses one of these values fails the tests here rather than being quietly bypassed by a test-only
   * constructor.
   */
 object TestProfiles {

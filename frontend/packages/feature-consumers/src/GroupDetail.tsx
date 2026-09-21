@@ -25,6 +25,7 @@
 import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import {
+  Banner,
   Button,
   Card,
   DataTable,
@@ -45,17 +46,37 @@ export interface GroupDetailProps {
   readonly group: Group;
   /** Where "Consumer groups" in the breadcrumb points. */
   readonly listHref: string;
+  /** Builds the topic destination used by assignment rows. */
+  readonly topicHref?: ((topic: string) => string) | undefined;
   /** Everything the offset-reset wizard needs except the topic list, which is read off the group. */
   readonly reset: Omit<ResetWizardProps, "topics">;
   /** Opens the delete confirmation. Absent when this user may not delete groups. */
   readonly onDelete?: (() => void) | undefined;
   /** Why deletion is not offered, when it is not. */
   readonly deleteRefusal?: string | undefined;
+  /**
+   * Opens the confirmation for forgetting this group's committed offsets on one topic.
+   *
+   * Named by topic and not by partition, because that is the shape of the endpoint behind it:
+   * `DELETE …/consumer-groups/{group}/offsets?topic=` removes the group's positions on one topic
+   * and nothing else. Absent when this user may not reset this group's offsets — the endpoint is
+   * authorized by `ConsumerGroupResetOffsets`, the same action the wizard needs.
+   */
+  readonly onForgetOffsets?: ((topic: string) => void) | undefined;
+  /** Why forgetting is not offered, when it is not. */
+  readonly forgetRefusal?: string | undefined;
+  /**
+   * The coordinator didn't answer in time, and what's on screen is the last snapshot KUI held.
+   * Absent means the figures below are fresh. The reason is the same sentence a stale `Section`
+   * carries elsewhere in the product — see `@kui/kernel`'s `Fetched` and `fromSection`.
+   */
+  readonly stale?: string | undefined;
 }
 
 export function GroupDetail(props: GroupDetailProps): JSX.Element {
   const chip = () => (props.group.state === null ? UNREADABLE_STATE_CHIP : stateChip(props.group.state));
   const topics = createMemo(() => subscriptions(props.group));
+  const assignmentColumns = createMemo(() => offsetColumns(props.topicHref));
 
   /**
    * A group with members cannot be deleted, and Kafka refuses it with a code an operator can act on
@@ -99,6 +120,10 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
         testId="consumer-group-head"
       />
 
+      <Show when={props.stale}>
+        {(reason) => <Banner tone="warning" message={reason()} testId="group-detail-stale" />}
+      </Show>
+
       <Facts group={props.group} />
 
       <Card title="Members" testId="group-members-card">
@@ -129,7 +154,7 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
       >
         <DataTable<PartitionOffset>
           caption={`Partition offsets and lag for ${props.group.groupId}`}
-          columns={OFFSET_COLUMNS}
+          columns={assignmentColumns()}
           rows={props.group.offsets}
           rowKey={(row) => `${row.topic}/${row.partition}`}
           testId="group-assignments-table"
@@ -144,8 +169,84 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
       </Card>
 
       <ResetWizard {...props.reset} topics={topics()} />
+
+      {/*
+        Forgetting one topic's offsets — a separate action from the wizard above it and from the
+        delete in the header, and it is per topic rather than a column of the assignments table.
+        The endpoint names a topic; that table's rows are partitions, so a per-row control would
+        offer a gesture the server cannot perform, and a single button would have to guess which of
+        the group's topics the operator meant.
+
+        Absent, rather than empty, for a group holding no offsets at all: there is nothing to
+        forget, and a heading over an empty list reads as a control that failed to load.
+      */}
+      <Show when={topics().length > 0}>
+        <section class="kui-cg-forget" data-testid="group-forget-offsets">
+          <h2 class="kui-cg-section__title">Forget this group's offsets on one topic</h2>
+          <p class="kui-cg-reset__note">
+            The group itself stays, every other topic it holds offsets on is untouched, and no
+            records are deleted. A consumer that comes back for this topic starts wherever its own
+            auto.offset.reset says, which for the default is the end of the log.
+          </p>
+          <ul class="kui-cg-forget__list">
+            <For each={topics()}>
+              {(held) => (
+                <li class="kui-cg-forget__row">
+                  <span class="kui-cg-mono kui-cg-forget__topic">{held.topic}</span>
+                  {/* The figure the receipt will be compared against, said before the click. */}
+                  <span class="kui-cg-forget__held">{describeHeld(held.partitions.length)}</span>
+                  <Show
+                    when={props.onForgetOffsets}
+                    fallback={
+                      <Button
+                        variant="secondary"
+                        icon="trash"
+                        disabled
+                        /* The fallback speaks about the cluster, not about this group, and the
+                           difference is not stylistic: the caller's sentence names the group and
+                           this one cannot, because a component handed no callback has not been
+                           told which permission is missing. Wording them identically made the two
+                           indistinguishable on screen, so the route's ternary could be deleted
+                           with every case still green — the same shape the delete control above
+                           already avoids. */
+                        disabledReason={
+                          props.forgetRefusal ??
+                          "You do not have permission to change committed offsets on this cluster."
+                        }
+                      >
+                        Forget offsets
+                      </Button>
+                    }
+                  >
+                    {(forget) => (
+                      <Button
+                        variant="secondary"
+                        icon="trash"
+                        onClick={() => forget()(held.topic)}
+                      >
+                        Forget offsets
+                      </Button>
+                    )}
+                  </Show>
+                </li>
+              )}
+            </For>
+          </ul>
+        </section>
+      </Show>
     </section>
   );
+}
+
+/**
+ * How many partitions this group holds a committed position on for one topic.
+ *
+ * Spelled out rather than left as a bare number beside a topic name: "3" next to
+ * `orders.v1` could as easily be a version, a replica count or a lag, and this figure is the one
+ * the receipt after the click is read against.
+ */
+function describeHeld(count: number): string {
+  return count === 1 ? "1 partition held" : `${formatCount(count)} partitions held`;
 }
 
 /**
@@ -295,50 +396,87 @@ export function memberColumns(members: readonly Member[]): readonly Column<Membe
   return MEMBER_COLUMNS.filter((column) => column.id !== "instance");
 }
 
-const OFFSET_COLUMNS: readonly Column<PartitionOffset>[] = [
-  { id: "topic", header: "Topic", render: (row) => <span class="kui-cg-mono">{row.topic}</span> },
-  { id: "partition", header: "Partition", align: "numeric", width: "7rem", render: (row) => formatCount(row.partition) },
-  {
-    id: "committed",
-    header: "Committed",
-    align: "numeric",
-    render: (row) =>
-      row.committed === null ? (
-        <span title="This group has never committed an offset on this partition.">{MISSING}</span>
-      ) : (
-        formatCount(row.committed)
-      ),
-  },
-  {
-    id: "end",
-    header: "End offset",
-    align: "numeric",
-    render: (row) =>
-      row.endOffset === null ? <span title="The partition's end offset could not be read.">{MISSING}</span> : formatCount(row.endOffset),
-  },
-  {
-    id: "lag",
-    header: "Lag",
-    align: "numeric",
-    width: "9rem",
-    render: (row) => {
-      const lag = partitionLag(row);
-      if (lag === null) {
-        return <span title="Lag needs both a committed offset and an end offset; one of them is missing.">{MISSING}</span>;
-      }
-      return <ThresholdValue value={formatCount(lag)} level={lagLevel(lag)} announcement={lagAnnouncement} />;
+function offsetColumns(
+  topicHref: ((topic: string) => string) | undefined,
+): readonly Column<PartitionOffset>[] {
+  return [
+    {
+      id: "topic",
+      header: "Topic",
+      render: (row) =>
+        topicHref === undefined ? (
+          <span class="kui-cg-mono">{row.topic}</span>
+        ) : (
+          <a class="kui-cg-name__link kui-cg-mono kui-cg-topic-link" href={topicHref(row.topic)}>
+            {row.topic}
+          </a>
+        ),
     },
-  },
-  {
-    id: "member",
-    header: "Held by",
-    render: (row) =>
-      row.memberId === null ? (
-        <span title="No member currently holds this partition.">{MISSING}</span>
-      ) : (
-        <span class="kui-cg-mono">{row.memberId}</span>
-      ),
-  },
-];
+    {
+      id: "partition",
+      header: "Partition",
+      align: "numeric",
+      width: "7rem",
+      render: (row) => formatCount(row.partition),
+    },
+    {
+      id: "committed",
+      header: "Committed",
+      align: "numeric",
+      render: (row) =>
+        row.committed === null ? (
+          <span title="This group has never committed an offset on this partition.">{MISSING}</span>
+        ) : (
+          formatCount(row.committed)
+        ),
+    },
+    {
+      id: "end",
+      header: "End offset",
+      align: "numeric",
+      render: (row) =>
+        row.endOffset === null ? (
+          <span title="The partition's end offset could not be read.">{MISSING}</span>
+        ) : (
+          formatCount(row.endOffset)
+        ),
+    },
+    {
+      id: "lag",
+      header: "Lag",
+      align: "numeric",
+      width: "9rem",
+      render: (row) => {
+        const lag = partitionLag(row);
+        if (lag === null) {
+          return (
+            <span title="Lag needs both a committed offset and an end offset; one of them is missing.">
+              {MISSING}
+            </span>
+          );
+        }
+        return (
+          <ThresholdValue
+            value={formatCount(lag)}
+            level={lagLevel(lag)}
+            announcement={lagAnnouncement}
+          />
+        );
+      },
+    },
+    {
+      id: "member",
+      header: "Held by",
+      render: (row) =>
+        row.memberId === null ? (
+          <span title="No member currently holds this partition.">{MISSING}</span>
+        ) : (
+          <span class="kui-cg-mono">{row.memberId}</span>
+        ),
+    },
+  ];
+}
+
+const OFFSET_COLUMNS: readonly Column<PartitionOffset>[] = offsetColumns(undefined);
 
 export { MEMBER_COLUMNS, OFFSET_COLUMNS };

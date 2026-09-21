@@ -9,12 +9,19 @@
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch --mode development",
-    "typecheck": "tsc --build --pretty false",
+    "typecheck": "tsc --build --pretty false && tsc --noEmit --pretty false -p e2e/tsconfig.json",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:messages": "playwright test e2e/messages.spec.ts",
+    "e2e:install": "playwright install chromium",
+    "capture:readme": "node --experimental-strip-types e2e/capture-readme.ts",
     "e2e:ui": "playwright test --ui",
     "storybook": "storybook dev -p 6006 --no-open",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "storybook:ci": "storybook build && npx --yes http-server storybook-static -p 6017 -s",
+    "a11y": "node scripts/a11y-stories.mjs",
+    "bundle-shape": "node scripts/bundle-shape.mjs",
+    "lint:boundaries": "node scripts/boundaries.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -40,5 +47,14 @@
     "@solidjs/router": "2.0.0-next.21",
     "@solidjs/web": "2.0.0-rc.6",
     "solid-js": "2.0.0-rc.6"
+  },
+  "kui": {
+    "pinnedPrereleaseDependencies": {
+      "_comment": "No stable solid-js 2.x line exists yet (checked npm 2026-09-17: solid-js/@solidjs/web latest is 2.0.0-rc.8, @solidjs/router latest is 2.0.0-next.24 - still no beta/rc cut). These pins are a deliberate, time-boxed exception, not an oversight: pre-release/next tags carry no stability or patch guarantees and can be republished or yanked without notice. Re-check upstream release notes each review cycle and move to the first stable 2.0.0 tag as soon as one ships (mirror the bump into every workspace package.json, not just this one).",
+      "solid-js": "2.0.0-rc.6",
+      "@solidjs/web": "2.0.0-rc.6",
+      "@solidjs/router": "2.0.0-next.21",
+      "reviewBy": "2026-12-31"
+    }
   }
 }

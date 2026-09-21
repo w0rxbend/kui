@@ -105,7 +105,15 @@ object TopicDetailUseCase {
         * its stale badge over exactly what KUI knows rather than inventing rows.
         */
       private def detailOf(row: TopicSummary): TopicDetail =
-        TopicDetail(summary = row, partitions = Nil, cleanupPolicy = None, segmentCount = None)
+        TopicDetail(
+          summary = row,
+          partitions = Nil,
+          // The scrape reads `cleanup.policy` in the same batch that builds the row, so the fallback page
+          // can show the header's tag. It is the row's own value and not a second read: a fallback that
+          // blanked a field the snapshot holds would tell an operator KUI does not know something it does.
+          cleanupPolicy = row.cleanupPolicy,
+          segmentCount = None
+        )
     }
 
   /** Whether a snapshot has anything worth falling back to.

@@ -63,7 +63,7 @@ final class HeaderDecodingSuite extends KuiSuite {
       val rendering = HeaderDecoding.render(name, Some(Array.fill(length)(0xff.toByte)))
       val isNumber = rendering match {
         case _: HeaderRendering.Number => true
-        case _                         => false
+        case _ => false
       }
       isNumber == (length == width)
     }

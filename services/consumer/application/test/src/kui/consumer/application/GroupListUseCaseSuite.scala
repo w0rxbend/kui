@@ -1,9 +1,10 @@
 package kui.consumer.application
 
+import munit.FunSuite
+
 import kui.consumer.domain.GroupSummary
 import kui.kernel.group.GroupState
 import kui.kernel.search.NameIndex
-import munit.FunSuite
 
 /** Filter, search, sort, page — the order, and the two orderings that are lies if they are got wrong. */
 final class GroupListUseCaseSuite extends FunSuite {
@@ -46,7 +47,8 @@ final class GroupListUseCaseSuite extends FunSuite {
   }
 
   test("a total counts what is left after filtering, not before it") {
-    val page = GroupListUseCase.applyQuery(rows, GroupQuery.Default.copy(states = Set(GroupState.Empty)), index)
+    val page =
+      GroupListUseCase.applyQuery(rows, GroupQuery.Default.copy(states = Set(GroupState.Empty)), index)
     assertEquals(page.totalItems, Some(1L))
   }
 
@@ -67,7 +69,11 @@ final class GroupListUseCaseSuite extends FunSuite {
 
   test("ties break on the group id in both directions, so paging is deterministic") {
     val tied = Vector(row("b", members = 1), row("a", members = 1), row("c", members = 1))
-    val ascending = GroupListUseCase.applyQuery(tied, GroupQuery.Default.copy(sort = GroupSortField.Members), NameIndex.of(Nil))
+    val ascending = GroupListUseCase.applyQuery(
+      tied,
+      GroupQuery.Default.copy(sort = GroupSortField.Members),
+      NameIndex.of(Nil)
+    )
     val descending = GroupListUseCase.applyQuery(
       tied,
       GroupQuery.Default.copy(sort = GroupSortField.Members, descending = true),

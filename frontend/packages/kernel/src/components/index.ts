@@ -17,6 +17,23 @@ export { Checkbox, type CheckboxProps } from "./Checkbox.jsx";
 export { StatusPill, type StatusPillProps, type PillTone } from "./StatusPill.jsx";
 export { IconTile, type IconTileProps, type TileTone } from "./IconTile.jsx";
 export { Avatar, initialsOf, type AvatarProps } from "./Avatar.jsx";
+/**
+ * The other initials tile, and it is a different rule rather than a variant of `Avatar`.
+ *
+ * `Avatar` abbreviates a *person's name* and takes the first letter of the first word and of the
+ * last, because a family name matters. `Monogram` abbreviates an *identifier* — a client id, a
+ * connector name — and reads it left to right, because the tail of `orders.payments.v2` is a
+ * version suffix and abbreviating four `orders.*` producers by it makes them all look alike. The
+ * colour is a hash into a decorative ramp that is deliberately not a token; the component says
+ * why (`SCREENS-V4.md` §0.2).
+ */
+export {
+  Monogram,
+  monogramIndex,
+  monogramInitials,
+  MONOGRAM_RAMP_LENGTH,
+  type MonogramProps,
+} from "./Monogram.jsx";
 export { Tooltip, type TooltipProps } from "./Tooltip.jsx";
 
 /**
@@ -101,6 +118,12 @@ export { createIsCompact, COMPACT_ROW_SAVING_PX } from "./density.js";
  */
 export { Card, type CardProps, type CardState } from "./Card.jsx";
 export { StatCard, type StatCardProps, type StatFigure, type StatPill } from "./StatCard.jsx";
+/**
+ * The pill that floats over a list once rows are selected. It is a surface rather than a control:
+ * it is placed by the screen, not by the table, precisely because the same selection is shown by
+ * two list treatments and must survive the switch between them.
+ */
+export { BulkActionBar, type BulkAction, type BulkActionBarProps } from "./BulkActionBar.jsx";
 export { StatTile, type StatTileProps, type TileFigure, type TileChip, type TileChipTone } from "./StatTile.jsx";
 export { StaleBadge, relativeAge, type StaleBadgeProps } from "./StaleBadge.jsx";
 export { Banner, type BannerProps, type BannerTone } from "./Banner.jsx";

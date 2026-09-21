@@ -6,9 +6,9 @@ import cats.effect.IO
 
 import kui.consumer.domain.GroupListingPage
 import kui.consumer.domain.fixtures.GroupFixtures
+import kui.kernel.GroupId
 import kui.kernel.error.InfrastructureError
 import kui.kernel.group.GroupState
-import kui.kernel.GroupId
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -140,7 +140,10 @@ final class GroupSnapshotsSuite extends KuiIOSuite {
     } yield {
       assertEquals(result.map(_.groupsOf(GroupFixtures.Orders).map(_.groupId)), Right(List(orders.groupId)))
       assertEquals(result.map(_.groupsOf(kui.kernel.TopicName.unsafe("other"))), Right(List.empty))
-      assertEquals(result.map(_.index.search("ord", kui.kernel.search.SearchMode.Plain)), Right(List("orders")))
+      assertEquals(
+        result.map(_.index.search("ord", kui.kernel.search.SearchMode.Plain)),
+        Right(List("orders"))
+      )
     }
   }
 

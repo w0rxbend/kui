@@ -12,9 +12,8 @@ import sttp.tapir.{AnyEndpoint, Endpoint, PublicEndpoint}
 
 import kui.cluster.contract.ClusterEndpoints
 import kui.cluster.contract.dto.*
-import kui.contracts.Section
 import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto}
-import kui.contracts.ErrorEnvelope
+import kui.contracts.{ErrorEnvelope, Section}
 import kui.gateway.api.GatewayTestServer
 import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig}
 import kui.gateway.application.client.{CallContext, ServiceClient}
@@ -38,7 +37,7 @@ final class ClusterRoutingSuite extends CatsEffectSuite {
   private val service = ServiceId.unsafe("cluster")
 
   /** What each proxied call was asked, and under which context. */
-  private final case class Recorded(context: CallContext, input: Any)
+  final private case class Recorded(context: CallContext, input: Any)
 
   private val at = java.time.Instant.parse("2026-09-03T10:11:12Z")
 
@@ -51,8 +50,8 @@ final class ClusterRoutingSuite extends CatsEffectSuite {
     summary = Section.NotConfigured
   )
 
-  /** What each endpoint answers with. Real response values, because the gateway encodes what it is given
-    * with the endpoint's own codec: a placeholder would fail to encode and every case would be a 500.
+  /** What each endpoint answers with. Real response values, because the gateway encodes what it is given with
+    * the endpoint's own codec: a placeholder would fail to encode and every case would be a 500.
     */
   private val answers: Map[String, Any] = Map(
     "cluster.list" -> ClustersResponse(Nil, at),

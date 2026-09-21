@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "JsonOrder",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "customer", "items", "total", "expedited", "shipping"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "customer": {"type": "string", "minLength": 1},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sku", "quantity"],
+        "properties": {
+          "sku": {"type": "string", "minLength": 1},
+          "quantity": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "total": {"type": "number", "minimum": 0},
+    "expedited": {"type": "boolean"},
+    "shipping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["city", "country"],
+      "properties": {
+        "city": {"type": "string", "minLength": 1},
+        "country": {"type": "string", "pattern": "^[A-Z]{2}$"}
+      }
+    }
+  }
+}

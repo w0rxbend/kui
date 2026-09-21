@@ -1,0 +1,10 @@
+{
+  "event" : "phase",
+  "data" : {
+    "columns" : [
+      "ID",
+      "TOTAL",
+      "NOTE"
+    ]
+  }
+}

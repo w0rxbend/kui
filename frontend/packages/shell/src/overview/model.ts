@@ -21,7 +21,21 @@
 
 import { formatCount } from "@kui/kernel";
 
-import { type Reading, mapReading, notCollected, readingValue, unknown, value } from "./reading.js";
+import {
+  INTERNAL_GROUP,
+  OTHER_GROUP,
+  isInternalTopic,
+  prefixes,
+  type PrefixGroup,
+} from "../nav/prefixes.js";
+import {
+  type Reading,
+  combineReadings,
+  mapReading,
+  readingValue,
+  unknown,
+  value,
+} from "./reading.js";
 
 /* --- The backend's shapes, as far as this screen reads them ----------------------------------- */
 
@@ -66,6 +80,29 @@ export interface LogDir {
   readonly error?: string | undefined;
   readonly totalBytes?: number | undefined;
   readonly usableBytes?: number | undefined;
+  /**
+   * The per-partition breakdown behind the directory's own totals — `LogDirDto.replicas`, which the
+   * cluster service already sorts biggest first.
+   *
+   * Optional because it is `getOrElse(Nil)` on the wire: a KUI older than the field sends none, and
+   * so does a directory that failed. That is what the storage card attributes disk by, and it is
+   * why the card can be blank on a cluster whose disk *percentages* are perfectly readable.
+   */
+  readonly replicas?: readonly LogDirReplica[] | undefined;
+}
+
+/**
+ * One replica's footprint inside one directory — `LogDirReplicaDto`, as far as the storage card
+ * reads it.
+ *
+ * `sizeBytes` is what this copy occupies on *this* broker's disk, so a three-way replicated
+ * partition counts once per broker and three times across the cluster. That is the right arithmetic
+ * for a per-broker breakdown and the wrong one for a cluster total, which is why nothing here sums
+ * these across brokers.
+ */
+export interface LogDirReplica {
+  readonly topic: string;
+  readonly sizeBytes: number;
 }
 
 /** `GroupSummaryDto`, as far as the "top consumer lag" panel reads it. */
@@ -272,8 +309,39 @@ function diskPercentOf(dirs: readonly LogDir[], logDirs: Reading<readonly LogDir
   if (measured === 0) {
     return unknown("this broker's log directories do not report a disk size (Kafka 3.3 and later do)");
   }
-  if (total <= 0) return unknown("this broker reported a zero-byte disk");
-  return value((used / total) * 100);
+  return diskShare(used, total);
+}
+
+/**
+ * A share, or the one reason there is not one.
+ *
+ * Narrower than `Reading<number>` on purpose. `diskShare` can only answer those two ways, and a
+ * caller made to handle `pending` and `notCollected` would be writing branches that cannot run —
+ * which is how a dead arm ends up carrying a sentence nobody has ever read.
+ */
+export type DiskShare = Extract<Reading<number>, { readonly kind: "value" | "unknown" }>;
+
+/**
+ * The one place `used / total` becomes a percentage, or refuses to.
+ *
+ * Exported and shared rather than repeated because the storage card prints the same quantity beside
+ * the same disk. It used to do its own division, and on a zero-byte disk the two disagreed in the
+ * worst available way: the broker-health bar drew no fill and said "this broker reported a zero-byte
+ * disk", while the storage row two cards away printed `0 B of 0 B` with no percentage and no
+ * explanation — the product's own rule against rendering an unmeasurable figure as a zero, broken by
+ * the one function whose comment claimed it could not disagree with this one. One arithmetic, one
+ * sentence, and now the claim is structural rather than aspirational.
+ *
+ * `total <= 0` rather than `total === 0`, because a directory reporting a negative size is the same
+ * question and a worse answer: dividing by it would draw a bar pointing the other way instead of
+ * saying that the figure makes no sense.
+ *
+ * The two results are written as literals rather than through `value` and `unknown`, whose return
+ * type is the whole of `Reading` — see {@link DiskShare} for why the narrower one is worth having.
+ */
+export function diskShare(used: number, total: number): DiskShare {
+  if (total <= 0) return { kind: "unknown", why: "this broker reported a zero-byte disk" };
+  return { kind: "value", value: (used / total) * 100 };
 }
 
 /**
@@ -289,6 +357,149 @@ export function controllerNote(brokers: Reading<readonly Broker[]>): string | un
   const controller = list.find((b) => b.isController);
   if (controller === undefined) return undefined;
   return `Controller: broker ${controller.id}. It won the election fair and square.`;
+}
+
+/* --- Storage by broker -------------------------------------------------------------------------- */
+
+/** One prefix group's share of one broker's disk. `bytes` is the sum of that group's replicas. */
+export interface StorageSegment {
+  readonly prefix: string;
+  readonly bytes: number;
+}
+
+/** One row of the **Storage by broker** card (SCREENS-V4.md §3.6): a bar, a figure, a name. */
+export interface StorageRow {
+  readonly id: number;
+  readonly name: string;
+  /** The disk, summed over the directories that reported one. `undefined` when none did. */
+  readonly capacityBytes: number | undefined;
+  /** `total - usable`, summed over the same directories. Absent whenever the capacity is. */
+  readonly usedBytes: number | undefined;
+  /** Attributed bytes, in the shared legend's order. A group with nothing here is absent. */
+  readonly segments: readonly StorageSegment[];
+}
+
+export interface StorageBreakdown {
+  /**
+   * The legend, folded **once** over every broker's topic names.
+   *
+   * One key for the whole card rather than one per row, which is the contract `StackedBar`'s
+   * `legend` prop states: four rows each printing `analytics.* inventory.* orders.* other` is the
+   * same key said four times. Folding per row would be worse than repetitive — `orders.*` would be
+   * the third colour on one broker and the first on another, and the eye would read a moved topic
+   * where there was only a different sort order.
+   */
+  readonly groups: readonly PrefixGroup[];
+  readonly rows: readonly StorageRow[];
+}
+
+/**
+ * The storage card, attributed to prefixes.
+ *
+ * ## The skip rule, for the third time in this product
+ *
+ * A directory that did not report **both** `totalBytes` and `usableBytes` is left out of the
+ * capacity, out of the used total, *and* out of the attribution. `diskPercentOf` above applies the
+ * first half of that and says why; the second half is the part that is easy to miss. Attributing a
+ * replica that lives on an unmeasured disk against a capacity that excludes that disk is a share
+ * computed against the wrong denominator — the segments would run past the end of the track, and
+ * `StackedBar` clamps them rather than showing that they did, so the picture would look ordinary
+ * and be wrong. A broker whose every directory is unmeasured therefore has no capacity, no used
+ * figure and no segments, and its bar draws the bare track, which is `StackedBar`'s own rule for a
+ * denominator nobody knows.
+ *
+ * ## Why both readings are required
+ *
+ * `brokerHealth` tolerates a missing log-directory answer, because a row with a name and no bar is
+ * still worth drawing. This card *is* the bars, so it refuses whole through {@link combineReadings}
+ * — which also gets the precedence right: still-in-flight beats failed, so a card whose broker list
+ * has landed and whose directories have not draws the waiting state rather than a failure.
+ */
+export function storageBreakdown(
+  brokers: Reading<readonly Broker[]>,
+  logDirs: Reading<readonly LogDir[]>,
+): Reading<StorageBreakdown> {
+  return combineReadings(brokers, logDirs, (brokerList, dirList) => {
+    const measured = dirList.filter(isMeasured);
+
+    // The fold runs over the names the *measured* directories hold, so the legend never advertises
+    // a group whose every byte was skipped above.
+    const names = [...new Set(measured.flatMap((dir) => (dir.replicas ?? []).map((r) => r.topic)))];
+    const groups = prefixes(names, STORAGE_PREFIX_GROUPS);
+    const labels = groups.map((group) => group.prefix);
+
+    const rows = brokerList.map((broker): StorageRow => {
+      const dirs = measured.filter((dir) => dir.brokerId === broker.id);
+      const known = dirs.length > 0;
+
+      const bytes = new Map<string, number>();
+      for (const dir of dirs) {
+        for (const replica of dir.replicas ?? []) {
+          const group = groupOf(replica.topic, labels);
+          bytes.set(group, (bytes.get(group) ?? 0) + replica.sizeBytes);
+        }
+      }
+
+      return {
+        id: broker.id,
+        name: broker.host,
+        capacityBytes: known ? sumOf(dirs, (dir) => dir.totalBytes ?? 0) : undefined,
+        usedBytes: known ? sumOf(dirs, (dir) => (dir.totalBytes ?? 0) - (dir.usableBytes ?? 0)) : undefined,
+        // Ordered by the legend rather than by size, so a colour keeps its position across rows.
+        segments: labels
+          .filter((label) => (bytes.get(label) ?? 0) > 0)
+          .map((label) => ({ prefix: label, bytes: bytes.get(label) ?? 0 })),
+      };
+    });
+
+    return { groups, rows };
+  });
+}
+
+/**
+ * How many prefix rows the storage card folds to, which is a smaller cap than the drawer's.
+ *
+ * The drawer's cap (`MAX_PREFIX_GROUPS`, eight) is bounded by the height of a list. This one is
+ * bounded by the number of distinct inks: the chart palette has six series colours, and the card
+ * spends one on `internal` and paints `other` neutral, leaving five. A sixth prefix row would have
+ * to share a colour with another, and a legend in which two rows are the same colour is not a
+ * legend — colour is the only thing tying a segment to its name once the bar is drawn.
+ *
+ * The two caps disagreeing is safe rather than a second implementation: `prefixes` takes the cap as
+ * an argument and folds whatever it drops into `other` with its own total, so both views add up to
+ * the same whole and a topic that has its own row in the drawer is inside `other` here.
+ */
+export const STORAGE_PREFIX_GROUPS = 5;
+
+/** Both figures, or neither. See the skip rule above; a failed disk is not a disk of size zero. */
+function isMeasured(dir: LogDir): boolean {
+  return dir.totalBytes !== undefined && dir.usableBytes !== undefined;
+}
+
+function sumOf<A>(items: readonly A[], of: (item: A) => number): number {
+  return items.reduce((total, item) => total + of(item), 0);
+}
+
+/**
+ * Which row of the fold a topic belongs to.
+ *
+ * This reads the fold's **own output** rather than repeating it: a label is either `internal`,
+ * `other`, a bare segment, or `segment.*`, and a topic belongs to a segment exactly when it is that
+ * segment or continues past it with a dot — which is `prefixes`' `firstSegment` rule seen from the
+ * label end. Writing the grouping out a second time is what `nav/prefixes.ts` warns against in its
+ * own header: two implementations that disagreed would put a topic in `orders.*` on the drawer and
+ * in `other` on this card, and neither screen would look wrong on its own.
+ */
+function groupOf(name: string, labels: readonly string[]): string {
+  if (isInternalTopic(name)) return INTERNAL_GROUP;
+  for (const label of labels) {
+    if (label === INTERNAL_GROUP || label === OTHER_GROUP) continue;
+    const segment = label.endsWith(".*") ? label.slice(0, -2) : label;
+    if (name === segment || name.startsWith(`${segment}.`)) return label;
+  }
+  // Everything the cap dropped. `prefixes` omits the `other` row only when there is nothing in it,
+  // so a name reaching here always has a row waiting for it.
+  return OTHER_GROUP;
 }
 
 /* --- Partition health ---------------------------------------------------------------------------- */
@@ -327,6 +538,19 @@ export function partitionHealth(summary: Reading<ClusterSummary>): Reading<Parti
   });
 }
 
+/**
+ * The share of partitions that are in sync, as a figure a gauge can be handed.
+ *
+ * Derived from {@link partitionHealth} rather than from the summary again, so the ring and the
+ * donut beneath it cannot disagree: one subtraction, one floor, one denominator. The card that
+ * draws this is `PARTITIONS IN SYNC` in SCREENS-V4.md §3.2, and its gauge is the one place on this
+ * screen where the good end of the domain is the *high* end — which is why `RingGauge` makes the
+ * caller say so.
+ */
+export function inSyncPercent(summary: Reading<ClusterSummary>): Reading<number> {
+  return mapReading(partitionHealth(summary), (health) => health.healthyPercent);
+}
+
 /* --- Top consumer lag ---------------------------------------------------------------------------- */
 
 /**
@@ -346,29 +570,24 @@ export function topLag(groups: Reading<readonly ConsumerGroup[]>, limit = 4): Re
   );
 }
 
-/* --- The things KUI does not measure ------------------------------------------------------------- */
-
-/**
- * The three figures the design draws that this backend does not collect.
+/* --- The figures that used to have no source ------------------------------------------------------
  *
- * These are not failures and they are not empty states. There is no metrics service, no timeseries
- * store and no scrape loop anywhere in the seven services — the gateway's OpenAPI documents publish
- * no endpoint that could answer any of them. The dashboard says so in a sentence and draws no axes,
- * because an empty chart with a labelled time axis is a claim that the data is merely missing right
- * now, and somebody will go looking for the broken exporter.
+ * Five constant `notCollected` readings lived here — the produce rate, the latency percentiles, the
+ * record-size distribution, the top producers and the request-handler idle time — each a sentence
+ * saying the product did not measure it. All five now have an endpoint in `services/metrics`, so
+ * the sentences moved to where the *answer* is: `metrics.ts` asks, and the five cards draw whichever
+ * of six states came back.
+ *
+ * They are not replaced by new constants here, and that is the point rather than an omission. A
+ * constant on the model gives the screen one answer for three different situations — this build
+ * does not measure it, this deployment configured no exporter, the exporter stopped answering — and
+ * the whole argument of `reading.ts` is that those must not be the same thing to show somebody.
+ *
+ * What survives as a standing refusal is narrower and belongs beside the card that draws it: there
+ * is no purgatory *percentage* and no record-size *distribution*, because a broker publishes a queue
+ * length and a mean. `TrafficCards.tsx` carries both, ADR-052 decides both, and both are drawn next
+ * to real figures rather than instead of them.
  */
-export const throughputSeries = (): Reading<never> =>
-  notCollected(
-    "KUI does not record throughput over time. Nothing samples broker byte rates, so there is no history to draw.",
-  );
-
-export const productionRate = (): Reading<never> =>
-  notCollected("KUI does not sample the current produce rate.");
-
-export const latencyPercentiles = (): Reading<never> =>
-  notCollected(
-    "KUI does not record request latency. Produce and fetch percentiles come from broker JMX, which nothing here scrapes.",
-  );
 
 /* --- The page's own sentence ---------------------------------------------------------------------- */
 
@@ -395,4 +614,22 @@ export function overviewLede(summary: Reading<ClusterSummary>): string {
     return `${formatCount(under)} partitions are under-replicated. Not an emergency, but not nothing.`;
   }
   return "All brokers vibing. Zero under-replicated partitions. You may sip your coffee.";
+}
+
+/**
+ * The line under "Cluster overview" on the Storage tab, which is conditional for the same reason.
+ *
+ * The design's sentence is "Disk, retention and the topics eating your budget." It promises an
+ * attribution, so it is only allowed to appear when there is one: on a cluster whose brokers report
+ * no disk size the tab has a bare track and nothing to eat anybody's budget, and a voice line
+ * describing a picture that is not there is the cheerful-over-broken failure wearing a different
+ * hat. The other two arms name what is missing instead.
+ */
+export function storageLede(storage: Reading<StorageBreakdown>): string {
+  if (storage.kind === "pending") return "Adding up what is on the disks.";
+  if (storage.kind !== "value") return "The disks have not been read, so there is nothing to attribute.";
+  if (storage.value.rows.every((row) => row.capacityBytes === undefined)) {
+    return "No broker reported a disk size, so there is no capacity to divide up.";
+  }
+  return "Disk, retention and the topics eating your budget.";
 }

@@ -1,5 +1,7 @@
 package kui.cluster.api
 
+import scala.concurrent.duration.*
+
 import io.circe.syntax.*
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
@@ -7,10 +9,17 @@ import org.scalacheck.Prop.forAll
 
 import kui.cluster.application.{BrokerListRow, SnapshotFreshness}
 import kui.cluster.contract.dto.ClusterProfileDto
-import kui.cluster.domain.{ControllerMode, LogDirError, PartitionSummary, QuorumInfo, ReplicaState}
+import kui.cluster.domain.{
+  ControllerMode,
+  ControllerUptime,
+  LogDirError,
+  ProfileOrigin,
+  QuorumInfo,
+  ReplicaState
+}
 import kui.contracts.cluster.ClusterSummaryDto
-import kui.kernel.{BrokerId, Secret}
 import kui.kernel.cluster.*
+import kui.kernel.{BrokerId, Secret}
 
 /** That the mapping tells the truth about a cluster, and never tells anyone a credential.
   *
@@ -78,6 +87,41 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     assertEquals(ClusterProfileDto.connectionOf(decoded), profile.connection)
   }
 
+  test("aStaticallyConfiguredClusterCarriesNoStoreVersionRatherThanAZeroOne") {
+    // `version` is an optimistic-concurrency token: a write sends it back and the store refuses if the
+    // record has moved. A statically configured cluster was never written, so there is no version for a
+    // write to replace, and sending one would ask the store to *create* a cluster that is already on the
+    // screen. The mapping's own comment says exactly this and nothing asserted it.
+    val static = ClusterMapping.row(profile, None, SnapshotFreshness.Loading, ClusterFixtures.At)
+
+    assertEquals(static.version, None)
+    assertEquals(static.origin, "static")
+  }
+
+  test("aStoredClusterCarriesTheVersionAWriteHasToSendBack") {
+    val stored = ClusterMapping.row(
+      ClusterFixtures.profile(origin = ProfileOrigin.Stored),
+      None,
+      SnapshotFreshness.Loading,
+      ClusterFixtures.At
+    )
+
+    assertEquals(stored.version, Some(7L))
+  }
+
+  test("aLogDirectorysReplicasArriveBiggestFirst") {
+    // The list the browser truncates. Sorting is done here so that every client gets the same order, and
+    // truncating an unsorted list drops exactly the large partitions the operator opened the page to find.
+    val dir = ClusterMapping.logDir(BrokerId.unsafe(1), ClusterFixtures.logDirOfSizes)
+
+    assertEquals(dir.replicas.map(_.sizeBytes), List(9_000L, 4_000L, 4_000L, 1_000L))
+    // Ties break by topic then partition, so two replicas of the same size still have one order.
+    assertEquals(
+      dir.replicas.map(replica => (replica.topic, replica.partition)).take(3),
+      List(("orders", 1), ("audit", 0), ("orders", 0))
+    )
+  }
+
   test("aSummaryReportsWhatKafkaSaidAndNothingItDidNot") {
     val summary = ClusterMapping.summary(ClusterFixtures.topology(), ClusterFixtures.At)
 
@@ -106,9 +150,10 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     // as long as the outage lasted.
     //
     // Nothing in `describeCluster` or `describeLogDirs` carries the ISR: a log directory lists the replicas
-    // stored on this disk, in sync or not (`research/kafka/admin-capabilities.md`). Only `describeTopics`
-    // knows, and the cluster service does not sweep topics. So the assertion is in two halves - the number
-    // is the total, and no field on the wire offers an in-sync count for anyone to read the total as.
+    // stored on this disk, in sync or not (`research/kafka/admin-capabilities.md`). The topic sweep does
+    // know, and its answer is published as a *cluster* count rather than folded into this per-broker one.
+    // So the assertion is in two halves - the number is the total, and no field on the wire offers an
+    // in-sync count for anyone to read the total as.
     val hosted = 147
     val actuallyInSync = 96
     assertNotEquals(hosted, actuallyInSync)
@@ -116,9 +161,11 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     val row = BrokerListRow(
       broker = ClusterFixtures.broker(1),
       isController = true,
-      replicas = Some(hosted),
+      partitions = Some(hosted),
       leaders = Some(50),
+      replicas = Some(hosted),
       skewPercent = Some(0.0d),
+      leaderSkewPercent = Some(0.0d),
       totalBytes = None,
       usableBytes = None,
       usedByKafkaBytes = Some(1024L),
@@ -135,10 +182,38 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     // Where under-replication *is* honestly reported: the cluster summary, from a count Kafka gives us.
     val topology = ClusterFixtures.topology()
     val summary = ClusterMapping.summary(
-      topology.copy(partitions = Some(PartitionSummary(online = 200, offline = 0, underReplicated = 51))),
+      topology.copy(census = Some(ClusterFixtures.census(online = 200, underReplicated = 51))),
       ClusterFixtures.At
     )
     assertEquals(summary.underReplicatedPartitionCount, Some(hosted - actuallyInSync))
+  }
+
+  test("aControllerWindowThatIsNotFullSendsANullPercentageAndItsLengthAnyway") {
+    // The state a browser meets most often — a KUI that restarted this morning — and the one where a
+    // literal in the client would be wrong: `null` with `windowSeconds` present is what lets the card say
+    // "collecting, 41m of 6h" instead of drawing an empty ring or, worse, a zero.
+    val collecting = ControllerUptime(window = 6.hours, coverage = 41.minutes, percent = None)
+    val summary = ClusterMapping.summary(
+      ClusterFixtures.topology().copy(controllerUptime = Some(collecting)),
+      ClusterFixtures.At
+    )
+
+    assertEquals(summary.controllerUptime.flatMap(_.percent), None)
+    assertEquals(summary.controllerUptime.map(_.windowSeconds), Some(21600L))
+    assertEquals(summary.controllerUptime.map(_.coverageSeconds), Some(2460L))
+
+    val rendered = summary.asJson.noSpaces
+    assert(rendered.contains(""""percent":null"""), rendered)
+    assert(rendered.contains(""""windowSeconds":21600"""), rendered)
+  }
+
+  test("aClusterKeepingNoWindowAtAllSendsNoUptimeObjectRatherThanAnEmptyOne") {
+    // Absent and "collecting" are different claims and a client renders them differently, so the mapping
+    // must not manufacture an object for a window nobody is keeping.
+    val summary = ClusterMapping.summary(ClusterFixtures.topology(), ClusterFixtures.At)
+
+    assertEquals(summary.controllerUptime, None)
+    assert(summary.asJson.noSpaces.contains(""""controllerUptime":null"""), summary.asJson.noSpaces)
   }
 
   test("controllerKindIsTheWireWordAndNotTheEnumName") {

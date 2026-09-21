@@ -11,7 +11,9 @@
           "outOfSyncReplicas" : 0,
           "offlinePartitions" : 0,
           "messageCount" : 1234567,
-          "sizeBytes" : 9483264
+          "sizeBytes" : 9483264,
+          "produceRate" : 1204.5,
+          "cleanupPolicy" : "delete"
         }
       ],
       "page" : {

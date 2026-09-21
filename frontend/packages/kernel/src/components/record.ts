@@ -28,8 +28,16 @@ export type RecordValue =
    * compacted topic records a deletion — and it is not an error.
    */
   | { readonly kind: "tombstone" }
-  /** Too large to preview inline. The size is shown; the payload is fetched on demand. */
-  | { readonly kind: "large"; readonly bytes: number }
+  /**
+   * Too large to preview inline. The wire has already delivered the payload, so it is retained for
+   * an explicit copy action without being handed to layout. Older fixtures may omit it.
+   */
+  | {
+      readonly kind: "large";
+      readonly bytes: number;
+      readonly text?: string;
+      readonly sourceKind?: "json" | "text";
+    }
   /**
    * The deserializer failed. The reason is shown in full, because "Avro schema 42 not found" is
    * the whole diagnosis, and the expansion offers the raw bytes as hex.
@@ -128,16 +136,67 @@ export function relativeTime(timestamp: string, now: number): string {
   return ahead ? `in ${amount}${unit}` : `${amount}${unit} ago`;
 }
 
-/** Bytes at one decimal place, for "4.2 MB — open to view". */
+/**
+ * Bytes at one decimal place, for "4.2 MB — open to view".
+ *
+ * ## Why the byte scale has three cases rather than one
+ *
+ * This was written for record sizes, which are whole numbers of bytes, and `147.0 B` for a
+ * 147-byte record is a false claim of precision — so the byte scale printed its value unrounded.
+ * Then rates started arriving through the same function, and a rate is a division: the cluster
+ * dashboard's CONSUME card read `81.2359955010432 B/s` beside a PRODUCTION card reading `1.2 kB/s`,
+ * and three rows of the throughput card's data table carried seventeen significant figures each.
+ * Rounding at the call sites would have been two edits and fourteen places for the third one to be
+ * forgotten, so the decision is here, where the product decides how a byte count is spelled:
+ *
+ * - a **whole** number of bytes prints as itself — `147 B`, never `147.0 B`;
+ * - a **fraction** of a byte prints to one decimal, exactly as every larger unit does;
+ * - a fraction **below `0.05`** prints `<0.1`, because `0.0 B/s` over a cluster that is moving
+ *   something is the zero this dashboard is not allowed to show. A measured `0` is still `0 B`:
+ *   that one is a fact about a quiet cluster and is the answer the card should give.
+ *
+ * ## Why the promotion threshold is not 1000
+ *
+ * `999.96` bytes is below the threshold and rounds to `1000.0` at one decimal, which prints a
+ * four-digit figure under a unit that has three. The loop promotes at the value that *rounds* to
+ * the next unit instead, so the printed figure is in `[0, 1000)` **at every unit below the last
+ * one**.
+ *
+ * ## Why that sentence is scoped, and what the last unit does
+ *
+ * It used to read *"always in `[0, 1000)`"*, with no qualifier, over a ladder that stopped at `TB`
+ * — so `formatBytes(1.5e15)` printed `1500.0 TB`, a four-digit figure under a three-digit unit,
+ * which is the exact defect the threshold above exists to remove. A petabyte is an ordinary size
+ * for a Kafka cluster's retained log, so that was not a corner: it was the shipped answer for a
+ * plausible number, and the header promised the opposite of it for a wave.
+ *
+ * The ladder now ends at `PB` — the same ceiling `feature-topics` had chosen independently, which
+ * is why this function is now the only one — and the loop still stops there rather than dividing
+ * past it. So `formatBytes(1.5e18)` prints `1500.0 PB` and the qualifier above is doing real work.
+ * That saturating spelling is deliberate and is the least wrong of the three options: dividing off
+ * the end of the table prints `1.5 B` for 1.5 exabytes, which is wrong by eighteen orders of
+ * magnitude and reads as perfectly ordinary; clamping invents a ceiling the cluster does not have;
+ * and adding `EB` moves this same seam one unit up without removing it. A figure that reads as
+ * implausible is the right rendering of an implausible figure.
+ */
 export function formatBytes(bytes: number): string {
-  const units = ["B", "kB", "MB", "GB", "TB"] as const;
+  const units = ["B", "kB", "MB", "GB", "TB", "PB"] as const;
   let value = Math.max(0, bytes);
   let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
+  while (value >= 999.95 && unit < units.length - 1) {
     value /= 1000;
     unit += 1;
   }
-  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit] ?? "B"}`;
+  return `${formatMagnitude(value, unit)} ${units[unit] ?? "B"}`;
+}
+
+/** The figure `formatBytes` prints, without its unit. Its header has the three cases. */
+function formatMagnitude(value: number, unit: number): string {
+  // Only the byte scale can hold a whole number small enough to be worth printing whole: every
+  // larger unit is reached by dividing, so `1.0 kB` is right and `1 kB` would hide 1,049 bytes.
+  if (unit === 0 && Number.isInteger(value)) return `${value}`;
+  if (value > 0 && value < 0.05) return "<0.1";
+  return value.toFixed(1);
 }
 
 /**
@@ -155,7 +214,9 @@ export function previewValue(value: RecordValue): string {
     case "tombstone":
       return "null";
     case "large":
-      return `${formatBytes(value.bytes)} — open to view`;
+      return value.text === undefined
+        ? `${formatBytes(value.bytes)} — value not retained`
+        : `${formatBytes(value.bytes)} — preview disabled`;
     case "undecodable":
       return `could not deserialize (${value.reason})`;
   }
@@ -175,7 +236,9 @@ export function prettyValue(value: RecordValue): string {
       : value.kind === "tombstone"
         ? "null"
         : value.kind === "large"
-          ? `${formatBytes(value.bytes)} — not loaded`
+          ? value.text === undefined
+            ? `${formatBytes(value.bytes)} — value not retained (session memory limit)`
+            : `${formatBytes(value.bytes)} — preview disabled; use Copy value`
           : (value.hex ?? value.reason);
   }
   try {

@@ -12,9 +12,9 @@ import munit.CatsEffectSuite
 import org.typelevel.otel4s.oteljava.testkit.OtelJavaTestkit
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.*
-import sttp.model.Uri
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.StreamBackendStub
+import sttp.model.Uri
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
 import kui.cluster.application.*
@@ -97,8 +97,8 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
 
   /** A token for one request line, minted with whichever codec the server under test verifies with.
     *
-    * The digest covers the method and the *path*: a query string is deliberately outside it (ADR-020), so
-    * the token for `/log-dirs?brokerId=1` is minted over `/log-dirs`.
+    * The digest covers the method and the *path*: a query string is deliberately outside it (ADR-020), so the
+    * token for `/log-dirs?brokerId=1` is minted over `/log-dirs`.
     */
   private def token(server: ClusterTestServer, method: String, path: String): IO[SignedPrincipal] =
     IO.realTimeInstant.flatMap(now =>
@@ -202,9 +202,11 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
         BrokerListRow(
           broker = ClusterFixtures.broker(1),
           isController = true,
+          partitions = Some(4),
+          leaders = Some(2),
           replicas = Some(3),
-          leaders = None,
           skewPercent = Some(0.0d),
+          leaderSkewPercent = Some(-33.3d),
           totalBytes = Some(100L),
           usableBytes = Some(40L),
           usedByKafkaBytes = Some(60L),
@@ -224,9 +226,12 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
         assertEquals(broker.get[Option[String]]("rack"), Right(Some("eu-west-1a")))
         assertEquals(broker.get[Boolean]("isController"), Right(true))
         assertEquals(broker.get[Option[Long]]("diskUsageBytes"), Right(Some(60L)))
-        // The two counts M1 cannot produce are null on the wire, not zero.
-        assertEquals(broker.get[Option[Int]]("partitionCount"), Right(None))
-        assertEquals(broker.get[Option[Int]]("leaderCount"), Right(None))
+        // All three come from the same sweep and all three reach the wire as numbers when it was complete.
+        // `leaderSkewPercent` was hard-coded `null` in the mapping until 2026-09-06, so the browser drew the
+        // NotMeasured sentence beside a leader count it had; this is the assertion that it is a figure now.
+        assertEquals(broker.get[Option[Int]]("partitionCount"), Right(Some(4)))
+        assertEquals(broker.get[Option[Int]]("leaderCount"), Right(Some(2)))
+        assertEquals(broker.get[Option[Double]]("leaderSkewPercent"), Right(Some(-33.3d)))
       }
   }
 
@@ -343,7 +348,19 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
     val list = BrokerList(
       profile.ref,
       List(
-        BrokerListRow(ClusterFixtures.broker(1), true, Some(3), None, Some(0.0d), Some(1L), Some(0L), Some(1L), 0)
+        BrokerListRow(
+          ClusterFixtures.broker(1),
+          true,
+          Some(4),
+          Some(2),
+          Some(3),
+          Some(0.0d),
+          Some(0.0d),
+          Some(1L),
+          Some(0L),
+          Some(1L),
+          0
+        )
       ),
       SnapshotFreshness.Fresh(ClusterFixtures.At)
     )

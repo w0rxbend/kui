@@ -5,8 +5,8 @@ import munit.CatsEffectSuite
 import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.trace.Tracer
 
-/** That the id which ties a response to its logs and its trace is always present, always usable in
-  * a header, and points at the trace whenever there is one.
+/** That the id which ties a response to its logs and its trace is always present, always usable in a header,
+  * and points at the trace whenever there is one.
   */
 final class CorrelationSuite extends CatsEffectSuite {
 

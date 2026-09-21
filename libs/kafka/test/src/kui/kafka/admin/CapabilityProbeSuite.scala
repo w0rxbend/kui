@@ -17,9 +17,9 @@ import kui.testkit.KuiIOSuite
 
 /** The probe, and the one property everything else rests on: it never fails.
   *
-  * A capability probe is a diagnostic. A diagnostic that can take the page down with it is worse
-  * than no diagnostic, so every test here that drives a failure asserts a *successful* effect with
-  * a three-way answer inside it.
+  * A capability probe is a diagnostic. A diagnostic that can take the page down with it is worse than no
+  * diagnostic, so every test here that drives a failure asserts a *successful* effect with a three-way answer
+  * inside it.
   */
 final class CapabilityProbeSuite extends KuiIOSuite {
 
@@ -43,9 +43,8 @@ final class CapabilityProbeSuite extends KuiIOSuite {
 
   /** A pool whose every call behaves the way the test says, with no broker anywhere.
     *
-    * `run` never touches the `Admin` it is given, so a `null` client is safe here and saves a
-    * reflective proxy: what is under test is how the probe reacts to an outcome, not what a Kafka
-    * call does.
+    * `run` never touches the `Admin` it is given, so a `null` client is safe here and saves a reflective
+    * proxy: what is under test is how the probe reacts to an outcome, not what a Kafka call does.
     */
   private def poolOf(
       behaviour: String => IO[Unit],
@@ -94,9 +93,8 @@ final class CapabilityProbeSuite extends KuiIOSuite {
     versions
       .flatMap(v => behaviours.flatMap(b => descriptions.map(d => (v, b, d))))
       .traverse_ { (version, behaviour, description) =>
-        probeWith(behaviour, version, description, None).map(features =>
-          assert(features.isTotal, s"not total for $version / $description: $features")
-        )
+        probeWith(behaviour, version, description, None)
+          .map(features => assert(features.isTotal, s"not total for $version / $description: $features"))
       }
   }
 
@@ -364,8 +362,6 @@ final class CapabilityProbeSuite extends KuiIOSuite {
       made <- calls.get
     } yield made.sorted
 
-    program.map(made =>
-      assertEquals(made, List("describeAcls", "describeLogDirs", "describeMetadataQuorum"))
-    )
+    program.map(made => assertEquals(made, List("describeAcls", "describeLogDirs", "describeMetadataQuorum")))
   }
 }

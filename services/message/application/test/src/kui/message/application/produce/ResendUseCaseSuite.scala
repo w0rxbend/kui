@@ -16,18 +16,22 @@ import kui.security.audit.{MutationKind, MutationOutcome}
   *
   * The feature's whole claim is **byte for byte**, so that is what most of these assert: the bytes that come
   * out of the source are the objects that go into the producer, headers included, and nothing decodes
-  * anything on the way. The last of those is asserted the only way it can be — with a serde source that has
-  * a counter on it, so that "never deserializes" is a number rather than a promise in a comment.
+  * anything on the way. The last of those is asserted the only way it can be — with a serde source that has a
+  * counter on it, so that "never deserializes" is a number rather than a promise in a comment.
   */
 final class ResendUseCaseSuite extends CatsEffectSuite {
 
   import ProduceRig.*
 
   private val budget: PollBudget =
-    PollBudget.unsafe(maxRecords = 1000, maxBytes = 1024L * 1024L, deadline = scala.concurrent.duration.Duration(30, "seconds"))
+    PollBudget.unsafe(
+      maxRecords = 1000,
+      maxBytes = 1024L * 1024L,
+      deadline = scala.concurrent.duration.Duration(30, "seconds")
+    )
 
-  /** Bytes that are not valid UTF-8. A resend has to carry these unchanged, and it is the case that fails
-    * the moment anybody puts a `new String(...)` on this path.
+  /** Bytes that are not valid UTF-8. A resend has to carry these unchanged, and it is the case that fails the
+    * moment anybody puts a `new String(...)` on this path.
     */
   private val invalidUtf8: Array[Byte] = Array[Byte](0xc3.toByte, 0x28.toByte, 0xa0.toByte)
 
@@ -62,7 +66,6 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
         keepHeaders = keepHeaders
       )
       .getOrElse(fail("the fixture request is not valid"))
-
 
   private def rig(
       readOnly: Boolean = false,

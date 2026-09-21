@@ -3,12 +3,14 @@ package kui.schema.api
 import cats.effect.IO
 
 import kui.contracts.capability.CapabilityState
+import kui.contracts.rbac.EndpointAuthorization
 import kui.kernel.error.InfrastructureError
-import kui.kernel.{ClusterId, Subject}
-import kui.schema.application.{ClusterRegistries, RegistryProfile}
+import kui.kernel.{ClusterId, SchemaId, Subject}
+import kui.schema.application.{ClusterRegistries, RegisterSchemaUseCase, RegistryProfile}
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.schema.domain.*
 import kui.security.audit.MutationKind
+import kui.security.rbac.Action
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -29,10 +31,13 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
     new SchemaRegistryPort[IO] {
       private def answer[A](value: A) = IO.pure(failure.toLeft(value))
       def subjects = answer(List.empty[Subject])
+      def summary(subject: Subject) = answer(Option.empty[SubjectSummary])
       def versions(subject: Subject) = answer(None)
       def schema(subject: Subject, version: VersionSelector) = answer(None)
       def globalCompatibility = answer(CompatibilityLevel.Backward)
       def subjectCompatibility(subject: Subject) = answer(None)
+      def register(subject: Subject, proposed: ProposedSchema) =
+        answer(RegisteredVersion(subject, SchemaId.unsafe(1), Some(SchemaVersion.unsafe(1))))
       def setGlobalCompatibility(level: CompatibilityLevel) = answer(())
       def setSubjectCompatibility(subject: Subject, level: CompatibilityLevel) = answer(())
       def checkCompatibility(subject: Subject, version: VersionSelector, proposed: ProposedSchema) =
@@ -51,9 +56,7 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
     }
 
   private def report(ports: Map[ClusterId, SchemaRegistryPort[IO]]) =
-    FakeStructuredLogger[IO].flatMap(logger =>
-      SchemaCapabilities.make[IO](registries(ports), logger).report
-    )
+    FakeStructuredLogger[IO].flatMap(logger => SchemaCapabilities.make[IO](registries(ports), logger).report)
 
   test("a cluster with no registry is not_configured, not degraded, and says which key to set") {
     report(Map(configured -> port(None))).map { capabilities =>
@@ -99,15 +102,41 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
     )
   }
 
+  test("a capability report that fails answers an empty document rather than a 500") {
+    // The gateway's registry needs an answer most exactly when things are wrong: a capability document
+    // that fails takes every cluster's row down with it, and the browser then cannot tell "the schema
+    // service is unreachable" from "this cluster has no registry". `SchemaApi.capabilityDocument`'s
+    // recovery can be deleted with every other case in this service green.
+    val exploding = new ClusterRegistries[IO] {
+      def all = IO.raiseError(new RuntimeException("the cluster list could not be built"))
+      def profile(cluster: ClusterId) = IO.pure(None)
+      def registry(cluster: ClusterId) = IO.pure(None)
+    }
+
+    for {
+      logger <- FakeStructuredLogger[IO]
+      document <- SchemaApi.capabilityDocument[IO](SchemaCapabilities.make[IO](exploding, logger), logger)
+      entries <- logger.entries
+    } yield {
+      assertEquals(document.service, SchemaApi.Id)
+      assertEquals(document.clusters, Map.empty)
+      // And it says so, because a document reporting no clusters and a deployment with no clusters look
+      // identical from the outside and only one of them is a failure.
+      assertEquals(entries.map(_.level), List("error"))
+    }
+  }
+
   test("a port that throws is reported as degraded rather than failing the whole report") {
     val throwing = new SchemaRegistryPort[IO] {
       private def boom[A]: IO[Either[kui.kernel.error.KuiError, A]] =
         IO.raiseError(new RuntimeException("a defect below the port"))
       def subjects = boom
+      def summary(subject: Subject) = boom
       def versions(subject: Subject) = boom
       def schema(subject: Subject, version: VersionSelector) = boom
       def globalCompatibility = boom
       def subjectCompatibility(subject: Subject) = boom
+      def register(subject: Subject, proposed: ProposedSchema) = boom
       def setGlobalCompatibility(level: CompatibilityLevel) = boom
       def setSubjectCompatibility(subject: Subject, level: CompatibilityLevel) = boom
       def checkCompatibility(subject: Subject, version: VersionSelector, proposed: ProposedSchema) = boom
@@ -131,10 +160,14 @@ final class SchemaEndpointClassificationSuite extends munit.FunSuite {
     val mutations = published.filter(kui.contracts.KuiEndpoint.isMutation)
     val reads = published.filterNot(kui.contracts.KuiEndpoint.isMutation)
 
-    assertEquals(mutations.flatMap(_.info.name).toSet, Set(
-      "schema.compatibility.global.set",
-      "schema.compatibility.subject.set"
-    ))
+    assertEquals(
+      mutations.flatMap(_.info.name).toSet,
+      Set(
+        "schema.compatibility.global.set",
+        "schema.compatibility.subject.set",
+        "schema.subject.version.register"
+      )
+    )
 
     // The compatibility check carries a body and is deliberately *not* a mutation: it registers nothing.
     // If that ever changes, this assertion is what says so.
@@ -155,9 +188,68 @@ final class SchemaEndpointClassificationSuite extends munit.FunSuite {
     assertEquals(fromContract, fromAudit)
   }
 
+  test("the registration is a mutation the audit vocabulary cannot name, and this is where that is said") {
+    // ADR-047 §3 wants a MutationRecord for every mutation. `MutationKind` is a sealed enum in
+    // libs/security-core and has no case for a registration, so `RegisterSchemaUseCase` writes a log line
+    // instead and this build ships one unaudited mutation. That is a real gap, and it is asserted rather
+    // than described so that it cannot be forgotten: the day somebody adds
+    // `case RegisterSchema extends MutationKind("schema.subject.version.register")`, this goes red and the
+    // use case has to be given an AuditSink.
+    assertEquals(
+      SchemaMutationEndpoints.RegisterVersionOperation,
+      RegisterSchemaUseCase.Operation
+    )
+
+    assert(
+      !MutationKind.values.map(_.operation).contains(SchemaMutationEndpoints.RegisterVersionOperation),
+      "MutationKind now names the registration; give RegisterSchemaUseCase an AuditSink and delete this"
+    )
+  }
+
   test("every mutating endpoint declares itself non-destructive: a level can be set back") {
     val markers = SchemaMutationEndpoints.all.flatMap(_.attribute(kui.contracts.KuiEndpoint.MutationKey))
 
     assertEquals(markers.map(_.destructive).toSet, Set(false))
+  }
+
+  test("every published endpoint declares the action it needs, and no write needs only a view") {
+    // The declaration *is* the rule: the gateway and this service are two enforcement points over one
+    // value, and `EndpointDecision.decide` reads it. `Action.SchemaModifyGlobalCompatibility` on the
+    // registry-wide write and `Action.SchemaEdit` on the subject one could each be replaced with
+    // `Action.SchemaView` with every case in this service green — and a role granted read access to
+    // schemas would then be able to set the whole registry's compatibility level to NONE.
+    def actionsOf(endpoint: sttp.tapir.AnyEndpoint): Set[Action] =
+      EndpointAuthorization
+        .of(endpoint)
+        .toSet
+        .flatMap(_.requirements.flatMap(_.actions.toList).toSet)
+
+    val declared = (SchemaEndpoints.all ++ SchemaMutationEndpoints.all)
+      .flatMap(endpoint => endpoint.info.name.map(_ -> actionsOf(endpoint)))
+      .toMap
+
+    assertEquals(
+      declared.get("schema.compatibility.global.set"),
+      Some(Set[Action](Action.SchemaModifyGlobalCompatibility))
+    )
+    assertEquals(declared.get("schema.compatibility.subject.set"), Some(Set[Action](Action.SchemaEdit)))
+    assertEquals(declared.get("schema.subject.version.register"), Some(Set[Action](Action.SchemaCreate)))
+
+    // And the reads, so that "no write needs only a view" is measured against something rather than
+    // asserted: the three reads that declare a requirement declare exactly the viewing one.
+    assertEquals(declared.get("schema.versions"), Some(Set[Action](Action.SchemaView)))
+    assertEquals(declared.get("schema.version"), Some(Set[Action](Action.SchemaView)))
+    assertEquals(declared.get("schema.compatibility.check"), Some(Set[Action](Action.SchemaView)))
+
+    val writeActions = List(
+      "schema.compatibility.global.set",
+      "schema.compatibility.subject.set",
+      "schema.subject.version.register"
+    ).flatMap(declared.getOrElse(_, Set.empty[Action]))
+
+    assert(
+      !writeActions.contains(Action.SchemaView),
+      "a write is declared as needing nothing more than read access to schemas"
+    )
   }
 }

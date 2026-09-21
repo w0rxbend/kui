@@ -231,6 +231,66 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/alerts/events": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * What KUI has noticed about this cluster
+         * @description Newest first, resolved events included: the design's card draws five rows of which two are resolved. openCount and unreadCount are counted over the whole store rather than over the page. Each rule carries its own section, so a rule whose facts could not be read says so instead of contributing a zero, and one dead rule costs one row rather than the document.
+         */
+        readonly get: operations["alerts.events"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/alerts/events/{eventId}/acknowledgement": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Mark one alert event acknowledged
+         * @description Part of the alerts.event.acknowledge flow. This call changes nothing. The event stays in the feed with the name of whoever acknowledged it, which is what an incident review reads. An event that is already closed, and an id that names no event, both answer 409 KUI-INVALID-STATE: from the caller's side they are one fact, and neither message says whether the id ever existed.
+         */
+        readonly post: operations["alerts.acknowledge"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/alerts/stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One event whenever this cluster's alert feed changes
+         * @description Named events: 'alerts' carries {cluster, openCount, at}; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope. A frame carries the open count and not the events, so one subscriber's unread count never reaches another's socket and a dropped frame costs a fetch rather than a stale screen.
+         */
+        readonly get: operations["alerts.stream"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/brokers": {
         readonly parameters: {
             readonly query?: never;
@@ -263,6 +323,86 @@ export interface paths {
          * @description Read-only in M1: BR-002 ships without edits, which arrive in M5 with read-only mode and audit. A setting the broker marks sensitive has no value and says so.
          */
         readonly get: operations["cluster.broker.configs"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/pause": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Pause one connector
+         * @description Asks the Connect cluster to stop this connector's tasks. Nothing is deleted and `resume` puts it back, so there is no typed confirmation; it is audited, and it is refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.
+         */
+        readonly post: operations["connect.connector.pause"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/restart": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Restart one connector and its tasks
+         * @description Asks the Connect cluster to restart this connector and its tasks. The connector resumes from its own committed offsets; what it costs is a gap in delivery while the tasks come back. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.
+         */
+        readonly post: operations["connect.connector.restart"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/resume": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Resume one paused connector
+         * @description Asks the Connect cluster to start this connector's tasks again. Audited, and refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.
+         */
+        readonly post: operations["connect.connector.resume"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/connectors": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The connectors this cluster's Connect workers are running
+         * @description One section per configured Connect cluster, so a worker that is down costs one row rather than the screen, and a worker that is rebalancing says so instead of reporting no connectors. Each connector carries its tasks with their states and the worker's own failure trace. No throughput is published: the Connect REST API measures none.
+         */
+        readonly get: operations["connect.connectors"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -379,6 +519,86 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/ksql/objects": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The streams, tables, queries and topics this cluster's ksqlDB knows about
+         * @description One list, ordered by kind and then by name, because §3.16's pane is one pane and a row that moves between polls is one an operator cannot click accurately. A row the server returned and KUI could not describe is named in `unreadable` rather than dropped.
+         */
+        readonly get: operations["ksql.objects"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/ksql/statements": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Run one ksqlDB statement
+         * @description Mutation (ksql.statement). This call changes the cluster and cannot be undone. One statement per request. A `DROP ... DELETE TOPIC` is refused without the token its plan answered with, and the token is checked against the statement's exact text so that a confirmed statement cannot be swapped for another one. A `SELECT ... EMIT CHANGES` is refused here and named at .../ksql/stream, because it never finishes. A pull query answers rows; everything else answers the server's own status sentence.
+         */
+        readonly post: operations["ksql.statement.execute"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/ksql/statements/plan": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * What running this statement would do
+         * @description Part of the ksql.statement flow. This call changes nothing. Answers what the statement is — a pull query, a push query or a statement — whether it is destructive, whether it deletes a Kafka topic, the warnings to show before it is confirmed, and a token valid for five minutes and for this statement's exact text. A statement that is not destructive plans to no token and needs none.
+         */
+        readonly post: operations["ksql.statement.plan"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/ksql/stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Rows of a push query, as they arrive
+         * @description Named events: 'phase' carries {columns} once, as soon as the server accepts the query; 'row' carries {values} in that column order; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope; 'done' says why it ended. A statement that is not a push query is refused before the server is called, and the refusal names the endpoint that does answer it.
+         */
+        readonly get: operations["ksql.stream"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/log-dirs": {
         readonly parameters: {
             readonly query?: never;
@@ -459,6 +679,106 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/metrics/latency": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The cluster's p99 request latency over the requested window
+         * @description Two series, produce and consumer fetch, on the same axis as throughput. A step KUI did not sample carries null, which breaks the line rather than drawing an instant answer. An unavailable section here means the exporter answered and publishes no RequestMetrics family at all, so the whitelist is what has to change.
+         */
+        readonly get: operations["metrics.latency"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/producers": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The topics receiving the most traffic
+         * @description Ranked by the broker's one-minute bytes-in rate per topic. `measuredBy` is `topic`: a Kafka broker publishes no per-client.id byte rate unless quotas are configured (ADR-052), so this is not a list of clients. An empty list means the exporter served the family and no per-topic line, which is either a cluster where nothing is producing or a ruleset with no per-topic rule; an unavailable section is an exporter that does not publish the family at all.
+         */
+        readonly get: operations["metrics.producers"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/record-size": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The mean size of a record on this cluster
+         * @description bytes in over records in, with both rates beside it so a caller can say what the figure is. There is no percentile and no histogram here because Kafka publishes none (ADR-052); a card that needs a distribution keeps its 'not measured' sentence.
+         */
+        readonly get: operations["metrics.recordSize"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/request-handlers": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * How idle the broker's request handlers are, and how deep its purgatories are
+         * @description Idle figures are ratios in 0..1 exactly as the broker publishes them, so the caller chooses the rounding. Purgatory is a count of parked requests per delayed operation and never a percentage: Kafka publishes a queue length and no ceiling to divide it by (ADR-052).
+         */
+        readonly get: operations["metrics.requestHandlers"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/throughput": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The cluster's throughput over the requested window
+         * @description Answers 200 with a not_configured section for a cluster that has no kui.metrics.sources entry, which is a deployment choice rather than a failure: the card keeps its 'not measured' sentence. A bucket KUI did not sample carries null rates, so a gap breaks the bar instead of reading as a quiet cluster.
+         */
+        readonly get: operations["metrics.throughput"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -512,7 +832,7 @@ export interface paths {
         };
         /**
          * The subjects registered on this cluster's Schema Registry
-         * @description Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.
+         * @description Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned. pageSize=0 answers the total with no rows and asks the registry nothing beyond the subject list.
          */
         readonly get: operations["schema.subjects"];
         readonly put?: never;
@@ -560,7 +880,11 @@ export interface paths {
          */
         readonly get: operations["schema.versions"];
         readonly put?: never;
-        readonly post?: never;
+        /**
+         * Register a schema under this subject
+         * @description Mutation (schema.subject.version.register). This call adds a version to the subject and cannot be undone from KUI. The registry decides whether the schema is accepted; a rejection comes back as 400 KUI-VALIDATION carrying the registry's own explanation in details[0], because that sentence names the field that broke the rule and is the only part of the answer anybody can act on. Registering a schema that is already registered under this subject is what the registry calls idempotent: it answers the existing id and version and adds no version. The answer's version is absent when the registry stored the schema and then would not say which version it became, which is a registration that succeeded and a number KUI does not know.
+         */
+        readonly post: operations["schema.subject.version.register"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -601,6 +925,54 @@ export interface paths {
          * @description Registers nothing. The check runs inside the registry, because the verdict that matters is the one the registry will give when the schema is really registered; KUI does not reimplement the compatibility rules of three schema languages. Answered on a read-only cluster like any other read.
          */
         readonly post: operations["schema.compatibility.check"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/settings/messages": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read this principal's message browser defaults for one cluster
+         * @description Returns the saved page size and presentation mode, or product defaults when none were saved.
+         */
+        readonly get: operations["cluster.messageBrowserSettings.get"];
+        /**
+         * Persist this principal's message browser defaults for one cluster
+         * @description Mutation (cluster.messageBrowserSettings.put). Replaces the bounded browse page size and presentation mode in KUI metadata; it does not alter Kafka.
+         */
+        readonly put: operations["cluster.messageBrowserSettings.put"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/settings/ui": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read this principal's appearance settings for one cluster
+         * @description Returns the server-side value, or the product defaults when this principal has not saved one.
+         */
+        readonly get: operations["cluster.uiSettings.get"];
+        /**
+         * Persist this principal's appearance settings for one cluster
+         * @description Mutation (cluster.uiSettings.put). Replaces theme, accent and density atomically in KUI's metadata store; it does not alter the Kafka cluster itself.
+         */
+        readonly put: operations["cluster.uiSettings.put"];
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -883,6 +1255,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/topics/names": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Every topic name on the cluster, unpaged
+         * @description The drawer's topic tree is a fold over names, so it needs the names and none of the figures. Unpaged on purpose: a page of names would make the tree's counts depend on how far something had scrolled a list it never shows. Topics the scrape could not describe are included — they have no list row, they do exist, and a tree that omitted them would say a topic is gone.
+         */
+        readonly get: operations["topic.names"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/topics/refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -897,6 +1289,26 @@ export interface paths {
          * @description Answers 202 with the time the request was taken. It changes nothing on the Kafka cluster: it asks KUI to re-scrape it, and the response exists so a button has something truthful to say.
          */
         readonly post: operations["topic.refresh"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/topics/statistics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Cluster-wide topic totals: how many topics, partitions and bytes
+         * @description Cluster-wide and unaffected by any list filter: the totals keep reading the whole cluster while the table below them shows a search result. Each sum is absent rather than partial — a scrape that could not describe a topic knows how many topics exist and not how many partitions they hold — and incompleteTopics says how many topics that was, so the screen can explain the gap.
+         */
+        readonly get: operations["topic.statistics"];
+        readonly put?: never;
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -943,10 +1355,39 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/search": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Topics, consumer groups and subjects matching one query, across every cluster
+         * @description Answers 200 whenever the query is well formed, however many of the three services could be asked. A service this deployment does not route, or one that did not answer, contributes its id to `partial` and no results; the other two still answer. A `q` outside 1 to 200 characters is a 400 KUI-VALIDATION naming the field, because a search box with no term is a request the browser should not have made rather than a cluster with nothing in it.
+         */
+        readonly get: operations["gateway.search"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AcknowledgementDto
+         * @description The event as it now stands, and the cluster's open count after the acknowledgement
+         */
+        readonly AcknowledgementDto: {
+            readonly event: components["schemas"]["AlertEventDto"];
+            /** Format: int32 */
+            readonly openCount: number;
+        };
         /**
          * AdminTuningDocument
          * @description Admin client timeouts, chunk sizes and refresh intervals, in whole milliseconds
@@ -980,6 +1421,42 @@ export interface components {
             readonly parallelism: number;
             /** Format: int64 */
             readonly timeoutMs: number;
+        };
+        /**
+         * AlertEventDto
+         * @description One row of the alerts feed. `severity` chooses the tone and `category` chooses the glyph; both derived values travel so the bell, the card and the panel cannot map them differently. `openedAt` is when KUI noticed, not when the cluster changed
+         */
+        readonly AlertEventDto: {
+            readonly category: string;
+            readonly detail: string;
+            readonly glyph: string;
+            readonly id: string;
+            /** Format: date-time */
+            readonly lastSeenAt: string;
+            /** Format: date-time */
+            readonly openedAt: string;
+            readonly resolution?: components["schemas"]["AlertResolutionDto"];
+            readonly severity: string;
+            readonly title: string;
+            readonly tone: string;
+        };
+        /**
+         * AlertFeedResponse
+         * @description What KUI has noticed about this cluster, or the reason it cannot say
+         */
+        readonly AlertFeedResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly events: unknown;
+        };
+        /**
+         * AlertResolutionDto
+         * @description How an event closed: `cleared` means the condition stopped, `acknowledged` means a person said they know. `by` is set only for an acknowledgement
+         */
+        readonly AlertResolutionDto: {
+            /** Format: date-time */
+            readonly at: string;
+            readonly by?: string;
+            readonly kind: string;
         };
         /**
          * AppInfo
@@ -1193,7 +1670,7 @@ export interface components {
         readonly CompatibilityCheckRequest: {
             readonly definition: string;
             readonly references?: readonly components["schemas"]["SchemaReferenceDto"][];
-            readonly schemaType: string;
+            readonly schemaType?: string;
         };
         /**
          * CompatibilityDto
@@ -1218,6 +1695,25 @@ export interface components {
             readonly detail?: string;
             readonly reachable: boolean;
             readonly status: string;
+        };
+        /**
+         * ConnectorListResponse
+         * @description The connectors of every Connect cluster configured for this Kafka cluster. `not_configured` with a 200 when this cluster configures none
+         */
+        readonly ConnectorListResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly connectors: unknown;
+        };
+        /**
+         * ConnectorOperationDto
+         * @description The worker accepted the operation. It carries no connector state: Connect applies these asynchronously, and the next read of the connector list is where the change appears
+         */
+        readonly ConnectorOperationDto: {
+            /** Format: date-time */
+            readonly acceptedAt: string;
+            readonly connect: string;
+            readonly connector: string;
+            readonly operation: string;
         };
         /**
          * CreatedTopicDto
@@ -1373,8 +1869,11 @@ export interface components {
          */
         readonly GroupDetailDto: {
             readonly assignments: components["schemas"]["AssignmentFreshnessDto"];
+            readonly coordinatorHost?: string;
             /** Format: int32 */
             readonly coordinatorId?: number;
+            /** Format: int32 */
+            readonly coordinatorPort?: number;
             /** Format: int32 */
             readonly excludedPartitions: number;
             /** @description a consumer group id */
@@ -1394,6 +1893,16 @@ export interface components {
             readonly totalLag?: number;
         };
         /**
+         * GroupHitDto
+         * @description A consumer group the query matched
+         */
+        readonly GroupHitDto: {
+            /** @description a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ */
+            readonly cluster: string;
+            /** @description a consumer group id */
+            readonly groupId: string;
+        };
+        /**
          * GroupsResponse
          * @description One page of the consumer-group list, plus how many coordinators did not answer
          */
@@ -1408,8 +1917,11 @@ export interface components {
          * @description One consumer group as the list shows it; totalLag is null when it could not be computed
          */
         readonly GroupSummaryDto: {
+            readonly coordinatorHost?: string;
             /** Format: int32 */
             readonly coordinatorId?: number;
+            /** Format: int32 */
+            readonly coordinatorPort?: number;
             /** Format: int32 */
             readonly excludedPartitions: number;
             /** @description a consumer group id */
@@ -1479,6 +1991,14 @@ export interface components {
             readonly storeType: string;
         };
         /**
+         * KsqlObjectsResponse
+         * @description What this cluster's ksqlDB named. `not_configured` with a 200 when this cluster has no ksqlDB
+         */
+        readonly KsqlObjectsResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly objects: unknown;
+        };
+        /**
          * LagDeltaDto
          * @description Groups whose lag changed since the given token, the groups that are gone, and a new token
          */
@@ -1505,6 +2025,14 @@ export interface components {
             readonly state: string;
             /** Format: int64 */
             readonly totalLag?: number;
+        };
+        /**
+         * LatencyResponse
+         * @description The cluster's p99 request latency, or the reason there is none to show
+         */
+        readonly LatencyResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly latency: unknown;
         };
         /**
          * LogDirsResponse
@@ -1551,6 +2079,15 @@ export interface components {
             readonly memberId: string;
             readonly partitions?: readonly string[];
             readonly rebalancing: boolean;
+        };
+        /**
+         * MessageBrowserSettingsDto
+         * @description The default page size and presentation mode for bounded message browsing
+         */
+        readonly MessageBrowserSettingsDto: {
+            readonly mode: string;
+            /** Format: int32 */
+            readonly pageSize: number;
         };
         /**
          * MessageDto
@@ -1622,7 +2159,7 @@ export interface components {
          * @description One page of a list: the items, and where the page sits in the whole
          */
         readonly PageDto_A: {
-            readonly items?: readonly string[];
+            readonly items?: readonly components["schemas"]["SubjectSummaryDto"][];
             readonly page: components["schemas"]["PageInfo"];
         };
         /**
@@ -1922,6 +2459,14 @@ export interface components {
             readonly replicaId: number;
         };
         /**
+         * RecordSizeResponse
+         * @description The mean record size, or the reason there is none to show
+         */
+        readonly RecordSizeResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly recordSize: unknown;
+        };
+        /**
          * RefreshAcceptedDto
          * @description A refresh was accepted; the snapshot is not new yet
          */
@@ -1940,6 +2485,35 @@ export interface components {
             readonly clusterId: string;
             /** @description RFC 3339 timestamp in UTC */
             readonly requestedAt: string;
+        };
+        /**
+         * RegisteredVersionDto
+         * @description The registered schema's id, and the version it became where the registry reported one
+         */
+        readonly RegisteredVersionDto: {
+            /** Format: int32 */
+            readonly id: number;
+            /** @description a schema registry subject */
+            readonly subject: string;
+            /** Format: int32 */
+            readonly version?: number;
+        };
+        /**
+         * RegisterSchemaRequest
+         * @description The schema to register under this subject, and what it is written in
+         */
+        readonly RegisterSchemaRequest: {
+            readonly definition: string;
+            readonly references?: readonly components["schemas"]["SchemaReferenceDto"][];
+            readonly schemaType?: string;
+        };
+        /**
+         * RequestHandlersResponse
+         * @description How busy the broker's handlers are, or the reason there is nothing to show
+         */
+        readonly RequestHandlersResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly requestHandlers: unknown;
         };
         /**
          * ResendRequestDto
@@ -2062,6 +2636,23 @@ export interface components {
             readonly password: string;
             readonly username: string;
         };
+        /**
+         * SearchAnswerDto
+         * @description Everything one query found, with the services that could not be asked named
+         */
+        readonly SearchAnswerDto: {
+            readonly partial?: readonly string[];
+            readonly results: components["schemas"]["SearchResultsDto"];
+        };
+        /**
+         * SearchResultsDto
+         * @description What the query found, grouped by kind
+         */
+        readonly SearchResultsDto: {
+            readonly groups?: readonly components["schemas"]["GroupHitDto"][];
+            readonly subjects?: readonly components["schemas"]["SubjectHitDto"][];
+            readonly topics?: readonly components["schemas"]["TopicHitDto"][];
+        };
         /** Sensitive */
         readonly Sensitive: {
             /** @description A credential. Internal channel only; never on /api/v1 */
@@ -2093,6 +2684,45 @@ export interface components {
             readonly reason: string;
         };
         /**
+         * StatementPlanDto
+         * @description What running this statement would do. A destructive statement carries a token valid for five minutes and for this statement's exact text; a harmless one carries none and needs none
+         */
+        readonly StatementPlanDto: {
+            /** Format: date-time */
+            readonly computedAt: string;
+            readonly deletesTopic: boolean;
+            readonly destructive: boolean;
+            /** Format: date-time */
+            readonly expiresAt?: string;
+            readonly shape: string;
+            readonly statement: string;
+            readonly token?: string;
+            readonly warnings?: readonly string[];
+        };
+        /**
+         * StatementRequestDto
+         * @description One ksqlDB statement, and the plan token confirming it when it is destructive. One statement per request: this service classifies what it is given in order to decide whether it needs a confirmation, and a batch has no single classification
+         */
+        readonly StatementRequestDto: {
+            readonly statement: string;
+            readonly token?: string;
+        };
+        /**
+         * StatementResultDto
+         * @description What a finished statement produced. `outcome` is 'rows' for a pull query — an empty rows list then means the query matched nothing — or 'status' for a DDL or DML statement, whose `message` is the server's own sentence
+         */
+        readonly StatementResultDto: {
+            readonly columns?: readonly string[];
+            readonly entity?: string;
+            /** Format: date-time */
+            readonly executedAt: string;
+            readonly message?: string;
+            readonly outcome: string;
+            readonly rows?: readonly (readonly string[])[];
+            readonly shape: string;
+            readonly statement: string;
+        };
+        /**
          * StoreMaterialWrite
          * @description A keystore or truststore, base64 encoded, with its password
          */
@@ -2105,6 +2735,28 @@ export interface components {
         /** StoreSource */
         readonly StoreSource: components["schemas"]["FromPath"] | components["schemas"]["Inline"];
         /**
+         * SubjectHitDto
+         * @description A subject the query matched
+         */
+        readonly SubjectHitDto: {
+            /** @description a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ */
+            readonly cluster: string;
+            /** @description a schema registry subject */
+            readonly subject: string;
+        };
+        /**
+         * SubjectSummaryDto
+         * @description A subject list row: the name, and the facts a row shows when they could be read
+         */
+        readonly SubjectSummaryDto: {
+            readonly compatibility?: components["schemas"]["CompatibilityDto"];
+            readonly format?: string;
+            /** @description a schema registry subject */
+            readonly subject: string;
+            /** Format: int32 */
+            readonly versionCount?: number;
+        };
+        /**
          * SubjectVersionsDto
          * @description A subject's version numbers, ascending
          */
@@ -2112,6 +2764,14 @@ export interface components {
             /** @description a schema registry subject */
             readonly subject: string;
             readonly versions?: readonly number[];
+        };
+        /**
+         * ThroughputResponse
+         * @description The cluster's throughput, or the reason there is none to show
+         */
+        readonly ThroughputResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly throughput: unknown;
         };
         /** TlsConfig */
         readonly TlsConfig: {
@@ -2158,6 +2818,24 @@ export interface components {
             readonly topic: unknown;
         };
         /**
+         * TopicHitDto
+         * @description A topic the query matched
+         */
+        readonly TopicHitDto: {
+            /** @description a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ */
+            readonly cluster: string;
+            /** @description a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..' */
+            readonly name: string;
+        };
+        /**
+         * TopicNamesResponse
+         * @description Every topic name on the cluster, for the drawer's tree; no counts and no paging
+         */
+        readonly TopicNamesResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly names: unknown;
+        };
+        /**
          * TopicOverviewDto
          * @description Everything the topic page shows, with each part able to be missing on its own
          */
@@ -2186,6 +2864,14 @@ export interface components {
             readonly topics: unknown;
         };
         /**
+         * TopicStatisticsResponse
+         * @description The topics list's cluster-wide statistics region
+         */
+        readonly TopicStatisticsResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly statistics: unknown;
+        };
+        /**
          * TopicSubscriptionDto
          * @description One subscribed topic and this group's position in each of its partitions
          */
@@ -2197,6 +2883,14 @@ export interface components {
             readonly partitions?: readonly components["schemas"]["PartitionDto"][];
             /** @description a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..' */
             readonly topic: string;
+        };
+        /**
+         * TopProducersResponse
+         * @description Who is producing the traffic, or the reason KUI cannot say
+         */
+        readonly TopProducersResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly producers: unknown;
         };
         /**
          * TrackHitDto
@@ -2250,6 +2944,15 @@ export interface components {
             readonly source: components["schemas"]["StoreSource"];
             /** @description JKS, PKCS12 or PEM */
             readonly storeType: string;
+        };
+        /**
+         * UiAppearanceDto
+         * @description The complete appearance snapshot for this principal and cluster
+         */
+        readonly UiAppearanceDto: {
+            readonly accent: string;
+            readonly density: string;
+            readonly theme: string;
         };
         /** Unavailable */
         readonly Unavailable: {
@@ -2687,6 +3390,106 @@ export interface operations {
             };
         };
     };
+    readonly "alerts.events": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How many events to return, 1 to 200 */
+                readonly limit?: number;
+                /** @description When true, this principal's read marker moves to now after unreadCount has been computed, so the caller still learns how many it had not seen. Default false, so a card polling the feed does not clear somebody's bell */
+                readonly markRead?: boolean;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AlertFeedResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "alerts.acknowledge": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The alert event's id, as the feed reported it */
+                readonly eventId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AcknowledgementDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "alerts.stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/event-stream": string;
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "cluster.brokers": {
         readonly parameters: {
             readonly query?: never;
@@ -2740,6 +3543,147 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["BrokerConfigsResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connector.pause": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it */
+                readonly connectName: string;
+                /** @description The connector's name, as the worker reported it */
+                readonly connectorName: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorOperationDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connector.restart": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it */
+                readonly connectName: string;
+                /** @description The connector's name, as the worker reported it */
+                readonly connectorName: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorOperationDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connector.resume": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it */
+                readonly connectName: string;
+                /** @description The connector's name, as the worker reported it */
+                readonly connectorName: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorOperationDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connectors": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorListResponse"];
                 };
             };
             readonly default: {
@@ -3011,6 +3955,143 @@ export interface operations {
             };
         };
     };
+    readonly "ksql.objects": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["KsqlObjectsResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.statement.execute": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["StatementRequestDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StatementResultDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.statement.plan": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["StatementRequestDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StatementPlanDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "ksql.stream": {
+        readonly parameters: {
+            readonly query: {
+                /** @description The push query to run. It must be a SELECT ... EMIT CHANGES and nothing else */
+                readonly statement: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/event-stream": string;
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "cluster.logDirs": {
         readonly parameters: {
             readonly query?: {
@@ -3146,6 +4227,165 @@ export interface operations {
             };
         };
     };
+    readonly "metrics.latency": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How far back to reach: 24h, 7d, 30d */
+                readonly window?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["LatencyResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.producers": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How many topics to return, 1 to 50 */
+                readonly top?: number;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TopProducersResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.recordSize": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RecordSizeResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.requestHandlers": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RequestHandlersResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.throughput": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How far back to reach: 24h, 7d, 30d */
+                readonly range?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ThroughputResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "cluster.refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -3250,7 +4490,7 @@ export interface operations {
                 readonly direction?: string;
                 /** @description Which page, numbered from one */
                 readonly page?: number;
-                /** @description How many rows a page holds. A value above the maximum is clamped, not refused */
+                /** @description How many rows a page holds, up to 100. A value above that is clamped, not refused. Exactly 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment; anything below that is clamped up to one row rather than read as a count */
                 readonly pageSize?: number;
                 /** @description Case-insensitive substring match over the subject name. Not a regular expression */
                 readonly q?: string;
@@ -3385,6 +4625,45 @@ export interface operations {
             };
         };
     };
+    readonly "schema.subject.version.register": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The subject, as the registry knows it */
+                readonly subject: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["RegisterSchemaRequest"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RegisteredVersionDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "schema.version": {
         readonly parameters: {
             readonly query?: never;
@@ -3445,6 +4724,140 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["CompatibilityCheckDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.messageBrowserSettings.get": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MessageBrowserSettingsDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.messageBrowserSettings.put": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["MessageBrowserSettingsDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MessageBrowserSettingsDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.uiSettings.get": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["UiAppearanceDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "cluster.uiSettings.put": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UiAppearanceDto"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["UiAppearanceDto"];
                 };
             };
             readonly default: {
@@ -4096,6 +5509,36 @@ export interface operations {
             };
         };
     };
+    readonly "topic.names": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TopicNamesResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "topic.refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -4114,6 +5557,36 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["RefreshAcceptedDto1"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "topic.statistics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TopicStatisticsResponse"];
                 };
             };
             readonly default: {
@@ -4175,6 +5648,38 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["AppInfo"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "gateway.search": {
+        readonly parameters: {
+            readonly query: {
+                /** @description How many hits of each kind to return */
+                readonly limit?: number;
+                /** @description What to look for: a case-insensitive substring of a topic, group or subject name */
+                readonly q: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SearchAnswerDto"];
                 };
             };
             readonly default: {

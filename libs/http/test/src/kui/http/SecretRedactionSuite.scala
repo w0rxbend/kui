@@ -5,8 +5,8 @@ import java.time.Instant
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
+import ch.qos.logback.classic.Logger as LogbackLogger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.classic.{Logger as LogbackLogger}
 import ch.qos.logback.core.read.ListAppender
 import io.circe.syntax.*
 import io.circe.{Encoder, Json}
@@ -28,10 +28,10 @@ import kui.testkit.RedactionAssertions
 
 /** The milestone-0 exit criterion, proved once, for every sink at once.
   *
-  * "A `Secret[String]` field logged, traced, or returned from any endpoint renders as `***`" is a
-  * promise about four different pieces of machinery, each maintained by different people at
-  * different times. Testing them separately would leave the promise itself untested — nothing would
-  * fail if a fifth sink appeared and quietly printed the value.
+  * "A `Secret[String]` field logged, traced, or returned from any endpoint renders as `***`" is a promise
+  * about four different pieces of machinery, each maintained by different people at different times. Testing
+  * them separately would leave the promise itself untested — nothing would fail if a fifth sink appeared and
+  * quietly printed the value.
   *
   * One fixture, `hunter2-DO-NOT-LEAK`, goes through all four here:
   *
@@ -40,33 +40,33 @@ import kui.testkit.RedactionAssertions
   *   3. an error envelope, built at a site that had the secret in scope;
   *   4. an HTTP response body, served by a real Tapir endpoint through Circe.
   *
-  * Plus a negative control: the same value *without* the `Secret` wrapper does appear, which is
-  * what proves the suite is capable of failing.
+  * Plus a negative control: the same value *without* the `Secret` wrapper does appear, which is what proves
+  * the suite is capable of failing.
   *
   * ==If you are adding a fifth sink==
   *
-  * A metrics attribute, a health payload, an audit record, a cache key — anything that turns a
-  * configuration object into text — add a case here. The guarantee is only as wide as this file.
+  * A metrics attribute, a health payload, an audit record, a cache key — anything that turns a configuration
+  * object into text — add a case here. The guarantee is only as wide as this file.
   *
   * ==Why this works at all==
   *
   * Redaction is a property of the type, not of any encoder (ADR-008). `Secret[A]`'s `toString` is
-  * `Secret(***)` and it has no other rendering, so there is no formatter that can be configured
-  * wrongly and no scrubbing filter that can be forgotten. That is why one fixture can cover four
-  * sinks: they all reach the same `toString`.
+  * `Secret(***)` and it has no other rendering, so there is no formatter that can be configured wrongly and
+  * no scrubbing filter that can be forgotten. That is why one fixture can cover four sinks: they all reach
+  * the same `toString`.
   */
 final class SecretRedactionSuite extends CatsEffectSuite {
 
   private val Needle = "hunter2-DO-NOT-LEAK"
 
   /** A realistic configuration object: a signing key beside the ordinary fields it travels with. */
-  private final case class SigningKeyView(kid: String, key: Secret[String], notBefore: Instant)
+  final private case class SigningKeyView(kid: String, key: Secret[String], notBefore: Instant)
 
   private val fixture =
     SigningKeyView("compose-1", Secret(Needle), Instant.parse("2026-01-01T00:00:00Z"))
 
-  /** The encoder a configuration view would use. It renders the secret through `toString`, which is
-    * the only rendering `Secret` has.
+  /** The encoder a configuration view would use. It renders the secret through `toString`, which is the only
+    * rendering `Secret` has.
     */
   private given Encoder[SigningKeyView] = Encoder.instance { view =>
     Json.obj(
@@ -172,8 +172,10 @@ final class SecretRedactionSuite extends CatsEffectSuite {
         .errorOut(statusCode.and(jsonBody[ErrorEnvelope]))
         .name("fails")
         .serverLogic[IO] { _ =>
-          val error = ApplicationError.NotFound("signing key", fixture.key.toString, ErrorCode.ClusterNotFound)
-          val (status, envelope) = ErrorInterceptor.render(error, CorrelationId.unsafe("abc123"), fixture.notBefore)
+          val error =
+            ApplicationError.NotFound("signing key", fixture.key.toString, ErrorCode.ClusterNotFound)
+          val (status, envelope) =
+            ErrorInterceptor.render(error, CorrelationId.unsafe("abc123"), fixture.notBefore)
           IO.pure(Left((sttp.model.StatusCode(status), envelope)))
         }
 
@@ -218,9 +220,11 @@ final class SecretRedactionSuite extends CatsEffectSuite {
   ): IO[List[ILoggingEvent]] =
     for {
       logger <- KuiLogger.make[IO]("kui-test")
-      events <- IO.blocking(attach()).bracket { appender =>
-        body(logger) *> IO.blocking(appender.list.asScala.toList)
-      }(appender => IO.blocking(detach(appender)))
+      events <- IO
+        .blocking(attach())
+        .bracket { appender =>
+          body(logger) *> IO.blocking(appender.list.asScala.toList)
+        }(appender => IO.blocking(detach(appender)))
     } yield events
 
   private def attach(): ListAppender[ILoggingEvent] = {

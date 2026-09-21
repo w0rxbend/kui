@@ -94,9 +94,15 @@ object TrackEndpoints {
       .in(jsonBody[TrackQueryDto])
       .out(jsonBody[TrackResultDto])
       .name("message.track")
-      // Cluster-scoped, and the topics it may read are checked by the service, which has the decoded body.
-      // The gateway cannot: it proxies bodies rather than decoding them, which `NameSource.RequestBody`
-      // exists to say out loud.
+      // Cluster-scoped only. The topics named in the body are NOT checked against the caller's per-topic
+      // permissions anywhere today — not here (the gateway cannot decode bodies, which is what
+      // `NameSource.RequestBody` exists to say out loud) and not in the message service, which reads
+      // `TrackQueryDto.topics` and scans every one of them without a permission check
+      // (`TrackRoutes`/`TrackUseCase` carry no principal to check against). A principal scoped to a single
+      // topic pattern can currently get hits from any topic via this endpoint. Fixing this needs either a
+      // `NameSource` that can point at a body list field, wired through to a real per-topic check in the
+      // message service, or an equivalent check added there directly — tracked as a gap rather than claimed
+      // as done.
       .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("track"))
       .summary("Find a value across several topics inside a time window")
       .description(

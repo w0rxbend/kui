@@ -11,8 +11,8 @@ import kui.testkit.KuiSuite
 /** The two batching properties, in a ScalaCheck suite of their own.
   *
   * They live apart from `AdminBatchSuite` because that suite's subject is *time* — it runs under
-  * `TestControl` on a `CatsEffectSuite`, which has no `property`. These two are about shape rather
-  * than timing, so they run on the real runtime and are fast anyway.
+  * `TestControl` on a `CatsEffectSuite`, which has no `property`. These two are about shape rather than
+  * timing, so they run on the real runtime and are fast anyway.
   */
 final class AdminBatchPropertySuite extends KuiSuite {
 

@@ -4,11 +4,11 @@ import cats.effect.kernel.Async
 import cats.syntax.all.*
 import io.circe.{parser, Decoder, HCursor, Json}
 import sttp.client4.*
-import sttp.model.{MediaType, StatusCode, Uri}
+import sttp.model.{MediaType, Method, StatusCode, Uri}
 
 import kui.config.SafeUrl
 import kui.http.upstream.UpstreamFailure
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
+import kui.kernel.error.{ApplicationError, ErrorCode, FieldError, InfrastructureError, KuiError}
 import kui.kernel.{SchemaId, Subject}
 import kui.schema.domain.*
 
@@ -62,8 +62,8 @@ final class RegistryHttp[F[_]: Async](
     * and every schema screen reported "the configured address does not look like a Schema Registry". The
     * message was accurate about the symptom and pointed at the operator's configuration, which was right.
     *
-    * So the path is dropped here and `rebase` puts it back exactly once. The scheme and host are kept only
-    * so that a logged or failed URI reads sensibly; they are replaced before the request is sent.
+    * So the path is dropped here and `rebase` puts it back exactly once. The scheme and host are kept only so
+    * that a logged or failed URI reads sensibly; they are replaced before the request is sent.
     */
   private val root: Uri =
     Uri.parse(baseUrl.value).getOrElse(uri"http://schema-registry.invalid").withWholePath("")
@@ -77,6 +77,41 @@ final class RegistryHttp[F[_]: Async](
         decode[List[String]](body, "a JSON array of subject names")
           .map(_.map(Subject.unsafe))
     })
+
+  /** Three requests, which is the fewest the Confluent API allows for one list row.
+    *
+    * Each of the three is the only source of its fact. The version *list* is the only source of a count that
+    * survives a soft-deleted version — the latest version number is not the number of versions, and a
+    * registry where v2 was deleted answers `latest` with v3 over a list of two. The latest version's own
+    * document is the only source of `schemaType`. `/config/{subject}` is the only source of a level.
+    *
+    * They are sent one after another rather than all at once because this call is already multiplied by the
+    * page size, and the bulkhead in front of the registry is deliberately narrow: the concurrency that
+    * matters is the caller's across rows, not this method's across three requests for one row.
+    *
+    * A subject the list named a moment ago and the version call cannot find is `None` and not an error. A
+    * registry is written to while somebody is reading it, and the other two requests are skipped because
+    * there is nothing left to ask them about.
+    */
+  def summary(subject: Subject): F[Either[KuiError, Option[SubjectSummary]]] =
+    versions(subject).flatMap {
+      case Left(error) => error.asLeft[Option[SubjectSummary]].pure[F]
+      case Right(None) => none[SubjectSummary].asRight[KuiError].pure[F]
+      case Right(Some(numbers)) =>
+        (schema(subject, VersionSelector.Latest), subjectCompatibility(subject)).tupled.map {
+          case (Left(error), _) => error.asLeft[Option[SubjectSummary]]
+          case (_, Left(error)) => error.asLeft[Option[SubjectSummary]]
+          case (Right(latest), Right(ownLevel)) =>
+            SubjectSummary(
+              subject = subject,
+              // Absent when the latest version went away between the two requests. The count still
+              // stands: it was measured, and a row with a count and no format says exactly that.
+              format = latest.map(_.format),
+              versionCount = Some(numbers.size),
+              compatibility = ownLevel.map(SubjectCompatibility.own)
+            ).some.asRight[KuiError]
+        }
+    }
 
   def versions(subject: Subject): F[Either[KuiError, Option[List[SchemaVersion]]]] =
     get(root.addPath("subjects", subject.value, "versions")).map(_.flatMap {
@@ -110,6 +145,72 @@ final class RegistryHttp[F[_]: Async](
       case None => Right(None)
       case Some(body) => parseLevel(body)
     })
+
+  /** Two requests, because the Confluent API answers registration with an id and no version.
+    *
+    * `POST /subjects/{subject}/versions` returns `{"id": N}` — that is the entire documented response, and
+    * the compatibility layers of Apicurio and Karapace copy it. So the version number is asked for
+    * separately, with `POST /subjects/{subject}`, which is the registry's "which version is *this* schema"
+    * lookup. That call is used rather than `GET .../versions/latest` on purpose: latest is a race — somebody
+    * else's registration between the two calls would give this operator back a version that is not theirs —
+    * whereas the lookup is about the exact document that was just sent and cannot answer about another one.
+    *
+    * The lookup's failure does not fail the registration. The schema is in the registry by then, and
+    * answering `Left` would tell an operator to do it again; the version travels as `None` instead and the
+    * screen says the number could not be read. See [[kui.schema.domain.RegisteredVersion]].
+    *
+    * The rejection path is the one that matters most here. `errorFrom` turns the registry's 409 or 422 into
+    * `KUI-VALIDATION` carrying the registry's own sentence in `details`, keyed to the `definition` field,
+    * because that sentence — "Schema being registered is incompatible with an earlier schema" and the reason
+    * it gives — is the only part of the answer an operator can act on.
+    */
+  def register(subject: Subject, proposed: ProposedSchema): F[Either[KuiError, RegisteredVersion]] = {
+    val body = schemaBody(proposed)
+
+    post(root.addPath("subjects", subject.value, "versions"), body, RegisteredField).flatMap {
+      // A 404 on registration is not an absence: the subject is *created* by this call, so there is nothing
+      // that could be missing. It is the same misconfigured address `subjects` reports.
+      case Left(error) => error.asLeft[RegisteredVersion].pure[F]
+      case Right(None) =>
+        notARegistry(s"POST /subjects/${subject.value}/versions answered 404")
+          .asLeft[RegisteredVersion]
+          .pure[F]
+      case Right(Some(answer)) =>
+        parseId(answer) match {
+          case Left(error) => error.asLeft[RegisteredVersion].pure[F]
+          case Right(id) =>
+            lookupVersion(subject, body).map(version =>
+              RegisteredVersion(subject, id, version).asRight[KuiError]
+            )
+        }
+    }
+  }
+
+  /** Which version the schema just registered became, or `None` when the registry would not say.
+    *
+    * Every failure here is swallowed into `None` — deliberately, and this is the only place in this file that
+    * swallows one. The registration has already succeeded; there is no failure left to report that would not
+    * be a lie about what happened to the operator's schema.
+    */
+  private def lookupVersion(subject: Subject, body: Json): F[Option[SchemaVersion]] =
+    post(root.addPath("subjects", subject.value), body).map {
+      case Right(Some(answer)) =>
+        parser
+          .parse(answer)
+          .toOption
+          .flatMap(_.hcursor.get[Int]("version").toOption)
+          .flatMap(SchemaVersion.from(_).toOption)
+      case _ => None
+    }
+
+  private def parseId(body: String): Either[KuiError, SchemaId] =
+    parser.parse(body).left.map(_ => malformed("it is not JSON")).flatMap { json =>
+      json.hcursor
+        .get[Int]("id")
+        .left
+        .map(_ => malformed("it has no 'id' field naming the schema it stored"))
+        .flatMap(SchemaId.from(_).left.map(error => malformed(error.message)))
+    }
 
   def setGlobalCompatibility(level: CompatibilityLevel): F[Either[KuiError, Unit]] =
     put(root.addPath("config"), levelBody(level)).map(_.void)
@@ -147,8 +248,19 @@ final class RegistryHttp[F[_]: Async](
   private def put(uri: Uri, body: Json): F[Either[KuiError, Option[String]]] =
     send(basicRequest.put(uri).body(body.noSpaces).contentType(VendorMediaType))
 
-  private def post(uri: Uri, body: Json): F[Either[KuiError, Option[String]]] =
-    send(basicRequest.post(uri).body(body.noSpaces).contentType(VendorMediaType))
+  /** @param rejectedField
+    *   which request field a refusal belongs beside, when the registry refuses this call. It is a parameter
+    *   rather than a constant because the same status from the same registry means different things on
+    *   different calls: a 422 on `PUT /config` is about the level somebody typed, and a 409 on
+    *   `POST /subjects/.../versions` is about the schema document. A refusal with no field lands on the
+    *   request as a whole, which is what [[kui.kernel.error.FieldError]] models with a `None` field.
+    */
+  private def post(
+      uri: Uri,
+      body: Json,
+      rejectedField: Option[String] = None
+  ): F[Either[KuiError, Option[String]]] =
+    send(basicRequest.post(uri).body(body.noSpaces).contentType(VendorMediaType), rejectedField)
 
   /** Authenticate, send, and turn everything that is not a usable response into a typed error.
     *
@@ -158,7 +270,10 @@ final class RegistryHttp[F[_]: Async](
     * the difference between "the registry said no" and "the registry said this schema drops a field that has
     * no default".
     */
-  private def send(request: Request[Either[String, String]]): F[Either[KuiError, Option[String]]] =
+  private def send(
+      request: Request[Either[String, String]],
+      rejectedField: Option[String] = None
+  ): F[Either[KuiError, Option[String]]] =
     credentials.authenticate(request.header("Accept", AcceptHeader).response(asStringAlways)).flatMap {
       case Left(error) => error.asLeft[Option[String]].pure[F]
       case Right(authenticated) =>
@@ -169,7 +284,7 @@ final class RegistryHttp[F[_]: Async](
             else if response.code == StatusCode.NotFound then Right(None)
             else if response.code == StatusCode.Unauthorized || response.code == StatusCode.Forbidden then
               Left(InfrastructureError.AuthFailed(UpstreamName))
-            else Left(errorFrom(response.code, response.body))
+            else Left(errorFrom(response.code, response.body, rejectedField, request.method))
           }
           .recover {
             // The resilient backend carries its typed error inside this one exception rather than losing
@@ -279,11 +394,35 @@ final class RegistryHttp[F[_]: Async](
 
   /** A non-404 failure status, with the registry's own error code and message when it sent one.
     *
-    * `422` with `error_code` 42203 is the one worth naming: it is what a registry answers when the
-    * compatibility level in a `PUT /config` is not one it knows, and turning it into a `KUI-VALIDATION`
-    * failure puts the message beside the field rather than in a red banner about an upstream.
+    * ==Which statuses become `KUI-VALIDATION`, and on which calls==
+    *
+    * `400` and `422` say the registry read what KUI sent and would not have it. `422` with `error_code` 42203
+    * is the one worth naming: it is what a registry answers when the compatibility level in a `PUT /config`
+    * is not one it knows, and turning it into a `KUI-VALIDATION` failure puts the message beside the field
+    * rather than in a red banner about an upstream.
+    *
+    * `409` is the registration's own refusal — "incompatible with an earlier schema for this subject" — and
+    * it belongs in the same branch for the same reason. It is folded in **only for a call that sent a body**,
+    * which here means every method except `GET`. A `409` answering `GET /subjects`, `GET …/versions`,
+    * `GET …/versions/{v}` or `GET /config` cannot be about anything the caller typed, because those calls
+    * carry nothing; reporting one as a `400 KUI-VALIDATION` would put a form error on a screen that has no
+    * form and hide a registry mid-election, mid-migration or behind a confused proxy. Those arrive as
+    * `KUI-UPSTREAM-UNAVAILABLE`, which is what a caller can act on.
+    *
+    * ==What `details` carries==
+    *
+    * One [[kui.kernel.error.FieldError]] when the registry sent a `message`, and an empty array when it sent
+    * nothing usable. Its `field` is `rejectedField` — `definition` on a registration, and `null` on the two
+    * `PUT /config` calls, because a level that the registry rejected is the whole request rather than one
+    * input of a form. A `null` field is the shape ADR-034 gives "this refusal is about the request", and a
+    * browser reading `details[0]` has to keep working when it is absent.
     */
-  private def errorFrom(status: StatusCode, body: String): KuiError = {
+  private def errorFrom(
+      status: StatusCode,
+      body: String,
+      rejectedField: Option[String],
+      method: Method
+  ): KuiError = {
     val detail = parser
       .parse(body)
       .toOption
@@ -291,12 +430,17 @@ final class RegistryHttp[F[_]: Async](
       .map(_.trim)
       .filter(_.nonEmpty)
 
-    if status == StatusCode.UnprocessableEntity || status == StatusCode.BadRequest then
+    if status == StatusCode.UnprocessableEntity || status == StatusCode.BadRequest ||
+      (status == StatusCode.Conflict && method != Method.GET)
+    then
       ApplicationError.Invalid(
         detail.fold(s"the schema registry refused the request (HTTP ${status.code})")(message =>
           s"the schema registry refused the request: $message"
         ),
-        Nil
+        // The registry's own sentence, in `details` as well as in the message, because that is where a form
+        // reads the text it puts beside the field somebody typed. ADR-034 allows this and not the body it
+        // came in: one field the registry writes for humans, and nothing else it sent.
+        detail.toList.map(message => FieldError(rejectedField, List(message)))
       )
     else
       detail match {
@@ -342,6 +486,13 @@ object RegistryHttp {
 
   /** The name this upstream is known by in metrics, spans and errors. A name, never a URL. */
   val UpstreamName: String = "schema-registry"
+
+  /** The request field a registration refusal belongs beside: the schema text the operator pasted.
+    *
+    * It is the browser's field name and not the registry's, because the `details` array is read by a form
+    * that has to decide which of its inputs to mark. `RegisterSchemaRequest.definition` is that input.
+    */
+  val RegisteredField: Option[String] = Some("definition")
 
   /** What KUI sends as `Content-Type`: the documented vendor type. */
   val VendorMediaType: MediaType =

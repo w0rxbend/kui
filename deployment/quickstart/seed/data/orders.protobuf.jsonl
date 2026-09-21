@@ -1,0 +1,3 @@
+{"id":"o-pb-1001","customer":"ada","items":[{"sku":"SKU-RED","quantity":2},{"sku":"SKU-BLUE","quantity":1}],"total":41.5,"expedited":true,"shipping":{"city":"Krakow","country":"PL"}}
+{"id":"o-pb-1002","customer":"grace","items":[{"sku":"SKU-GREEN","quantity":4}],"total":88.0,"expedited":false,"shipping":{"city":"Gdansk","country":"PL"}}
+{"id":"o-pb-1003","customer":"alan","items":[{"sku":"SKU-BLACK","quantity":1},{"sku":"SKU-WHITE","quantity":3}],"total":125.75,"expedited":true,"shipping":{"city":"Kyiv","country":"UA"}}

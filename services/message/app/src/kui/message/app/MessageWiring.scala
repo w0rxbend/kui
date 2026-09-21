@@ -5,6 +5,7 @@ import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import fs2.io.file.Files
 import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.otel4s.metrics.Meter
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.Backend
 import sttp.client4.httpclient.fs2.HttpClientFs2Backend
@@ -23,16 +24,18 @@ import kui.message.api.{MessageApi, MessageRoutes}
 import kui.message.application.cursor.CursorCodec
 import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.{PurgeToken, PurgeUseCase}
-import kui.message.application.{BrowseUseCase, FilterUseCase, TrackUseCase}
+import kui.message.application.{BrowseUseCase, FilterUseCase, RecordMasking, TrackUseCase}
 import kui.message.infrastructure.{
   BrowseTuning,
   CelFilterSource,
   ClusterSerdeSource,
   ConfiguredClusterProfiles,
+  ConfiguredRecordMasking,
   KafkaBrowseConsumer,
   KafkaRecordDeleter,
   KafkaRecordProducer,
-  KafkaRecordSource
+  KafkaRecordSource,
+  MaskingMetrics
 }
 import kui.observability.Telemetry
 import kui.observability.audit.LoggingAuditSink
@@ -119,18 +122,26 @@ object MessageWiring {
         tuning
       )
       serdeSource = new ClusterSerdeSource[F](serdes)
+      // DM-001, ADR-023. The masking engine's first production caller: rules come from this process's
+      // own `kui.clusters[].masking[]`, and the mask is applied inside the read, at the decode, so that
+      // every consumer of a decoded record — the record event, both filters, the DTO — sees the same
+      // masked value. There is no second placement that satisfies "before any DTO leaves the service"
+      // for all of them at once.
+      masking <- Resource.eval(maskingFor[F](clusters, meter))
+      _ <- Resource.eval(describeMasking[F](clusters, logger))
       browse = BrowseUseCase.make[F](
         profiles,
         serdeSource,
         source,
         CursorCodec.hmacSha256[F](signingKey),
-        filterSource
+        filterSource,
+        masking
       )
       filters = FilterUseCase.make[F](filterSource)
       // A track reads through the same record source a browse does, so the seek arithmetic and the
       // decoding have one implementation: what a track matches on is exactly what the browse screen would
       // have shown for the same record.
-      track = TrackUseCase.make[F](profiles, serdeSource, source)
+      track = TrackUseCase.make[F](profiles, serdeSource, source, masking)
       // ADR-047's three parts, wired once and shared by both writes. The guard is the only way this
       // service changes a cluster: it holds the read-only refusal and the audit record, and it is what
       // returns the result, so a use case cannot be added that writes without going through them.
@@ -199,6 +210,32 @@ object MessageWiring {
       capabilities = MessageApi.capabilityDocument[F](profiles.ids)
     )
 
+  /** The record mask this process browses and tracks through, over a metrics adapter that really records.
+    *
+    * ==Why this is a named function and not two lines inside [[make]]==
+    *
+    * It is the only place in the running product that decides which `MaskingMetrics` the mask is handed, and
+    * that choice had no case at all. `MaskingMetrics.otel4s[F](meter)` → `MaskingMetrics.noop[F].pure[F]` is
+    * one compiling, `-Werror`-clean line under which `kui.masking.applied` — declared in wave 1, given its
+    * first writer in wave 10 — is never emitted in production again, with `services.message.__.test`
+    * reporting 1442/1442 SUCCESS (W10-04/F2). `MaskingMetricsSuite` drives the real adapter directly and
+    * `ConfiguredRecordMaskingSuite` drives a counting fake; neither can see which of the two RUNS, because
+    * neither is reached from here.
+    *
+    * `private[app]` is the same widening `describeMasking` already carries and it is here for the same
+    * reason: a rule nothing can reach is a rule nothing can gate. `MessageWiringSuite` takes this function,
+    * hands it a meter backed by an in-memory SDK reader, masks a topic through the result and reads the point
+    * back — an assertion about what the process holds rather than about either adapter on its own.
+    *
+    * The two metric families wired beside this one — `CacheMetrics` and `FilterMetrics` — have no such seam
+    * yet and are still guarded by a source read in that suite, which says so plainly.
+    */
+  private[app] def maskingFor[F[_]: Async](
+      clusters: List[ClusterConfig],
+      meter: Meter[F]
+  ): F[RecordMasking[F]] =
+    MaskingMetrics.otel4s[F](meter).map(ConfiguredRecordMasking.of[F](clusters, _))
+
   /** One CEL filter engine per configured cluster.
     *
     * Per cluster and not per process, because the compiled-program cache is keyed on a cluster: a filter is
@@ -252,8 +289,11 @@ object MessageWiring {
     *
     * `SecureRandom` and not a fixed literal: a predictable key would let anyone mint a cursor naming any
     * cluster, and a cursor is trusted precisely because it was signed.
+    *
+    * `private[app]` so that `MessageWiringSuite` can take two keys and compare them. Reaching it through
+    * `make` would need a Kafka client and a registry; this module had no test source at all until then.
     */
-  private def newCursorKey[F[_]: Async]: F[Secret[Array[Byte]]] =
+  private[app] def newCursorKey[F[_]: Async]: F[Secret[Array[Byte]]] =
     Async[F].delay {
       val bytes = new Array[Byte](CursorKeyBytes)
       new java.security.SecureRandom().nextBytes(bytes)
@@ -337,6 +377,36 @@ object MessageWiring {
     backend.toList.flatMap(client =>
       ClusterSerdeFactories.forCluster[F](cluster, client, telemetry, logger, metrics, policy)
     )
+
+  /** One INFO line per cluster that configures masking, saying how many rules are in force.
+    *
+    * "Was this deployment masking anything?" is unanswerable after the fact unless the process said so at
+    * startup, and it is the first question asked when a field turns up in full where it should not have — or,
+    * more often, when a field an operator can see on a screen turns up as asterisks and nobody remembers why.
+    *
+    * The **count** and never the rules. A masking rule names the fields and the topics an operator thought
+    * were worth hiding, which is itself a map of where this cluster's secrets are; putting that roster into
+    * `docker logs` would undo a share of what the rules are for. `MaskingConfig.toString` makes the same
+    * choice for the same reason, and this line is what stops the two from disagreeing.
+    *
+    * `private[app]` rather than `private`, and the widening is the point of it. `MaskingConfigSuite` asserts
+    * this discipline for `ClusterConfig.toString`; this is the second place that prints the same fact and it
+    * is the one an operator actually reads, and it had no case at all — changing `.size` to the list printed
+    * every masked field name and topic pattern into `docker logs` with `./scripts/run-tests.sh` green
+    * (W9-06/F3). A rule nothing can reach is a rule nothing can gate, so the seam is landed here and
+    * `MessageWiringSuite` drives it over a captured logger.
+    */
+  private[app] def describeMasking[F[_]: Async](
+      clusters: List[ClusterConfig],
+      logger: StructuredLogger[F]
+  ): F[Unit] =
+    clusters.filter(_.masking.nonEmpty).traverse_ { cluster =>
+      logger.info(
+        s"cluster '${cluster.id.value}' masks browsed and tracked records with " +
+          s"${cluster.masking.rules.size} rule(s) (ADR-023, DM-001). Masking is never applied on produce " +
+          "or resend"
+      )
+    }
 
   /** One INFO line per cluster that configures a registry, and one WARN for the case KUI cannot honour.
     *

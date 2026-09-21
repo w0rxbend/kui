@@ -7,15 +7,14 @@ import kui.testkit.{ClusterGenerators, KuiSuite}
 
 /** What `BootstrapServers` accepts, what it refuses, and which field it blames.
   *
-  * The `fieldName` assertions are not decoration. CFGOP-001 accumulates every configuration failure
-  * into one startup message keyed by field, so an error that blames the wrong field sends an
-  * operator to the wrong line of their YAML.
+  * The `fieldName` assertions are not decoration. CFGOP-001 accumulates every configuration failure into one
+  * startup message keyed by field, so an error that blames the wrong field sends an operator to the wrong
+  * line of their YAML.
   */
 final class BootstrapServersSuite extends KuiSuite {
 
-  /** The result reduced to two comparable strings: the joined value on the right, the blamed field
-    * on the left. Comparing that keeps a failure message readable and keeps the opaque type out of
-    * the assertion.
+  /** The result reduced to two comparable strings: the joined value on the right, the blamed field on the
+    * left. Comparing that keeps a failure message readable and keeps the opaque type out of the assertion.
     */
   private def parsed(raw: String): Either[String, String] =
     BootstrapServers.from(raw).left.map(_.fieldName).map(_.value)

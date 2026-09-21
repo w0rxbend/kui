@@ -8,10 +8,10 @@ import kui.testkit.Generators
 
 /** What the identifiers of KERN-001 promise, checked rather than described.
   *
-  * The two kinds of test here answer two different questions. The properties answer "does this hold
-  * for every value", which is the only honest way to talk about a validation rule. The tables answer
-  * "does this exact input produce this exact error", which is what stops a future refactor quietly
-  * widening a rule: a table row is a decision someone has to delete on purpose.
+  * The two kinds of test here answer two different questions. The properties answer "does this hold for every
+  * value", which is the only honest way to talk about a validation rule. The tables answer "does this exact
+  * input produce this exact error", which is what stops a future refactor quietly widening a rule: a table
+  * row is a decision someone has to delete on purpose.
   */
 final class IdsSuite extends ScalaCheckSuite {
 
@@ -45,22 +45,22 @@ final class IdsSuite extends ScalaCheckSuite {
     }
   }
 
-  /** Every shape ADR-031's slug rule exists to refuse. Each row names the reason, so a failure says
-    * which rule stopped holding rather than only which string broke.
+  /** Every shape ADR-031's slug rule exists to refuse. Each row names the reason, so a failure says which
+    * rule stopped holding rather than only which string broke.
     */
   private val rejectedClusterIds: List[(String, String)] = List(
-    ""                 -> "empty",
-    "-leading"         -> "starts with a dash",
-    "trailing-"        -> "ends with a dash",
-    "Prod"             -> "contains an uppercase letter",
-    "prod eu"          -> "contains a space",
-    "prod.eu"          -> "contains a dot",
-    "prod_eu"          -> "contains an underscore",
-    "prod/eu"          -> "contains a path separator",
-    "prod:eu"          -> "contains a colon",
-    "prödü"            -> "contains a non-ASCII letter",
-    "a" * 65           -> "is longer than 64 characters",
-    "-"                -> "is a lone dash"
+    "" -> "empty",
+    "-leading" -> "starts with a dash",
+    "trailing-" -> "ends with a dash",
+    "Prod" -> "contains an uppercase letter",
+    "prod eu" -> "contains a space",
+    "prod.eu" -> "contains a dot",
+    "prod_eu" -> "contains an underscore",
+    "prod/eu" -> "contains a path separator",
+    "prod:eu" -> "contains a colon",
+    "prödü" -> "contains a non-ASCII letter",
+    "a" * 65 -> "is longer than 64 characters",
+    "-" -> "is a lone dash"
   )
 
   rejectedClusterIds.foreach { row =>

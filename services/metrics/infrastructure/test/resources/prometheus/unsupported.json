@@ -1,0 +1,66 @@
+{
+  "scalar": {
+    "status": "success",
+    "data": {
+      "resultType": "scalar",
+      "result": [0, "1"]
+    }
+  },
+  "string": {
+    "status": "success",
+    "data": {
+      "resultType": "string",
+      "result": [0, "CANARY_STRING"]
+    }
+  },
+  "unknown": {
+    "status": "success",
+    "data": {
+      "resultType": "CANARY_FUTURE_TYPE",
+      "result": []
+    }
+  },
+  "vector": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": []
+    }
+  },
+  "matrix": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": []
+    }
+  },
+  "instantHistogram": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        {
+          "metric": { "tenant": "CANARY_HISTOGRAM" },
+          "histogram": [
+            0,
+            { "count": "1", "sum": "2", "buckets": [[0, "1", "2", "1"]] }
+          ]
+        }
+      ]
+    }
+  },
+  "rangeHistogram": {
+    "status": "success",
+    "data": {
+      "resultType": "matrix",
+      "result": [
+        {
+          "metric": { "tenant": "CANARY_HISTOGRAM" },
+          "histograms": [
+            [0, { "count": "1", "sum": "2", "buckets": [] }]
+          ]
+        }
+      ]
+    }
+  }
+}

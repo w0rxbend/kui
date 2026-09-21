@@ -94,19 +94,24 @@ object Tokens {
     /** The veil behind a dialog or a drawer. One value for both, because they say the same thing. */
     val Scrim = "--kui-color-scrim"
 
-    /** The chart palette, which is not a sixth ramp: each of these is declared as an alias of a colour that
+    /** The chart palette. The first five are not a sixth ramp: each is declared as an alias of a colour that
       * already exists, so a chart never invents ink of its own.
       *
       * They have their own names anyway, because "the third line on this chart" and "this thing is healthy"
       * are different ideas that happen to share a colour today. Only in the partition-health donut do 3, 4
       * and 5 carry their status meaning, because there the categories genuinely are healthy, degraded and
       * failed; anywhere else a series colour means nothing but "a different line".
+      *
+      * `Series6` is the one exception, and 10-tokens.css records why: the storage card draws four segments
+      * inside a single bar, so an alias of any of the first five would repeat an ink within one mark. It is
+      * therefore a real pair of hexes declared per theme, like the ramps above it.
       */
     val Series1 = "--kui-color-series-1"
     val Series2 = "--kui-color-series-2"
     val Series3 = "--kui-color-series-3"
     val Series4 = "--kui-color-series-4"
     val Series5 = "--kui-color-series-5"
+    val Series6 = "--kui-color-series-6"
 
     val all: List[String] = List(
       Surface,
@@ -145,7 +150,8 @@ object Tokens {
       Series2,
       Series3,
       Series4,
-      Series5
+      Series5,
+      Series6
     )
   }
 

@@ -1,722 +1,232 @@
-# Configuring KUI
+# Configuring metrics sources
 
-Everything KUI reads at startup is in this document. There is no hidden default file, no system
-property KUI looks at behind your back, and no key that is silently ignored — a key KUI does not
-recognise fails the load and names itself.
+KUI looks up a metrics source by cluster ID. For a source to be used, the member below
+`kui.metrics.sources` must exactly match an `id` in `kui.clusters`; a cluster may also have no source, which is
+a supported `not_configured` state. The loader currently validates the member as a legal cluster ID but does
+not reject a legal ID absent from `kui.clusters`; such an unmatched entry measures nothing.
 
-If you would rather start from a file than a table, there are two you can copy:
+## Loading and secrets
 
-| File | What it is |
-| --- | --- |
-| [`deployment/examples/minimal.yaml`](../../deployment/examples/minimal.yaml) | The simplest thing that works: one cluster, no security. |
-| [`deployment/examples/three-clusters.yaml`](../../deployment/examples/three-clusters.yaml) | **Start here.** One KUI process managing three clusters — a plaintext development one, a three-broker production-shaped one, and a secured one — with every secret read from the environment. It is the file `deployment/demo/` runs, and the shape most real deployments have. |
-| [`deployment/examples/production.yaml`](../../deployment/examples/production.yaml) | The same idea in the distributed topology: a gateway process and service processes in separate containers, with the shared signing keys and the Kafka-backed metadata store that shape needs. |
+Configuration precedence is command line, environment, configuration files, then built-in defaults. A later
+file overrides an earlier file; a file supplied with `--config` is added last. Nested source keys follow the
+same rule. For example, `--kui.metrics.sources.production.auth.token=env:PROM_TOKEN` overrides
+`KUI_METRICS_SOURCES_PRODUCTION_AUTH_TOKEN`, which overrides YAML.
 
-Every one of them is loaded through KUI's own configuration loader, under the URL policy of the
-deployment it describes, by `ShippedConfigurationSuite` in `libs/config/test` — on every build, so
-none of them can quietly go stale. An example that has never been loaded is a guess, and a wrong
-example fails on somebody's first run, which is the worst possible moment. The same suite covers
-the quickstart's, the Compose stacks' and the secured stack's files.
+Secret fields accept `env:NAME`, `file:/absolute/path`, or a literal. Prefer environment or mounted-file
+references outside local development. References are resolved at startup; missing, unreadable, or empty
+values fail configuration without printing secret contents. The examples below intentionally contain only
+references.
 
-> **Where the product is today.** KUI connects to Kafka and works: it lists clusters and brokers,
-> administers topics, browses and publishes messages, and shows consumer groups, their lag and the
-> offset-reset wizard. Two sections are not read yet and are marked in the tables below — `kui.rbac`
-> (**M6**, the authorization model) and `kui.auth.type` beyond `disabled` (**M6** as well). The
-> marking always says which of two very different things happens: a key that is *accepted and
-> ignored* starts the process, and a value that is *not accepted at all* refuses to.
+## Source kinds
 
-## Where a value can come from
-
-Four places, in order of who wins:
-
-1. **A command-line flag** — `--kui.server.port=9090`, or `--kui.server.port 9090`. The `kui.`
-   prefix is optional, so `--server.port=9090` is the same flag. `--config <path>` (or
-   `--config=<path>`) adds a YAML file.
-2. **An environment variable** — the key in capitals with `.` and `-` replaced by `_`:
-   `kui.server.port` is `KUI_SERVER_PORT`, and `kui.gateway.services.schema-registry.url` is
-   `KUI_GATEWAY_SERVICES_SCHEMA_REGISTRY_URL`.
-3. **A YAML file** — one or more. A later file overrides an earlier one, and files named by
-   `--config` come after the ones the process was started with.
-4. **The built-in default** — listed for every key in the tables below.
-
-A *bad* value in a higher-precedence place is an error, not a reason to fall through to the next
-one. If `KUI_SERVER_PORT=abc`, KUI refuses to start; it does not quietly use the port from the
-file, because you would have no way of noticing.
-
-The environment is a first-class layer, not a way of patching a file. A deployment with no YAML
-file at all is legitimate:
-
-```
-$ KUI_GATEWAY_SERVICES_CLUSTER_URL=https://kui-cluster.example.com kui-gateway
-```
-
-is enough to define an upstream service, with `timeout` and `maxConcurrent` taking their defaults.
-
-## When something is wrong
-
-KUI reports **every** problem it found, one per line, in key order, and exits with status 1. Each
-line names the key, what was expected, what was found, and which of the four places supplied it:
-
-```
-kui.gateway.readinessIntervalMs: expected a positive number of milliseconds; '-1' is not a positive number of milliseconds (found '-1')   (file: /etc/kui/kui.yaml)
-kui.gateway.services.cluster.maxConcurrent: expected a positive whole number; positiveInt must be at least 1, got '0' (found '0')   (file: /etc/kui/kui.yaml)
-kui.gateway.services.cluster.timeout: expected a duration such as 10s; 'soon' is not a duration such as 10s or 500ms (found 'soon')   (file: /etc/kui/kui.yaml)
-kui.server.basePath: expected a path such as / or /kui; must not be empty (found '')   (file: /etc/kui/kui.yaml)
-kui.server.port: expected a port between 1 and 65535; port must be between 1 and 65535, got '70000' (found '70000')   (file: /etc/kui/kui.yaml)
-kui.telemetry.hashUserIds: expected true or false; 'maybe' is not a boolean (found 'maybe')   (file: /etc/kui/kui.yaml)
-```
-
-There is no partially-valid start. A gateway running with three of its four upstreams configured is
-harder to diagnose than one that refused to boot and told you why.
-
-### Two stages, not one
-
-Loading the configuration and wiring the process are separate steps, and a setting can be rejected
-by either. The distinction is worth knowing when a message does not look like the ones above:
-
-- **Load** checks that every key exists, that every value parses, and that every secret reference
-  resolves. This is what produces the report above.
-- **Wiring** checks the things that only make sense once the values are in hand — that a signing
-  key is long enough for HS256, that a service was given the keys it needs at all. These arrive as
-  a single sentence on startup, after the configuration has already been accepted.
-
-A signing key that is too short is the case people hit. The loader accepts it, because it is a
-perfectly well-formed string; wiring then refuses it:
-
-```
-signing key '2026-01' is 40 bits; HS256 needs at least 256
-```
-
-## The keys
-
-Types: **string**, **int**, **boolean** (`true`/`yes`/`on` and `false`/`no`/`off`), **duration**
-(`10s`, `500ms`), **secret** (see [Secrets](#secrets)), **instant** (RFC 3339, e.g.
-`2026-01-01T00:00:00Z`).
-
-### `kui.server` — how this process listens
-
-Read by every KUI process.
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.server.host` | string | `0.0.0.0` | no | A host name or IP address. Anything else fails the load. `0.0.0.0` is every interface, which is what a container needs — binding `127.0.0.1` inside a container makes the process unreachable from outside it. |
-| `kui.server.port` | int | `8080` | no | Must be 1–65535. A port already in use fails the start; KUI never picks another one for you. |
-| `kui.server.basePath` | string | `/` | no | The prefix every route is served under, for a reverse proxy that mounts KUI at `/kui`. Must not be empty — write `/` for no prefix. |
-| `kui.server.devInsecureCookies` | boolean | `false` | no | Omits `Secure` from the session cookie so plain HTTP on localhost works. The process warns on every start while it is on. Never set it anywhere the network can reach. |
-
-### `kui.gateway` — upstreams, identity and CORS
-
-`services` and `cors` are read by the gateway. `principalKeys` is read by **every** process; see the
-note under that table.
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.gateway.services.<id>.url` | string (URL) | — | **yes**, once `<id>` is mentioned at all | The address of one downstream KUI service. Checked against the [URL policy](#which-urls-kui-will-call). Listing a service and omitting its URL fails the load with `kui.gateway.services.<id>.url is required`. |
-| `kui.gateway.services.<id>.timeout` | duration | `10s` | no | The whole-call budget for that service. Must be positive and finite. |
-| `kui.gateway.services.<id>.maxConcurrent` | int | `32` | no | The bulkhead: how many calls to that service may be in flight at once. Must be at least 1. It is what stops one slow service from consuming every thread and taking the others down with it. |
-| `kui.gateway.readinessIntervalMs` | int (ms) | `10000` | no | How often the gateway polls each service's readiness, which is what keeps the greyed-out parts of the interface honest. Must be positive. |
-| `kui.gateway.principalKeys.<n>.kid` | string | — | **yes**, once a key is listed | The key id that travels in the signed principal header. |
-| `kui.gateway.principalKeys.<n>.key` | secret | — | **yes**, once a key is listed | The shared signing secret. Must resolve to a non-empty value of **at least 32 bytes** — a shorter key is refused at wiring, not at load (see [Two stages](#two-stages-not-one)). |
-| `kui.gateway.principalKeys.<n>.notBefore` | instant | `1970-01-01T00:00:00Z` | no | When this key becomes usable for *signing*, which is what makes rotation a rolling change. Must be RFC 3339. |
-| `kui.gateway.cors.enabled` | boolean | `false` | no | Whether pages from other origins may call this API. Off, because the gateway serves the interface from the same origin. |
-| `kui.gateway.cors.origins` | list of string | *(empty)* | no | The explicit allow-list; comma-separated in the environment. `*` is refused at load: combined with credentials it would let any website read a signed-in user's Kafka data. |
-
-**Which `<id>`s mean something.** `<id>` is a KUI service id, and the gateway derives proxy routes for
-the ones it holds a published contract for: `cluster` (M1) and `topic` (M2). A service listed here that
-the gateway has no contract for is *not* an error — it is configured, polled and reported in
-`GET /api/v1/capabilities` — it simply has no proxied routes yet, which is what lets a service be
-deployed before the gateway build that routes it. A service that is **not** listed at all is
-`NotConfigured`: its sidebar entry is hidden rather than greyed, because "this deployment has no such
-thing" and "this deployment cannot reach it" are different statements and only the second is a problem
-somebody should go and fix.
-
-```yaml
-kui:
-  gateway:
-    services:
-      cluster:
-        url: http://kui-cluster:8081
-      topic:
-        url: http://kui-topic:8082
-        # The topic service reads whole snapshots of large clusters; the default 10s budget is fine
-        # for the list, and this is where you would raise it for a cluster with tens of thousands of
-        # topics.
-        timeout: 10s
-```
-
-**`principalKeys` is not a gateway setting despite its name.** It is the shared key set of one
-deployment. The gateway signs the internal `X-Kui-Principal` header with the newest key whose
-`notBefore` has passed, and every service accepts any key in the list (ADR-020). Give every process
-the same list, reading the same secret. If they disagree, every call the gateway makes comes back
-401.
-
-**A service started with no keys refuses to start.** One that started anyway would trust an
-`X-Kui-Principal` header from anyone who could reach its port, and it would do it silently:
-
-```
-kui-cluster cannot start; no principal signing keys are configured. A service that starts
-without them would trust an X-Kui-Principal header from anyone who can reach its port.
-Configure kui.gateway.principalKeys, or set KUI_ALLOW_UNSIGNED=true for local development only.
-```
-
-`KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and writes a warning to the log every minute for
-as long as it is in effect. It is an environment variable rather than a configuration key on
-purpose: a security relaxation should be visible in the process's environment, where an operator or
-an auditor sees it in one place, and impossible to arrive at by accident inside a large YAML file
-somebody copied.
-
-### `kui.telemetry` — logs, traces and metrics
-
-Read by every KUI process.
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.telemetry.otlpEndpoint` | string (URL) | *(unset)* | no | Where traces and metrics are exported. Unset means export nothing. A collector that is down or misconfigured never stops KUI starting or serving. Checked against the [URL policy](#which-urls-kui-will-call). |
-| `kui.telemetry.prometheusPort` | int | *(unset)* | no | An extra port exposing **this process's own** telemetry in Prometheus format. Not the product's Kafka-cluster metrics endpoint; ADR-009 keeps those separate. Must be 1–65535. |
-| `kui.telemetry.logFormat` | `json` \| `text` | `json` | no | `json` writes one object per line for a log system; `text` writes a short line for a human at a terminal. Anything else fails the load. |
-| `kui.telemetry.hashUserIds` | boolean | `true` | no | Log and trace `user.id` as a salted hash rather than the login name. |
-
-### `kui.auth` — authentication
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.auth.type` | string | `disabled` | no | **`disabled` is the only accepted value today.** Anything else fails the load naming M6, rather than being ignored — so a file that asks for authentication can never quietly start a deployment that has none. |
-
-### `kui.store` — KUI's own metadata store
-
-Where KUI keeps the things it learns at runtime: registered clusters, settings, uploaded files.
-`kui.store.kafka.bootstrapServers` is the on/off switch — set it and KUI uses compacted Kafka
-topics, leave it unset and KUI reads a directory (or nothing) and reports every write as
-`NotConfigured`. There is no separate `enabled` flag on purpose: two settings that have to agree
-are two settings that will eventually disagree. See
-[the metadata-store page](metadata-store.md) for the topics, the encryption key and the backup
-procedure.
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.store.topicPrefix` | string | `__kui_` | no | Every store topic name is built from it, so `__kui_config` becomes `<prefix>config`. Must match `^[a-z0-9_.-]{1,64}$`. Change it when two KUI installations share one cluster. |
-| `kui.store.replicationFactor` | short | `3` | no | Used only when KUI *creates* a topic; an existing topic is never rewritten. `1` is accepted, because single-broker development is a supported mode. |
-| `kui.store.minInSyncReplicas` | int | `2` | no | Must be at least 1 and no greater than `replicationFactor`; breaking that fails the load with both values in one message. |
-| `kui.store.maxFileBytes` | long | `4194304` | no | The cap on one uploaded file. 1 KiB … 64 MiB. The broker's own `max.message.bytes` has to exceed it. |
-| `kui.store.replayTimeout` | duration | `30s` | no | How long startup waits for the store's log to be replayed to its end before failing with `KUI-STORE-REPLAY-TIMEOUT`. 1s … 10m. This bound is what turns a hung startup into a named error. |
-| `kui.store.writeTimeout` | duration | `10s` | no | How long a write waits to read its own record back from the log before giving up. 1s … 2m. |
-| `kui.store.dir` | path | *(unset)* | no | The read-only file adapter's root, laid out as `<root>/<section>/<id>.json`. A path that does not exist is **not** an error: it is an empty store, and a volume that mounts a moment after the process starts is a real thing. |
-| `kui.store.kafka.bootstrapServers` | list of string | *(unset)* | no | `host:port` entries; a YAML list, or comma-separated in the environment. **Setting it turns the Kafka store on.** |
-| `kui.store.kafka.security.*` | — | `PLAINTEXT` | no | The same typed security model as a managed cluster (ADR-022): `protocol`, `mechanism`, `username`, `password`, the `ssl.*` block. See the `kui.clusters` table below for the full key list; the two are decoded by the same code and accept the same spellings. |
-| `kui.store.kafka.properties.<name>` | map of string | *(empty)* | no | Raw Kafka client properties for the store's own clients, applied last. Not settable from the environment: a Kafka property name contains dots the `KUI_*` mapping cannot round-trip. Values whose key looks like a credential are redacted in every log line. |
-| `kui.store.encryptionKey` | secret | *(unset)* | with the Kafka store | 32 random bytes, base64. `openssl rand -base64 32`. Takes a literal, `env:NAME` or `file:/path`. **Required whenever `kui.store.kafka.*` is set** — starting without it would work until the first secret and then fail at write time, which is the worst place to find out. |
-| `kui.store.encryptionKeys` | secret | *(unset)* | no | The rotation form: `id:base64,id:base64`. Mutually exclusive with `encryptionKey`; setting both fails the load rather than merging them. |
-| `kui.store.encryptionKeyId` | string | `k1` | with `encryptionKeys` | Which key new writes are encrypted under. Every key listed stays usable for *reading*, which is what makes a rotation a rolling change rather than a flag day. An id that is not among the configured keys fails the load, listing the ids that are. |
-
-**Losing `kui.store.encryptionKey` makes every stored secret permanently unreadable.** There is no
-recovery path and there cannot be one — that is what encryption means. Back the key up separately
-from the topic, and read
-[the metadata-store page's key section](metadata-store.md#42-the-encryption-key) before you rotate.
-
-### `kui.clusters` — the clusters KUI manages
-
-This is the list of Kafka clusters KUI connects to. Nothing here is checked against a broker at
-startup: a cluster that is spelled correctly and unreachable is a valid configuration, and shows on
-the dashboard as `Unavailable: <reason>`. If a bad address stopped KUI from starting, one dead
-broker would take the whole console down.
-
-Repeated sections use a dotted index, so one key has one spelling everywhere:
-
-```yaml
-kui:
-  clusters:
-    - name: Production EU
-      bootstrapServers: broker-1.eu:9093,broker-2.eu:9093
-      security:
-        protocol: SASL_SSL
-        mechanism: SCRAM-SHA-512
-        username: kui
-        password: env:KUI_PROD_PASSWORD
-```
-
-The same cluster, entirely from the environment:
-
-```
-KUI_CLUSTERS_0_NAME=Production EU
-KUI_CLUSTERS_0_BOOTSTRAPSERVERS=broker-1.eu:9093,broker-2.eu:9093
-KUI_CLUSTERS_0_SECURITY_PROTOCOL=SASL_SSL
-KUI_CLUSTERS_0_SECURITY_MECHANISM=SCRAM-SHA-512
-KUI_CLUSTERS_0_SECURITY_USERNAME=kui
-KUI_CLUSTERS_0_SECURITY_PASSWORD=env:KUI_PROD_PASSWORD
-```
-
-The index must start at `0` and have no gaps. `kui.clusters.0` and `kui.clusters.2` with no `1` is
-refused, naming the gap, because it nearly always means a deleted entry or a mistyped variable name
-— and renumbering silently would hide both.
-
-| Key | Environment name | Default | Meaning |
-| --- | --- | --- | --- |
-| `kui.clusters.<n>.name` | `KUI_CLUSTERS_<N>_NAME` | *(required)* | The display name. 1–64 characters. |
-| `kui.clusters.<n>.id` | `KUI_CLUSTERS_<N>_ID` | *(slug of `name`)* | The URL slug. See "Renaming a cluster" below. |
-| `kui.clusters.<n>.bootstrapServers` | `…_BOOTSTRAPSERVERS` | *(required)* | `host:port` entries; a YAML list, or comma-separated. |
-| `kui.clusters.<n>.readOnly` | `…_READONLY` | `false` | Declared now, enforced in M5. Recorded on the profile and shown in the UI. |
-| `kui.clusters.<n>.security.protocol` | `…_SECURITY_PROTOCOL` | `PLAINTEXT` | `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT` or `SASL_SSL`. `SASL_PLAINTEXT` authenticates but does **not** encrypt. |
-| `kui.clusters.<n>.security.mechanism` | `…_SECURITY_MECHANISM` | *(required for the two SASL protocols)* | See the mechanism table below. |
-| `kui.clusters.<n>.security.username` | `…_SECURITY_USERNAME` | *(required for PLAIN and SCRAM)* | |
-| `kui.clusters.<n>.security.password` | `…_SECURITY_PASSWORD` | *(required for PLAIN and SCRAM)* | A secret: literal, `env:NAME` or `file:/path`. |
-| `kui.clusters.<n>.security.serviceName` | `…_SECURITY_SERVICENAME` | *(required for GSSAPI)* | `sasl.kerberos.service.name`. |
-| `kui.clusters.<n>.security.principal` | `…_SECURITY_PRINCIPAL` | *(required for GSSAPI)* | |
-| `kui.clusters.<n>.security.keytab` | `…_SECURITY_KEYTAB` | *(unset)* | A path inside the container. |
-| `kui.clusters.<n>.security.useTicketCache` | `…_SECURITY_USETICKETCACHE` | `false` | Use an existing Kerberos ticket cache instead of a keytab. |
-| `kui.clusters.<n>.security.storeKey` | `…_SECURITY_STOREKEY` | `true` | GSSAPI only: keep the key from the keytab in the login context, so KUI can renew its own ticket instead of failing when the first one expires. |
-| `kui.clusters.<n>.security.tokenEndpoint` | `…_SECURITY_TOKENENDPOINT` | *(required for OAUTHBEARER)* | |
-| `kui.clusters.<n>.security.clientId` | `…_SECURITY_CLIENTID` | *(required for OAUTHBEARER)* | |
-| `kui.clusters.<n>.security.clientSecret` | `…_SECURITY_CLIENTSECRET` | *(required for OAUTHBEARER)* | A secret. |
-| `kui.clusters.<n>.security.scope` | `…_SECURITY_SCOPE` | *(unset)* | |
-| `kui.clusters.<n>.security.profile` | `…_SECURITY_PROFILE` | *(unset)* | AWS named profile, `AWS_MSK_IAM` only. |
-| `kui.clusters.<n>.security.roleArn` / `.stsRegion` | `…_SECURITY_ROLEARN` / `…_STSREGION` | *(unset)* | `AWS_MSK_IAM` only. |
-| `kui.clusters.<n>.security.namespace` | `…_SECURITY_NAMESPACE` | *(required for AZURE_ENTRA)* | The Event Hubs namespace. |
-| `kui.clusters.<n>.security.ssl.truststore.location` | `…_SECURITY_SSL_TRUSTSTORE_LOCATION` | *(unset)* | A path. Mutually exclusive with `inline`. |
-| `kui.clusters.<n>.security.ssl.truststore.inline` | `…_SECURITY_SSL_TRUSTSTORE_INLINE` | *(unset)* | Base64 of the store's bytes. A secret. |
-| `kui.clusters.<n>.security.ssl.truststore.password` | `…_SECURITY_SSL_TRUSTSTORE_PASSWORD` | *(unset)* | A secret. |
-| `kui.clusters.<n>.security.ssl.truststore.type` | `…_SECURITY_SSL_TRUSTSTORE_TYPE` | `PKCS12` | `PKCS12`, `JKS` or `PEM`. |
-| `kui.clusters.<n>.security.ssl.keystore.*` | `…_SECURITY_SSL_KEYSTORE_*` | *(unset)* | The same four keys, for mutual TLS. |
-| `kui.clusters.<n>.security.ssl.keyPassword` | `…_SECURITY_SSL_KEYPASSWORD` | *(unset)* | A secret. Takes `env:` and `file:` like every other one. |
-| `kui.clusters.<n>.security.ssl.verifyHostname` | `…_SECURITY_SSL_VERIFYHOSTNAME` | `true` | Leave it on. `false` also removes the check that the broker is who it claims to be. |
-| `kui.clusters.<n>.security.ssl.enabledProtocols` / `.cipherSuites` | `…` | *(unset)* | Comma-separated lists. |
-| `kui.clusters.<n>.admin.requestTimeout` | `…_ADMIN_REQUESTTIMEOUT` | `30s` | How long one request to a broker may take. Becomes `request.timeout.ms`. |
-| `kui.clusters.<n>.admin.apiTimeout` | `…_ADMIN_APITIMEOUT` | `60s` | The whole-call budget, the client's own retries included. Becomes `default.api.timeout.ms`. |
-| `kui.clusters.<n>.admin.chunkSize` | `…_ADMIN_CHUNKSIZE` | `200` | How many topics, partitions or config resources go into one admin request. |
-| `kui.clusters.<n>.admin.groupChunkSize` | `…_ADMIN_GROUPCHUNKSIZE` | `50` | The same, for consumer groups. Separate from `chunkSize` because describing fifty groups costs a broker far more than describing fifty topics. |
-| `kui.clusters.<n>.admin.parallelism` | `…_ADMIN_PARALLELISM` | `4` | How many chunks are in flight at once against this one cluster. |
-| `kui.clusters.<n>.properties.<kafka.property>` | *(not settable from the environment)* | *(empty)* | Raw Kafka client properties, applied last. |
-
-### `kui.clusters.<n>.schemaRegistry` — where the schemas are
-
-Optional, and its absence is a supported configuration rather than a missing one. A cluster with no
-`schemaRegistry` block has no Schemas screen: the schema service reports that cluster as
-**not configured**, the browser hides the feature for it, and nothing anywhere turns red. That is a
-different state from a registry that is configured and unreachable, which shows the feature
-*degraded* with the reason and a retry — the two must never look alike, or a deployment that never
-wanted a registry carries a permanently red panel nobody can clear.
-
-```yaml
-kui:
-  clusters:
-    - name: "Production"
-      bootstrapServers: ["kafka:9092"]
-      schemaRegistry:
-        url: ["http://schema-registry-1:8081", "http://schema-registry-2:8081"]
-        callTimeout: 10s
-        auth:
-          type: basic
-          username: kui
-          password: env:KUI_REGISTRY_PASSWORD
-```
-
-| Key | Environment | Default | Meaning |
-| --- | --- | --- | --- |
-| `kui.clusters.<n>.schemaRegistry.url` | `…_SCHEMAREGISTRY_URL` | *(unset — the feature is off)* | One or more registry addresses, in preference order; a YAML list or comma-separated. A second address is a registry cluster, and KUI fails over to it. Setting this key is what switches the feature on. |
-| `kui.clusters.<n>.schemaRegistry.callTimeout` | `…_SCHEMAREGISTRY_CALLTIMEOUT` | `10s` | The whole-call budget, retries included (1s … 60s). Short on purpose: a registry is routinely the least reliable component in a deployment, and a screen that waits a minute for it has taken the outage on instead of reporting it. |
-| `kui.clusters.<n>.schemaRegistry.auth.type` | `…_SCHEMAREGISTRY_AUTH_TYPE` | `none` | `none`, `basic` or `oauth`. |
-| `kui.clusters.<n>.schemaRegistry.auth.username` | `…_AUTH_USERNAME` | *(required for `basic`)* | |
-| `kui.clusters.<n>.schemaRegistry.auth.password` | `…_AUTH_PASSWORD` | *(required for `basic`)* | A secret: literal, `env:NAME` or `file:/path`. |
-| `kui.clusters.<n>.schemaRegistry.auth.tokenEndpoint` | `…_AUTH_TOKENENDPOINT` | *(required for `oauth`)* | The OAuth 2.0 token endpoint. KUI posts a client-credentials grant to it and sends the bearer token to the registry. |
-| `kui.clusters.<n>.schemaRegistry.auth.clientId` | `…_AUTH_CLIENTID` | *(required for `oauth`)* | |
-| `kui.clusters.<n>.schemaRegistry.auth.clientSecret` | `…_AUTH_CLIENTSECRET` | *(required for `oauth`)* | A secret. |
-| `kui.clusters.<n>.schemaRegistry.auth.scope` | `…_AUTH_SCOPE` | *(unset)* | Sent with the grant when the issuer needs one. |
-
-**Basic or OAuth, never both.** A file that sets `type: basic` and also carries `clientSecret` is
-refused, naming the surplus keys. Accepting both would mean one of the two silently losing — and the
-one that loses is always the one somebody changes when the other expires, producing an outage that
-looks like a registry problem rather than a configuration one.
-
-**The token is cached** until thirty seconds before it expires, and it is fetched over its own HTTP
-client rather than the registry's, so a token request can never be failed over onto a registry
-address. An issuer that will not answer degrades that cluster's Schemas screen and nothing else.
-
-**A private address is allowed only if you allowed it.** Registry URLs go through the same
-`KUI_ALLOW_PRIVATE_UPSTREAMS` check as every other upstream address. A registry at
-`http://schema-registry:8081` inside a Compose network needs it; see "Outbound addresses" below.
-
-### `kui.clusters.<n>.serde` — which decoder reads which topic
-
-Most production Kafka traffic is Avro, Protobuf or JSON Schema, and a record in any of those formats
-is unreadable without its schema: the bytes carry a schema *id* and the schema itself lives in a
-Schema Registry. Point KUI at that registry with `kui.clusters.<n>.schemaRegistry` and the records
-decode; leave it unset and they render as raw bytes, because there is nothing else they could
-honestly be shown as.
-
-"This cluster is Avro" is one line:
-
-```yaml
-kui:
-  clusters:
-    - name: "Production"
-      bootstrapServers: ["kafka:9092"]
-      schemaRegistry:
-        url: ["http://schema-registry:8081"]
-      serde:
-        defaultValue: SchemaRegistry
-```
-
-A cluster where only some topics are registry-backed uses patterns instead, and the first matching
-pattern wins — so write them most specific first:
-
-```yaml
-      serde:
-        patterns:
-          - serde: SchemaRegistry
-            topicValuesPattern: "orders\\..*"
-          - serde: String
-            topicKeysPattern: ".*"
-```
-
-| Key | Environment | Default | Meaning |
-| --- | --- | --- | --- |
-| `kui.clusters.<n>.serde.defaultKey` | `…_SERDE_DEFAULTKEY` | *(unset)* | The serde for record keys on this cluster when no pattern matches. |
-| `kui.clusters.<n>.serde.defaultValue` | `…_SERDE_DEFAULTVALUE` | *(unset)* | The same for record values. |
-| `kui.clusters.<n>.serde.patterns.<i>.serde` | `…_SERDE_PATTERNS_<I>_SERDE` | *(required in an entry)* | The serde this entry selects. |
-| `kui.clusters.<n>.serde.patterns.<i>.topicKeysPattern` | `…_TOPICKEYSPATTERN` | *(unset)* | A regular expression matched against the **whole** topic name, for keys. |
-| `kui.clusters.<n>.serde.patterns.<i>.topicValuesPattern` | `…_TOPICVALUESPATTERN` | *(unset)* | The same, for values. An entry with neither pattern is refused: it could never select anything. |
-| `kui.clusters.<n>.serde.schemaCacheSize` | `…_SERDE_SCHEMACACHESIZE` | `1000` | How many schemas to hold by id (1 … 100000). A registry never reissues an id, so this cache has a size and no expiry. |
-| `kui.clusters.<n>.serde.subjectCacheTtl` | `…_SERDE_SUBJECTCACHETTL` | `30s` | How long the *latest* version of a subject may be reused (1s … 10m). This one must expire, because registering a new version is how a schema evolves. |
-
-The serde names are `String`, `Int32`, `Int64`, `UInt32`, `UInt64`, `UUID`, `Base64`, `Hex`, `Json`
-and `SchemaRegistry`. A name outside that list fails the load and the message lists the ones that
-exist. `Fallback` is deliberately not settable: it is where resolution ends, not a choice.
-
-**How a serde is actually chosen**, in order: what the user picked in the message browser; then
-what the record's own bytes claim (a Schema Registry payload starts with a zero byte and a schema
-id, and is recognised on sight); then the first matching pattern above; then the cluster default;
-then `String`; and behind all of it a fallback that cannot fail, so a browse never breaks on a
-record it cannot decode.
-
-**When the registry is down**, the `SchemaRegistry` row still appears in the serde picker, marked
-unavailable with the reason. Records decode through the fallback and each row carries a marker
-saying the decode fell back. A cluster whose registry is unreachable at startup still starts, and
-every other cluster keeps working.
-
-**Protobuf** decodes for reading and not for writing: KUI parses the `.proto` text the registry
-returns and reads the record against it, and the produce form refuses a Protobuf topic with a
-message saying so. Avro and JSON Schema work in both directions.
-
-**Tuning one cluster without touching the others.** The five keys under `admin` are per cluster, so
-a cluster with ten thousand topics, or a broker on the other side of an ocean, can be tuned on its
-own. The section is optional, and so is every key in it: `admin: { parallelism: 8 }` leaves the
-other four at their defaults rather than resetting them.
-
-| Key | Accepted range |
-| --- | --- |
-| `requestTimeout` | 1s … 5m |
-| `apiTimeout` | 1s … 15m, and at least as long as `requestTimeout` |
-| `chunkSize` | 1 … 1000 |
-| `groupChunkSize` | 1 … 1000 |
-| `parallelism` | 1 … 32 |
-
-The defaults are not round numbers somebody liked. 30s and 60s are the Kafka client's own; 200, 50
-and 4 are the values Kafbat arrived at after hitting the failures
-`research/kafka/admin-capabilities.md` §0 records. Start from them.
-
-If a cluster is timing out, reach for `chunkSize` **down** before `requestTimeout` **up**. A smaller
-request that succeeds is better than a larger one that eventually does not, and the admin client has
-a single network thread, so a longer timeout on a big request also holds up everything queued behind
-it.
-
-`apiTimeout` shorter than `requestTimeout` is refused rather than clamped. It describes a client
-that gives up before its own single request can finish, which on a dashboard looks exactly like a
-broken cluster. The error names the other key and its value — including when that value is the
-default, which is the half an operator cannot see for themselves.
-
-**Mechanism spellings, and how far each one is tested.** The values are upper-case and are exactly
-the ones Kafka's own documentation uses, so they can be copied across without translation. The last
-column is the honest answer to "does this actually work": a mechanism that is only unit-tested has
-had its rendered client properties checked against the vendor's documented example, and has never
-been pointed at a live broker by KUI's CI.
-
-| `mechanism` | Also requires | Integration-tested against a real broker |
+| `kind` | Address | Current behavior |
 | --- | --- | --- |
-| `PLAIN` | `username`, `password` | **yes** — SASL_PLAINTEXT container |
-| `SCRAM-SHA-256` | `username`, `password` | no — the SHA-512 variant is, and the code path is shared |
-| `SCRAM-SHA-512` | `username`, `password` | **yes** — SASL_PLAINTEXT container |
-| `GSSAPI` | `serviceName`, `principal`, and `keytab` or `useTicketCache` | no — property rendering only (needs a KDC) |
-| `OAUTHBEARER` | `tokenEndpoint`, `clientId`, `clientSecret` | no — property rendering only (needs an identity provider) |
-| `AWS_MSK_IAM` | *(optional `profile`, `roleArn`, `stsRegion`)* | no — property rendering only (needs AWS) |
-| `AZURE_ENTRA` | `namespace` | no — property rendering only (needs Azure) |
-| `GCP` | *(nothing)* | no — property rendering only (needs Google Cloud) |
+| `prometheus` (default) | A Prometheus text exposition endpoint, normally ending in `/metrics` | Supported and scraped on `kui.metrics.scrapeInterval`. This is what the quickstart uses. |
+| `prometheus-api` | A Prometheus server base URL, optionally with a reverse-proxy prefix | A source-owned bounded instant/range client is wired internally and kept out of the exposition scraper. No server-owned Kafka metrics catalog maps it to a public metrics route yet, so screens report the source as unreadable. |
+| `jmx` | A JMX address | Declared but not implemented. Run a JMX exporter in HTTP-server mode and use `kind: prometheus`. |
 
-A `mechanism` set under `PLAINTEXT` or `SSL` is **refused**, not ignored. Ignoring it is how an
-operator ends up with an unauthenticated connection they believe is authenticated: the credentials
-were in the file, and nothing ever sent them.
+### Text exposition
 
-**Renaming a cluster.** The id is what appears in every URL, every bookmark and every future RBAC
-rule. By default it is derived from the name (ADR-031): `Production EU` becomes `production-eu`.
-That means fixing a typo in a display name would otherwise change the id and break those links, so
-set `id` explicitly and the name becomes free to edit:
-
-```yaml
-    - name: Production EU (Frankfurt)
-      id: prod-eu
-```
-
-Two clusters whose names produce the same id are refused at startup, naming both, because one of
-the two would otherwise be silently unreachable. A name with no letters or digits in it — `***`, or
-a name written entirely in a non-Latin script — is also refused, with the same instruction to set
-`id` explicitly: inventing `cluster-1` would put an identifier the operator never chose into their
-URLs.
-
-**The `properties` escape hatch.** Whatever the typed keys above render, the entries under
-`properties` are applied last and win. It exists so a broker setting KUI has no typed key for — or
-a mechanism it has not modelled yet — is usable without waiting for a release:
-
-```yaml
-      properties:
-        ssl.cipher.suites: TLS_AES_256_GCM_SHA384
-        sasl.login.callback.handler.class: com.example.MyHandler
-```
-
-Two things to know about it. It is **file-only**: a Kafka property name contains dots, and the
-`KUI_*` environment mapping replaces dots with underscores, so `ssl.cipher.suites` could not be
-spelled back out again — an environment variable under `properties` is therefore an error that says
-so rather than a setting that quietly does nothing. And a value whose key looks like a credential
-(anything containing `password`, `secret`, `key`, `token`, `credential`, `jaas`, `passwd` or
-`auth`) is redacted in every log line and diagnostic. A secret inside `properties` still uses
-`env:NAME`; the *value* travels through the environment, only the *key* cannot.
-
-**More than one cluster, and what happens when one of them dies.** The list is a list because
-managing several clusters from one console is the point of the product, and because the clusters in
-it are genuinely independent of one another. Each one gets its own connection, its own background
-snapshot and its own capability state, so a cluster that stops answering — a broker restarting, a
-network partition, an expired certificate — is reported as `Unavailable` on its own row, with the
-reason and the age of the last good snapshot, while every other cluster in the file keeps working
-normally. Nothing about the failure is global: no page goes blank, no request queues behind the
-dead cluster's timeout, and KUI does not restart.
-
-That is a claim worth watching rather than reading.
-[`deployment/demo/README.md`](../../deployment/demo/README.md) brings up three clusters on one
-machine and walks through stopping one of them and starting it again.
-
-### `kui.topics` — the topic service's own dials
-
-Read by the **topic service** only. Every key is optional and every default is a working one: an
-operator who never touches this section gets a snapshot of each cluster's topics rebuilt once a
-minute, with topics whose names begin `__` hidden by default.
-
-The `kui.clusters[]` list is deliberately **not** part of this section. The topic service holds no
-cluster list of its own; it gets every cluster, and the credentials to reach it, from the cluster
-service over `/internal/v1` (ADR-046, and `kui.clusterProfiles` below). Two lists of clusters in two
-processes are two lists that eventually disagree, and the disagreement would show up as "that
-cluster is on the dashboard but its topics 404".
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.topics.refreshInterval` | duration | `60s` | no | How often a cluster's topic snapshot is rebuilt in the background. 5s … 1h. Twice the cluster service's thirty seconds, because a topic scrape costs an order of magnitude more and its data changes an order of magnitude less often. **Raise this first** on a cluster with tens of thousands of topics: it is the dial that reduces load, and it costs only freshness. |
-| `kui.topics.scrapeTimeout` | duration | `45s` | no | The budget for one whole scrape. Past it the scrape is cancelled and the **previous snapshot is kept** — the list stays readable and is marked stale, rather than emptying. 1s … 1h, and it must be **shorter than `refreshInterval`**; setting it longer fails the load naming both keys and both values, because a scrape that outlives its interval overlaps the next one and doubles the load on a cluster that is already struggling. |
-| `kui.topics.internalPrefix` | string | `__` | no | A topic is treated as internal if Kafka's own `isInternal` flag says so **or** its name starts with this. 1 … 16 characters; an empty value fails the load, because `startsWith("")` is true of every name and the topic list would come back empty. Both conditions are needed: `__consumer_offsets` carries Kafka's flag, and `__kui_config` — KUI's own metadata topic — does not, but is noise to an operator all the same. |
-| `kui.topics.defaultSearchMode` | `plain` \| `fts` | `plain` | no | What `?mode=` means when a request omits it. `plain` is substring matching, which is the behaviour a person can predict; `fts` also matches transpositions and typos. Anything else fails the load (ADR-038). |
-| `kui.topics.defaultPageSize` | int | `25` | no | The page size a request that omits `pageSize` gets. Must be 1 … `maxPageSize`; exceeding it fails the load naming both. |
-| `kui.topics.maxPageSize` | int | `500` | no | The largest page a request may ask for. Must be 1 … 500. **The 500 is a hard ceiling** (ADR-026): these lists are assembled in memory, so a page of a million rows is not a big page, it is an outage. |
-
-**Tuning for a large cluster.** Raise `refreshInterval` before you raise `scrapeTimeout`: the first
-reduces how often the work happens, the second only allows it to take longer, and a longer scrape on
-the same interval is how two scrapes end up running at once. The admin-call chunk sizes and
-parallelism are **not** here — they are `kui.clusters[].admin.*` on the cluster service, per cluster,
-and they arrive in the profile, because the right chunk size depends on the broker being scraped and
-not on which KUI process is scraping it.
-
-### `kui.consumers` — the consumer service's own dials
-
-Read by the **consumer service** only. It holds no cluster list either, for the same reason
-`kui.topics` does not.
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.consumers.refreshInterval` | duration | `30s` | no | How often each cluster's consumer groups are described in the background. 5s … 1h. **Not** the same dial as `kui.topics.refreshInterval`, deliberately: describing every group on a cluster and listing its topics are different costs against different broker paths, and one knob for both would mean tuning the cheap scrape by the expensive one. There is no TTL — a snapshot older than this is shown and marked stale, never withheld. Raise it on a cluster with thousands of groups; lower it while you are watching a lag figure move. |
-
-### `kui.streaming` — the key that signs what KUI hands the browser
-
-Read by the **message service** and the **consumer service**. One key, because there is one kind of
-thing it protects: an opaque string KUI mints, gives to a browser, and later accepts back as an
-instruction. Today there are two of them — the message browser's paging cursor (ADR-026) and the
-offset reset's plan token (ADR-045), which the apply endpoint accepts *instead of* a specification,
-so a token an attacker could mint would be a token that writes offsets nobody was shown.
-
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.streaming.cursorKey` | secret | *(generated per process)* | no, until you run two processes | The shared HMAC-SHA256 key. Written as a literal, `env:NAME` or `file:/path`, like every other secret. A resolved value shorter than **32 bytes** fails the load rather than weakening every token silently. Generate one with `openssl rand -base64 48`. |
-
-**When you can leave it out, and when you cannot.** Absent, each process generates its own key at
-startup and says so in one INFO line. That is honest for exactly one shape: a single all-in-one
-process on a laptop. Run two replicas and a cursor minted by one is refused by the other, so "load
-more" works one press in two; restart the one process and a reset wizard an operator left open can
-never be applied, because the plan it holds was signed with a key that no longer exists. Neither
-failure names itself — both look like an intermittent product — so the startup line is the only
-place the deployment shape is visible. Configure the key before the second replica, not after.
-
-### `kui.clusterProfiles` — how a Kafka-facing service reaches the cluster service
-
-Every KUI service that opens a Kafka connection — topics, and later messages, consumer groups and
-security — gets the connection settings for a cluster from the **cluster service**, over
-`/internal/v1`, rather than reading `kui.clusters[]` itself. Only the cluster service reads the
-metadata store and only it holds `kui.store.encryptionKey` (ADR-036, ADR-046). These six keys are
-what such a service reads. Only `url` is required, and it is required only of a process that has a
-profile client at all: the gateway, the cluster service and the store load the same file, have no
-profile client, and start perfectly well without this section.
+The [quickstart configuration](../../deployment/quickstart/kui-quickstart.yaml) is the executable example:
 
 ```yaml
 kui:
-  clusterProfiles:
-    url: http://kui-cluster:8081   # required by a Kafka-facing service; its base URL, no path
-    pollInterval: 60s              # how often the cluster list is re-read even when the change stream is up
-    requestTimeout: 5s             # how long one profile fetch may take
-    reconnectBackoff: 1s           # the first delay after the change stream drops
-    maxReconnectBackoff: 30s       # the cap on that delay
-    startupTimeout: 10s            # how long the first fetch may take before the service starts degraded
+  metrics:
+    scrapeInterval: 30s
+    retention: 24h
+    maxSamplesPerSeries: 5000
+    sources:
+      quickstart:
+        kind: prometheus
+        url: http://kafka-metrics:5556/metrics
+        callTimeout: 10s
 ```
 
-| Key | Type | Default | Required | What happens when it is wrong or missing |
-| --- | --- | --- | --- | --- |
-| `kui.clusterProfiles.url` | url | *(unset)* | by a Kafka-facing service | The cluster service's base URL, e.g. `http://kui-cluster:8081`. **No path**: `/internal/v1/...` is appended by the client from the contract's own constants, so it cannot be spelled wrong here. Setting this key is what turns the profile client on. |
-| `kui.clusterProfiles.pollInterval` | duration | `60s` | no | 5s … 1h. See below: it is a fallback, not the primary mechanism. |
-| `kui.clusterProfiles.requestTimeout` | duration | `5s` | no | 1s … 60s. The far side answers from memory; a longer bound only makes a wedged connection take longer to notice. |
-| `kui.clusterProfiles.reconnectBackoff` | duration | `1s` | no | 100ms … 10m. The first delay after the change stream drops; it doubles from there. |
-| `kui.clusterProfiles.maxReconnectBackoff` | duration | `30s` | no | 100ms … 10m, and never shorter than `reconnectBackoff` — setting it shorter fails the load naming both, because a cap below the first delay makes the backoff shrink instead of grow. |
-| `kui.clusterProfiles.startupTimeout` | duration | `10s` | no | 1s … 60s. How long the first fetch may take before the service starts anyway, in a degraded state. It starts rather than exits on purpose: a service that crash-looped while the cluster service restarted would turn one outage into two. |
+`callTimeout` must be shorter than `scrapeInterval`. Authentication, custom HTTP TLS, and all query/cache
+keys are rejected for exposition sources rather than ignored. Protect a plain-HTTP exporter with network
+policy; KUI does not add authentication to this source kind.
 
-`pollInterval` is a **fallback**, not the primary mechanism. With the change stream open, an edit to
-a cluster reaches every service in milliseconds; the poll is what bounds the damage when the stream
-has died without either end noticing, which is what a middlebox dropping an idle socket looks like —
-exactly like a quiet cluster. Lowering it makes a broken stream less visible in its effects and does
-not make a working one faster.
+### Prometheus query API
 
-`maxReconnectBackoff` is capped at thirty seconds on purpose. A client that had backed off to ten
-minutes would take ten minutes to notice a recovery that happened one second after its last attempt.
-
-**What an operator must not do.** `/internal/v1` carries the clusters' credentials on this channel
-and must not be reachable from outside the deployment network — not through an ingress, a load
-balancer, or a service mesh gateway that terminates external traffic. `/api/v1` is the
-browser-facing surface and carries no credential on any endpoint of any service. See
-`docs/operations/metadata-store.md` §4.3 for the full statement and for the two mechanisms that
-enforce it.
-
-**When the cluster service is down.** A consuming service keeps working from the last profile it
-saw, and reports its capability as `Degraded` with the reason and how long it has been failing. It
-does not fail requests and it does not refuse to start: a service that crash-looped because the
-cluster service was briefly restarting would turn one outage into two, and would make container boot
-order a correctness requirement.
-
-### `kui.rbac` — the authorization model (**M6**)
-
-**Accepted and ignored.** Any key under `kui.rbac` loads today and is read by nothing, so a file
-written for M6 still starts a build that has no authorization model yet.
-
-## Which URLs KUI will call
-
-Every URL-shaped key is checked before KUI will use it, because a URL in a configuration file is a
-URL KUI's own network position will fetch. That makes each one a server-side request forgery risk:
-the classic attack points KUI at `http://169.254.169.254/`, the address a cloud instance uses to
-hand out its own credentials, and reads the answer back through KUI.
-
-- `http` and `https` only. There is no development exception for schemes.
-- No credentials in the URL (`http://user:pass@host`). Put them in their own keys, where they can
-  be redacted.
-- By default, no address that points at this machine (`localhost`, `127.0.0.1`, `[::1]`) and no
-  address that is not routable on the public internet — the private ranges, the link-local range,
-  and the cloud metadata addresses inside it. The disguises are caught too: `2130706433`,
-  `0x7f000001`, `017700000001`, `127.1` and `[::ffff:127.0.0.1]` all reach the same host as
-  `127.0.0.1`, and a check that refused one spelling and accepted another would not be a check.
-
-**Only address literals are examined; a host name is never resolved.** So
-`http://kui-cluster.kui.svc.cluster.local:8080` is accepted under the strict policy even though it
-resolves to a private address on the network where it runs. This is deliberate: it means a
-configuration file validates identically on every machine, rather than passing on a laptop and
-failing in the cluster because a resolver disagreed. Ordinary service discovery keeps working, and
-the rule still stops the literal addresses that make SSRF worth attempting.
-
-The last rule is relaxed by `KUI_ALLOW_PRIVATE_UPSTREAMS=true` — exactly that value, nothing else
-counts — which is what the Docker Compose topology and local development use, where every upstream
-really is on loopback or a private network. Like `KUI_ALLOW_UNSIGNED`, it is an environment
-variable so that the relaxation is visible in one place. It is not relaxed in production.
-
-## Secrets
-
-Any key that holds a secret accepts three forms:
+This example is accepted, fully validated, and allocates the internal source-owned query provider. Per the
+current product boundary above, no public route consumes it yet, so it does not feed KUI screens:
 
 ```yaml
-key: "s3cret"                  # a literal. Fine on a laptop; it is in version control anywhere else.
-key: "env:KUI_SIGNING_KEY"     # read from an environment variable at startup
-key: "file:/run/secrets/kui"   # read from a mounted file, which is how Kubernetes and Compose
-                               # deliver secrets
+kui:
+  metrics:
+    sources:
+      production:
+        kind: prometheus-api
+        url: https://prometheus.example.net/tenant-a/prometheus
+        callTimeout: 10s
+        queryTimeout: 8s
+        maxConcurrentQueries: 4
+        maxSeriesPerQuery: 200
+        maxPointsPerSeries: 600
+        maxResponseBytes: 4194304
+        maxCacheBytes: 67108864
+        cacheTtl: 15s
+        staleTtl: 2m
+        auth:
+          type: bearer
+          token: env:KUI_PROMETHEUS_TOKEN
 ```
 
-A reference is resolved during the load, so a missing one is a startup failure that names the
-variable rather than an empty secret nobody notices:
+The URL is the server base, not `/api/v1/query` or `/api/v1/query_range`. Query strings, fragments, and URL
+user-info are rejected; a reverse-proxy path is preserved. Requests use bounded form-encoded `POST`, disable
+redirects, send the configured Prometheus timeout and series limit, and are not retried.
 
-```
-kui.gateway.principalKeys.0.key: references environment variable KUI_PRINCIPAL_KEY, which is not set
-```
+## Exact bounds
 
-A `file:` reference is read and trimmed; one that cannot be read says only that it could not be
-read, and never echoes the file's contents. A reference that resolves to an empty value is an
-error, not an empty secret.
+Global exposition/window settings are:
 
-**The guarantee: a secret never appears in a log line, a span attribute, an error envelope or an
-HTTP response body.** It is enforced by the type, not by a filter over the output: `Secret[A]` in
-`libs/kernel` prints as `***` and has no other rendering, so there is no formatter to forget to
-configure. `SecretRedactionSuite` in `libs/config/test` takes one secret value and asserts it is
-absent from all four sinks at once — plus a negative control that the same value *without* the
-wrapper does appear, so the test can fail.
+| Setting | Default | Accepted range or rule |
+| --- | ---: | --- |
+| `scrapeInterval` | 30s | 5s–1h |
+| `retention` | 24h | 1m–30d and not shorter than `scrapeInterval` |
+| `maxSamplesPerSeries` | 5,000 | 60–100,000 |
+| source `callTimeout` | 10s | 1s–60s; for exposition, shorter than `scrapeInterval` |
 
-If you add a fifth place a configuration value can end up — a metrics attribute, a health payload,
-an audit record — add a case to that suite.
+The following source keys are valid only for `prometheus-api`:
 
-A configuration problem reported for a secret key prints `***` in place of the value. A YAML syntax
-error reports only the parser's position and never the offending line, because at that point
-nothing has been decoded and the redaction that protects every other path cannot apply — an
-unclosed quote on a signing-key line would otherwise print the key into `docker logs`.
+| Setting | Default | Accepted range or rule |
+| --- | ---: | --- |
+| `queryTimeout` | 8s | 1s–55s and strictly shorter than `callTimeout` |
+| `maxConcurrentQueries` | 4 | 1–32 |
+| `maxSeriesPerQuery` | 200 | 1–1,000 |
+| `maxPointsPerSeries` | 600 | 60–2,000 |
+| `maxResponseBytes` | 4 MiB | 64 KiB–32 MiB |
+| `maxCacheBytes` | 64 MiB | 4 MiB–512 MiB |
+| `cacheTtl` | 15s | 1s–5m |
+| `staleTtl` | 2m | from `cacheTtl` through 30m |
 
-## Empty sections are legal
+Bounds are inclusive except the two explicitly strict timeout relationships.
 
-`services: {}`, `principalKeys: []`, `origins: []`, or a `telemetry:` block whose keys are all
-commented out, are all accepted. An empty container supplies no value, so it cannot be a wrong
-value, and refusing it would refuse a file that says exactly what it means. A **scalar** where a
-section belongs (`telemetry: 7`) is still a mistake and is still named.
+Independent fixed protocol bounds also apply: a compiled expression is at most 64 KiB UTF-8; a series has at
+most 64 labels and 16 KiB of UTF-8 label names and values; warnings and info entries are each counted only up
+to 32; total decoded samples are at most `maxSeriesPerQuery × maxPointsPerSeries`. Range timestamps must be
+ordered, inside the requested window, aligned to the step, and cannot exceed
+`floor((to - from) / step) + 1` points per series. Native histograms and scalar or string query results are
+rejected rather than coerced.
 
-One shape that looks empty and is not: an indentation slip turns the list entry `- kid: k1` into a
-map key `k1:`. That is reported as `kui.gateway.principalKeys.first: is not a list entry` rather
-than being dropped, because a silently empty key list means a service refusing to start while the
-operator is looking straight at a key in the file.
+## Authentication
 
-## What the cluster service reads
+Authentication is supported only by `prometheus-api`; omitting `auth` is anonymous.
 
-Every KUI process loads the same file and takes its own slice of it. The cluster service's slice is
-three sections, and it is smaller than the gateway's on purpose — a process that read settings it
-does not use would be a process an operator could not reason about:
-
-| Section | What the cluster service does with it |
+| `auth.type` | Required keys |
 | --- | --- |
-| `kui.server.*` | where it listens, and under which base path |
-| `kui.telemetry.*` | where traces and metrics go, and whether log lines are JSON or text |
-| `kui.gateway.principalKeys[]` | the keys it will accept a signed `X-Kui-Principal` from |
+| `none` | none |
+| `basic` | `username`, secret `password` |
+| `bearer` | secret `token` |
+| `oauth` | HTTPS `tokenEndpoint`, `clientId`, secret `clientSecret`; `scope` is optional |
 
-`services/cluster/app/resources/reference.yaml` is the same information as a commented file you can
-copy. It is **not** loaded: a reference configuration silently merged underneath yours is a file
-that changes behaviour when somebody edits it for a different deployment. `ClusterWiringSuite`
-asserts that its values are the defaults the code actually uses, so it cannot go stale unnoticed.
+Exactly one mechanism may be configured. Surplus keys from another mechanism are startup errors.
+Authenticated Prometheus API sources and OAuth token endpoints require HTTPS.
 
-## What is not here yet
+Basic and OAuth use the same secret-reference contract:
 
-Static configuration is read once at startup: there is no hot reload of the file and no
-configuration wizard.
+```yaml
+# Basic
+auth:
+  type: basic
+  username: kui
+  password: file:/run/secrets/prometheus_password
 
-The cluster registry is the exception. Records in KUI's own Kafka-backed metadata store (ADR-036 as
-amended by ADR-042) overlay `kui.clusters` at runtime, so a cluster can be added or edited without
-restarting anything — see [the metadata store guide](metadata-store.md). That does not change what
-is written here: the static file stays the canonical base, and the store is one more layer above it
-in the same precedence chain. A cluster the store knows about but the file does not is added; a
-cluster both describe is replaced whole by the store's version, never merged field by field, so
-removing `security` from a stored record cannot silently inherit the file's credentials.
+# Or OAuth client credentials
+auth:
+  type: oauth
+  tokenEndpoint: https://issuer.example.net/oauth2/token
+  clientId: kui-metrics
+  clientSecret: env:KUI_PROMETHEUS_CLIENT_SECRET
+  scope: metrics.read
+```
 
-## User preferences are not configuration
+OAuth token acquisition has a fixed 5s request timeout and 64 KiB response-body ceiling. `expires_in` must
+be a positive whole number no greater than 365 days; refresh begins 30s early or halfway through shorter
+lifetimes. Concurrent callers share one token refresh. The source `callTimeout` still bounds the complete
+query operation, including waiting for authentication.
 
-The theme, the accent colour, the table density, the timezone and the screen refresh rate are set
-by each person in the interface and are stored in that person's own browser, under `kui.*` keys in
-`localStorage`. There is nothing to configure, nothing to deploy and nothing to back up: KUI has no
-per-user store on the server, and these values never leave the browser they were set in. Somebody
-who clears their browser data gets the defaults back, and a person on two machines sets their
-preferences twice.
+## TLS and mutual TLS
+
+Without a `tls` block, HTTPS uses JVM trust roots, mandatory hostname verification, and no client
+certificate. There is no setting that disables certificate or hostname verification. Custom material is
+valid only for an HTTPS `prometheus-api` source:
+
+```yaml
+kui:
+  metrics:
+    sources:
+      production:
+        kind: prometheus-api
+        url: https://prometheus.example.net/prometheus
+        tls:
+          truststore:
+            type: PKCS12
+            location: /etc/kui/prometheus-truststore.p12
+            password: file:/run/secrets/prometheus_truststore_password
+          keystore:
+            type: PKCS12
+            location: /etc/kui/prometheus-client.p12
+            password: file:/run/secrets/prometheus_keystore_password
+            keyPassword: file:/run/secrets/prometheus_key_password
+```
+
+Trust stores and client key stores accept `JKS` or `PKCS12`. Each uses exactly one of `location` or secret
+`inline` Base64 material. A custom trust store replaces JVM trust roots. A client `keystore` requires both
+its store password and key password. PEM is not supported. Store decoding and SSL-context construction are
+startup validation, so missing or malformed local TLS material prevents the listener from starting.
+
+The OAuth token transport currently uses JVM trust independently of the source's custom trust/mTLS stores.
+
+## Query cache and stale data
+
+The query client keeps separate instant and range caches under one per-source budget: at most 1,024 entries
+and `maxCacheBytes` in total. The key contains bounded source/query identities, an expression digest, and the
+aligned instant or range—not raw PromQL or resource names. Identical in-flight requests share one physical
+request; successful empty results are cacheable, while failures are not.
+
+A result is fresh through `cacheTtl`. After that it may be returned with explicit stale freshness, but only
+until `staleTtl` and only when refresh fails because of transport/unreachable, timeout, circuit-open, HTTP
+429, or HTTP 5xx. Authentication, HTTP 400/404/422, configuration, protocol/decoder, unsupported-result,
+and response-size failures never serve stale data.
+
+These semantics are implemented by the internally wired provider. They become product-visible only when a
+server-owned Kafka metrics catalog consumes that provider and maps its answers to public metric sections.
+
+## Lifecycle and operations
+
+- Invalid keys, bounds, secret references, URLs, authentication combinations, and local TLS material fail
+  startup with accumulated, redacted diagnostics.
+- An unreachable text exporter does not fail startup or readiness. The metrics service has no upstream
+  readiness checks because its routes can still return an honest unavailable/not-configured section.
+- Each supported exposition source owns one background scrape fiber, one-call bulkhead, zero retries, and a
+  bounded retention window. Resource shutdown cancels an in-flight scrape and releases its HTTP resources.
+- A `prometheus-api` source owns its query transport, credentials, caches, and telemetry for the source
+  lifetime, but starts no exposition collector and currently has no public caller. Shutdown cancels shared
+  loads, clears both caches, and releases credential and HTTP resources. A `jmx` source starts neither kind
+  of collector. Startup logs and capabilities explain both boundaries instead of presenting empty data.
+
+Use `GET /health/live` for restart decisions, `GET /health/ready` for routing, and `GET /capabilities` to see
+per-cluster feature state. See [Observing KUI](observability.md#health-endpoints-what-to-probe-and-what-a-503-means)
+for probe semantics and the [metrics catalog](observability.md#the-metrics) for cache, query, upstream, and
+circuit telemetry.
+
+## Security notes
+
+- Production URL policy rejects loopback names and private, loopback, link-local, cloud-metadata, and other
+  non-public address literals. Host names are not resolved during configuration validation, so network egress
+  policy remains part of the SSRF boundary. `KUI_ALLOW_PRIVATE_UPSTREAMS=true` is an explicit relaxation for
+  private-network and quickstart deployments; enabling it expands that boundary.
+- Prometheus API redirects are disabled so credentials cannot be forwarded to a different destination.
+  Response bodies, warning text, PromQL, URLs, and credentials are excluded from browser-facing errors,
+  telemetry labels, and per-failure logs.
+- The text-exposition integration has no application-layer auth or custom TLS configuration. Isolate it at
+  the network layer, or terminate security at a trusted proxy/exporter endpoint.
+- OAuth uses JVM system trust; the source's custom trust store and client certificate do not apply to the
+  token endpoint in this version.
+- KUI bounds response bytes and decoded structure, cache memory and entries, concurrency, and time. Those
+  controls limit resource exhaustion; they do not make an untrusted Prometheus deployment safe to expose
+  directly to users.
+
+The [observability guide](observability.md#labels-never-carry-user-data) documents the bounded labels and
+redaction boundary in detail.
