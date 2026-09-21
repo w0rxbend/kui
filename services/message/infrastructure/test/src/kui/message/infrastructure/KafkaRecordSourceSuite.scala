@@ -284,6 +284,32 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
     }
   }
 
+  test("a backward candidate batch falls back when actual payload bytes exceed its allowance") {
+    val oversized = FakeBrowseConsumer.partition(0, 200)._2.map(record => record.copy(valueSize = 16 * 1024))
+    val log = Map(PartitionId.unsafe(0) -> oversized)
+    val rawBudget = PollBudget.unsafe(maxRecords = 100, maxBytes = 1L << 20, deadline = 30.seconds)
+
+    for {
+      consumer <- FakeBrowseConsumer.of(log)
+      source = new KafkaRecordSource[IO](
+        (_, _) =>
+          Resource.pure[IO, Either[KuiError, BrowseConsumer[IO]]](
+            (consumer: BrowseConsumer[IO]).asRight[KuiError]
+          ),
+        BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+      )
+      records <- source
+        .browse(request(SeekMode.Latest, Direction.Backward, limit = 100), rawBudget)
+        .compile
+        .toList
+      assignments <- consumer.assignmentCount
+    } yield {
+      assertEquals(records.size, 64)
+      assertEquals(offsets(records).headOption, Some((0, 199L)))
+      assert(assignments > 1, clues(assignments))
+    }
+  }
+
   test("a backward source does not emit records beyond the raw byte budget") {
     val log = Map(FakeBrowseConsumer.partition(0, 10))
     val rawBudget = PollBudget.unsafe(maxRecords = 20, maxBytes = 48L, deadline = 30.seconds)

@@ -325,9 +325,10 @@ final class KafkaRecordSource[F[_]: Temporal](
       if round.isEmpty || slots > recordsRemaining || prefetchAllowance > budget.bytesLeft - walk.bytes then
         Option.empty[(Walk, Selected)].asRight.pure[F]
       else
-        readCandidateBatch(consumer, request.topic, round).map {
+        readCandidateBatch(consumer, request.topic, round, prefetchAllowance).map {
           case Left(error) => error.asLeft[Option[(Walk, Selected)]]
-          case Right(candidates) =>
+          case Right(None) => Option.empty[(Walk, Selected)].asRight[KuiError]
+          case Right(Some(candidates)) =>
             val selected = within(
               inScanOrder(round, candidates),
               recordsLeft = math.min(recordsRemaining, Int.MaxValue.toLong).toInt,
@@ -443,24 +444,32 @@ final class KafkaRecordSource[F[_]: Temporal](
   private def readCandidateBatch(
       consumer: BrowseConsumer[F],
       topic: TopicName,
-      round: List[Window]
-  ): F[Either[KuiError, List[RawRecord]]] = {
+      round: List[Window],
+      maxRetainedBytes: Long
+  ): F[Either[KuiError, Option[List[RawRecord]]]] = {
     val bounds = round.map(window => window.partition -> window.high).toMap
 
-    def drain(progress: Progress, reversed: List[RawRecord]): F[Either[KuiError, List[RawRecord]]] =
+    def drain(
+        progress: Progress,
+        reversed: List[RawRecord],
+        retainedBytes: Long
+    ): F[Either[KuiError, Option[List[RawRecord]]]] =
       if progress.empties > tuning.emptyPollsBeforeEnd || reachedEnd(progress, bounds) then
-        reversed.reverse.asRight[KuiError].pure[F]
+        Some(reversed.reverse).asRight[KuiError].pure[F]
       else
         consumer.poll(tuning.pollTimeout).flatMap {
-          case Left(error) => error.asLeft[List[RawRecord]].pure[F]
+          case Left(error) => error.asLeft[Option[List[RawRecord]]].pure[F]
           case Right(polled) =>
             val kept = polled.filter(record => round.exists(_.holds(record.partition, record.offset)))
-            drain(progress.after(polled), kept.reverse ::: reversed)
+            val keptBytes = kept.foldLeft(0L)((total, record) => addBytes(total, serialisedSize(record)))
+            val nextBytes = addBytes(retainedBytes, keptBytes)
+            if nextBytes > maxRetainedBytes then Option.empty[List[RawRecord]].asRight[KuiError].pure[F]
+            else drain(progress.after(polled), kept.reverse ::: reversed, nextBytes)
         }
 
     assignAndSeek(consumer, topic, round.map(window => window.partition -> window.low)).flatMap {
-      case Left(error) => error.asLeft[List[RawRecord]].pure[F]
-      case Right(_) => drain(Progress.empty, reversed = Nil)
+      case Left(error) => error.asLeft[Option[List[RawRecord]]].pure[F]
+      case Right(_) => drain(Progress.empty, reversed = Nil, retainedBytes = 0L)
     }
   }
 
