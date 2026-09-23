@@ -6,8 +6,8 @@ import java.util.Locale
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.Applicative
-import cats.effect.{IO, Ref}
 import cats.effect.kernel.{Clock, Concurrent}
+import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import fs2.Stream
 
