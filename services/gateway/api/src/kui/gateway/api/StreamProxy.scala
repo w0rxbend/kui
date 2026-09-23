@@ -1,7 +1,5 @@
 package kui.gateway.api
 
-import java.nio.charset.StandardCharsets
-
 import cats.effect.kernel.{Async, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
@@ -117,9 +115,10 @@ object StreamProxy {
   /** Whether a terminal event has gone past, worked out from the bytes without decoding them.
     *
     * SSE frames are line-oriented, and a terminal frame is identified by one line: `event: done` or
-    * `event: error`. A chunk can end in the middle of a line, so the tail of each chunk is carried into the
-    * next one. Only complete lines are examined, which is why a chunk boundary cannot hide a terminal event
-    * and cannot invent one either.
+    * `event: error`. A chunk can end in the middle of a line, so the parser position is carried into the next
+    * one. Only complete lines are accepted, which is why a chunk boundary cannot hide a terminal event and
+    * cannot invent one either. Bytes from `data:` lines are not retained: once a line cannot be a terminal
+    * event, one constant-size discard state is enough until its newline arrives.
     *
     * ==Visible to this package's tests, and why it has to be==
     *
@@ -134,48 +133,111 @@ object StreamProxy {
     * many source chunks are coalesced into one dequeued chunk is a scheduling outcome rather than a property
     * of this code, and a gate that fires one run in four reads as a flake. So that case holds the end-to-end
     * property only — one terminal event out, none appended — and is not a gate on the carry;
-    * `StreamProxySuite` carries the four-run table beside it and says so. The two cases that do hold the
-    * carry's rules drive [[observe]] directly, which is the only level the split is always still there at.
+    * `StreamProxySuite` carries the four-run table beside it and says so. Its direct [[observe]] cases are
+    * the deterministic gates on parser state crossing chunk boundaries.
     */
-  final private[api] class TerminalWatch[F[_]: Async](carry: Ref[F, Vector[Byte]], seen: Ref[F, Boolean]) {
+  final private[api] class TerminalWatch[F[_]: Async] private (
+      line: Ref[F, TerminalWatch.LineState],
+      seen: Ref[F, Boolean]
+  ) {
 
     def observe(chunk: Chunk[Byte]): F[Unit] =
-      carry
-        .modify { partial =>
-          // Split on the newline byte, not on a decoded string. `0x0A` cannot occur inside a multi-byte
-          // UTF-8 sequence, so this is exact even when a chunk boundary falls in the middle of a character
-          // — and only complete lines are ever decoded.
-          val buffer = partial ++ chunk.toVector
-          val pieces = split(buffer)
-          (pieces.last, pieces.init)
-        }
-        .flatMap(complete => seen.update(_ || complete.exists(isTerminalLine)))
+      line.modify(current => TerminalWatch.scan(current, chunk)).flatMap(found => seen.update(_ || found))
 
     def sawTerminal: F[Boolean] = seen.get
 
-    /** Every line in the buffer, with the trailing element being the incomplete one (possibly empty). */
-    private def split(buffer: Vector[Byte]): Vector[Vector[Byte]] = {
-      val (lines, rest) = buffer.foldLeft((Vector.empty[Vector[Byte]], Vector.empty[Byte])) {
-        case ((done, current), Newline) => (done :+ current, Vector.empty)
-        case ((done, current), byte) => (done, current :+ byte)
-      }
-      lines :+ rest
-    }
-
-    private def isTerminalLine(line: Vector[Byte]): Boolean = {
-      val text = new String(line.toArray, StandardCharsets.UTF_8).stripSuffix("\r")
-      text.startsWith("event:") && {
-        val name = text.drop("event:".length).trim
-        name == SseEventName.Done || name == SseEventName.Error
-      }
-    }
+    /** Payload bytes retained solely for terminal detection. Package-visible so the bounded-memory rule can
+      * be asserted directly instead of inferred from a timing-sensitive heap measurement.
+      */
+    private[api] def retainedPayloadBytes: F[Int] = line.get.map(_.retainedPayloadBytes)
   }
 
   private val Newline: Byte = '\n'.toByte
 
   private[api] object TerminalWatch {
 
+    /** Constant-size progress through the only two lines the watcher cares about.
+      *
+      * A Kafka value lives on an SSE `data:` line and can be megabytes long. Keeping that line until its
+      * newline both retained the whole payload and re-scanned the growing prefix for every network chunk.
+      * Once a line stops being a possible `event: done` or `event: error`, [[LineState.Discard]] remembers
+      * that single fact until the newline; payload bytes themselves are never retained.
+      */
+    private enum LineState {
+      case Prefix(matched: Int)
+      case LeadingWhitespace
+      case Name(target: String, matched: Int)
+      case TrailingWhitespace
+      case Discard
+
+      def isTerminal: Boolean = this match {
+        case TrailingWhitespace => true
+        case _ => false
+      }
+
+      /** No state contains bytes from the body; each case is a fixed-size parser position. */
+      def retainedPayloadBytes: Int = 0
+    }
+
+    private object LineState {
+      val Start: LineState = LineState.Prefix(0)
+    }
+
+    /** Scans one transport chunk once and returns the next line state plus whether it completed a terminal
+      * event line. `0x0a` cannot occur inside a multi-byte UTF-8 sequence, so byte-level line detection is
+      * exact even when the transport splits a character across chunks.
+      */
+    private def scan(initial: LineState, chunk: Chunk[Byte]): (LineState, Boolean) = {
+      var current = initial
+      var terminal = false
+      var index = 0
+
+      while index < chunk.size do {
+        val byte = chunk(index)
+        if byte == Newline then {
+          terminal ||= current.isTerminal
+          current = LineState.Start
+        } else current = advance(current, byte)
+        index += 1
+      }
+
+      (current, terminal)
+    }
+
+    private def advance(current: LineState, byte: Byte): LineState =
+      current match {
+        case LineState.Prefix(matched) =>
+          if byte != EventPrefix.charAt(matched).toByte then LineState.Discard
+          else if matched + 1 == EventPrefix.length then LineState.LeadingWhitespace
+          else LineState.Prefix(matched + 1)
+
+        case LineState.LeadingWhitespace =>
+          if isTrimWhitespace(byte) then LineState.LeadingWhitespace
+          else if byte == SseEventName.Done.charAt(0).toByte then
+            LineState.Name(SseEventName.Done, matched = 1)
+          else if byte == SseEventName.Error.charAt(0).toByte then
+            LineState.Name(SseEventName.Error, matched = 1)
+          else LineState.Discard
+
+        case LineState.Name(target, matched) =>
+          if byte != target.charAt(matched).toByte then LineState.Discard
+          else if matched + 1 == target.length then LineState.TrailingWhitespace
+          else LineState.Name(target, matched + 1)
+
+        case LineState.TrailingWhitespace =>
+          if isTrimWhitespace(byte) then LineState.TrailingWhitespace else LineState.Discard
+
+        case LineState.Discard => LineState.Discard
+      }
+
+    /** `String.trim`, used by the former implementation, removes characters through U+0020. Terminal names
+      * and the field prefix are ASCII, so applying the same rule to their UTF-8 bytes preserves detection.
+      */
+    private def isTrimWhitespace(byte: Byte): Boolean = (byte & 0xff) <= 0x20
+
+    private val EventPrefix: String = "event:"
+
     def apply[F[_]: Async]: F[TerminalWatch[F]] =
-      (Ref.of[F, Vector[Byte]](Vector.empty), Ref.of[F, Boolean](false)).mapN(new TerminalWatch[F](_, _))
+      (Ref.of[F, LineState](LineState.Start), Ref.of[F, Boolean](false)).mapN(new TerminalWatch[F](_, _))
   }
 }

@@ -431,4 +431,24 @@ final class StreamProxySuite extends CatsEffectSuite {
       assert(afterFlush, "a trailing newline after the terminal event cleared the latch")
     }
   }
+
+  test("aLargeDataLineDoesNotAccumulateInTheTerminalDetector") {
+    // Kafka values are carried on `data:` lines and can legitimately be large. The detector only needs the
+    // tiny `event:` line, so retaining a fragmented value until its newline makes gateway memory grow with
+    // the payload and repeatedly scans the same prefix. One MiB is large enough to expose that state without
+    // turning this into a wall-clock benchmark.
+    val fragments = chunkOf("data: ") :: List.fill(1024)(chunkOf("x" * 1024))
+
+    for {
+      watch <- StreamProxy.TerminalWatch[IO]
+      _ <- Stream.emits(fragments).covary[IO].evalMap(watch.observe).compile.drain
+      retained <- watch.retainedPayloadBytes
+      _ <- watch.observe(chunkOf("\nevent: do"))
+      _ <- watch.observe(chunkOf("ne\n"))
+      terminal <- watch.sawTerminal
+    } yield {
+      assertEquals(retained, 0, "data payload bytes must not be retained by the terminal detector")
+      assert(terminal, "discarding a data line must not break detection on the following line")
+    }
+  }
 }
