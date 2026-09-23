@@ -320,7 +320,7 @@ object ClusterSecurityConfig {
       raw(leaf).filter(_.nonEmpty).map(value => key(leaf) -> SecretRef.parse(value))
 
     def boolean(leaf: String, default: Boolean): Problems[Boolean] =
-      raw(leaf).map(_.trim.toLowerCase) match {
+      raw(leaf).map(_.trim.toLowerCase(Locale.ROOT)) match {
         case None => default.validNel
         case Some("true" | "yes" | "on") => true.validNel
         case Some("false" | "no" | "off") => false.validNel
