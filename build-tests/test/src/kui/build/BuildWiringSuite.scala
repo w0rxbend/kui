@@ -409,7 +409,17 @@ final class BuildWiringSuite extends FunSuite {
 
     assertEquals(
       jobs,
-      List("compile", "style", "architecture", "security", "generated", "test", "frontend", "browser", "compose"),
+      List(
+        "compile",
+        "style",
+        "architecture",
+        "security",
+        "generated",
+        "test",
+        "frontend",
+        "browser",
+        "compose"
+      ),
       clue = s"ci.yml declares the jobs $jobs. A deleted job takes every gate inside it with it and no " +
         "suite in this repository could see that happen; a new job belongs in this list, deliberately."
     )
@@ -499,8 +509,8 @@ private object BuildWiringSuite {
 
   /** Every named step `.github/workflows/ci.yml` runs, in the order it declares them.
     *
-    * `Install pnpm` appears three times, while two jobs each install the workspace and the pinned browser,
-    * so this is a list and is compared as one.
+    * `Install pnpm` appears three times, while two jobs each install the workspace and the pinned browser, so
+    * this is a list and is compared as one.
     */
   val workflowSteps: List[String] = List(
     "Compile every module with -Werror",
