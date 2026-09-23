@@ -1,0 +1,25 @@
+version: 2
+
+# Pinning CI dependencies to commits removes mutable code from privileged jobs. Dependabot keeps
+# those pins maintainable by proposing the reviewed SHA behind each new release. The frontend entry
+# does the same for the one lockfile this repository owns; Scala/Mill dependencies remain subject to
+# the normal reviewed build.mill update because GitHub has no Mill ecosystem updater.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Kyiv
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Europe/Kyiv
+    open-pull-requests-limit: 5
+    versioning-strategy: increase

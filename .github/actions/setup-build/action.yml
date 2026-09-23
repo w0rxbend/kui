@@ -1,7 +1,7 @@
 # Everything every CI job needs before it can run a Mill task.
 #
-# It exists so the five jobs in ci.yml do not each carry their own copy of the JDK, Node and cache
-# configuration. Five copies drift: someone bumps the JDK in one job, the others keep building
+# It exists so the backend jobs in ci.yml do not each carry their own copy of the JDK, Node and cache
+# configuration. Copies drift: someone bumps the JDK in one job, the others keep building
 # against the old one, and the difference shows up as a mysterious failure in a single stage.
 name: Set up the KUI build
 description: Installs the JDK and Node that the Mill build needs, and restores the build caches.
@@ -11,7 +11,7 @@ runs:
   steps:
     - name: Install JDK 21 (Temurin)
       # ADR-001 pins JDK 21; `temurin` is the distribution the toolchain document names.
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
       with:
         distribution: temurin
         java-version: '21'
@@ -20,12 +20,12 @@ runs:
       # Scala.js tests need a JavaScript engine (blocker B-002). Node is installed for every job,
       # not only the test job, so that a job which later grows a JS step does not fail in a way
       # that looks like a code problem. `docs/development/toolchain.md` asks for 20 or newer.
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
         node-version: '22'
 
     - name: Restore the dependency and build caches
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         # `~/.cache/coursier` holds downloaded jars; `out/` holds Mill's incremental compilation
         # state. Both are keyed on the files that decide what is in them, so a dependency change
