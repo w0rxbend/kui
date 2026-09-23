@@ -66,12 +66,14 @@ final class UserDirectoriesSuite extends KuiIOSuite {
   }
 
   test("case-insensitive account lookup does not depend on the host locale") {
-    IO(Locale.getDefault).bracket { _ =>
-      IO(Locale.setDefault(Locale.forLanguageTag("tr-TR"))) *>
-        IO.defer(ConfiguredUserDirectory.fromRecords[IO](List(account)).find("ADMIN"))
-    }(previous => IO(Locale.setDefault(previous))).map { found =>
-      assertEquals(found.map(_.name.value), Some("Admin"))
-    }
+    IO(Locale.getDefault)
+      .bracket { _ =>
+        IO(Locale.setDefault(Locale.forLanguageTag("tr-TR"))) *>
+          IO.defer(ConfiguredUserDirectory.fromRecords[IO](List(account)).find("ADMIN"))
+      }(previous => IO(Locale.setDefault(previous)))
+      .map { found =>
+        assertEquals(found.map(_.name.value), Some("Admin"))
+      }
   }
 
   test("a file-backed deployment refuses a password change and says what to configure instead") {

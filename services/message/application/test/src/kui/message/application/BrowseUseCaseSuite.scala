@@ -623,16 +623,19 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   test("the string filter is case-insensitive independently of the host locale") {
     val records = List(raw(0, "invoice")).map(_.asRight[KuiError])
 
-    IO(Locale.getDefault).bracket { _ =>
-      IO(Locale.setDefault(Locale.forLanguageTag("tr-TR"))) *>
-        events(useCase(records), request(10, Some("I")))
-    }(previous => IO(Locale.setDefault(previous))).map { produced =>
-      assertEquals(delivered(produced), List("invoice"))
-    }
+    IO(Locale.getDefault)
+      .bracket { _ =>
+        IO(Locale.setDefault(Locale.forLanguageTag("tr-TR"))) *>
+          events(useCase(records), request(10, Some("I")))
+      }(previous => IO(Locale.setDefault(previous)))
+      .map { produced =>
+        assertEquals(delivered(produced), List("invoice"))
+      }
   }
 
   test("a browse reads the monotonic clock only when it reports elapsed time") {
-    val records = List.tabulate(BrowseUseCase.ProgressEvery - 1)(offset => raw(offset.toLong, s"value-$offset"))
+    val records =
+      List.tabulate(BrowseUseCase.ProgressEvery - 1)(offset => raw(offset.toLong, s"value-$offset"))
 
     for {
       calls <- Ref.of[IO, Int](0)
