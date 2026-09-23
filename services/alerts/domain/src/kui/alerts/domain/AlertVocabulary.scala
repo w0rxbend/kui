@@ -1,5 +1,7 @@
 package kui.alerts.domain
 
+import java.util.Locale
+
 /** How loud an event is. Two values, and the reason there are two rather than four is the whole of §3.9.
   *
   * `SCREENS-V4.md` §3.8 draws four severity dots — `primary`, `success`, `warning`, `danger`. Two of them are
@@ -28,7 +30,7 @@ object AlertSeverity {
 
   val All: List[AlertSeverity] = values.toList
 
-  def fromWire(raw: String): Option[AlertSeverity] = All.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[AlertSeverity] = All.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[AlertSeverity, AlertSeverity] = CanEqual.derived
 }
@@ -63,7 +65,7 @@ object AlertCategory {
 
   val All: List[AlertCategory] = values.toList
 
-  def fromWire(raw: String): Option[AlertCategory] = All.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[AlertCategory] = All.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[AlertCategory, AlertCategory] = CanEqual.derived
 }
@@ -102,7 +104,7 @@ object AlertRule {
     */
   val All: List[AlertRule] = values.toList
 
-  def fromWire(raw: String): Option[AlertRule] = All.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[AlertRule] = All.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[AlertRule, AlertRule] = CanEqual.derived
 }

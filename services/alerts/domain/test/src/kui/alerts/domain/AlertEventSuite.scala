@@ -1,5 +1,7 @@
 package kui.alerts.domain
 
+import java.util.Locale
+
 import munit.FunSuite
 
 /** The event's identity, its tone and the order a feed draws it in. */
@@ -129,6 +131,17 @@ final class AlertEventSuite extends FunSuite {
     assertEquals(AlertCategory.All.flatMap(c => AlertCategory.fromWire(c.wire)), AlertCategory.All)
     assertEquals(AlertRule.All.flatMap(r => AlertRule.fromWire(r.wire)), AlertRule.All)
     assertEquals(AlertSeverity.fromWire("nonsense"), None)
+  }
+
+  test("stored alert vocabulary is decoded independently of the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(AlertSeverity.fromWire("CRITICAL"), Some(AlertSeverity.Critical))
+      assertEquals(AlertCategory.fromWire("PARTITION"), Some(AlertCategory.Partition))
+      assertEquals(AlertRule.fromWire("OFFLINE-PARTITIONS"), Some(AlertRule.OfflinePartitions))
+      assertEquals(AlertResolutionKind.fromWire("CLEARED"), Some(AlertResolutionKind.Cleared))
+    } finally Locale.setDefault(previous)
   }
 
   private def firstPassRebalance(): AlertEvent = {

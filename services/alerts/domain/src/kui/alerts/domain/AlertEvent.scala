@@ -3,6 +3,7 @@ package kui.alerts.domain
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.Locale
 
 /** What an open event is *about*, as an equality.
   *
@@ -128,7 +129,7 @@ enum AlertResolutionKind(val wire: String) {
 object AlertResolutionKind {
 
   def fromWire(raw: String): Option[AlertResolutionKind] =
-    values.find(_.wire == raw.trim.toLowerCase)
+    values.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[AlertResolutionKind, AlertResolutionKind] = CanEqual.derived
 }
