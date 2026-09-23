@@ -142,13 +142,20 @@ export async function fetchSearch(
   api: KuiApiClient,
   query: string,
   limit: number = SEARCH_LIMIT,
+  signal?: AbortSignal,
 ): Promise<ApiResult<SearchAnswer>> {
   const call = api.get as unknown as (
     path: string,
-    init: { readonly params: { readonly query: { readonly q: string; readonly limit: number } } },
+    init: {
+      readonly params: { readonly query: { readonly q: string; readonly limit: number } };
+      readonly signal?: AbortSignal;
+    },
   ) => Promise<ApiResult<unknown>>;
 
-  const answer = await call("/api/v1/search", { params: { query: { q: query, limit } } });
+  const answer = await call("/api/v1/search", {
+    params: { query: { q: query, limit } },
+    ...(signal === undefined ? {} : { signal }),
+  });
   return answer.ok ? { ok: true, value: decodeSearch(answer.value) } : answer;
 }
 

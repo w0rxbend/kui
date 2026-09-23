@@ -1676,9 +1676,11 @@ describe("the search field", () => {
   function stubHeldSearch(): {
     readonly asked: readonly string[];
     readonly answer: (query: string, body: unknown) => void;
+    readonly signal: (query: string) => AbortSignal;
   } {
     const asked: string[] = [];
     const held = new Map<string, (body: unknown) => void>();
+    const signals = new Map<string, AbortSignal>();
     vi.stubGlobal("EventSource", SilentEventSource);
     vi.stubGlobal(
       "fetch",
@@ -1695,6 +1697,7 @@ describe("the search field", () => {
         if (url.pathname === "/api/v1/search") {
           const query = url.searchParams.get("q") ?? "";
           asked.push(query);
+          if (input instanceof Request) signals.set(query, input.signal);
           return new Promise<Response>((resolve) => {
             held.set(query, (body) =>
               resolve(
@@ -1720,6 +1723,11 @@ describe("the search field", () => {
         held.delete(query);
         settle(body);
       },
+      signal: (query) => {
+        const signal = signals.get(query);
+        if (signal === undefined) throw new Error(`no search for "${query}" is in flight`);
+        return signal;
+      },
     };
   }
 
@@ -1742,6 +1750,27 @@ describe("the search field", () => {
       flush();
     }
   }
+
+  it("invalidates and cancels the previous search as soon as the query changes", async () => {
+    const gateway = stubHeldSearch();
+    const app = mountApp();
+    await settle();
+
+    type(app, "ord");
+    await requested();
+    expect(gateway.asked).toEqual(["ord"]);
+
+    type(app, "orders");
+    gateway.answer("ord", found("ord-legacy.audit"));
+    await landed();
+
+    const search = app.host.querySelector("[data-testid='search']")?.textContent ?? "";
+    expect(search).not.toContain("ord-legacy.audit");
+    expect(search).toContain("Searching");
+    expect(gateway.signal("ord").aborted).toBe(true);
+
+    app.dispose();
+  });
 
   /**
    * The out-of-order guard, at the seam it defends.

@@ -92,6 +92,7 @@ import { createMessageBrowserSync } from "./data/messageBrowser.js";
 import { brokerStorageOf, createClusterStore } from "./data/clusterStore.js";
 import {
   SEARCH_DEBOUNCE_MS,
+  SEARCH_LIMIT,
   SEARCH_MAX_LENGTH,
   fetchSearch,
   searchGroups,
@@ -307,6 +308,7 @@ export function App() {
   const [searchState, setSearchState] = createSignal<SearchState>({ kind: "idle" });
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let searchRequest: AbortController | undefined;
   /**
    * Which search is current.
    *
@@ -318,10 +320,19 @@ export function App() {
    */
   let searchEpisode = 0;
 
-  const runSearch = (query: string): void => {
+  const invalidateSearch = (): number => {
     const episode = (searchEpisode += 1);
+    searchRequest?.abort();
+    searchRequest = undefined;
+    return episode;
+  };
+
+  const runSearch = (query: string, episode: number): void => {
+    const request = new AbortController();
+    searchRequest = request;
     setSearchState({ kind: "searching" });
-    void fetchSearch(api, query).then((answer) => {
+    void fetchSearch(api, query, SEARCH_LIMIT, request.signal).then((answer) => {
+      if (searchRequest === request) searchRequest = undefined;
       if (episode !== searchEpisode) return;
       /* The search endpoint is the gateway's own, so a failure here is evidence about the gateway
          rather than about one upstream — the same reasoning the capability probe applies. A service
@@ -339,12 +350,17 @@ export function App() {
   const onSearchInput = (next: string): void => {
     setSearchText(next);
     if (searchTimer !== undefined) clearTimeout(searchTimer);
+    searchTimer = undefined;
+
+    /* Invalidate at the keystroke, not when its debounce expires. Otherwise an older request can
+       land during this 200 ms window and replace "Searching" with rows for text the field no
+       longer contains. Cancelling also stops a gateway fan-out whose answer cannot be used. */
+    const episode = invalidateSearch();
 
     const query = next.trim();
     if (query.length === 0) {
       // Emptying the box is not a search for nothing; it is the end of searching. The episode is
       // stepped so that an answer already in flight cannot reopen the overlay behind the caret.
-      searchEpisode += 1;
       setSearchState({ kind: "idle" });
       return;
     }
@@ -353,11 +369,16 @@ export function App() {
        the request goes out leaves the overlay showing the *previous* query's results for a fifth of
        a second under new text, which reads as a search that answered wrongly. */
     setSearchState({ kind: "searching" });
-    searchTimer = setTimeout(() => runSearch(query), SEARCH_DEBOUNCE_MS);
+    searchTimer = setTimeout(() => {
+      searchTimer = undefined;
+      runSearch(query, episode);
+    }, SEARCH_DEBOUNCE_MS);
   };
 
   onCleanup(() => {
     if (searchTimer !== undefined) clearTimeout(searchTimer);
+    searchEpisode += 1;
+    searchRequest?.abort();
   });
 
   const searchAnswer = createMemo<SearchAnswer | undefined>(() => {
@@ -995,7 +1016,7 @@ export function App() {
                 unavailable: searchUnavailable(),
                 onRetry: () => {
                   const query = searchText().trim();
-                  if (query.length > 0) runSearch(query);
+                  if (query.length > 0) runSearch(query, invalidateSearch());
                 },
                 inputRef: (el) => {
                   searchInput = el;
