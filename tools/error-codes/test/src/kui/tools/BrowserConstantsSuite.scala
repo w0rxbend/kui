@@ -1,6 +1,7 @@
 package kui.tools
 
 import java.nio.file.Paths
+import java.util.Locale
 
 import munit.FunSuite
 
@@ -36,6 +37,17 @@ final class BrowserConstantsSuite extends FunSuite {
     assert(declared.nonEmpty, "no connector action declares a parent fallback at all")
     assertEquals(BrowserConstants.mismatchedFallbacks(declared), Nil)
     assert(BrowserConstants.render(ErrorCode.values.toList).isRight)
+  }
+
+  test("generated browser constants do not depend on the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.ROOT)
+      val expected = BrowserConstants.render(ErrorCode.values.toList)
+
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(BrowserConstants.render(ErrorCode.values.toList), expected)
+    } finally Locale.setDefault(previous)
   }
 
   test("a mismatch refuses the whole rendering rather than emitting a list the browser misreads") {
