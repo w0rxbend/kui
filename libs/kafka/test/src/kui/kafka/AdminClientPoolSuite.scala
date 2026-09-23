@@ -7,7 +7,7 @@ import java.security.KeyStore
 import java.util.Base64
 
 import cats.effect.std.CountDownLatch
-import cats.effect.{IO, Ref, Resource}
+import cats.effect.{Deferred, IO, Ref, Resource}
 import cats.syntax.all.*
 import org.apache.kafka.clients.admin.{Admin, AdminClientConfig}
 import org.apache.kafka.common.errors.{TimeoutException, TopicAuthorizationException}
@@ -280,6 +280,41 @@ final class AdminClientPoolSuite extends KuiIOSuite {
     } yield {
       assertEquals(created, 2)
       assertEquals(closed, 2)
+    }
+  }
+
+  test("evictionWaitsForAnInFlightCreationBeforeForgettingTheClient") {
+    for {
+      t <- tracker
+      creationStarted <- Deferred[IO, Unit]
+      allowCreation <- Deferred[IO, Unit]
+      evictionStarted <- Deferred[IO, Unit]
+      factory = (
+          (_, _, rendered) =>
+            Resource.make(
+              creationStarted.complete(()).void >> allowCreation.get >>
+                t.properties.update(_ :+ rendered.unsafeValues) >>
+                t.created.update(_ + 1) >> IO(fakeAdmin())
+            )(_ => t.closed.update(_ + 1))
+      ): AdminClientPool.Factory[IO]
+      _ <- AdminClientPool.resourceWith[IO](AdminMetrics.noop[IO], factory).use { pool =>
+        for {
+          first <- pool.run(plaintext, "describeCluster")(succeed).start
+          _ <- creationStarted.get
+          eviction <- (evictionStarted.complete(()).void >> pool.evict(id)).start
+          // Let eviction reach the cluster gate before the paused factory is allowed to finish.
+          _ <- evictionStarted.get >> IO.cede
+          _ <- allowCreation.complete(())
+          _ <- first.joinWithNever
+          _ <- eviction.joinWithNever
+          _ <- pool.run(plaintext, "describeCluster")(succeed)
+        } yield ()
+      }
+      created <- t.created.get
+      closed <- t.closed.get
+    } yield {
+      assertEquals(created, 2, "the client created before eviction completed was cached afterwards")
+      assertEquals(closed, 2, "not every created client was closed")
     }
   }
 

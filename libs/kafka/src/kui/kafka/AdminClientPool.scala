@@ -177,12 +177,14 @@ object AdminClientPool {
       entries.get.flatMap(_.get(id).fold(Async[F].unit)(entry => remove(id, entry.generation).void))
 
     def evict(id: ClusterId): F[Unit] =
-      for {
-        removed <- entries.modify(current => (current - id, current.get(id)))
-        _ <- removed.fold(Async[F].unit)(_.release)
-        _ <- gates.update(_ - id)
-        _ <- logged(_.debug(s"admin client for cluster ${id.value} evicted"))
-      } yield ()
+      gateFor(id)
+        .flatMap(
+          _.permit.use { _ =>
+            entries
+              .modify(current => (current - id, current.get(id)))
+              .flatMap(_.fold(Async[F].unit)(_.release))
+          }
+        ) >> logged(_.debug(s"admin client for cluster ${id.value} evicted"))
 
     /** Closes every client the pool still holds. Runs on `Resource` release, including on the cancellation
       * path, which is the only thing standing between a cancelled startup and a process that keeps a Kafka
@@ -212,6 +214,8 @@ object AdminClientPool {
       }
 
     private def gateFor(id: ClusterId): F[Semaphore[F]] =
+      // Keep one gate per id for the pool's lifetime. Removing it during eviction would let a call that
+      // already holds the old gate create in parallel with a later call holding a newly allocated gate.
       gates.get.map(_.get(id)).flatMap {
         case Some(gate) => gate.pure[F]
         case None =>
