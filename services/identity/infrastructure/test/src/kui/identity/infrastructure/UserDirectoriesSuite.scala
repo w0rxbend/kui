@@ -1,6 +1,7 @@
 package kui.identity.infrastructure
 
 import java.time.Instant
+import java.util.Locale
 
 import cats.effect.{IO, Ref}
 import fs2.Stream
@@ -61,6 +62,15 @@ final class UserDirectoriesSuite extends KuiIOSuite {
       assertEquals(padded.map(_.name.value), Some("Admin"))
       // The other half of the rule: matching loosely must not mean matching everything.
       assertEquals(absent, None)
+    }
+  }
+
+  test("case-insensitive account lookup does not depend on the host locale") {
+    IO(Locale.getDefault).bracket { _ =>
+      IO(Locale.setDefault(Locale.forLanguageTag("tr-TR"))) *>
+        IO.defer(ConfiguredUserDirectory.fromRecords[IO](List(account)).find("ADMIN"))
+    }(previous => IO(Locale.setDefault(previous))).map { found =>
+      assertEquals(found.map(_.name.value), Some("Admin"))
     }
   }
 

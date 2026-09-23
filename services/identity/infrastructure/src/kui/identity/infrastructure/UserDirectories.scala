@@ -1,5 +1,7 @@
 package kui.identity.infrastructure
 
+import java.util.Locale
+
 import cats.effect.kernel.Sync
 import cats.syntax.all.*
 import io.circe.{Json, JsonObject}
@@ -73,7 +75,7 @@ object ConfiguredUserDirectory {
         "passwords have somewhere to live"
     )
 
-  private[infrastructure] def key(username: String): String = username.trim.toLowerCase
+  private[infrastructure] def key(username: String): String = username.trim.toLowerCase(Locale.ROOT)
 }
 
 /** The configured accounts, with any password somebody has since changed laid over the top.
