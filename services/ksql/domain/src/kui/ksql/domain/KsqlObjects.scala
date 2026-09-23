@@ -1,5 +1,7 @@
 package kui.ksql.domain
 
+import java.util.Locale
+
 /** What kind of thing ksqlDB named.
   *
   * A closed enum where `ConnectorState` one service over is an open string, and the asymmetry is deliberate:
@@ -152,7 +154,7 @@ object KsqlObjects {
     * stable tie-break the server gives us.
     */
   val ordering: Ordering[KsqlObject] =
-    Ordering.by(item => (item.kind.ordinal, item.name.toLowerCase, item.name))
+    Ordering.by(item => (item.kind.ordinal, item.name.toLowerCase(Locale.ROOT), item.name))
 
   /** The answer, ordered and bounded. The only constructor callers use, so that neither rule can be skipped
     * by a caller that assembles the case class itself.

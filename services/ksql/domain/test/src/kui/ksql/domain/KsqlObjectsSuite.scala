@@ -1,5 +1,7 @@
 package kui.ksql.domain
 
+import java.util.Locale
+
 import munit.FunSuite
 
 /** What one ksqlDB cluster named, and the two rules the answer is built with.
@@ -47,6 +49,17 @@ final class KsqlObjectsSuite extends FunSuite {
     val mixed = List(stream("beta"), stream("Alpha"), stream("ALPHA2"))
 
     assertEquals(KsqlObjects.of(mixed, Nil).items.map(_.name), List("Alpha", "ALPHA2", "beta"))
+  }
+
+  test("name ordering does not depend on the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(
+        KsqlObjects.of(List(stream("zeta"), stream("Istanbul")), Nil).items.map(_.name),
+        List("Istanbul", "zeta")
+      )
+    } finally Locale.setDefault(previous)
   }
 
   test("an answer past the bound is cut and says how much it cut") {

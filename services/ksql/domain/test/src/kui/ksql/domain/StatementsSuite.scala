@@ -1,5 +1,7 @@
 package kui.ksql.domain
 
+import java.util.Locale
+
 import munit.FunSuite
 
 /** What a statement *is*, which is the decision the rest of this service is shaped around.
@@ -130,6 +132,14 @@ final class StatementsSuite extends FunSuite {
     assertEquals(parsed("DROP TABLE IF EXISTS users;").target, Some("USERS"))
     assertEquals(parsed("DROP STREAM `MixedCase` DELETE TOPIC;").target, Some("MixedCase"))
     assertEquals(parsed("SELECT * FROM ORDERS;").target, None)
+  }
+
+  test("an unquoted DROP target is normalized independently of the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(parsed("DROP STREAM id DELETE TOPIC;").target, Some("ID"))
+    } finally Locale.setDefault(previous)
   }
 
   test("only a DROP is destructive, however loudly something else says DELETE TOPIC") {

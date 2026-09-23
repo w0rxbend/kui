@@ -1,5 +1,7 @@
 package kui.ksql.domain
 
+import java.util.Locale
+
 /** What a statement *is*, which decides which endpoint may answer it.
   *
   * The three cases are not stylistic: they are three different promises about when the answer ends.
@@ -191,7 +193,7 @@ object KsqlStatement {
         // the object the server calls `ORDERS`; a statement that quoted the name is looked up as typed.
         case DropTarget(name) if name.startsWith("`") || name.startsWith("\"") =>
           Some(name.drop(1).dropRight(1))
-        case DropTarget(name) => Some(name.toUpperCase)
+        case DropTarget(name) => Some(name.toUpperCase(Locale.ROOT))
         case _ => None
       }
     )
