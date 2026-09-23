@@ -1,5 +1,7 @@
 package kui.security
 
+import java.util.Locale
+
 import kui.kernel.{RoleName, UserName}
 
 /** How KUI came to believe who the caller is. */
@@ -92,7 +94,7 @@ object RequestDigest {
     * stream before it has seen the end of it, and a digest it cannot compute is a digest it cannot sign.
     */
   def ofRequestLine(method: String, path: String): RequestDigest =
-    RequestDigest(method.toUpperCase, path, EmptyBodySha256)
+    RequestDigest(method.toUpperCase(Locale.ROOT), path, EmptyBodySha256)
 
   given CanEqual[RequestDigest, RequestDigest] = CanEqual.derived
 }

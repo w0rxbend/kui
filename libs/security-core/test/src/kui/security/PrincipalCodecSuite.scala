@@ -1,6 +1,7 @@
 package kui.security
 
 import java.time.Instant
+import java.util.Locale
 
 import cats.Id
 import munit.FunSuite
@@ -115,6 +116,14 @@ final class PrincipalCodecSuite extends FunSuite {
     assertEquals(digestOfGet.method, "GET")
     assertEquals(digestOfGet.bodySha256, RequestDigest.EmptyBodySha256)
     assertEquals(digestOfGet, RequestDigest.ofRequestLine("GET", "/topics"))
+  }
+
+  test("request-line normalisation does not depend on the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(RequestDigest.ofRequestLine("options", "/topics").method, "OPTIONS")
+    } finally Locale.setDefault(previous)
   }
 
   test("two different calls never share a digest") {
