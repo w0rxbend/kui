@@ -1,5 +1,7 @@
 package kui.schema.domain
 
+import java.util.Locale
+
 /** How strictly a subject's next version has to fit the versions before it.
   *
   * These seven values are the registry's, not KUI's, and the wire spellings are exactly what the registry
@@ -43,7 +45,7 @@ object CompatibilityLevel {
   val RegistryDefault: CompatibilityLevel = Backward
 
   def fromWire(raw: String): Option[CompatibilityLevel] =
-    values.find(_.wire == raw.trim.toUpperCase)
+    values.find(_.wire == raw.trim.toUpperCase(Locale.ROOT))
 
   given CanEqual[CompatibilityLevel, CompatibilityLevel] = CanEqual.derived
 }

@@ -1,5 +1,7 @@
 package kui.schema.domain
 
+import java.util.Locale
+
 import munit.FunSuite
 
 import kui.kernel.{PageRequest, PageSize, PositiveInt, SortOrder, Subject}
@@ -29,6 +31,16 @@ final class SubjectCatalogSuite extends FunSuite {
     val page = SubjectCatalog.page(all, SubjectQuery(Some("Orders"), SortOrder.Asc, request(1, 25)))
 
     assertEquals(page.items.map(_.value).toSet, Set("prod.orders-value", "ORDERS-key"))
+  }
+
+  test("subject search is independent of the default locale") {
+    val previousLocale = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      val page =
+        SubjectCatalog.page(subjects("invoice-value"), SubjectQuery(Some("I"), SortOrder.Asc, request(1, 25)))
+      assertEquals(page.items, subjects("invoice-value"))
+    } finally Locale.setDefault(previousLocale)
   }
 
   test("a blank search is no search at all") {
@@ -98,6 +110,14 @@ final class SchemaFormatSuite extends FunSuite {
     assertEquals(format.label, "THRIFT")
     assertEquals(format.isKnown, false)
   }
+
+  test("schema type normalization is independent of the default locale") {
+    val previousLocale = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(SchemaFormat.fromRegistry(Some("thrift")).label, "THRIFT")
+    } finally Locale.setDefault(previousLocale)
+  }
 }
 
 /** The seven levels' wire spellings are the registry's and must survive a rename of the case. */
@@ -116,5 +136,16 @@ final class CompatibilityLevelSuite extends FunSuite {
 
   test("an unknown level is not guessed at") {
     assertEquals(CompatibilityLevel.fromWire("BAKCWARD"), None)
+  }
+
+  test("compatibility parsing is independent of the default locale") {
+    val previousLocale = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(
+        CompatibilityLevel.fromWire("full_transitive"),
+        Some(CompatibilityLevel.FullTransitive)
+      )
+    } finally Locale.setDefault(previousLocale)
   }
 }

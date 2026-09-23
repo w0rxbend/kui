@@ -1,5 +1,7 @@
 package kui.schema.domain
 
+import java.util.Locale
+
 import kui.kernel.{SchemaId, Subject, ValidationError}
 
 /** Which schema language a registered schema is written in.
@@ -44,7 +46,7 @@ object SchemaFormat {
 
   /** The registry's `schemaType` field, whose absence means Avro. */
   def fromRegistry(raw: Option[String]): SchemaFormat =
-    raw.map(_.trim.toUpperCase) match {
+    raw.map(_.trim.toUpperCase(Locale.ROOT)) match {
       case None | Some("") | Some("AVRO") => Avro
       case Some("JSON") => Json
       case Some("PROTOBUF") => Protobuf

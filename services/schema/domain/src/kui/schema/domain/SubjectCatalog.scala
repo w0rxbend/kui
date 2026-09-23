@@ -1,5 +1,7 @@
 package kui.schema.domain
 
+import java.util.Locale
+
 import kui.kernel.{Page, PageRequest, SortOrder, Subject}
 
 /** What a subject list request asks for.
@@ -91,8 +93,8 @@ object SubjectCatalog {
     val matching = query.search.map(_.trim).filter(_.nonEmpty) match {
       case None => subjects
       case Some(needle) =>
-        val lowered = needle.toLowerCase
-        subjects.filter(_.value.toLowerCase.contains(lowered))
+        val lowered = needle.toLowerCase(Locale.ROOT)
+        subjects.filter(_.value.toLowerCase(Locale.ROOT).contains(lowered))
     }
 
     val sorted = query.order match {
