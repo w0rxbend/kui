@@ -1,10 +1,8 @@
 package kui.gateway.api
 
 import cats.effect.kernel.{Async, Clock}
-import cats.syntax.all.*
 import fs2.Stream
 import sttp.capabilities.fs2.Fs2Streams
-import sttp.model.StatusCode
 import sttp.tapir.model.ServerRequest
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.{extractFromRequest, statusCode, AnyEndpoint, Endpoint}
@@ -13,10 +11,9 @@ import kui.contracts.ErrorEnvelope
 import kui.gateway.api.routing.{ContractRouting, RbacPreCheck}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.Sse
-import kui.kernel.error.{InfrastructureError, KuiError}
-import kui.kernel.{ClusterId, CorrelationId}
+import kui.kernel.ClusterId
+import kui.kernel.error.InfrastructureError
 import kui.ksql.contract.KsqlStreamEndpoint
-import kui.security.Principal
 
 /** `GET /api/v1/clusters/{clusterId}/ksql/stream?statement=…`, relayed to the ksql service.
   *
@@ -25,7 +22,8 @@ import kui.security.Principal
   * states: `ContractRouting.derive` waits for a complete response value, decodes it and re-encodes it, so a
   * derived route over a push query would answer nothing until the query ended — and a push query ends only
   * when somebody goes away. `services/alerts` shipped complete and unreachable in wave 6 for want of this
-  * file's equivalent, so it is written in the same shape rather than in a better one.
+  * file's equivalent. Their shared security stage now lives in [[StreamAuthorization]]; each route keeps its
+  * own stream contract and relay because their inputs and upstream protocols remain distinct.
   *
   * Three things it does that the derivation would not:
   *
@@ -55,7 +53,9 @@ object KsqlStreamRoutes {
     List(
       publicEndpoint[F]
         .errorOut(statusCode)
-        .serverSecurityLogic[Authorized, F](request => authorize[F](request, rbac))
+        .serverSecurityLogic[StreamAuthorization.Authorized, F](request =>
+          StreamAuthorization.authorize[F](request, KsqlStreamEndpoint.endpoint[F], rbac)
+        )
         .serverLogicSuccess(authorized => input => Async[F].pure(relay[F](client, authorized, input)))
     )
 
@@ -82,27 +82,12 @@ object KsqlStreamRoutes {
   /** Every endpoint this relay serves, for the merged OpenAPI document. */
   def endpoints[F[_]]: List[AnyEndpoint] = List(publicEndpoint[F])
 
-  private def authorize[F[_]: Async](
-      request: ServerRequest,
-      rbac: RbacPreCheck[F]
-  ): F[Either[(ErrorEnvelope, StatusCode), Authorized]] =
-    ContractRouting.callerOf[F](request).flatMap {
-      case Left(error) => error.asLeft[Authorized].pure[F]
-      case Right((principal, correlationId, cluster, segments)) =>
-        rbac
-          .check(principal, KsqlStreamEndpoint.endpoint[F], cluster, segments)
-          .flatMap {
-            case Right(_) => Authorized(principal, correlationId).asRight.pure[F]
-            case Left(error) => failure[F](error, correlationId)
-          }
-    }
-
   /** The upstream rows are rendered with the same encoder the ksql service uses. `StreamProxy` forwards those
     * bytes unchanged and supplies an error event only if the upstream disappears without one.
     */
   private[api] def relay[F[_]: Async](
       client: ServiceClient[F],
-      authorized: Authorized,
+      authorized: StreamAuthorization.Authorized,
       input: (ClusterId, String)
   ): Stream[F, Byte] = {
     val (cluster, _) = input
@@ -120,15 +105,4 @@ object KsqlStreamRoutes {
       )
     }
   }
-
-  private def failure[F[_]: Async](
-      error: KuiError,
-      correlationId: CorrelationId
-  ): F[Either[(ErrorEnvelope, StatusCode), Authorized]] =
-    Clock[F].realTimeInstant.map { now =>
-      val envelope = ErrorEnvelope.of(error, correlationId, now)
-      Left((envelope, StatusCode(ErrorEnvelope.statusOf(error))))
-    }
-
-  final private[api] case class Authorized(principal: Principal, correlationId: CorrelationId)
 }

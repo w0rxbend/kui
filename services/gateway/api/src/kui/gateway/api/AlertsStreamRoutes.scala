@@ -1,10 +1,8 @@
 package kui.gateway.api
 
 import cats.effect.kernel.{Async, Clock}
-import cats.syntax.all.*
 import fs2.Stream
 import sttp.capabilities.fs2.Fs2Streams
-import sttp.model.StatusCode
 import sttp.tapir.model.ServerRequest
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.{extractFromRequest, statusCode, AnyEndpoint, Endpoint}
@@ -14,9 +12,8 @@ import kui.contracts.ErrorEnvelope
 import kui.gateway.api.routing.{ContractRouting, RbacPreCheck}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.Sse
-import kui.kernel.error.{InfrastructureError, KuiError}
-import kui.kernel.{ClusterId, CorrelationId}
-import kui.security.Principal
+import kui.kernel.ClusterId
+import kui.kernel.error.InfrastructureError
 
 /** `GET /api/v1/clusters/{clusterId}/alerts/stream`, relayed to the alerts service.
   *
@@ -38,7 +35,9 @@ object AlertsStreamRoutes {
     List(
       publicEndpoint[F]
         .errorOut(statusCode)
-        .serverSecurityLogic[Authorized, F](request => authorize[F](request, rbac))
+        .serverSecurityLogic[StreamAuthorization.Authorized, F](request =>
+          StreamAuthorization.authorize[F](request, AlertsStreamEndpoint.endpoint[F], rbac)
+        )
         .serverLogicSuccess(authorized => cluster => Async[F].pure(relay[F](client, authorized, cluster)))
     )
 
@@ -61,27 +60,12 @@ object AlertsStreamRoutes {
   /** Every endpoint this relay serves, for the merged OpenAPI document. */
   def endpoints[F[_]]: List[AnyEndpoint] = List(publicEndpoint[F])
 
-  private def authorize[F[_]: Async](
-      request: ServerRequest,
-      rbac: RbacPreCheck[F]
-  ): F[Either[(ErrorEnvelope, StatusCode), Authorized]] =
-    ContractRouting.callerOf[F](request).flatMap {
-      case Left(error) => error.asLeft[Authorized].pure[F]
-      case Right((principal, correlationId, cluster, segments)) =>
-        rbac
-          .check(principal, AlertsStreamEndpoint.endpoint[F], cluster, segments)
-          .flatMap {
-            case Right(_) => Authorized(principal, correlationId).asRight.pure[F]
-            case Left(error) => failure[F](error, correlationId)
-          }
-    }
-
   /** The upstream events are rendered with the same encoder the alerts service uses. `StreamProxy` forwards
     * those bytes unchanged and supplies an error event only if the upstream disappears without one.
     */
   private[api] def relay[F[_]: Async](
       client: ServiceClient[F],
-      authorized: Authorized,
+      authorized: StreamAuthorization.Authorized,
       cluster: ClusterId
   ): Stream[F, Byte] = {
     val context = CallContext(authorized.principal, authorized.correlationId, Some(cluster))
@@ -98,15 +82,4 @@ object AlertsStreamRoutes {
       )
     }
   }
-
-  private def failure[F[_]: Async](
-      error: KuiError,
-      correlationId: CorrelationId
-  ): F[Either[(ErrorEnvelope, StatusCode), Authorized]] =
-    Clock[F].realTimeInstant.map { now =>
-      val envelope = ErrorEnvelope.of(error, correlationId, now)
-      Left((envelope, StatusCode(ErrorEnvelope.statusOf(error))))
-    }
-
-  final private[api] case class Authorized(principal: Principal, correlationId: CorrelationId)
 }
