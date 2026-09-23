@@ -14,7 +14,8 @@
 # WHAT READS THIS FILE, AND WHAT THAT LEAVES UNREAD. Asked for by W12-02 and answered plainly rather
 # than reassuringly, because this file has now produced two green-over-nothing defects in two waves.
 #
-# TWO local gates read this file: `scripts/check-action-pins.sh` examines every `uses:` reference,
+# TWO local gates read this file: `scripts/check-action-pins.sh` examines every `uses:` reference
+# for immutable refs and rejects checkout steps that retain credentials,
 # while the case named `everyDocumentGateTheWorkflowRunsAsksIt...` in `build-tests`'
 # `BuildWiringSuite` reads `run:` lines, anchors on exactly TWO invocations (`docs.errorCodes`,
 # `frontend.apiConstants`) and requires each to pass `--check`. They are real gates and still cover
@@ -71,6 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build
       - name: Compile every module with -Werror
         run: ./mill __.compile
@@ -80,6 +83,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build
       # Two separate steps, because they fail for different reasons and the fix differs:
       # `checkFormat` means "run ./mill __.reformat", `fix --check` means "there is a lint rule
@@ -94,6 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build
       - name: Check the module layering rules (ADR-041)
         run: ./mill checkArchitecture
@@ -104,9 +111,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       # Actions execute with the workflow token, before application tests have a chance to object.
       # A release tag is useful documentation but not an integrity boundary, so the script rejects
-      # every remote action ref that is not a full commit SHA. Dependabot updates those SHAs.
+      # every remote action ref that is not a full commit SHA. It also prevents checkout from leaving
+      # the workflow token available to later build commands. Dependabot updates action SHAs.
       - name: Check immutable action references
         run: ./scripts/check-action-pins.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -138,6 +148,8 @@ jobs:
     # the script prints the figure that would make each disagreeing sentence true.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build
       - name: Check the committed OpenAPI documents
         run: ./mill __.openApiCheck
@@ -157,6 +169,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build
 
       # This step used to be three commands, and the first of them was
@@ -197,6 +211,8 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       # BEFORE ANYTHING IS INSTALLED, because this one needs neither Node nor pnpm and it is the
       # cheapest failure in the workflow.
       #
@@ -438,6 +454,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22.13.0"
@@ -526,6 +544,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build
 
       # Every image the stack names, derived from the file that names them rather than listed here.
