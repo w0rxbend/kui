@@ -1,5 +1,7 @@
 package kui.security.rbac
 
+import java.util.Locale
+
 import munit.ScalaCheckSuite
 import org.scalacheck.Prop.forAll
 import org.scalacheck.{Gen, Prop}
@@ -24,6 +26,17 @@ final class RbacLawsSuite extends ScalaCheckSuite {
 
   private def user(roles: RoleName*): Principal =
     Principal(UserName.unsafe("tester"), roles.toSet, PrincipalKind.Session)
+
+  test("RBAC vocabulary parsing does not depend on the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(Resource.fromWire("audit"), Some(Resource.Audit))
+      assertEquals(Action.fromWire(Resource.Topic, "view"), Some(Action.TopicView))
+      assertEquals(Provider.fromWire("oauth_github"), Some(Provider.OauthGithub))
+      assertEquals(SubjectKind.fromWire("ORGANIZATION"), Some(SubjectKind.Organization))
+    } finally Locale.setDefault(previous)
+  }
 
   // -- Law 1: the implies closure is idempotent -----------------------------------------------------
 

@@ -1,5 +1,7 @@
 package kui.security.rbac
 
+import java.util.Locale
+
 import kui.kernel.{ClusterId, RoleName}
 
 /** Where a role's subjects came from, so that "the group `platform`" from GitHub and "the group `platform`"
@@ -25,7 +27,7 @@ enum Provider(val wire: String) {
 }
 
 object Provider {
-  def fromWire(raw: String): Option[Provider] = values.find(_.wire == raw.trim.toUpperCase)
+  def fromWire(raw: String): Option[Provider] = values.find(_.wire == raw.trim.toUpperCase(Locale.ROOT))
   given CanEqual[Provider, Provider] = CanEqual.derived
 }
 
@@ -46,7 +48,7 @@ enum SubjectKind(val wire: String) {
 }
 
 object SubjectKind {
-  def fromWire(raw: String): Option[SubjectKind] = values.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[SubjectKind] = values.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
   given CanEqual[SubjectKind, SubjectKind] = CanEqual.derived
 }
 

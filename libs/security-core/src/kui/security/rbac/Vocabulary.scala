@@ -1,5 +1,7 @@
 package kui.security.rbac
 
+import java.util.Locale
+
 import scala.annotation.nowarn
 import scala.util.matching.Regex
 
@@ -89,7 +91,7 @@ object Resource {
 
   /** Parses the configuration spelling, case-insensitively as Kafbat does. */
   def fromWire(raw: String): Option[Resource] = {
-    val normalised = raw.trim.toUpperCase
+    val normalised = raw.trim.toUpperCase(Locale.ROOT)
     values.find(_.wire == normalised)
   }
 
@@ -296,7 +298,7 @@ object Action {
     * one.
     */
   def fromWire(resource: Resource, raw: String): Option[Action] = {
-    val normalised = raw.trim.toUpperCase
+    val normalised = raw.trim.toUpperCase(Locale.ROOT)
     val aliased =
       if resource == Resource.Connect && normalised == ConnectRestartAlias then ConnectOperate.wire
       else normalised
