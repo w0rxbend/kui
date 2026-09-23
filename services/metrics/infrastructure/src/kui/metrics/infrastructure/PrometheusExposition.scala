@@ -1,6 +1,7 @@
 package kui.metrics.infrastructure
 
 import java.time.Instant
+import java.util.Locale
 
 import scala.util.matching.Regex
 
@@ -220,15 +221,16 @@ object PrometheusExposition {
       .sortBy(_.topic)
 
   private def isThroughputRate(sample: PrometheusSample, family: String): Boolean =
-    sample.name.toLowerCase.endsWith(RateSuffix) && isAttribute(sample, BrokerTopicMetrics, family)
+    sample.name.toLowerCase(Locale.ROOT).endsWith(RateSuffix) &&
+      isAttribute(sample, BrokerTopicMetrics, family)
 
   private def percentileOf(samples: List[PrometheusSample], request: String): Option[Double] =
     samples
       .find { sample =>
-        sample.name.toLowerCase.endsWith(P99Suffix) &&
+        sample.name.toLowerCase(Locale.ROOT).endsWith(P99Suffix) &&
         isAttribute(sample, RequestMetrics, TotalTimeMs) &&
         dimensionsOf(sample) == Set(RequestLabel) &&
-        labelOf(sample, RequestLabel).map(_.toLowerCase).contains(request)
+        labelOf(sample, RequestLabel).map(_.toLowerCase(Locale.ROOT)).contains(request)
       }
       .map(_.value)
 
@@ -240,7 +242,7 @@ object PrometheusExposition {
   ): Option[Double] =
     samples
       .find { sample =>
-        (!rated || sample.name.toLowerCase.endsWith(RateSuffix)) &&
+        (!rated || sample.name.toLowerCase(Locale.ROOT).endsWith(RateSuffix)) &&
         isAttribute(sample, mbeanType, attribute) &&
         dimensionsOf(sample).isEmpty
       }
@@ -271,10 +273,11 @@ object PrometheusExposition {
     * `brokerrequesthandleravgidlepercent` cannot be read as `requesthandleravgidlepercent`.
     */
   private def isAttribute(sample: PrometheusSample, mbeanType: String, attribute: String): Boolean = {
-    val name = sample.name.toLowerCase
+    val name = sample.name.toLowerCase(Locale.ROOT)
 
     name.contains(mbeanType) &&
-    (name.contains(s"_$attribute") || labelOf(sample, AttributeLabel).map(_.toLowerCase).contains(attribute))
+    (name.contains(s"_$attribute") ||
+      labelOf(sample, AttributeLabel).map(_.toLowerCase(Locale.ROOT)).contains(attribute))
   }
 
   /** One label's value, whatever case the exporter spelled the key in.
@@ -294,7 +297,7 @@ object PrometheusExposition {
     * to one topic, one request kind or one delayed operation.
     */
   private def dimensionsOf(sample: PrometheusSample): Set[String] =
-    sample.labels.keySet.map(_.toLowerCase) - AttributeLabel
+    sample.labels.keySet.map(_.toLowerCase(Locale.ROOT)) - AttributeLabel
 
   private def sampleOf(line: String): Option[PrometheusSample] =
     line match {

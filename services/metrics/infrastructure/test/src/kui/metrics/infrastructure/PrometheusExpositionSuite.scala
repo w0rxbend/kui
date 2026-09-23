@@ -1,6 +1,7 @@
 package kui.metrics.infrastructure
 
 import java.time.Instant
+import java.util.Locale
 
 import scala.io.Source
 import scala.util.Using
@@ -415,6 +416,17 @@ final class PrometheusExpositionSuite extends FunSuite {
       PrometheusExposition.brokerSampleAt(at, mbeanNames),
       PrometheusExposition.brokerSampleAt(at, lowercased)
     )
+  }
+
+  test("mixed-case Prometheus names are matched independently of the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(
+        PrometheusExposition.brokerSampleAt(at, mbeanNames),
+        PrometheusExposition.brokerSampleAt(at, lowercased)
+      )
+    } finally Locale.setDefault(previous)
   }
 
   test("families it does not know are ignored rather than failing the body") {

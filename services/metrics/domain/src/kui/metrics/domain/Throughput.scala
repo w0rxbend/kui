@@ -1,6 +1,7 @@
 package kui.metrics.domain
 
 import java.time.Instant
+import java.util.Locale
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
@@ -41,7 +42,7 @@ object ThroughputRange {
     * the one failure a chart cannot show its reader.
     */
   def fromWire(raw: String): Option[ThroughputRange] = {
-    val normalised = raw.trim.toLowerCase
+    val normalised = raw.trim.toLowerCase(Locale.ROOT)
     All.find(_.wire == normalised)
   }
 

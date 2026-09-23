@@ -1,6 +1,7 @@
 package kui.metrics.contract.dto
 
 import java.time.Instant
+import java.util.Locale
 
 import io.circe.syntax.*
 import io.circe.{Codec, Decoder, Encoder, HCursor, Json}
@@ -38,7 +39,7 @@ object ThroughputRangeDto {
   val Wires: List[String] = All.map(_.wire)
 
   def fromWire(raw: String): Option[ThroughputRangeDto] = {
-    val normalised = raw.trim.toLowerCase
+    val normalised = raw.trim.toLowerCase(Locale.ROOT)
     All.find(_.wire == normalised)
   }
 
