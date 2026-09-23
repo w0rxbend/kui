@@ -37,6 +37,33 @@ export interface ProgressBarProps {
   readonly trailing?: JSX.Element | undefined;
 }
 
+/**
+ * ARIA's number grammar accepts decimal notation but not JavaScript's scientific notation. Live
+ * rates can be small enough for `String(number)` to choose an exponent, so expand that notation
+ * before Solid writes the attribute. Keeping the original significant digits also keeps the
+ * machine-readable value aligned with the visible scale instead of rounding a small non-zero rate
+ * down to zero.
+ */
+function ariaDecimal(value: number): string {
+  const source = String(value);
+  const exponentMarker = source.search(/[eE]/);
+  if (exponentMarker < 0) return source;
+
+  const coefficient = source.slice(0, exponentMarker);
+  const exponent = Number(source.slice(exponentMarker + 1));
+  const sign = coefficient.startsWith("-") ? "-" : "";
+  const unsigned = sign ? coefficient.slice(1) : coefficient;
+  const point = unsigned.indexOf(".");
+  const digits = unsigned.replace(".", "");
+  const decimalPosition = (point < 0 ? unsigned.length : point) + exponent;
+
+  if (decimalPosition <= 0) return `${sign}0.${"0".repeat(-decimalPosition)}${digits}`;
+  if (decimalPosition >= digits.length) {
+    return `${sign}${digits}${"0".repeat(decimalPosition - digits.length)}`;
+  }
+  return `${sign}${digits.slice(0, decimalPosition)}.${digits.slice(decimalPosition)}`;
+}
+
 export const ProgressBar: Component<ProgressBarProps> = props => {
   const max = (): number => props.max ?? 100;
   const known = (): boolean => props.value !== undefined && Number.isFinite(props.value);
@@ -62,8 +89,8 @@ export const ProgressBar: Component<ProgressBarProps> = props => {
         role="progressbar"
         aria-label={props.label}
         aria-valuemin={0}
-        aria-valuemax={max()}
-        aria-valuenow={known() ? props.value : undefined}
+        aria-valuemax={ariaDecimal(max())}
+        aria-valuenow={known() ? ariaDecimal(props.value ?? 0) : undefined}
         aria-valuetext={text()}
       >
         <Show when={known()}>

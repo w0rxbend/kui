@@ -446,6 +446,15 @@ test.describe("the Traffic tab", () => {
         // As many bars as rows that carried a rate, and no bar for a row that did not.
         const rated = topics.filter((entry) => typeof entry.bytesInPerSecond === "number").length;
         await expect(card.locator(".kui-progress__fill")).toHaveCount(rated);
+
+        /* ARIA's number grammar does not accept JavaScript exponent notation. Producer rates can
+           be tiny between exporter samples, so assert the deployed component writes a decimal
+           value rather than `1.4e-9`, which axe rejects and assistive technology cannot parse. */
+        const ariaValues = await card
+          .locator("[role='progressbar'][aria-valuenow]")
+          .evaluateAll((bars) => bars.map((bar) => bar.getAttribute("aria-valuenow")));
+        expect(ariaValues).toHaveLength(rated);
+        for (const value of ariaValues) expect(value).toMatch(/^-?\d+(?:\.\d+)?$/);
       }
 
       /* Kafka's own topics are not ranked, and the card says how many were left out rather than

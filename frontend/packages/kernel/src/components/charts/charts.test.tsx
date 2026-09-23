@@ -212,6 +212,22 @@ describe("ProgressBar", () => {
     dispose();
   });
 
+  it("exposes sub-micro rates as valid ARIA numbers", async () => {
+    const { container, dispose } = mount(() => (
+      <ProgressBar
+        label="orders.v1 write rate"
+        value={1.4502999465431473e-9}
+        max={0.6747649353732096}
+        valueText="<0.1 B/s"
+      />
+    ));
+    const bar = container.querySelector("[role='progressbar']")!;
+
+    expect(bar.getAttribute("aria-valuenow")).toBe("0.0000000014502999465431473");
+    await expectNoViolations(container);
+    dispose();
+  });
+
   it("draws an unknown value differently from a zero, in the picture and in the text", () => {
     const zero = mount(() => <ProgressBar label="zero" value={0} />);
     const unknown = mount(() => <ProgressBar label="unknown" value={undefined} />);
