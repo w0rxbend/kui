@@ -1,5 +1,7 @@
 package kui.identity.domain
 
+import java.util.Locale
+
 import kui.kernel.Secret
 import kui.testkit.KuiSuite
 
@@ -30,6 +32,15 @@ final class PasswordHashSuite extends KuiSuite {
     assertEquals(PasswordAlgorithm.Current, PasswordAlgorithm.Pbkdf2HmacSha256)
     assertEquals(PasswordAlgorithm.fromWire("pbkdf2-sha256"), Some(PasswordAlgorithm.Pbkdf2HmacSha256))
     assertEquals(PasswordAlgorithm.fromWire("bcrypt"), None)
+  }
+
+  test("identity wire vocabulary is decoded independently of the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(AuthMode.fromWire("OIDC"), Some(AuthMode.Oidc))
+      assertEquals(PasswordAlgorithm.fromWire("PBKDF2-SHA256"), Some(PasswordAlgorithm.Pbkdf2HmacSha256))
+    } finally Locale.setDefault(previous)
   }
 
   test("a truncated hash is refused, and the failure does not echo the value") {

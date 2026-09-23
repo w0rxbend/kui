@@ -1,5 +1,7 @@
 package kui.identity.domain
 
+import java.util.Locale
+
 /** How this deployment expects people to prove who they are.
   *
   * It mirrors `kui.auth.type` and is deliberately not the same type: `kui.config.AuthType` is what a
@@ -24,7 +26,7 @@ enum AuthMode(val wire: String) {
 
 object AuthMode {
 
-  def fromWire(raw: String): Option[AuthMode] = values.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[AuthMode] = values.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[AuthMode, AuthMode] = CanEqual.derived
 }

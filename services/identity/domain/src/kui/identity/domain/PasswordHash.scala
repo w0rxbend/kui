@@ -1,5 +1,7 @@
 package kui.identity.domain
 
+import java.util.Locale
+
 import kui.kernel.{Secret, ValidationError}
 
 /** A stored password, in the only form a password should ever be stored in.
@@ -115,7 +117,8 @@ object PasswordAlgorithm {
   /** What a new hash is written with today. */
   val Current: PasswordAlgorithm = Pbkdf2HmacSha256
 
-  def fromWire(raw: String): Option[PasswordAlgorithm] = values.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[PasswordAlgorithm] =
+    values.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[PasswordAlgorithm, PasswordAlgorithm] = CanEqual.derived
 }
