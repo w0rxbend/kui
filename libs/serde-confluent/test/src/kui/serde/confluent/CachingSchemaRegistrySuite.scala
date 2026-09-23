@@ -3,13 +3,14 @@ package kui.serde.confluent
 import scala.concurrent.duration.*
 
 import cats.data.NonEmptyList
+import cats.effect.testkit.TestControl
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 
 import kui.cache.CacheMetrics
 import kui.config.SafeUrl
 import kui.kernel.ClusterId
-import kui.kernel.error.KuiError
+import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.testkit.KuiIOSuite
 
 /** The asymmetry between the two caches, which is the whole design of this class.
@@ -115,6 +116,100 @@ final class CachingSchemaRegistrySuite extends KuiIOSuite {
         } yield assertEquals(made, 1, clue = "a schema id was asked about twice")
       }
     } yield ()
+  }
+
+  test("concurrent cache misses for one schema make one registry call") {
+    val readers = 20
+
+    val program = for {
+      calls <- Ref.of[IO, Int](0)
+      underlying = new SchemaRegistry[IO] {
+        def schemaById(id: Int): IO[Either[KuiError, RegistrySchema]] =
+          calls.update(_ + 1) >> IO.sleep(1.second).as(Right(schema))
+
+        def latestForSubject(subject: String): IO[Either[KuiError, Option[RegistrySchema]]] =
+          IO.pure(Right(None))
+      }
+      made <- CachingSchemaRegistry
+        .resource[IO](underlying, config, cluster, CacheMetrics.noop[IO])
+        .use(registry => List.fill(readers)(registry.schemaById(schema.id)).parSequence >> calls.get)
+    } yield made
+
+    TestControl.executeEmbed(program).map { made =>
+      assertEquals(
+        made,
+        1,
+        clue = s"$readers records carrying one schema id caused $made registry calls"
+      )
+    }
+  }
+
+  test("concurrent failed misses share one call but the failure is not cached") {
+    val readers = 20
+    val failure = InfrastructureError.Unreachable("schema-registry", "connection refused")
+
+    val program = for {
+      calls <- Ref.of[IO, Int](0)
+      underlying = new SchemaRegistry[IO] {
+        def schemaById(id: Int): IO[Either[KuiError, RegistrySchema]] =
+          calls.update(_ + 1) >> IO.sleep(1.second).as(Left(failure))
+
+        def latestForSubject(subject: String): IO[Either[KuiError, Option[RegistrySchema]]] =
+          IO.pure(Right(None))
+      }
+      result <- CachingSchemaRegistry
+        .resource[IO](underlying, config, cluster, CacheMetrics.noop[IO])
+        .use { registry =>
+          for {
+            answers <- List.fill(readers)(registry.schemaById(schema.id)).parSequence
+            firstBatch <- calls.get
+            retried <- registry.schemaById(schema.id)
+            afterRetry <- calls.get
+          } yield (answers, firstBatch, retried, afterRetry)
+        }
+    } yield result
+
+    TestControl.executeEmbed(program).map { (answers, firstBatch, retried, afterRetry) =>
+      assertEquals(answers.distinct, List(Left(failure)))
+      assertEquals(firstBatch, 1, s"$readers concurrent failures made $firstBatch registry calls")
+      assertEquals(retried, Left(failure))
+      assertEquals(afterRetry, 2, "a failed lookup was cached instead of retried")
+    }
+  }
+
+  test("different schema ids are not serialized behind one cache miss") {
+    val readers = 20
+
+    val program = for {
+      calls <- Ref.of[IO, Int](0)
+      underlying = new SchemaRegistry[IO] {
+        def schemaById(id: Int): IO[Either[KuiError, RegistrySchema]] =
+          calls.update(_ + 1) >> IO.sleep(1.second).as(Right(schema.copy(id = id)))
+
+        def latestForSubject(subject: String): IO[Either[KuiError, Option[RegistrySchema]]] =
+          IO.pure(Right(None))
+      }
+      result <- CachingSchemaRegistry
+        .resource[IO](underlying, config, cluster, CacheMetrics.noop[IO])
+        .use { registry =>
+          for {
+            started <- IO.monotonic
+            answers <- (1 to readers).toList.parTraverse(registry.schemaById)
+            finished <- IO.monotonic
+            made <- calls.get
+          } yield (answers, made, finished - started)
+        }
+    } yield result
+
+    TestControl.executeEmbed(program).map { (answers, made, elapsed) =>
+      assertEquals(answers, (1 to readers).toList.map(id => Right(schema.copy(id = id))))
+      assertEquals(made, readers)
+      assertEquals(
+        elapsed,
+        1.second,
+        clue = s"$readers independent schema ids were serialized and took $elapsed"
+      )
+    }
   }
 
   test("each cache is counted under its own name, so a hit rate belongs to the cache it came from") {

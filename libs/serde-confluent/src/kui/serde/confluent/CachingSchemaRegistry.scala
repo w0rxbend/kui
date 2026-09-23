@@ -1,5 +1,7 @@
 package kui.serde.confluent
 
+import scala.util.control.NoStackTrace
+
 import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 
@@ -26,6 +28,10 @@ import kui.kernel.error.KuiError
   * one second stay "down" for the life of the cache.
   */
 object CachingSchemaRegistry {
+
+  final private class LookupFailure(val error: KuiError)
+      extends RuntimeException("schema registry lookup failed")
+      with NoStackTrace
 
   /** The `cache` metric attribute for the by-id cache: one short stable string per *kind* of cache, never a
     * per-cluster value (`BoundedCache`'s own rule — the cluster is its own attribute).
@@ -72,25 +78,20 @@ object CachingSchemaRegistry {
     def latestForSubject(subject: String): F[Either[KuiError, Option[RegistrySchema]]] =
       cached(subjects, subject)(underlying.latestForSubject(subject))
 
-    /** Read through, store only success.
+    /** Read through once under concurrency, storing only success.
       *
-      * `getOrLoad` is not used, and the reason is worth stating: it caches whatever the load returns, and
-      * what this load returns is an `Either` whose `Left` is a failure. Storing that would turn one refused
-      * connection into a cache entry that keeps answering "the registry is down" after the registry has come
-      * back. The cost of doing it this way is that a burst of concurrent misses can produce more than one
-      * upstream call for the same key; that is bounded by the upstream's own bulkhead and is the cheaper of
-      * the two mistakes.
+      * The in-flight map is not a second cache: an entry exists only while its lookup is running and is
+      * removed on success, failure and cancellation. Current waiters share either answer, while a later
+      * caller retries a failure because only successful values reach `BoundedCache`.
       */
     private def cached[K <: AnyRef, V <: AnyRef](cache: BoundedCache[F, K, V], key: K)(
         load: F[Either[KuiError, V]]
     ): F[Either[KuiError, V]] =
-      cache.get(key).flatMap {
-        case Some(hit) => hit.asRight[KuiError].pure[F]
-        case None =>
-          load.flatTap {
-            case Right(value) => cache.put(key, value)
-            case Left(_) => Async[F].unit
-          }
-      }
+      cache
+        .getOrLoad(key)(
+          load.flatMap(_.fold(error => Async[F].raiseError[V](new LookupFailure(error)), _.pure[F]))
+        )
+        .map(_.asRight[KuiError])
+        .recover { case failure: LookupFailure => Left(failure.error) }
   }
 }

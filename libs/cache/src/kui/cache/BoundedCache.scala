@@ -5,8 +5,8 @@ import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.duration.FiniteDuration
 
-import cats.effect.std.Mutex
-import cats.effect.{Async, Clock, Resource, Sync}
+import cats.effect.syntax.all.*
+import cats.effect.{Async, Clock, Deferred, Ref, Resource, Sync}
 import cats.syntax.all.*
 import com.github.benmanes.caffeine.cache.{Cache as CaffeineCache, Caffeine, Ticker}
 
@@ -94,13 +94,10 @@ object BoundedCache {
   ): Resource[F, BoundedCache[F, K, V]] =
     Resource.make(
       for {
-        // One mutex, not one per key. `getOrLoad` is the only thing it guards, the guarded region is a map
-        // lookup plus at most one `load`, and the alternative — a map of per-key locks — is a second cache
-        // with the same eviction problem this one has, guarding the first.
-        lock <- Mutex[F]
         clock <- Clock[F].monotonic.flatMap(d => Sync[F].delay(new AtomicLong(d.toNanos)))
         underlying <- Sync[F].delay(build[K, V](maxSize, ttl, clock))
-      } yield new Impl[F, K, V](name, cluster, underlying, lock, clock, metrics): BoundedCache[F, K, V]
+        inFlight <- Ref.of[F, Map[K, Deferred[F, Option[Either[Throwable, V]]]]](Map.empty)
+      } yield new Impl[F, K, V](name, cluster, underlying, inFlight, clock, metrics): BoundedCache[F, K, V]
     )(cache => cache.invalidateAll)
 
   /** Caffeine reads `System.nanoTime` unless it is given a ticker, and `System.nanoTime` is not the clock the
@@ -126,7 +123,7 @@ object BoundedCache {
       name: String,
       cluster: ClusterId,
       underlying: CaffeineCache[K, V],
-      lock: Mutex[F],
+      inFlight: Ref[F, Map[K, Deferred[F, Option[Either[Throwable, V]]]]],
       clock: AtomicLong,
       metrics: CacheMetrics[F]
   ) extends BoundedCache[F, K, V] {
@@ -147,18 +144,56 @@ object BoundedCache {
     def getOrLoad(key: K)(load: => F[V]): F[V] =
       peek(key).flatMap {
         case Some(value) => metrics.hit(name, cluster).as(value)
-        case None =>
-          // Re-checked inside the lock. Between the read above and taking the lock another fiber may
-          // have loaded the same key, and loading it twice is precisely what this method promises not
-          // to do.
-          lock.lock.surround {
-            peek(key).flatMap {
-              case Some(value) => metrics.hit(name, cluster).as(value)
-              case None =>
-                metrics.miss(name, cluster) >>
-                  load.flatMap(value => put(key, value).as(value))
+        case None => joinOrLoad(key)(load)
+      }
+
+    /** Coordinate only callers for this key. A global lock would also prevent duplicate loads, but at the
+      * cost of serializing unrelated misses behind the slowest upstream request.
+      *
+      * `None` is a cancelled leader: waiters retry rather than hang. A completed failure is shared with the
+      * callers that were already waiting, then removed so the next caller can recover immediately.
+      */
+    private def joinOrLoad(key: K)(load: => F[V]): F[V] =
+      Async[F].uncancelable { poll =>
+        Deferred[F, Option[Either[Throwable, V]]].flatMap { candidate =>
+          inFlight
+            .modify { current =>
+              current.get(key) match {
+                case Some(running) => (current, Left(running))
+                case None => (current.updated(key, candidate), Right(()))
+              }
             }
-          }
+            .flatMap {
+              case Left(running) =>
+                poll(running.get).flatMap {
+                  case Some(Right(value)) => metrics.hit(name, cluster).as(value)
+                  case Some(Left(failure)) =>
+                    metrics.miss(name, cluster) >> Async[F].raiseError(failure)
+                  case None => poll(getOrLoad(key)(load))
+                }
+
+              case Right(()) =>
+                def complete(result: Option[Either[Throwable, V]]): F[Unit] =
+                  candidate.complete(result).void >> inFlight.update(_ - key)
+
+                // Close the race between the fast-path miss and registering this flight: an earlier leader
+                // may have populated the cache before this caller won the empty slot.
+                val readThrough =
+                  peek(key).flatMap {
+                    case Some(value) => metrics.hit(name, cluster).as(value)
+                    case None =>
+                      metrics.miss(name, cluster) >> load.flatMap(value => put(key, value).as(value))
+                  }
+
+                poll(readThrough.attempt)
+                  .onCancel(complete(None))
+                  .flatMap {
+                    case Right(value) => complete(Some(Right(value))).as(value)
+                    case Left(failure) =>
+                      complete(Some(Left(failure))) >> Async[F].raiseError(failure)
+                  }
+            }
+        }
       }
 
     def put(key: K, value: V): F[Unit] = tick >> Sync[F].delay(underlying.put(key, value))

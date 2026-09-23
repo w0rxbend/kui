@@ -3,7 +3,7 @@ package kui.cache
 import scala.concurrent.duration.*
 
 import cats.effect.testkit.TestControl
-import cats.effect.{IO, Ref, Resource}
+import cats.effect.{Deferred, IO, Ref, Resource}
 import cats.syntax.all.*
 
 import kui.kernel.ClusterId
@@ -85,6 +85,75 @@ final class BoundedCacheSuite extends KuiIOSuite {
         // upstream is already the slow thing.
         _ <- loads.get.assertEquals(1)
       } yield ()
+    }
+  }
+
+  test("getOrLoad runs misses for different keys concurrently") {
+    val readers = 20
+
+    TestControl.executeEmbed {
+      cacheOf(readers, None).use { (cache, _) =>
+        for {
+          started <- IO.monotonic
+          results <- (1 to readers).toList.parTraverse { index =>
+            val key = s"k-$index"
+            cache.getOrLoad(key)(IO.sleep(1.second).as(key))
+          }
+          finished <- IO.monotonic
+        } yield {
+          assertEquals(results, (1 to readers).toList.map(index => s"k-$index"))
+          assertEquals(
+            finished - started,
+            1.second,
+            clue = s"$readers independent cache misses were serialized"
+          )
+        }
+      }
+    }
+  }
+
+  test("concurrent callers share a failing load but a later caller retries") {
+    val readers = 20
+    val failure = new RuntimeException("upstream down")
+
+    TestControl.executeEmbed {
+      cacheOf(10, None).use { (cache, _) =>
+        for {
+          attempts <- Ref.of[IO, Int](0)
+          load = attempts.update(_ + 1) >> IO.sleep(1.second) >> IO.raiseError[String](failure)
+          answers <- List.fill(readers)(cache.getOrLoad("k")(load).attempt).parSequence
+          firstBatch <- attempts.get
+          retried <- cache.getOrLoad("k")(load).attempt
+          afterRetry <- attempts.get
+        } yield {
+          assertEquals(answers.distinct, List(Left(failure)))
+          assertEquals(firstBatch, 1, s"$readers concurrent callers made $firstBatch failing loads")
+          assertEquals(retried, Left(failure))
+          assertEquals(afterRetry, 2, "a failed load was cached instead of retried")
+        }
+      }
+    }
+  }
+
+  test("cancelling a load releases callers waiting for the same key") {
+    cacheOf(10, None).use { (cache, _) =>
+      for {
+        attempts <- Ref.of[IO, Int](0)
+        started <- Deferred[IO, Unit]
+        load = attempts.getAndUpdate(_ + 1).flatMap {
+          case 0 => started.complete(()).void >> IO.never[String]
+          case _ => IO.pure("recovered")
+        }
+        leader <- cache.getOrLoad("k")(load).start
+        _ <- started.get
+        waiting <- cache.getOrLoad("k")(load).start
+        _ <- IO.cede >> leader.cancel
+        result <- waiting.joinWithNever
+        made <- attempts.get
+      } yield {
+        assertEquals(result, "recovered")
+        assertEquals(made, 2)
+      }
     }
   }
 
