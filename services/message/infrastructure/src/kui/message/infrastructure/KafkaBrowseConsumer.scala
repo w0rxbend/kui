@@ -12,6 +12,7 @@ import fs2.io.file.Files
 import org.apache.kafka.clients.consumer.{ConsumerRecord, KafkaConsumer}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
+import org.apache.kafka.common.utils.Utils
 import org.typelevel.log4cats.StructuredLogger
 
 import kui.kafka.{ConsumerFactory, KafkaErrorMapper}
@@ -246,7 +247,7 @@ object KafkaBrowseConsumer {
       headers = headers,
       keySize = math.max(0, record.serializedKeySize),
       valueSize = math.max(0, record.serializedValueSize),
-      headersSize = headers.map(header => header.key.length + header.value.fold(0)(_.length)).sum
+      headersSize = headers.map(header => Utils.utf8Length(header.key) + header.value.fold(0)(_.length)).sum
     )
   }
 
