@@ -83,7 +83,7 @@ export function NavDrawer(props: NavDrawerProps) {
   const groups = () => props.groups.filter((group) => group.destinations.length > 0);
 
   return (
-    <div class="kui-nav-drawer" data-testid="nav-drawer">
+    <aside class="kui-nav-drawer" aria-label="Cluster navigation" data-testid="nav-drawer">
       <BrandBlock cluster={props.cluster} manageHref={props.manageHref} />
 
       <nav class="kui-nav-drawer__nav" aria-label="Main">
@@ -134,6 +134,6 @@ export function NavDrawer(props: NavDrawerProps) {
       >
         <StorageMeter brokers={props.storage ?? []} />
       </Show>
-    </div>
+    </aside>
   );
 }

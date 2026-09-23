@@ -314,6 +314,16 @@ describe("StorageMeter", () => {
 });
 
 describe("NavDrawer", () => {
+  it("contains the whole cluster drawer in a named complementary landmark", () => {
+    const { container, dispose } = mount(() => (
+      <NavDrawer groups={NAV_GROUPS} cluster={HEALTHY_CLUSTER} />
+    ));
+    const drawer = container.querySelector("[data-testid='nav-drawer']");
+    expect(drawer?.tagName).toBe("ASIDE");
+    expect(drawer?.getAttribute("aria-label")).toBe("Cluster navigation");
+    dispose();
+  });
+
   it("labels each group's list with its own heading", () => {
     const { container, dispose } = mount(() => <NavDrawer groups={NAV_GROUPS} cluster={HEALTHY_CLUSTER} />);
     const lists = container.querySelectorAll(".kui-nav-group__list");
@@ -908,7 +918,7 @@ describe("Breadcrumb", () => {
 
   it("keeps its landmark when the trail is empty, so the page's structure does not change", () => {
     const { container, dispose } = mount(() => <Breadcrumb trail={[]} />);
-    expect(container.querySelector('nav[aria-label="Breadcrumb"]')).not.toBeNull();
+    expect(container.querySelector('nav[aria-label="Application breadcrumb"]')).not.toBeNull();
     dispose();
   });
 
@@ -1319,6 +1329,16 @@ describe("the appearance popover", () => {
 });
 
 describe("EnvRail", () => {
+  it("contains its destinations and account in a named navigation landmark", () => {
+    const { container, dispose } = mount(() => (
+      <EnvRail environments={CLUSTERS} currentId="prod-kyiv-01" />
+    ));
+    const rail = container.querySelector("[data-testid='env-rail']");
+    expect(rail?.tagName).toBe("NAV");
+    expect(rail?.getAttribute("aria-label")).toBe("Environment navigation");
+    dispose();
+  });
+
   it("admits it does not know who is signed in rather than inventing initials", () => {
     // Moved here from `TopBar` with the avatar itself. The property is the point, not where it
     // lives: two invented initials are worse than admitting we do not know, in a product where the

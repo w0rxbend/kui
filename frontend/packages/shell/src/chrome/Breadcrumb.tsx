@@ -62,7 +62,7 @@ export function Breadcrumb(props: BreadcrumbProps) {
   );
 
   return (
-    <nav class="kui-breadcrumb" aria-label="Breadcrumb" data-testid="breadcrumb">
+    <nav class="kui-breadcrumb" aria-label="Application breadcrumb" data-testid="breadcrumb">
       <ol class="kui-breadcrumb__list">
         <For each={head()}>{(item, index) => crumb(item, () => !collapsed() && index() === props.trail.length - 1)}</For>
         <Show when={collapsed()}>

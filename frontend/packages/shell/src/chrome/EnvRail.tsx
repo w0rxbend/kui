@@ -126,7 +126,7 @@ export function EnvRail(props: EnvRailProps) {
   const foot = () => destinations().filter((destination) => destination.atFoot === true);
 
   return (
-    <div class="kui-rail" data-testid="env-rail">
+    <nav class="kui-rail" aria-label="Environment navigation" data-testid="env-rail">
       <a class="kui-rail__mark kui-focusable" href={props.homeHref ?? "#"} aria-label="KUI — cluster overview">
         <Icon name="topology" size="22px" />
       </a>
@@ -212,7 +212,7 @@ export function EnvRail(props: EnvRailProps) {
           <div class="kui-rail__account-panel">{props.accountPanel}</div>
         </Show>
       </div>
-    </div>
+    </nav>
   );
 }
 

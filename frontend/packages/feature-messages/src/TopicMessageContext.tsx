@@ -25,7 +25,7 @@ export function TopicMessageContext(props: TopicMessageContextProps): JSX.Elemen
   const health = () => HEALTH[props.health];
 
   return (
-    <section class="kui-topic-messages-page" aria-label={`Messages in ${props.topicName}`}>
+    <section class="kui-topic-messages-page">
       <PageHeader
         title={props.topicName}
         crumbs={[

@@ -396,6 +396,7 @@ describe("the topic context around the message browser", () => {
     expect(container.querySelector("h1")?.textContent).toBe(TOPIC);
     expect(container.textContent).toContain("in sync");
     expect(container.querySelector("[aria-label='Breadcrumb']")?.textContent).toContain("Topics");
+    expect(container.querySelectorAll(`[aria-label='Messages in ${TOPIC}']`)).toHaveLength(1);
 
     const tabs = container.querySelector("[aria-label='Topic sections']");
     expect(tabs).not.toBeNull();
