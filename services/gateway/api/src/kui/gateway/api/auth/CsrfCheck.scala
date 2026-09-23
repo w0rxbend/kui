@@ -1,5 +1,7 @@
 package kui.gateway.api.auth
 
+import java.util.Locale
+
 import kui.contracts.HttpHeaders
 import kui.security.PrincipalKind
 
@@ -28,7 +30,7 @@ object CsrfCheck {
   /** The decision.
     *
     * @param method
-    *   the HTTP method, upper-cased
+    *   the HTTP method; matching is case-insensitive and independent of the process locale
     * @param authKind
     *   how the caller was authenticated. Bearer callers are exempt outright (ADR-019): a script presenting a
     *   token chose to send it, which is not something a hostile page can forge into happening, unlike a
@@ -48,7 +50,7 @@ object CsrfCheck {
       sessionSecret: Option[String],
       secFetchSite: Option[String]
   ): Verdict = {
-    val upperMethod = method.toUpperCase
+    val upperMethod = method.toUpperCase(Locale.ROOT)
 
     if SafeMethods.contains(upperMethod) then Verdict.Allowed
     else if authKind == PrincipalKind.Bearer then Verdict.Allowed

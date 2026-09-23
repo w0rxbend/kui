@@ -1,5 +1,7 @@
 package kui.gateway.api.auth
 
+import java.util.Locale
+
 import munit.FunSuite
 
 import kui.contracts.HttpHeaders
@@ -123,6 +125,17 @@ final class CsrfCheckSuite extends FunSuite {
       CsrfCheck.verdict("OPTIONS", PrincipalKind.Session, None, Some(secret), Some("cross-site")),
       allowed
     )
+  }
+
+  test("safe method matching is independent of the default locale") {
+    val previousLocale = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(
+        CsrfCheck.verdict("options", PrincipalKind.Session, None, Some(secret), Some("cross-site")),
+        allowed
+      )
+    } finally Locale.setDefault(previousLocale)
   }
 
   test("theComparisonIsCaseSensitive") {
