@@ -149,10 +149,11 @@ final class RegistryCredentialsSuite extends KuiIOSuite {
     // from the *shape* of the answer and contains none of it. All three shapes are refused, because an
     // empty `access_token` is a state real issuers reach and a token of "" authenticates nothing.
     val answers = List(
-      "<html>an HTML login page</html>" -> "it is not JSON",
+      "<html>an HTML login page</html>" -> "invalid JSON",
       """{"error":"invalid_client","hint":"secret s3cr3t-client-secret is wrong"}""" ->
-        "it has no 'access_token' field",
-      """{"access_token":"   ","expires_in":3600}""" -> "its 'access_token' is empty"
+        "missing access_token",
+      """{"access_token":"   ","expires_in":3600}""" -> "empty access_token",
+      """{"access_token":"token-canary"}""" -> "missing expires_in"
     )
 
     answers.traverse { (body, expected) =>
@@ -261,12 +262,9 @@ final class RegistryCredentialsSuite extends KuiIOSuite {
     }
   }
 
-  test("a token an issuer says expires in one second is still cached for thirty") {
-    // The denial-of-service rule, and it is the *floor* that makes it true rather than the minimum
-    // lifetime beside it: `(lifetime - RefreshMargin).max(MinimumLifetime / 2)` is what stops a token
-    // whose stated lifetime is shorter than the refresh margin from being born already expired. Without
-    // it, `expires_in: 1` yields a `usableUntil` in the past and KUI asks the issuer once per registry
-    // call — turning its own authentication into an attack on the identity provider.
+  test("a short-lived token is reused within its safe half-lifetime") {
+    // The refresh margin is capped at half of the issuer's stated lifetime, so a valid short-lived token
+    // is usable without inventing a longer expiry than the issuer supplied.
     val program =
       for {
         seen <- Ref.of[IO, List[sttp.client4.GenericRequest[?, ?]]](Nil)
@@ -277,15 +275,14 @@ final class RegistryCredentialsSuite extends KuiIOSuite {
           .fromConfig[IO](oauth(), Some(backend), logger)
           .use(credentials => credentials.authenticate(request).replicateA(5))
         early <- seen.get.map(_.size)
-        // and it is not cached for ever either: past the floor, the issuer is asked again.
       } yield early
 
     TestControl.executeEmbed(program).map { calls =>
-      assertEquals(calls, 1, "five calls inside the floor asked the issuer more than once")
+      assertEquals(calls, 1, "five immediate calls asked the issuer more than once")
     }
   }
 
-  test("a token cached under the floor is renewed once the floor has passed") {
+  test("a short-lived token is renewed after its safe half-lifetime") {
     val program =
       for {
         seen <- Ref.of[IO, List[sttp.client4.GenericRequest[?, ?]]](Nil)
@@ -295,7 +292,7 @@ final class RegistryCredentialsSuite extends KuiIOSuite {
         headers <- RegistryCredentials
           .fromConfig[IO](oauth(), Some(backend), logger)
           .use { credentials =>
-            credentials.authenticate(request) *> IO.sleep(31.seconds) *>
+            credentials.authenticate(request) *> IO.sleep(1.second) *>
               credentials.authenticate(request)
           }
         calls <- seen.get.map(_.size)

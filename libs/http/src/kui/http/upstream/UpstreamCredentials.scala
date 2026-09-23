@@ -17,6 +17,7 @@ import sttp.model.{HeaderNames, Uri}
 
 import kui.config.UpstreamAuthConfig
 import kui.kernel.Secret
+import kui.kernel.error.{ErrorCode, InfrastructureError, KuiError}
 
 /** Credentials applied to one upstream HTTP request.
   *
@@ -26,6 +27,10 @@ import kui.kernel.Secret
   */
 sealed trait UpstreamCredentials[F[_]] {
   def authenticate[T](request: Request[T]): F[Either[UpstreamCredentials.Failure, Request[T]]]
+
+  def authenticateStream[T, S](
+      request: StreamRequest[T, S]
+  ): F[Either[UpstreamCredentials.Failure, StreamRequest[T, S]]]
 
   /** Safe for logs and diagnostics. */
   def describe: String
@@ -94,6 +99,18 @@ object UpstreamCredentials {
   val DefaultRefreshBefore: FiniteDuration = 30.seconds
   val MaxTokenLifetime: FiniteDuration = 365.days
 
+  def anonymous[F[_]: Async]: UpstreamCredentials[F] = new Anonymous[F]
+
+  def basic[F[_]: Async](username: String, password: Secret[String]): UpstreamCredentials[F] = {
+    val encoded = Base64.getEncoder.encodeToString(
+      s"$username:${password.value}".getBytes(StandardCharsets.UTF_8)
+    )
+    new HeaderCredentials[F](s"Basic $encoded", "basic")
+  }
+
+  def bearer[F[_]: Async](token: Secret[String]): UpstreamCredentials[F] =
+    new HeaderCredentials[F](s"Bearer ${token.value}", "bearer")
+
   /** Build credentials for the static cases in [[UpstreamAuthConfig]].
     *
     * OAuth is deliberately `None` here because it owns an effectful token client; [[resource]] constructs
@@ -101,15 +118,23 @@ object UpstreamCredentials {
     */
   def static[F[_]: Async](config: UpstreamAuthConfig): Option[UpstreamCredentials[F]] =
     config match {
-      case UpstreamAuthConfig.Anonymous => Some(new Anonymous[F])
-      case UpstreamAuthConfig.Basic(username, password) =>
-        val encoded = Base64.getEncoder.encodeToString(
-          s"$username:${password.value}".getBytes(StandardCharsets.UTF_8)
-        )
-        Some(new HeaderCredentials[F](s"Basic $encoded", config.describe))
-      case UpstreamAuthConfig.Bearer(token) =>
-        Some(new HeaderCredentials[F](s"Bearer ${token.value}", config.describe))
+      case UpstreamAuthConfig.Anonymous => Some(anonymous[F])
+      case UpstreamAuthConfig.Basic(username, password) => Some(basic[F](username, password))
+      case UpstreamAuthConfig.Bearer(token) => Some(bearer[F](token))
       case _: UpstreamAuthConfig.OAuth => None
+    }
+
+  /** Translate a credential-source failure without exposing response bodies, credentials, or endpoint URLs.
+    */
+  def toKuiError(upstream: String, failure: Failure): KuiError =
+    failure match {
+      case Failure.Rejected(status) if status == 401 || status == 403 =>
+        InfrastructureError.AuthFailed(upstream)
+      case Failure.Rejected(status) => InfrastructureError.Upstream(upstream, status)
+      case Failure.TimedOut(_) | Failure.Transport =>
+        InfrastructureError.Unreachable(upstream, failure.message)
+      case Failure.ResponseTooLarge(_) | Failure.Malformed(_) =>
+        InfrastructureError.Remote(ErrorCode.UpstreamAuth, s"$upstream: ${failure.message}", Nil)
     }
 
   /** Credentials using a source-owned token transport with the JVM's default trust configuration. */
@@ -128,7 +153,7 @@ object UpstreamCredentials {
     }
 
   /** Test seam for the token endpoint transport. Production uses [[resource]] and JVM trust. */
-  private[upstream] def withBackend[F[_]: Async](
+  private[kui] def withBackend[F[_]: Async](
       config: UpstreamAuthConfig.OAuth,
       backend: Backend[F],
       settings: Settings = Settings()
@@ -145,12 +170,28 @@ object UpstreamCredentials {
         .asRight[Failure]
         .pure[F]
 
+    def authenticateStream[T, S](
+        request: StreamRequest[T, S]
+    ): F[Either[Failure, StreamRequest[T, S]]] =
+      request
+        .withHeaders(request.headers.filterNot(_.is(HeaderNames.Authorization)))
+        .asRight[Failure]
+        .pure[F]
+
     val describe: String = UpstreamAuthConfig.Anonymous.describe
   }
 
   final private class HeaderCredentials[F[_]: Async](value: String, val describe: String)
       extends UpstreamCredentials[F] {
     def authenticate[T](request: Request[T]): F[Either[Failure, Request[T]]] =
+      request
+        .header(HeaderNames.Authorization, value, DuplicateHeaderBehavior.Replace)
+        .asRight[Failure]
+        .pure[F]
+
+    def authenticateStream[T, S](
+        request: StreamRequest[T, S]
+    ): F[Either[Failure, StreamRequest[T, S]]] =
       request
         .header(HeaderNames.Authorization, value, DuplicateHeaderBehavior.Replace)
         .asRight[Failure]
@@ -174,6 +215,19 @@ object UpstreamCredentials {
     val describe: String = OAuthDescription
 
     def authenticate[T](request: Request[T]): F[Either[Failure, Request[T]]] =
+      token.map(
+        _.map(value =>
+          request.header(
+            HeaderNames.Authorization,
+            s"Bearer ${value.value}",
+            DuplicateHeaderBehavior.Replace
+          )
+        )
+      )
+
+    def authenticateStream[T, S](
+        request: StreamRequest[T, S]
+    ): F[Either[Failure, StreamRequest[T, S]]] =
       token.map(
         _.map(value =>
           request.header(

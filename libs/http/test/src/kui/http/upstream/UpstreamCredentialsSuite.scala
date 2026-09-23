@@ -7,6 +7,7 @@ import scala.concurrent.duration.DurationInt
 import cats.effect.testkit.TestControl
 import cats.effect.{Deferred, IO, Ref}
 import cats.syntax.all.*
+import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.*
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.{BackendStub, ResponseStub, StubBody}
@@ -58,6 +59,19 @@ final class UpstreamCredentialsSuite extends KuiIOSuite {
       assertEquals(basic.map(authorizationHeaders), Right(List("Basic a3VpOmh1bnRlcjI=")))
       assertEquals(bearer.map(authorizationHeaders), Right(List("Bearer server-token")))
     }
+  }
+
+  test("configured credentials replace caller authorization on streaming requests") {
+    val supplied = basicRequest
+      .get(uri"https://upstream.invalid/events")
+      .header("Authorization", "Bearer caller-token")
+      .response(asStreamAlwaysUnsafe(Fs2Streams[IO]))
+
+    credentials(UpstreamAuthConfig.Basic("kui", Secret("hunter2")))
+      .authenticateStream(supplied)
+      .map(authenticated =>
+        assertEquals(authenticated.map(_.header("Authorization")), Right(Some("Basic a3VpOmh1bnRlcjI=")))
+      )
   }
 
   test("OAuth fetches one token without redirects and reuses it before early refresh") {

@@ -228,9 +228,27 @@ final class KsqlCredentialsSuite extends KuiIOSuite {
     }
   }
 
-  test("the shortest lifetime KUI believes is a minute, so a zero expiry is not a fetch per request") {
-    assertEquals(KsqlCredentials.MinimumLifetime, scala.concurrent.duration.Duration(1, "minute"))
-    assertEquals(KsqlCredentials.RefreshMargin, scala.concurrent.duration.Duration(30, "seconds"))
+  test("an issuer that reports a non-positive expiry is refused") {
+    val config = UpstreamAuthConfig.OAuth(
+      SafeUrl.unsafe("https://issuer.example/token"),
+      "client",
+      Secret("secret"),
+      None
+    )
+    val issuer: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespond(
+        ResponseStub.adjust(
+          """{"access_token":"a-token","expires_in":0}""",
+          StatusCode.Ok
+        ): sttp.client4.Response[StubBody]
+      )
+
+    kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>
+      KsqlCredentials
+        .fromConfig[IO](config, Some(issuer), logger)
+        .use(credentials => headerOf(credentials))
+        .map(result => assertEquals(result, None))
+    }
   }
 
   test("the token upstream has a name of its own, so a metric says which system was slow") {

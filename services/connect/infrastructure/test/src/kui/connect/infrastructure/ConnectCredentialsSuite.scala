@@ -127,24 +127,26 @@ final class ConnectCredentialsSuite extends KuiIOSuite {
 
     credentials(oauth(), Some(backend)).use(_.authenticate(request)).map {
       case Left(error) =>
-        assert(clue(error.message).contains("could not be understood"))
+        assert(clue(error.message).contains("malformed"))
         assert(!clue(error.message).contains("s3cret"))
       case Right(sent) => fail(s"expected a refusal, got ${authorization(sent)}")
     }
   }
 
-  test("an issuer that omits expires_in gets the minimum lifetime rather than a cache of zero") {
-    // A token cached forever becomes a 401 that outlives every restart; one re-fetched a minute later
-    // costs nothing. What must not happen is a fetch per request, which is what `expires_in: 0` — sent by
-    // issuers that mean "does not expire" — would otherwise produce.
+  test("an issuer that reports a non-positive expiry is refused") {
+    // Treating zero as a made-up lifetime can keep using a token after the issuer considers it invalid.
+    // The issuer owns expiry, so an ambiguous lifetime is a malformed credential response.
     Ref.of[IO, List[String]](Nil).flatMap { seen =>
       val backend = issuerStub("""{"access_token":"abc","expires_in":0}""", seen = Some(seen))
 
       credentials(oauth(), Some(backend))
-        .use(authenticating =>
-          authenticating.authenticate(request) >> authenticating.authenticate(request) >> seen.get
-        )
-        .map(asked => assertEquals(asked.size, 1))
+        .use(_.authenticate(request))
+        .map {
+          case Left(error) =>
+            assertEquals(error.code, ErrorCode.UpstreamAuth)
+            assert(clue(error.message).contains("positive"))
+          case Right(sent) => fail(s"accepted an ambiguous token lifetime: ${authorization(sent)}")
+        }
     }
   }
 
