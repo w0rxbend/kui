@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.scalacheck.{Gen, Prop}
@@ -67,6 +69,39 @@ final class ClusterSecuritySuite extends KuiSuite {
         assertEquals(tls, None)
       case other => fail(s"expected SASL, got $other")
     }
+  }
+
+  test("securityTokensDecodeIndependentlyOfHostLocale") {
+    val prefix = "kui.clusters.0.security"
+    val values = Map(
+      s"$prefix.protocol" -> "sasl_plaintext",
+      s"$prefix.mechanism" -> "plain",
+      s"$prefix.username" -> "kui",
+      s"$prefix.password" -> "pw"
+    )
+    val previous = Locale.getDefault
+    val decoded =
+      try {
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+        ClusterSecurityConfig.decode(
+          prefix,
+          key => values.get(key).map(value => ConfigSourceName.Default -> value)
+        )
+      } finally Locale.setDefault(previous)
+
+    val security = decoded.toEither.map(
+      _.assemble(Map(s"$prefix.password" -> kui.kernel.Secret("pw")))
+    )
+    assertEquals(
+      security,
+      Right(
+        ClusterSecurity.Sasl(
+          SaslProtocol.SaslPlaintext,
+          SaslMechanism.Plain("kui", kui.kernel.Secret("pw")),
+          None
+        )
+      )
+    )
   }
 
   test("scramSha256Decodes") {

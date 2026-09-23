@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import cats.data.{NonEmptyList, ValidatedNel}
 import cats.effect.kernel.Sync
 import cats.syntax.all.*
@@ -326,14 +328,14 @@ object ClusterSecurityConfig {
       }
 
     def enumerated(leaf: String, allowed: List[String], default: String): Problems[String] =
-      raw(leaf).map(_.trim.toUpperCase) match {
+      raw(leaf).map(_.trim.toUpperCase(Locale.ROOT)) match {
         case None => default.validNel
         case Some(value) if allowed.contains(value) => value.validNel
         case Some(other) => problem(leaf, s"'$other' is not one of ${allowed.mkString(", ")}").invalidNel
       }
 
     def required(leaf: String, allowed: List[String]): Problems[String] =
-      raw(leaf).map(_.trim.toUpperCase) match {
+      raw(leaf).map(_.trim.toUpperCase(Locale.ROOT)) match {
         case None =>
           problem(
             leaf,
@@ -402,7 +404,7 @@ object ClusterSecurityConfig {
     }
 
     private def storeType(which: String): Problems[StoreType] =
-      raw(s"ssl.$which.type").map(_.trim.toUpperCase) match {
+      raw(s"ssl.$which.type").map(_.trim.toUpperCase(Locale.ROOT)) match {
         case None => StoreType.Pkcs12.validNel
         case Some("PKCS12") => StoreType.Pkcs12.validNel
         case Some("JKS") => StoreType.Jks.validNel
