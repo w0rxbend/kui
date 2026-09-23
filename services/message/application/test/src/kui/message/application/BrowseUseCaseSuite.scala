@@ -1,6 +1,7 @@
 package kui.message.application
 
 import java.time.Instant
+import java.util.Locale
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
@@ -616,6 +617,17 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
       // Three read, two delivered. The gap is the number that tells a user their filter is working, and
       // it is the only thing on the stream that would ever say so.
       assertEquals((consumed.read, consumed.delivered), (3L, 2L))
+    }
+  }
+
+  test("the string filter is case-insensitive independently of the host locale") {
+    val records = List(raw(0, "invoice")).map(_.asRight[KuiError])
+
+    IO(Locale.getDefault).bracket { _ =>
+      IO(Locale.setDefault(Locale.forLanguageTag("tr-TR"))) *>
+        events(useCase(records), request(10, Some("I")))
+    }(previous => IO(Locale.setDefault(previous))).map { produced =>
+      assertEquals(delivered(produced), List("invoice"))
     }
   }
 

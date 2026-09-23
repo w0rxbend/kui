@@ -1,6 +1,7 @@
 package kui.message.application
 
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -471,11 +472,12 @@ object BrowseUseCase {
     request.stringFilter match {
       case None => true
       case Some(needle) =>
-        val wanted = needle.toLowerCase
-        record.key.text.toLowerCase.contains(wanted) ||
-        record.value.text.toLowerCase.contains(wanted) ||
+        val wanted = needle.toLowerCase(Locale.ROOT)
+        record.key.text.toLowerCase(Locale.ROOT).contains(wanted) ||
+        record.value.text.toLowerCase(Locale.ROOT).contains(wanted) ||
         record.headers.exists(header =>
-          header.key.toLowerCase.contains(wanted) || header.value.toLowerCase.contains(wanted)
+          header.key.toLowerCase(Locale.ROOT).contains(wanted) ||
+            header.value.toLowerCase(Locale.ROOT).contains(wanted)
         )
     }
 
