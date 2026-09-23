@@ -518,7 +518,11 @@ final class PrometheusQueryClientSuite extends CatsEffectSuite {
       .use { tokenServer =>
         PrometheusTestServer.resource(PrometheusTestResponse(200, successVector())).use { queryServer =>
           val configured = oauthSettings(queryServer, tokenServer).copy(
-            callTimeout = 100.millis,
+            // Leave enough headroom for the healthy seed request when the full repository suite is
+            // competing with Kafka containers and dozens of forked JVMs. The second token response still
+            // takes twice this limit, so this remains an acquisition-timeout test rather than a scheduler
+            // timing test.
+            callTimeout = 1.second,
             cacheTtl = 1.millis,
             staleTtl = 10.seconds
           )
