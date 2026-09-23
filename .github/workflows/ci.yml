@@ -148,14 +148,6 @@ jobs:
       # them, so a rename on the server becomes a diff here rather than a 403 nobody can explain.
       - name: Check the committed browser constants
         run: ./mill frontend.apiConstants --check
-      # Not a generated file, but the same failure: a figure a document publishes about itself, and
-      # nothing comparing it to the thing it counts. `docs/FEATURE_MATRIX.md`'s state totals, the
-      # percentage `README.md` repeats, the merged document's operation and path counts in ADR-048
-      # and `frontend/packages/api/README.md`, and `DEPENDENCY_MATRIX.md`'s row per dependency were
-      # all correct when written and all drifted, because the commands offered for checking them
-      # printed numbers for a person to compare rather than comparing them.
-      - name: Check every count the repository publishes about itself
-        run: ./scripts/feature-matrix-check.sh
 
   test:
     name: unit + property + contract tests

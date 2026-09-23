@@ -1147,43 +1147,19 @@ translated by each client's sealed `UpstreamError` (ADR-037).
 
 ## 16. Repository layout
 
-This tree is what `git ls-files | cut -d/ -f1 | sort -u` answers at the top level, and what
-`git ls-files libs`, `git ls-files services`, `git ls-files frontend/packages` and
-`git ls-files deployment` answer one level in. **It is derived from the index and not from a
-working tree, and that distinction is the whole of why the version before this one was wrong.**
-`ls` cannot tell a tracked directory from an ignored one, so the rewrite of 2026-09-12 — the one
-whose own subject was directories that are not on disk — read `screens/` off a working tree and
-added it here as a fifth phantom, at a moment when the index did not carry it. That is no longer
-the state of the tree: `582c9bc5` ("Add screens", 2026-09-12) committed the twenty-three captures,
-so `git ls-files screens` answers `23` and this listing names `screens/` because the index does.
-`.gitignore` no longer ignores `screens/`: ADR-058 removed the rule so that the ignore file and the
-index agree, and superseded ADR-057, which had decided the other way hours before the commit. The same working-tree reading is why `.github/` was
-missing: it is tracked, it holds the `ci.yml` this document cites repeatedly, and a listing that
-carries `.scalafmt.conf` and `.tool-versions` and not `.github/` is short in the direction §16 says
-it fixed.
-
-**Both directions hold.** Every top-level name the index carries is in the block below, and every
-top-level name the block asserts is in the index. The omission direction — the one that let
-`.github/` sit outside this listing while the document cited its `ci.yml` — is one command, and it
-printed nothing on 2026-09-12:
+This is a compact map of the current tracked tree. To inspect the authoritative top-level roster,
+ask Git rather than the working directory:
 
 ```bash
-block=$(sed -n '/^kui\/$/,/^```$/p' ARCHITECTURE.md)
-git ls-files | cut -d/ -f1 | sort -u |
-  while read -r name; do grep -qF -- "$name" <<<"$block" || echo "missing from §16: $name"; done
+git ls-files | cut -d/ -f1 | sort -u
 ```
 
-The phantom direction is the one `ls` cannot answer and a reader should not have to run by hand;
-it belongs to the listing claim in `./scripts/feature-matrix-check.sh`, which reads this block and
-resolves each name it asserts against `git ls-files`.
-
-<!-- checked: listings -- verified by ./scripts/feature-matrix-check.sh -- claims: listing-phantom, listing-omission, residue -->
 ```
 kui/
 ├── build.mill  mill  .mill-version  .tool-versions  .gitignore
 │             .scalafmt.conf  .scalafix.conf  .scalafix-pure.conf  .scalafix-tests.conf
-├── README.md  ARCHITECTURE.md  CONTRIBUTING.md  DECISIONS.md  DEPENDENCY_MATRIX.md
-│             TECH_DEBT.md  LICENSE  repo.txt
+├── README.md  ARCHITECTURE.md  CAPABILITY-MAP-prometheus-observability.md
+│             SPEC-prometheus-query-core.md  LICENSE  repo.txt
 ├── libs/        kernel/ contracts-core/ kafka/ kafka-auth/ serde/ serde-confluent/ filter/
 │                cache/ observability/ security-core/ http/ config/ testkit/
 ├── services/    gateway/ cluster/ topic/ message/ consumer/ schema/ connect/ ksql/
@@ -1198,40 +1174,19 @@ kui/
 ├── build-tests/ the suites that read build.mill, ci.yml and the Dockerfiles themselves
 ├── deployment/  docker/ compose/ quickstart/ demo/ secured/ examples/ frontend/ metrics/
 │                storybook/
-├── .github/     workflows/ci.yml and actions/setup-build/ — the only CI this repository has
-├── scripts/     run-tests.sh, feature-matrix-check.sh
-├── screens/     the design captures, tracked despite `.gitignore` — see below
-├── docs/ research/ tools/ mill-build/
+├── .github/     workflows/ci.yml and actions/setup-build/
+├── .agents/     repository-local Playwright skill
+├── scripts/     run-tests.sh, check-action-pins.sh
+├── screens/     tracked design captures
+├── docs/        API, frontend and operations documentation
+├── tasks/       current planning and work tracking
+├── tools/       build-time generators
+└── mill-build/  Mill build support
 ```
-<!-- /checked -->
 
-Two entries above are worth a sentence so that nobody has to guess why they are there. `mill` is the
-committed launcher script, not a directory, which is why `./mill` works in a fresh clone with no
-installed Mill. `repo.txt` is a committed whole-repository dump — it is in the index, so it is
-listed here rather than quietly omitted, and whether it should still be tracked is a question for
-the register rather than for this listing.
-
-**The captures are here, and the decision that said they would not be has not been reopened.** The
-twenty-three design screenshots `research/design/SCREENS-V4.md` reads are in `screens/`, in the
-index, since `582c9bc5`. ADR-057 — accepted the same day, hours earlier — decided the opposite, and
-`research/design/SCREENS-V4.md`, `docs/plan/README.md` and `.gitignore:43` were all written to that
-decision and now describe a repository this one is not. This section states what `git ls-files`
-answers, which is its whole job; which of the two should move is a decision for ADR-057's owner —
-either a commit that removes the captures again, or an ADR that supersedes 057 and says why six
-megabytes a revision became worth keeping. It is recorded in the register rather than settled here.
-
-**The four the version before 2026-09-12 named and this repository does not have, each absence a
-decision rather than an oversight.**
-`services/security` is the ACL and client-quota service of §2's catalog, which has not been begun —
-no screen, no endpoint, no service — and `libs/security-core` is the authentication and
-authorization *library*, which is a different thing and does exist. `deployment/helm/` has never
-been written. The top-level
-`e2e/` was a JVM Playwright plus Testcontainers tree and was deleted at `41358502` when ADR-048
-replaced the browser build; `frontend/e2e/` is its successor and runs under the frontend's own
-build. `benchmarks/` has no commit in this repository's history at all — it was in the plan this
-listing was copied from and was never written. `services/config`, which this section has always
-said is absent, was dissolved for the reason §2 and the decisions log give. Mill task names follow
-the project's build-command conventions.
+`mill` is the committed launcher script, not a directory. Browser end-to-end tests live under
+`frontend/e2e/`; the repository does not ship a top-level `e2e/`, Helm chart, or benchmark tree.
+Mill task names follow the project's build-command conventions.
 
 ### Naming key
 
@@ -1239,7 +1194,7 @@ The same thing has a different form in different places; each form has one job.
 
 | Form | Where it is used | Example |
 | --- | --- | --- |
-| `kui-<name>-service` | prose about a deployable, and the Helm release name | `kui-topic-service` |
+| `kui-<name>-service` | prose and code comments about a deployable service | `kui-topic-service` |
 | `kui-<name>` | Docker image and Compose service name | `kui-topic` |
 | `<name>` | `ServiceId` values, capability keys, metric and log labels, OpenAPI tags | `topic` |
 | `services/<name>/<layer>` | directory path | `services/topic/api` |

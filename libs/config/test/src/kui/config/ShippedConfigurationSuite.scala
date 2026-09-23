@@ -117,12 +117,11 @@ final class ShippedConfigurationSuite extends KuiSuite {
     * file that is absent from it is absent from every assertion made about it, and absence is invisible from
     * the only side anything looked at.
     *
-    * So the two directions are reconciled against the filesystem below, the way
-    * `scripts/feature-matrix-check.sh` reconciles its manifests. A file under `deployment/` is either a KUI
-    * configuration -- in which case it is loaded through the real loader by a row in [[shipped]] -- or it is
-    * one of these, and saying which costs a line and a sentence. Matching is on the file name rather than on
-    * the whole path, because the question "is this KUI's configuration or somebody else's" is a question
-    * about the file and not about which directory it happens to sit in.
+    * So the two directions are reconciled against the filesystem below. A file under `deployment/` is either
+    * a KUI configuration -- in which case it is loaded through the real loader by a row in [[shipped]] -- or
+    * it is one of these, and saying which costs a line and a sentence. Matching is on the file name rather
+    * than on the whole path, because the question "is this KUI's configuration or somebody else's" is a
+    * question about the file and not about which directory it happens to sit in.
     *
     * Widening one of these patterns is the way to make this reconciliation stop noticing anything, so the
     * case below also asserts that each one still matches something and that what is left over is exactly

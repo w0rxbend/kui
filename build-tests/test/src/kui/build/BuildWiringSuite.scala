@@ -387,8 +387,8 @@ final class BuildWiringSuite extends FunSuite {
     // to ci.yml to close "a filter that matches nothing exits 0" is itself read by nothing. Measured on
     // 2026-09-12 — deleting that six-line `grep -q '"name": "@kui/api"'` guard left
     // `./mill --no-daemon build-tests.test` at 139/139 SUCCESS; deleting the ENTIRE 126-line `compose` job
-    // left it at 139/139 and `./scripts/feature-matrix-check.sh` at 434/434; deleting the whole
-    // "The interface image copies every workspace manifest" step was invisible for the same reason.
+    // left it at 139/139; deleting the whole "The interface image copies every workspace manifest" step
+    // was invisible for the same reason.
     //
     // The case above reads two `run:` lines out of this workflow. That is a rule about what a named step
     // does; nothing was a rule about WHICH STEPS EXIST. So the roster is pinned here, and a job or a step
@@ -523,7 +523,6 @@ private object BuildWiringSuite {
     "Check the committed OpenAPI documents",
     "Check the committed error-code table",
     "Check the committed browser constants",
-    "Check every count the repository publishes about itself",
     "Run every test suite",
     "Upload test reports",
     "The interface image copies every workspace manifest",

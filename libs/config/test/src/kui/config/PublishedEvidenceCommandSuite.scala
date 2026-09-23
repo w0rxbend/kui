@@ -23,8 +23,8 @@ import kui.testkit.KuiSuite
   * The gate was fine; the published evidence was the thing that could not fail.
   *
   * W13-02 repaired the range to end where the block ends. That repair is this suite's subject: reverting it
-  * to wave 12's range left `./scripts/feature-matrix-check.sh` at `all true` and `./mill libs.config.test` at
-  * 395/395 SUCCESS, because the only reader of that paragraph was a person.
+  * to wave 12's range left the then-current documentation gate green and `./mill libs.config.test` at 395/395
+  * SUCCESS, because the only reader of that paragraph was a person.
   *
   * ==What is asserted, and why it is the range and not the rules==
   *
