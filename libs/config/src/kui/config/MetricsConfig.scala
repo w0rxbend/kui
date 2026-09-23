@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import kui.kernel.ClusterId
@@ -97,7 +99,7 @@ object MetricsSourceKind {
   val All: List[MetricsSourceKind] = List(Prometheus, PrometheusApi, Jmx)
 
   def fromWire(raw: String): Option[MetricsSourceKind] =
-    All.find(_.wireName == raw.trim.toLowerCase)
+    All.find(_.wireName == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[MetricsSourceKind, MetricsSourceKind] = CanEqual.derived
 }

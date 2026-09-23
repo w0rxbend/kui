@@ -1,6 +1,7 @@
 package kui.config
 
 import java.net.{InetAddress, URI}
+import java.util.Locale
 
 import scala.util.Try
 
@@ -121,7 +122,7 @@ object SafeUrl {
       raw: String,
       policy: UrlPolicy
   ): Either[ValidationError, Unit] =
-    Option(uri.getScheme).map(_.toLowerCase) match {
+    Option(uri.getScheme).map(_.toLowerCase(Locale.ROOT)) match {
       case Some(scheme) if policy.allowedSchemes.contains(scheme) => Right(())
       case _ =>
         val expected = policy.allowedSchemes.toList.sorted.mkString(" or ")
@@ -141,7 +142,7 @@ object SafeUrl {
 
   private def hostOf(uri: URI, raw: String): Either[ValidationError, String] =
     Option(uri.getHost).filter(_.nonEmpty) match {
-      case Some(host) => Right(host.toLowerCase)
+      case Some(host) => Right(host.toLowerCase(Locale.ROOT))
       case None => Left(ValidationError.Format(Field, "a URL with a host name", raw))
     }
 

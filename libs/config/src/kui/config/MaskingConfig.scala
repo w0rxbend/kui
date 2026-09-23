@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import scala.util.matching.Regex
 
 import cats.data.NonEmptyList
@@ -138,7 +140,7 @@ object MaskingConfig {
 
   /** `remove`, `mask` or `replace`, named rather than guessed at. */
   def readKind(raw: String): Either[String, Kind] = {
-    val wanted = raw.trim.toLowerCase
+    val wanted = raw.trim.toLowerCase(Locale.ROOT)
     Kind.All
       .find(_.wire == wanted)
       .toRight(s"'$raw' is not a masking kind; the kinds are ${Kind.All.map(_.wire).mkString(", ")}")

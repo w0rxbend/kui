@@ -4,6 +4,7 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.time.Instant
+import java.util.Locale
 
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.util.Try
@@ -232,7 +233,7 @@ object KuiConfigSource {
         // everything up to the last underscore. That is what lets `SCHEMA_REGISTRY_URL` mean the
         // service `schema-registry` rather than the service `schema` with a key `registry_url`.
         .flatMap(rest => Option.when(rest.contains('_'))(rest.substring(0, rest.lastIndexOf('_'))))
-        .map(_.toLowerCase.replace('_', '-'))
+        .map(_.toLowerCase(Locale.ROOT).replace('_', '-'))
       val fromFiles = files.flatMap(document => Layers.membersOf(document.json, prefix)).toSet
       fromCli ++ fromEnv ++ fromFiles
     }
@@ -257,7 +258,7 @@ object KuiConfigSource {
           val rest = key.drop(envPrefix.length)
           suffixes.collectFirst {
             case suffix if rest.endsWith(suffix) && rest.length > suffix.length =>
-              rest.dropRight(suffix.length).toLowerCase.replace('_', '-')
+              rest.dropRight(suffix.length).toLowerCase(Locale.ROOT).replace('_', '-')
           }
         }
       val fromFiles = files.flatMap(document => Layers.membersOf(document.json, prefix)).toSet
@@ -300,7 +301,7 @@ object KuiConfigSource {
     /** `kui.server.basePath` becomes `KUI_SERVER_BASEPATH`. Dashes become underscores too, so a service id
       * like `schema-registry` has a spellable environment name.
       */
-    def envName(key: String): String = key.toUpperCase.replace('.', '_').replace('-', '_')
+    def envName(key: String): String = key.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_')
 
     /** Reads one dotted path out of a parsed document, rendering the leaf as text.
       *
@@ -392,7 +393,7 @@ object KuiConfigSource {
     raw.toIntOption.toRight(s"'$raw' is not a whole number").flatMap(Port.from(_).leftMap(_.message))
 
   private def readBoolean(raw: String): Either[String, Boolean] =
-    raw.toLowerCase match {
+    raw.toLowerCase(Locale.ROOT) match {
       case "true" | "yes" | "on" => Right(true)
       case "false" | "no" | "off" => Right(false)
       case other => Left(s"'$other' is not a boolean")
@@ -1498,7 +1499,7 @@ object KuiConfigSource {
         ).map(
           _.andThen {
             case UpstreamAuthConfig.OAuth(endpoint, _, _, _)
-                if !endpoint.value.toLowerCase.startsWith("https://") =>
+                if !endpoint.value.toLowerCase(Locale.ROOT).startsWith("https://") =>
               ConfigProblem(
                 s"$prefix.auth.tokenEndpoint",
                 "must use HTTPS for OAuth client credentials",
@@ -2160,7 +2161,7 @@ object KuiConfigSource {
   }
 
   private def readSearchMode(raw: String): Either[String, SearchMode] =
-    SearchMode.fromWire(raw.trim.toLowerCase).toRight(s"'$raw' is neither plain nor fts")
+    SearchMode.fromWire(raw.trim.toLowerCase(Locale.ROOT)).toRight(s"'$raw' is neither plain nor fts")
 
   private def readPageSize(raw: String): Either[String, PageSize] =
     raw.toIntOption

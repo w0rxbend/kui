@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import kui.kernel.Port
 
 /** How log lines are rendered.
@@ -18,7 +20,7 @@ enum LogFormat {
 }
 
 object LogFormat {
-  def fromWire(raw: String): Option[LogFormat] = values.find(_.wire == raw.toLowerCase)
+  def fromWire(raw: String): Option[LogFormat] = values.find(_.wire == raw.toLowerCase(Locale.ROOT))
 
   given CanEqual[LogFormat, LogFormat] = CanEqual.derived
 }

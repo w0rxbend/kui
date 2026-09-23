@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.data.NonEmptyList
@@ -43,7 +45,7 @@ object RegistryAuthConfig {
 
   /** The spellings `kui.clusters.<n>.schemaRegistry.auth.type` accepts. */
   def fromWire(raw: String): Option[String] =
-    raw.trim.toLowerCase match {
+    raw.trim.toLowerCase(Locale.ROOT) match {
       case value @ ("none" | "basic" | "oauth") => Some(value)
       case _ => None
     }

@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import kui.kernel.Secret
 
 /** How a person proves who they are to KUI itself (ADR-015).
@@ -32,7 +34,7 @@ enum AuthType(val wire: String) {
 
 object AuthType {
 
-  def fromWire(raw: String): Option[AuthType] = values.find(_.wire == raw.trim.toLowerCase)
+  def fromWire(raw: String): Option[AuthType] = values.find(_.wire == raw.trim.toLowerCase(Locale.ROOT))
 
   given CanEqual[AuthType, AuthType] = CanEqual.derived
 }

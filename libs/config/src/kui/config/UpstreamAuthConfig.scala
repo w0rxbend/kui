@@ -1,5 +1,7 @@
 package kui.config
 
+import java.util.Locale
+
 import kui.kernel.Secret
 
 /** How KUI proves to one HTTP dependency of a cluster — a Kafka Connect cluster, a ksqlDB cluster — that it
@@ -58,7 +60,7 @@ object UpstreamAuthConfig {
 
   /** The spellings an `auth.type` key accepts. */
   def fromWire(raw: String): Option[Mechanism] = {
-    val normalized = raw.trim.toLowerCase
+    val normalized = raw.trim.toLowerCase(Locale.ROOT)
     Mechanism.All.find(_.wireName == normalized)
   }
 
