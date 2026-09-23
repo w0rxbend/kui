@@ -256,6 +256,11 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
    * one has started. The generation makes those callbacks inert before they touch shared state. */
   let generation = 0;
   const retainedByteSizes = new WeakMap<KafkaRecord, number>();
+  /* A record normally has two owners (the combined row list and its cached page). Reference
+   * counts preserve the old identity deduplication without rebuilding a Set of every retained
+   * record after each streamed paint batch. Entries are deleted with their final owner, so this
+   * index cannot keep an evicted payload alive. */
+  const retainedReferences = new Map<KafkaRecord, number>();
   const utf8 = new TextEncoder();
   let committedPayloadBytes = 0;
 
@@ -274,16 +279,30 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     return bytes;
   }
 
-  function measureCommittedPayloadBytes(): number {
-    const retainedRecords = new Set<KafkaRecord>([...rowList, ...heldList, ...pageList.flat()]);
-    return [...retainedRecords].reduce(
-      (total, existing) => total + retainedBytes(existing),
-      0,
-    );
+  function retain(record: KafkaRecord): void {
+    const references = retainedReferences.get(record) ?? 0;
+    if (references === 0) committedPayloadBytes += retainedBytes(record);
+    retainedReferences.set(record, references + 1);
   }
 
-  function refreshCommittedPayloadBytes(): void {
-    committedPayloadBytes = measureCommittedPayloadBytes();
+  function releaseRetained(record: KafkaRecord): void {
+    const references = retainedReferences.get(record);
+    if (references === undefined) return;
+    if (references > 1) {
+      retainedReferences.set(record, references - 1);
+      return;
+    }
+    retainedReferences.delete(record);
+    committedPayloadBytes = Math.max(0, committedPayloadBytes - retainedBytes(record));
+  }
+
+  function releaseAll(records: readonly KafkaRecord[]): void {
+    for (const record of records) releaseRetained(record);
+  }
+
+  function clearRetained(): void {
+    retainedReferences.clear();
+    committedPayloadBytes = 0;
   }
 
   function withoutPayload(record: KafkaRecord, incoming = retainedBytes(record)): KafkaRecord {
@@ -294,10 +313,14 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     return { ...record, value: { kind: "large", bytes, sourceKind } };
   }
 
-  function withinPayloadBudget(record: KafkaRecord, newlyCommitted = 0): KafkaRecord {
+  function withinPayloadBudget(
+    record: KafkaRecord,
+    newlyCommitted = 0,
+    committedBeforeBatch = committedPayloadBytes,
+  ): KafkaRecord {
     const incoming = retainedBytes(record);
     if (incoming === 0) return record;
-    if (committedPayloadBytes + newlyCommitted + incoming <= MAX_RETAINED_PAYLOAD_BYTES) {
+    if (committedBeforeBatch + newlyCommitted + incoming <= MAX_RETAINED_PAYLOAD_BYTES) {
       return record;
     }
     return withoutPayload(record, incoming);
@@ -335,14 +358,20 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     if (records.length === 0 && omitted === 0) return;
     const committed: KafkaRecord[] = [];
     let newlyCommittedPayloadBytes = 0;
+    const committedBeforeBatch = committedPayloadBytes;
     for (const incoming of records) {
-      const record = withinPayloadBudget(incoming, newlyCommittedPayloadBytes);
+      const record = withinPayloadBudget(
+        incoming,
+        newlyCommittedPayloadBytes,
+        committedBeforeBatch,
+      );
       newlyCommittedPayloadBytes += retainedBytes(record);
       committed.push(record);
       if (pausedNow) {
         if (liveNow) heldList.unshift(record);
         else heldList.push(record);
-        if (heldList.length > MAX_ROWS) heldList.length = MAX_ROWS;
+        retain(record);
+        if (heldList.length > MAX_ROWS) releaseAll(heldList.splice(MAX_ROWS));
         continue;
       }
 
@@ -351,17 +380,21 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
       if (liveNow) {
         rowList.unshift(record);
         page.unshift(record);
-        if (rowList.length > MAX_ROWS) rowList.length = MAX_ROWS;
-        if (page.length > MAX_ROWS) page.length = MAX_ROWS;
+        retain(record);
+        retain(record);
+        if (rowList.length > MAX_ROWS) releaseAll(rowList.splice(MAX_ROWS));
+        if (page.length > MAX_ROWS) releaseAll(page.splice(MAX_ROWS));
       } else {
         rowList.push(record);
-        if (rowList.length > MAX_ROWS) rowList.splice(0, rowList.length - MAX_ROWS);
         page.push(record);
-        if (page.length > MAX_ROWS) page.length = MAX_ROWS;
+        retain(record);
+        retain(record);
+        if (rowList.length > MAX_ROWS) {
+          releaseAll(rowList.splice(0, rowList.length - MAX_ROWS));
+        }
+        if (page.length > MAX_ROWS) releaseAll(page.splice(MAX_ROWS));
       }
     }
-
-    refreshCommittedPayloadBytes();
 
     setProgress((current) => ({
       ...current,
@@ -529,12 +562,12 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     ) {
       const removed = pageList.shift();
       cachedRecords -= removed?.length ?? 0;
+      if (removed !== undefined) releaseAll(removed);
       firstPageNumberNow += 1;
       setFirstPageNumber(firstPageNumberNow);
       activePageNow = Math.max(0, activePageNow - 1);
       setPageIndex((current) => Math.max(0, current - 1));
     }
-    refreshCommittedPayloadBytes();
   }
 
   function stop(): void {
@@ -561,15 +594,27 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     if (heldList.length > 0) {
       const page = pageList[activePageNow] ?? [];
       if (liveNow) {
-        rowList = [...heldList, ...rowList].slice(0, MAX_ROWS);
-        pageList[activePageNow] = [...heldList, ...page].slice(0, MAX_ROWS);
+        const nextRows = [...heldList, ...rowList].slice(0, MAX_ROWS);
+        const nextPage = [...heldList, ...page].slice(0, MAX_ROWS);
+        releaseAll(rowList);
+        releaseAll(page);
+        for (const record of nextRows) retain(record);
+        for (const record of nextPage) retain(record);
+        rowList = nextRows;
+        pageList[activePageNow] = nextPage;
       } else {
-        rowList = [...rowList, ...heldList].slice(-MAX_ROWS);
-        pageList[activePageNow] = [...page, ...heldList].slice(0, MAX_ROWS);
+        const nextRows = [...rowList, ...heldList].slice(-MAX_ROWS);
+        const nextPage = [...page, ...heldList].slice(0, MAX_ROWS);
+        releaseAll(rowList);
+        releaseAll(page);
+        for (const record of nextRows) retain(record);
+        for (const record of nextPage) retain(record);
+        rowList = nextRows;
+        pageList[activePageNow] = nextPage;
       }
+      releaseAll(heldList);
       heldList = [];
     }
-    refreshCommittedPayloadBytes();
     publishRows();
   }
 
@@ -580,6 +625,7 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
     liveNow = query.live;
     immediatelyCommitted = 0;
     if (!keepRows) {
+      clearRetained();
       rowList = [];
       pageList = [[]];
       activePageNow = 0;
@@ -590,7 +636,6 @@ export function createBrowseSession(options: BrowseSessionOptions): BrowseSessio
       activePageNow = pageList.length;
       pageList = [...pageList, []];
     }
-    refreshCommittedPayloadBytes();
     lastQuery = { ...query, cursor: undefined };
     /* The cursor from the *previous* page is spent the moment this one starts. Leaving it in place
      * would leave "Load more" offering the page that is already being read. */

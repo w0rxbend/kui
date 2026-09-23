@@ -153,6 +153,50 @@ describe("a browse session", () => {
     dispose();
   });
 
+  test("does not rescan committed payloads when a later stream batch arrives", () => {
+    const fake = fakeTransport();
+    const continuations: Array<() => void> = [];
+    const committed = Array.from({ length: 100 }, (_, index) => record(String(index)));
+    const committedSet = new Set<object>(committed);
+    let committedPayloadLookups = 0;
+    const originalWeakMapGet = WeakMap.prototype.get;
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({
+        streamUrl: "/stream",
+        transport: fake.transport,
+        scheduleAfterPaint: (resume) => {
+          continuations.push(resume);
+          return () => undefined;
+        },
+      });
+
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      for (const existing of committed) fake.emit(existing);
+      while (continuations.length > 0) continuations.shift()?.();
+      void flush();
+      expect(session.rows()).toHaveLength(committed.length);
+
+      const weakMapGet = vi
+        .spyOn(WeakMap.prototype, "get")
+        .mockImplementation(function (this: WeakMap<object, unknown>, key: object) {
+          if (committedSet.has(key)) committedPayloadLookups += 1;
+          return originalWeakMapGet.call(this, key);
+        });
+      try {
+        for (let index = 100; index < 124; index += 1) fake.emit(record(String(index)));
+        while (continuations.length > 0) continuations.shift()?.();
+        void flush();
+
+        expect(session.rows()).toHaveLength(124);
+        expect(committedPayloadLookups).toBe(0);
+      } finally {
+        weakMapGet.mockRestore();
+      }
+      return null;
+    });
+    dispose();
+  });
+
   test("bounds a live render backlog while keeping the newest rows and delivered count", () => {
     const fake = fakeTransport();
     const continuations: Array<() => void> = [];
