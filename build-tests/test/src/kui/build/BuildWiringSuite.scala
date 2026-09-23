@@ -409,7 +409,7 @@ final class BuildWiringSuite extends FunSuite {
 
     assertEquals(
       jobs,
-      List("compile", "style", "architecture", "generated", "test", "frontend", "browser", "compose"),
+      List("compile", "style", "architecture", "security", "generated", "test", "frontend", "browser", "compose"),
       clue = s"ci.yml declares the jobs $jobs. A deleted job takes every gate inside it with it and no " +
         "suite in this repository could see that happen; a new job belongs in this list, deliberately."
     )
@@ -425,9 +425,9 @@ final class BuildWiringSuite extends FunSuite {
       BuildWiringSuite.workflowSteps.sorted,
       clue =
         s"ci.yml runs ${steps.size} named steps and this roster pins ${BuildWiringSuite.workflowSteps.size}. " +
-          "Compared as a sorted LIST and not a set, because three of these names appear twice — `Install`, " +
-          "`Install pnpm` and `Install the pinned browser` are each run by two jobs, and a set would let one " +
-          "of each pair be deleted silently."
+          "Compared as a sorted LIST and not a set, because `Install pnpm` appears three times while " +
+          "`Install` and `Install the pinned browser` each appear twice; a set would let duplicates be " +
+          "deleted silently."
     )
   }
 
@@ -499,14 +499,17 @@ private object BuildWiringSuite {
 
   /** Every named step `.github/workflows/ci.yml` runs, in the order it declares them.
     *
-    * Three names appear twice — two jobs each install pnpm, install the workspace and install the pinned
-    * browser — so this is a list and is compared as one.
+    * `Install pnpm` appears three times, while two jobs each install the workspace and the pinned browser,
+    * so this is a list and is compared as one.
     */
   val workflowSteps: List[String] = List(
     "Compile every module with -Werror",
     "Check formatting (scalafmt)",
     "Check lint rules (scalafix)",
     "Check the module layering rules (ADR-041)",
+    "Check immutable action references",
+    "Install pnpm",
+    "Reject high or critical dependency vulnerabilities",
     "Check the committed OpenAPI documents",
     "Check the committed error-code table",
     "Check the committed browser constants",
