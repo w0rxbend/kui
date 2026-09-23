@@ -1,5 +1,7 @@
 package kui.message.contract
 
+import java.util.Locale
+
 import cats.data.NonEmptySet
 import munit.FunSuite
 import sttp.tapir.DecodeResult
@@ -158,6 +160,17 @@ final class BrowseParamsSuite extends FunSuite {
     }
     assert(BrowseParams.directionCodec.decode("sideways").isInstanceOf[DecodeResult.Failure])
     assert(BrowseParams.isolationCodec.decode("read_whatever").isInstanceOf[DecodeResult.Failure])
+  }
+
+  test("browse vocabulary is decoded independently of the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(
+        BrowseParams.isolationCodec.decode("read_committed"),
+        DecodeResult.Value(IsolationLevel.ReadCommitted)
+      )
+    } finally Locale.setDefault(previous)
   }
 
   test("theDefaultDirectionOfASeekIsCarriedByTheKernelAndNotReinventedHere") {

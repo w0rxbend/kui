@@ -1,5 +1,7 @@
 package kui.message.contract
 
+import java.util.Locale
+
 import cats.Order
 import cats.data.NonEmptySet
 import sttp.tapir.CodecFormat.TextPlain
@@ -96,7 +98,7 @@ object BrowseParams {
   /** `FORWARD` or `BACKWARD`, case-insensitively, because a hand-written URL should not fail on capitals. */
   given directionCodec: Codec[String, Direction, TextPlain] =
     Codec.string.mapDecode(raw =>
-      Direction.from(raw.trim.toUpperCase) match {
+      Direction.from(raw.trim.toUpperCase(Locale.ROOT)) match {
         case Right(direction) => DecodeResult.Value(direction)
         case Left(error) => DecodeResult.Error(raw, new IllegalArgumentException(error.message))
       }
@@ -105,7 +107,7 @@ object BrowseParams {
   /** `READ_UNCOMMITTED` or `READ_COMMITTED`. */
   given isolationCodec: Codec[String, IsolationLevel, TextPlain] =
     Codec.string.mapDecode(raw =>
-      IsolationLevel.from(raw.trim.toUpperCase) match {
+      IsolationLevel.from(raw.trim.toUpperCase(Locale.ROOT)) match {
         case Right(level) => DecodeResult.Value(level)
         case Left(error) => DecodeResult.Error(raw, new IllegalArgumentException(error.message))
       }
