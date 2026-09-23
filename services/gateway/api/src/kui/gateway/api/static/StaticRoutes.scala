@@ -2,6 +2,7 @@ package kui.gateway.api.static
 
 import java.net.{URLConnection, URLDecoder}
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 
 import cats.effect.kernel.{Async, Sync}
 import cats.syntax.all.*
@@ -385,7 +386,7 @@ object StaticRoutes {
     if candidate.startsWith("W/") then candidate.substring(2) else candidate
 
   private def extensionOf(name: String): Option[String] =
-    Option.when(name.contains('.'))(name.substring(name.lastIndexOf('.') + 1).toLowerCase)
+    Option.when(name.contains('.'))(name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT))
 
   /** What a path with no matching file resolves to: the shell, so Waypoint can decide what the path means, or
     * the "not bundled" page when there is no shell to fall back to at all.

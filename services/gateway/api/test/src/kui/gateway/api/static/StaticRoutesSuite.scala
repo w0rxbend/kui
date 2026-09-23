@@ -1,5 +1,7 @@
 package kui.gateway.api.static
 
+import java.util.Locale
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
@@ -146,6 +148,21 @@ final class StaticRoutesSuite extends KuiIOSuite {
         // still answered rather than turned into a 404 by a change meant for JavaScript modules.
         assertEquals(response.code.code, 200, response.body)
       }
+    }
+  }
+
+  test("asset extensions are recognized independently of the host locale") {
+    val turkishLocale = Resource.make(
+      IO {
+        val previous = Locale.getDefault
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+        previous
+      }
+    )(previous => IO(Locale.setDefault(previous)))
+
+    turkishLocale.flatMap(_ => server()).use(_.get("/ui/MISSING.ICO")).map { response =>
+      assertEquals(response.code.code, 404, response.body)
+      assert(!response.body.contains(IndexHtml.BootstrapElementId), response.body)
     }
   }
 
