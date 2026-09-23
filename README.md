@@ -172,7 +172,9 @@ KUI uses the same domain modules in two deployment shapes:
 Start with the [minimal](deployment/examples/minimal.yaml),
 [three-cluster](deployment/examples/three-clusters.yaml), or
 [production-shaped](deployment/examples/production.yaml) configuration examples. Each example
-documents its deployment and security settings inline; the
+documents its deployment and security settings inline. The
+[production deployment guide](docs/operations/deployment.md) covers topology selection, image
+builds, secrets, ingress, probes, resource boundaries, upgrades, and rollback; the
 [metrics-source guide](docs/operations/configuration.md) covers Prometheus exposition and API
 sources, authentication, TLS/mTLS, caching, and limits.
 
@@ -190,6 +192,7 @@ principal.
 
 | Guide | Covers |
 | --- | --- |
+| [Production deployment](docs/operations/deployment.md) | Topologies, image builds, secrets, HTTPS ingress, probes, resources, upgrades, and rollback |
 | [Metrics sources](docs/operations/configuration.md) | Prometheus exposition and API sources, authentication, TLS/mTLS, caching, and limits |
 | [Message masking](docs/operations/masking.md) | Server-side rules for redacting sensitive record fields |
 | [Observability](docs/operations/observability.md) | Logs, metrics, traces, health, and readiness |
