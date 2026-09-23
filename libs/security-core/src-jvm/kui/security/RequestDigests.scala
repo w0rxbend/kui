@@ -1,6 +1,7 @@
 package kui.security
 
 import java.security.MessageDigest
+import java.util.Locale
 
 /** Building a [[RequestDigest]] from a request body.
   *
@@ -16,7 +17,7 @@ object RequestDigests {
 
   /** The digest of a call whose body has been read into memory. */
   def of(method: String, path: String, body: Array[Byte]): RequestDigest =
-    RequestDigest(method.toUpperCase, path, sha256Hex(body))
+    RequestDigest(method.toUpperCase(Locale.ROOT), path, sha256Hex(body))
 
   /** Lowercase hexadecimal SHA-256, the form every claim and log line in KUI uses. */
   def sha256Hex(bytes: Array[Byte]): String = {

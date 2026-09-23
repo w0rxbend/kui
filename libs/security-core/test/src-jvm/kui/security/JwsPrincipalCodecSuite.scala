@@ -1,6 +1,7 @@
 package kui.security
 
 import java.time.Instant
+import java.util.Locale
 
 import cats.data.NonEmptyList
 import munit.ScalaCheckSuite
@@ -199,6 +200,14 @@ final class JwsPrincipalCodecSuite extends ScalaCheckSuite {
       RequestDigests.of("GET", "/x", body),
       RequestDigests.of("GET", "/x", "the quick brown fon".getBytes("UTF-8"))
     )
+  }
+
+  test("the digest of a body normalizes its method independently of the default locale") {
+    val previousLocale = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(RequestDigests.of("options", "/x", Array.emptyByteArray).method, "OPTIONS")
+    } finally Locale.setDefault(previousLocale)
   }
 
   test("the hash of an empty body is the constant the shared half writes down") {
