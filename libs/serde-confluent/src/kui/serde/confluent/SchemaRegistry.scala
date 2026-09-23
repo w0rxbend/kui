@@ -10,7 +10,7 @@ import sttp.client4.*
 import sttp.model.{StatusCode, Uri}
 
 import kui.config.{SafeUrl, UrlPolicy}
-import kui.http.upstream.{UpstreamConfig, UpstreamFailure}
+import kui.http.upstream.{UpstreamClient, UpstreamConfig, UpstreamFailure}
 import kui.kernel.PositiveInt
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.serde.SchemaDescription
@@ -228,7 +228,7 @@ object SchemaRegistry {
           // is the honest description of "the call did not produce a response".
           case UpstreamFailure(error) => Left(error)
           case failure: Exception =>
-            Left(InfrastructureError.Unreachable(UpstreamName, describe(failure)))
+            Left(InfrastructureError.Unreachable(UpstreamName, UpstreamClient.safeFailureCause(failure)))
         }
 
     private def authenticated(request: Request[String]): Request[String] =
@@ -274,16 +274,5 @@ object SchemaRegistry {
         s"the schema registry's answer could not be understood: $why",
         Nil
       )
-
-    /** An exception's class and message, and nothing else.
-      *
-      * `KuiError`'s rule (no stack trace, no response body, no credential) applies to anything that ends up
-      * in a message, and a registry URL with a password in it is the exact thing a naive `toString` would
-      * publish.
-      */
-    private def describe(failure: Exception): String = {
-      val message = Option(failure.getMessage).filter(_.nonEmpty).getOrElse("no further detail")
-      s"${failure.getClass.getSimpleName}: $message"
-    }
   }
 }

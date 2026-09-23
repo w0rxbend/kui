@@ -346,6 +346,18 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     } yield assertEquals(result.map(_.cluster.name), Right("Production EU"))
   }
 
+  test("transport errors retain no exception-controlled credential text") {
+    val canary = "https://user:service-secret@internal.service"
+
+    SttpServiceClient.transportError(new java.net.ConnectException(canary)) match {
+      case InfrastructureError.Unreachable(upstream, cause) =>
+        assertEquals(upstream, "upstream")
+        assertEquals(cause, "ConnectException")
+        assert(!cause.contains("service-secret"), cause)
+      case other => fail(s"expected an unreachable upstream, got $other")
+    }
+  }
+
   test("aClientBuiltThroughResourceWithNoPolicyRefusesALoopbackUpstream") {
     // `resource`'s `policy` parameter defaults to `UrlPolicy.Strict`, and that default is the SSRF guard's
     // fail-safe: a composition root that says nothing gets the safe answer rather than the convenient one.

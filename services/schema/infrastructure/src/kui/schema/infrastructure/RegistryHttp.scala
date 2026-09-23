@@ -7,7 +7,7 @@ import sttp.client4.*
 import sttp.model.{MediaType, Method, StatusCode, Uri}
 
 import kui.config.SafeUrl
-import kui.http.upstream.UpstreamFailure
+import kui.http.upstream.{UpstreamClient, UpstreamFailure}
 import kui.kernel.error.{ApplicationError, ErrorCode, FieldError, InfrastructureError, KuiError}
 import kui.kernel.{SchemaId, Subject}
 import kui.schema.domain.*
@@ -292,7 +292,7 @@ final class RegistryHttp[F[_]: Async](
             // did not produce a response, which is the honest description.
             case UpstreamFailure(error) => Left(error)
             case failure: Exception =>
-              Left(InfrastructureError.Unreachable(UpstreamName, describe(failure)))
+              Left(InfrastructureError.Unreachable(UpstreamName, UpstreamClient.safeFailureCause(failure)))
           }
     }
 
@@ -472,14 +472,6 @@ final class RegistryHttp[F[_]: Async](
       s"the configured address does not look like a Schema Registry: $what",
       Nil
     )
-
-  /** An exception's class and message, and nothing else. A connection failure's text routinely contains a URL
-    * with a password in it, which is exactly what a naive `toString` would publish.
-    */
-  private def describe(failure: Exception): String = {
-    val message = Option(failure.getMessage).filter(_.nonEmpty).getOrElse("no further detail")
-    s"${failure.getClass.getSimpleName}: $message"
-  }
 }
 
 object RegistryHttp {

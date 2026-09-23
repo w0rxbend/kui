@@ -20,6 +20,7 @@ import kui.cluster.contract.{ClusterEndpoints, ProfileEndpoints}
 import kui.contracts.ErrorEnvelope.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.http.sse.SseWire
+import kui.http.upstream.UpstreamClient
 import kui.kernel.error.{FieldError, InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, UserName}
 import kui.observability.{MetricNames, Telemetry}
@@ -598,7 +599,7 @@ object HttpClusterProfiles {
       metrics.fetches.inc(Attributes(Attribute(MetricNames.Attr.Outcome, outcome)))
 
     private def unreachable(failure: Throwable): KuiError =
-      InfrastructureError.Unreachable(ServiceName, Option(failure.getMessage).getOrElse(failure.toString))
+      InfrastructureError.Unreachable(ServiceName, UpstreamClient.safeFailureCause(failure))
   }
 
   /** What this client calls the far side in an error message and on a metric. */

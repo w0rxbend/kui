@@ -14,6 +14,7 @@ import kui.contracts.capability.{CapabilityKey, ClusterCapability, ReasonCode}
 import kui.contracts.health.ReadinessReport
 import kui.gateway.application.client.{CallContext, ServiceClient, ServiceClients}
 import kui.http.health.HealthEndpoints
+import kui.http.upstream.UpstreamClient
 import kui.kernel.error.{ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.{CorrelationId, ServiceId}
 import kui.security.Principal
@@ -184,8 +185,7 @@ object ReadinessPoller {
         // service would stay at whatever state it was last reported as, for ever, with nothing saying so.
         .handleError(error =>
           Left(
-            InfrastructureError
-              .Unreachable(service.value, Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+            InfrastructureError.Unreachable(service.value, UpstreamClient.safeFailureCause(error))
           )
         )
 

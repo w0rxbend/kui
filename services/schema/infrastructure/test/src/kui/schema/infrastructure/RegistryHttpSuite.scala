@@ -400,17 +400,14 @@ final class RegistryHttpSuite extends KuiIOSuite {
       }
   }
 
-  test("a connection failure is described by its class and message, never by its toString") {
-    // `describe` keeps the exception's *simple* class name and its message and throws the rest away, and
-    // it can be reduced to `failure.toString` with every other case in this file green. A `toString`
-    // carries the exception's package and, worse, its whole cause chain — which for a transport failure
-    // is where the connection's own text ends up. The class is the half an operator can act on.
+  test("a connection failure retains its class but never its potentially sensitive message") {
+    val canary = "https://user:registry-secret@registry-internal:8081"
     val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
       .thenRespondF { _ =>
         IO.raiseError(
           new RuntimeException(
-            "Connection refused",
-            new java.net.ConnectException("no route to registry-internal:8081")
+            canary,
+            new java.net.ConnectException(canary)
           )
         )
       }
@@ -418,14 +415,8 @@ final class RegistryHttpSuite extends KuiIOSuite {
     new RegistryHttp[IO](backend, base, RegistryCredentials.anonymous[IO]).subjects.map {
       case Left(InfrastructureError.Unreachable(upstream, cause)) =>
         assertEquals(upstream, RegistryHttp.UpstreamName)
-        assert(
-          clue(cause).startsWith("ConnectException: ") || clue(cause).startsWith("RuntimeException: "),
-          "the failure's simple class name is what names the kind of failure"
-        )
-        assert(
-          !cause.contains("java.net.") && !cause.contains("java.lang."),
-          "a toString drags the exception's package and its cause chain into the log line"
-        )
+        assertEquals(cause, "ConnectException")
+        assert(!cause.contains("registry-secret"), cause)
       case other => fail(s"expected an unreachable upstream, got $other")
     }
   }

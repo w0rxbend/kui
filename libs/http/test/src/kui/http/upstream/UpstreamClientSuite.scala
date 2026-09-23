@@ -368,10 +368,13 @@ final class UpstreamClientSuite extends CatsEffectSuite {
       Some(InfrastructureError.CircuitOpen("schema-registry", since))
     )
 
+    val transportCanary = "https://user:transport-secret@registry.internal"
+    val transport = errorFor(Left(new java.net.ConnectException(transportCanary)))
     assertEquals(
-      errorFor(Left(new java.net.ConnectException("refused"))),
-      Some(InfrastructureError.Unreachable("schema-registry", "refused"))
+      transport,
+      Some(InfrastructureError.Unreachable("schema-registry", "ConnectException"))
     )
+    assert(!transport.toString.contains("transport-secret"), transport.toString)
   }
 
   test("a response body limit remains a non-transport contract failure through wrapper exceptions") {

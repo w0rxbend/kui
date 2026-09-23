@@ -505,10 +505,8 @@ final class KsqlHttpSuite extends KuiIOSuite {
     ).objects.map {
       case Left(kui.kernel.error.InfrastructureError.Unreachable(upstream, cause)) =>
         assertEquals(upstream, KsqlHttp.UpstreamName)
-        // `cause` is the field that reaches the log. An exception with no message of its own says so in
-        // words rather than trailing off, and the class is named without its package, so nothing the
-        // exception class itself chose to print gets through.
-        assertEquals(cause, "RuntimeException: no further detail")
+        // `cause` reaches the log, so it carries only a static class name and never exception-controlled text.
+        assertEquals(cause, "RuntimeException")
       case other => fail(s"expected an unreachable upstream, got $other")
     }
   }

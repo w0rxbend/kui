@@ -8,7 +8,7 @@ import sttp.model.{Method, StatusCode}
 
 import kui.config.SafeUrl
 import kui.connect.domain.*
-import kui.kernel.error.ErrorCode
+import kui.kernel.error.{ErrorCode, InfrastructureError}
 import kui.kernel.{ConnectName, ConnectorName}
 import kui.testkit.KuiIOSuite
 
@@ -371,6 +371,20 @@ final class ConnectHttpSuite extends KuiIOSuite {
     worker { case "/connectors" => (StatusCode.Unauthorized, "") }.connectors.map(answer =>
       assertEquals(answer.left.map(_.code), Left(ErrorCode.UpstreamAuth))
     )
+  }
+
+  test("a transport failure never copies a credential-bearing URL into its diagnostic") {
+    val canary = "https://user:connect-secret@connect.internal"
+    val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF(_ => IO.raiseError(new java.net.ConnectException(canary)))
+
+    new ConnectHttp[IO](backend, base, payments, ConnectCredentials.anonymous[IO]).connectors.map {
+      case Left(InfrastructureError.Unreachable(upstream, cause)) =>
+        assertEquals(upstream, ConnectHttp.upstreamName(payments))
+        assertEquals(cause, "ConnectException")
+        assert(!cause.contains("connect-secret"), cause)
+      case other => fail(s"expected an unreachable upstream, got $other")
+    }
   }
 
   test("requests are built relative to the root, because failover puts the base path back on") {

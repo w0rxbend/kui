@@ -400,7 +400,7 @@ object SttpServiceClient {
       case other =>
         InfrastructureError.Unreachable(
           "upstream",
-          Option(other.getMessage).getOrElse(other.getClass.getSimpleName)
+          UpstreamClient.safeFailureCause(other)
         )
     }
 }

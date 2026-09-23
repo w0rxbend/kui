@@ -8,7 +8,7 @@ import sttp.client4.*
 import sttp.model.{StatusCode, Uri}
 
 import kui.config.{MetricsSourceSettings, SafeUrl}
-import kui.http.upstream.UpstreamFailure
+import kui.http.upstream.{UpstreamClient, UpstreamFailure}
 import kui.kernel.error.{ErrorCode, InfrastructureError, KuiError}
 import kui.metrics.domain.BrokerSample
 
@@ -79,7 +79,8 @@ final class PrometheusBrokerScrape[F[_]: Async](
         // The resilient backend carries its typed error — a timeout, an open circuit, a refused address —
         // inside this one exception rather than losing it in a message.
         case UpstreamFailure(error) => Left(error)
-        case failure: Exception => Left(InfrastructureError.Unreachable(UpstreamName, describe(failure)))
+        case failure: Exception =>
+          Left(InfrastructureError.Unreachable(UpstreamName, UpstreamClient.safeFailureCause(failure)))
       }
 }
 
@@ -109,9 +110,4 @@ object PrometheusBrokerScrape {
       s"the metrics exporter's answer could not be understood: $why",
       Nil
     )
-
-  private def describe(failure: Exception): String = {
-    val message = Option(failure.getMessage).filter(_.nonEmpty).getOrElse("no further detail")
-    s"${failure.getClass.getSimpleName}: $message"
-  }
 }

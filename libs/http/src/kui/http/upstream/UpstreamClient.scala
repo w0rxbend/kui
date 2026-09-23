@@ -196,10 +196,19 @@ object UpstreamClient {
         Some(
           InfrastructureError.Unreachable(
             config.name,
-            Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+            safeFailureCause(error)
           )
         )
     }
+
+  /** A stable transport diagnostic that cannot copy credentials, hosts, or query strings from an exception.
+    *
+    * Exception messages are controlled by HTTP clients and the operating system and commonly include the
+    * address being dialled. Configured addresses may contain sensitive user-info, so only the exception's
+    * static class name is retained for logs.
+    */
+  private[kui] def safeFailureCause(error: Throwable): String =
+    Option(error.getClass.getSimpleName).filter(_.nonEmpty).getOrElse("transport failure")
 
   private[upstream] def isResponseLimitCause(error: Throwable): Boolean = {
     @annotation.tailrec

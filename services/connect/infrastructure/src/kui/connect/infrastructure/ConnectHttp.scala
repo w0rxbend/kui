@@ -9,7 +9,7 @@ import sttp.model.{StatusCode, Uri}
 
 import kui.config.SafeUrl
 import kui.connect.domain.*
-import kui.http.upstream.UpstreamFailure
+import kui.http.upstream.{UpstreamClient, UpstreamFailure}
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.{ConnectName, ConnectorName, TaskId}
 
@@ -263,7 +263,7 @@ final class ConnectHttp[F[_]: Async](
             // did not produce a response, which is the honest description.
             case UpstreamFailure(error) => Left(error)
             case failure: Exception =>
-              Left(InfrastructureError.Unreachable(upstreamName, describe(failure)))
+              Left(InfrastructureError.Unreachable(upstreamName, UpstreamClient.safeFailureCause(failure)))
           }
     }
 
@@ -334,14 +334,6 @@ final class ConnectHttp[F[_]: Async](
     * deployment with two Connect clusters must be able to see which of them is failing.
     */
   private def upstreamName: String = ConnectHttp.upstreamName(connect)
-
-  /** An exception's class and message, and nothing else. A connection failure's text routinely contains a URL
-    * with a password in it, which is exactly what a naive `toString` would publish.
-    */
-  private def describe(failure: Exception): String = {
-    val message = Option(failure.getMessage).filter(_.nonEmpty).getOrElse("no further detail")
-    s"${failure.getClass.getSimpleName}: $message"
-  }
 }
 
 object ConnectHttp {

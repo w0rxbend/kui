@@ -11,7 +11,7 @@ import sttp.client4.*
 import sttp.model.{StatusCode, Uri}
 
 import kui.config.SafeUrl
-import kui.http.upstream.{BoundedResponse, UpstreamFailure}
+import kui.http.upstream.{BoundedResponse, UpstreamClient, UpstreamFailure}
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.ksql.application.KsqlClient
 import kui.ksql.domain.*
@@ -220,9 +220,7 @@ final class KsqlHttp[F[_]: Async](
       case other =>
         InfrastructureError.Unreachable(
           upstreamName,
-          // An exception's class and message, and nothing else. A connection failure's text routinely
-          // contains a URL with a password in it, which is exactly what a naive `toString` would publish.
-          s"${other.getClass.getSimpleName}: ${Option(other.getMessage).getOrElse("no further detail")}"
+          UpstreamClient.safeFailureCause(other)
         )
     }
 
