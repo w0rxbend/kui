@@ -2,9 +2,11 @@ package kui.message.application
 
 import java.time.Instant
 
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
+import cats.Applicative
 import cats.effect.{IO, Ref}
+import cats.effect.kernel.{Clock, Concurrent}
 import cats.syntax.all.*
 import fs2.Stream
 
@@ -39,6 +41,14 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   private val topic = TopicName.unsafe("audit.log.raw")
   private val budget = PollBudget.unsafe(1000, 1L << 20, 30.seconds)
   private val key = Secret("test-key".getBytes("UTF-8"))
+
+  final private class CountingClock(calls: Ref[IO, Int]) extends Clock[IO] {
+    def applicative: Applicative[IO] = Applicative[IO]
+
+    def monotonic: IO[FiniteDuration] = calls.update(_ + 1).as(0.seconds)
+
+    def realTime: IO[FiniteDuration] = IO.pure(0.seconds)
+  }
 
   private val clusters: ClusterProfileSource[IO] = (id: ClusterId) =>
     IO.pure(
@@ -607,6 +617,25 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
       // it is the only thing on the stream that would ever say so.
       assertEquals((consumed.read, consumed.delivered), (3L, 2L))
     }
+  }
+
+  test("a browse reads the monotonic clock only when it reports elapsed time") {
+    val records = List.tabulate(BrowseUseCase.ProgressEvery - 1)(offset => raw(offset.toLong, s"value-$offset"))
+
+    for {
+      calls <- Ref.of[IO, Int](0)
+      clock = new CountingClock(calls)
+      browse = BrowseUseCase.make[IO](
+        clusters,
+        serdes("<nothing fails>"),
+        source(records.map(_.asRight[KuiError])),
+        CursorCodec.hmacSha256[IO](key),
+        FilterSource.unsupported[IO],
+        RecordMasking.none[IO]
+      )(using summon[Concurrent[IO]], clock)
+      _ <- events(browse, request(BrowseUseCase.ProgressEvery))
+      observed <- calls.get
+    } yield assertEquals(observed, 2, "only the browse start and terminal accounting need the clock")
   }
 
   // ---------------------------------------------------------------------------- an unknown cluster

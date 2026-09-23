@@ -282,28 +282,25 @@ object BrowseUseCase {
             if matches(request, record) then verdictOf(filter, record)
             else FilterVerdict.DidNotMatch.pure[F]
           matched = verdict == FilterVerdict.Matched
-          elapsed <- Clock[F].monotonic
           next <- state.updateAndGet(_.saw(raw, matched, failed(verdict)))
-        } yield {
-          val progress =
+          progress <-
             if next.read % ProgressEvery.toLong == 0L then
-              Chunk.singleton(
-                BrowseEvent
-                  .Consumed(next.bytes, next.read, next.delivered, next.filterErrors, elapsed, budget)
+              Clock[F].monotonic.map(elapsed =>
+                Chunk.singleton(
+                  BrowseEvent
+                    .Consumed(next.bytes, next.read, next.delivered, next.filterErrors, elapsed, budget)
+                )
               )
-            else Chunk.empty[BrowseEvent]
-
-          Step(
-            events =
-              (if matched then Chunk.singleton(BrowseEvent.Record(record)) else Chunk.empty) ++ progress,
-            // A tail has no total. `limit` is a page size, and a page is a thing a bounded browse has; a
-            // browse that is still open after an hour has delivered whatever was written in that hour and
-            // is not finished. The bound on a tail is on the *screen* — `BrowseSession.MaxRows` keeps the
-            // newest five hundred rows and drops the rest — because that is where an unbounded stream can
-            // be bounded without deciding on the user's behalf that they have watched enough.
-            more = request.live || next.delivered < request.limit.toLong
-          )
-        }
+            else Chunk.empty[BrowseEvent].pure[F]
+        } yield Step(
+          events = (if matched then Chunk.singleton(BrowseEvent.Record(record)) else Chunk.empty) ++ progress,
+          // A tail has no total. `limit` is a page size, and a page is a thing a bounded browse has; a
+          // browse that is still open after an hour has delivered whatever was written in that hour and
+          // is not finished. The bound on a tail is on the *screen* — `BrowseSession.MaxRows` keeps the
+          // newest five hundred rows and drops the rest — because that is where an unbounded stream can
+          // be bounded without deciding on the user's behalf that they have watched enough.
+          more = request.live || next.delivered < request.limit.toLong
+        )
 
       /** The terminal events: either the failure that stopped the browse, or the accounting and the cursor.
         */
