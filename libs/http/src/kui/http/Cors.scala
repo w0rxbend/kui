@@ -1,5 +1,7 @@
 package kui.http
 
+import java.util.Locale
+
 import sttp.model.Method
 import sttp.tapir.server.interceptor.Interceptor
 import sttp.tapir.server.interceptor.cors.{CORSConfig, CORSInterceptor}
@@ -37,13 +39,13 @@ object Cors {
   def interceptor[F[_]](config: CorsConfig): Option[Interceptor[F]] =
     if !config.enabled || config.origins.isEmpty then None
     else {
-      val allowed = config.origins.map(_.toLowerCase).toSet
+      val allowed = config.origins.map(_.toLowerCase(Locale.ROOT)).toSet
 
       val corsConfig = CORSConfig.default
         // Matching against a fixed set, rather than reflecting whatever the caller sent, is what
         // makes the allow-list an allow-list. Tapir echoes the matched origin back and adds
         // `Vary: Origin`, so a cache cannot serve one origin's response to another.
-        .allowMatchingOrigins(origin => allowed.contains(origin.toLowerCase))
+        .allowMatchingOrigins(origin => allowed.contains(origin.toLowerCase(Locale.ROOT)))
         // Credentials are allowed only because every origin here was named by an operator. This is
         // the pairing that `*` would make unsafe, and the reason `*` is refused at load time.
         .allowCredentials

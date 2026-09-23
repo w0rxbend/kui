@@ -1,5 +1,7 @@
 package kui.http
 
+import java.util.Locale
+
 import cats.effect.IO
 import munit.CatsEffectSuite
 import sttp.capabilities.fs2.Fs2Streams
@@ -62,6 +64,22 @@ final class CorsSuite extends CatsEffectSuite {
     TestServer.resource(List(ping), cors = allowed).use { server =>
       server.get("/ping", Map("Origin" -> "https://evil.example.com")).map { response =>
         assertEquals(response.header(AllowOrigin), None)
+      }
+    }
+  }
+
+  test("origin matching is independent of the host locale") {
+    val configured = CorsConfig(enabled = true, List("HTTPS://INTERNAL.EXAMPLE.COM"))
+    val previous = Locale.getDefault
+    val interceptor =
+      try {
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+        Cors.interceptor[IO](configured).getOrElse(fail("enabled CORS produced no interceptor"))
+      } finally Locale.setDefault(previous)
+
+    TestServer.resource(List(ping), interceptors = _ => List(interceptor)).use { server =>
+      server.get("/ping", Map("Origin" -> "https://internal.example.com")).map { response =>
+        assertEquals(response.header(AllowOrigin), Some("https://internal.example.com"))
       }
     }
   }
