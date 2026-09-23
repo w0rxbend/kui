@@ -688,6 +688,145 @@
         }
       }
     },
+    "/internal/v1/clusters/{clusterId}/settings/messages" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Read this principal's message browser defaults for one cluster",
+        "description" : "Returns the saved page size and presentation mode, or product defaults when none were saved.",
+        "operationId" : "cluster.messageBrowserSettings.get",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Persist this principal's message browser defaults for one cluster",
+        "description" : "Mutation (cluster.messageBrowserSettings.put). Replaces the bounded browse page size and presentation mode in KUI metadata; it does not alter Kafka.",
+        "operationId" : "cluster.messageBrowserSettings.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageBrowserSettingsDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/clusters/connection-test" : {
       "post" : {
         "tags" : [
@@ -1599,6 +1738,24 @@
         "type" : "object",
         "additionalProperties" : {
           "type" : "string"
+        }
+      },
+      "MessageBrowserSettingsDto" : {
+        "title" : "MessageBrowserSettingsDto",
+        "description" : "The default page size and presentation mode for bounded message browsing",
+        "type" : "object",
+        "required" : [
+          "pageSize",
+          "mode"
+        ],
+        "properties" : {
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "mode" : {
+            "type" : "string"
+          }
         }
       },
       "OAuthBearer" : {

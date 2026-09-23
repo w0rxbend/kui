@@ -196,6 +196,7 @@ principal.
 | [Metrics sources](docs/operations/configuration.md) | Prometheus exposition and API sources, authentication, TLS/mTLS, caching, and limits |
 | [Message masking](docs/operations/masking.md) | Server-side rules for redacting sensitive record fields |
 | [Observability](docs/operations/observability.md) | Logs, metrics, traces, health, and readiness |
+| [Error codes](docs/api/error-codes.md) | Generated HTTP status, retryability, area, and meaning for every stable API error code |
 | [Architecture](ARCHITECTURE.md) | Runtime boundaries, fault isolation, and module design |
 | [OpenAPI](docs/api/openapi.json) | The merged HTTP contract |
 
