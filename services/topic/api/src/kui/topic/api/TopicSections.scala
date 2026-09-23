@@ -1,6 +1,7 @@
 package kui.topic.api
 
 import java.time.Instant
+import java.util.Locale
 
 import kui.cache.{Snapshot, SnapshotStatus}
 import kui.contracts.Section
@@ -101,7 +102,7 @@ object TopicSections {
     * typed reason, this function is what deletes.
     */
   def reasonFor(reason: String): ReasonCode = {
-    val lowered = reason.toLowerCase
+    val lowered = reason.toLowerCase(Locale.ROOT)
     if lowered.contains("timeout") || lowered.contains("timed out") then ReasonCode.UpstreamTimeout
     else if lowered.contains("breaker") || lowered.contains("circuit") then ReasonCode.CircuitOpen
     else if lowered.contains("authoriz") || lowered.contains("authentic") then ReasonCode.UpstreamAuth

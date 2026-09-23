@@ -1,6 +1,7 @@
 package kui.topic.api
 
 import java.time.Instant
+import java.util.Locale
 
 import munit.FunSuite
 
@@ -109,5 +110,14 @@ final class TopicSectionsSuite extends FunSuite {
       TopicSections.ofFresh(Fresh.FromSnapshot("old", scrapedAt, "something went wrong"), now)(identity),
       Section.Stale("old", scrapedAt, ReasonCode.UpstreamUnavailable)
     )
+  }
+
+  test("fallback reasons are classified independently of the host locale") {
+    val previous = Locale.getDefault
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(TopicSections.reasonFor("UPSTREAM TIMEOUT"), ReasonCode.UpstreamTimeout)
+      assertEquals(TopicSections.reasonFor("CIRCUIT BREAKER OPEN"), ReasonCode.CircuitOpen)
+    } finally Locale.setDefault(previous)
   }
 }
