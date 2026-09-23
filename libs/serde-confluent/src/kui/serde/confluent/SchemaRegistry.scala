@@ -1,5 +1,7 @@
 package kui.serde.confluent
 
+import java.util.Locale
+
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.data.NonEmptyList
@@ -38,7 +40,7 @@ enum SchemaType {
 object SchemaType {
 
   def fromRegistry(raw: Option[String]): Either[String, SchemaType] =
-    raw.map(_.trim.toUpperCase) match {
+    raw.map(_.trim.toUpperCase(Locale.ROOT)) match {
       case None | Some("") | Some("AVRO") => Right(Avro)
       case Some("JSON") => Right(Json)
       case Some("PROTOBUF") => Right(Protobuf)

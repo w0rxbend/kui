@@ -1,5 +1,7 @@
 package kui.tools
 
+import java.util.Locale
+
 import kui.contracts.HttpHeaders
 import kui.contracts.capability.{CapabilityState, DegradedReason, ReasonCode}
 import kui.contracts.sse.SseEventName
@@ -329,6 +331,6 @@ object BrowserConstants {
     code.wire
       .stripPrefix("KUI-")
       .split('-')
-      .map(part => part.take(1) + part.drop(1).toLowerCase)
+      .map(part => part.take(1) + part.drop(1).toLowerCase(Locale.ROOT))
       .mkString
 }

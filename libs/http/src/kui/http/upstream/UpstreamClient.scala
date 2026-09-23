@@ -1,5 +1,6 @@
 package kui.http.upstream
 
+import java.util.Locale
 import java.util.concurrent.TimeoutException
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
@@ -152,12 +153,13 @@ object UpstreamClient {
   ): Resource[F, Unit] =
     transitions
       .evalMap { event =>
+        val state = event.state.toString.toLowerCase(Locale.ROOT)
         logger.info(
           Map(
             MetricNames.Attr.Upstream -> upstream,
-            MetricNames.Attr.State -> event.state.toString.toLowerCase
+            MetricNames.Attr.State -> state
           ) ++ event.lastError.map("error.last" -> _)
-        )(s"circuit for $upstream is now ${event.state.toString.toLowerCase}")
+        )(s"circuit for $upstream is now $state")
       }
       .compile
       .drain

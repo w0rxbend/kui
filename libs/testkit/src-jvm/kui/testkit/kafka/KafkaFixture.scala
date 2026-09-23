@@ -2,6 +2,7 @@ package kui.testkit.kafka
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
+import java.util.Locale
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.CollectionConverters.*
@@ -89,7 +90,9 @@ object KafkaFixture {
       startTimeout: FiniteDuration = 90.seconds
   ): Resource[F, RunningBroker] =
     for {
-      directory <- temporaryDirectory[F](s"kui-kafka-${topology.securityProtocol.toLowerCase}")
+      directory <- temporaryDirectory[F](
+        s"kui-kafka-${topology.securityProtocol.toLowerCase(Locale.ROOT)}"
+      )
       materials <- Resource.eval(tlsMaterials[F](topology, directory))
       container <- container[F](topology, materials.map(_._2), directory, startTimeout)
       broker <- Resource.eval(describe[F](topology, container, materials.map(_._1)))
