@@ -8,6 +8,61 @@ import { CLUSTER, test, expect, type KuiApi } from "./fixtures";
 import { eachTileSaysSomething } from "./statTiles";
 
 test.describe("the shell", () => {
+  test("keeps the page usable below compact navigation on phone widths", async ({ page }) => {
+    const cases = [
+      {
+        width: 320,
+        height: 800,
+        path: "/ui/settings",
+        ready: "[data-testid='page-settings']",
+      },
+      {
+        width: 390,
+        height: 844,
+        path: `/ui/clusters/${CLUSTER}/topics/orders.v1/messages?seekTo=beginning`,
+        ready: ".kui-browse",
+      },
+    ] as const;
+
+    for (const phone of cases) {
+      await page.setViewportSize({ width: phone.width, height: phone.height });
+      await page.goto(phone.path);
+      await expect(page.locator(phone.ready)).toBeVisible();
+
+      const content = page.locator(".kui-frame__content");
+      await expect
+        .poll(async () => content.evaluate((element) => element.getBoundingClientRect().top))
+        .toBeLessThan(180);
+      await expect
+        .poll(async () => content.evaluate((element) => element.getBoundingClientRect().height))
+        .toBeGreaterThan(phone.height - 180);
+
+      const topbar = page.getByTestId("topbar");
+      await expect
+        .poll(async () =>
+          topbar.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+        )
+        .toBe(true);
+
+      if (phone.width === 390) {
+        const lastDestination = page.getByTestId("nav-ksql");
+        await lastDestination.focus();
+        await expect(lastDestination).toBeFocused();
+        await expect
+          .poll(async () => {
+            const strip = await page.locator(".kui-nav-drawer__nav").boundingBox();
+            const destination = await lastDestination.boundingBox();
+            if (strip === null || destination === null) return false;
+            return (
+              destination.x >= strip.x &&
+              destination.x + destination.width <= strip.x + strip.width
+            );
+          })
+          .toBe(true);
+      }
+    }
+  });
+
   /**
    * The smoke test, and it changed this wave for a reason worth writing down.
    *

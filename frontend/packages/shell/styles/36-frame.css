@@ -126,3 +126,101 @@
     width: 100%;
   }
 }
+
+/* --- Phone windows -----------------------------------------------------------------------------
+ *
+ * The tablet strip above still gives a drawer up to 40% of the viewport. On a phone that leaves
+ * less than half the screen for the page and makes the top bar's intrinsic width disappear behind
+ * the frame's intentional horizontal clip. Keep every destination reachable, but turn the drawer
+ * into a compact cluster heading plus one horizontally scrollable navigation row. */
+@media (max-width: 599px) {
+  .kui-frame {
+    grid-template-rows: var(--kui-topbar-height) auto minmax(0, 1fr);
+    grid-template-areas:
+      "rail topbar"
+      "rail drawer"
+      "rail content";
+  }
+
+  .kui-frame__drawer {
+    max-height: none;
+    overflow: hidden;
+  }
+
+  .kui-nav-drawer {
+    display: grid;
+    grid-template-rows: auto auto;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--kui-color-border);
+  }
+
+  .kui-brand {
+    padding: var(--kui-space-2) var(--kui-space-3);
+  }
+
+  .kui-brand__caption {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .kui-nav-drawer__nav {
+    display: flex;
+    gap: var(--kui-space-2);
+    padding: var(--kui-space-1) var(--kui-space-2);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .kui-nav-group {
+    flex: 0 0 auto;
+  }
+
+  .kui-nav-group + .kui-nav-group {
+    padding-left: var(--kui-space-2);
+    margin-top: 0;
+    border-top: 0;
+    border-left: 1px solid var(--kui-color-border);
+  }
+
+  .kui-nav-group__head,
+  .kui-storage,
+  .kui-cluster-card__slot {
+    display: none;
+  }
+
+  .kui-nav-group__list {
+    flex-direction: row;
+  }
+
+  .kui-nav-item {
+    white-space: nowrap;
+  }
+
+  .kui-topbar {
+    gap: var(--kui-space-2);
+    padding: 0 var(--kui-space-2);
+  }
+
+  /* The compact drawer keeps the selected cluster in words immediately below this band, so the
+   * installation breadcrumb can yield its space to search without hiding the page's identity. */
+  .kui-topbar__where {
+    display: none;
+  }
+
+  .kui-topbar__actions {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: var(--kui-space-1);
+  }
+
+  .kui-global-search {
+    flex: 1 1 0;
+  }
+
+  .kui-appearance,
+  .kui-notices {
+    max-width: calc(100vw - var(--kui-rail-width) - var(--kui-space-4));
+  }
+}
