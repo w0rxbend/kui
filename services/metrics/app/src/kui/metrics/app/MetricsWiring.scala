@@ -242,7 +242,11 @@ object MetricsWiring {
           metrics = cacheMetrics
         )
       )
-      scrape = new PrometheusBrokerScrape[F](upstream.backend, settings.url)
+      scrape = new PrometheusBrokerScrape[F](
+        upstream.backend,
+        settings.url,
+        settings.maxResponseBytes.toLong
+      )
       _ <- BrokerScrapeLoop.resource[F](cluster, scrape, buffer, metrics.scrapeInterval, logger)
     } yield buffer
 

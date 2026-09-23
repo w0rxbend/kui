@@ -3,6 +3,7 @@ package kui.metrics.infrastructure
 import java.time.Instant
 
 import cats.effect.IO
+import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.{BackendStub, ResponseStub, StubBody}
 import sttp.client4.{Backend, Response}
@@ -10,6 +11,7 @@ import sttp.model.StatusCode
 
 import kui.config.SafeUrl
 import kui.kernel.error.ErrorCode
+import kui.metrics.infrastructure.prometheus.{PrometheusTestResponse, PrometheusTestServer}
 import kui.testkit.KuiIOSuite
 
 /** What the scrape does with each answer an address can give.
@@ -91,5 +93,41 @@ final class PrometheusBrokerScrapeSuite extends KuiIOSuite {
       // from "the exporter is down".
       case Left(failure) => assertEquals(failure.code, ErrorCode.UpstreamAuth)
     }
+  }
+
+  test("a real chunked response within the configured byte ceiling is parsed") {
+    PrometheusTestServer
+      .resource(PrometheusTestResponse(200, served, chunked = true))
+      .use { server =>
+        HttpClientFs2Backend.resource[IO]().use { backend =>
+          val scrape = new PrometheusBrokerScrape[IO](
+            backend,
+            SafeUrl.unsafe(server.baseUrl("/metrics")),
+            served.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+          )
+
+          scrape.sample(at).map(result => assert(result.isRight, clue(result)))
+        }
+      }
+  }
+
+  test("a chunked response above the configured byte ceiling is rejected before parsing") {
+    val limit = 64L
+
+    PrometheusTestServer
+      .resource(PrometheusTestResponse(200, "x" * (limit.toInt + 1), chunked = true))
+      .use { server =>
+        HttpClientFs2Backend.resource[IO]().use { backend =>
+          val scrape = new PrometheusBrokerScrape[IO](
+            backend,
+            SafeUrl.unsafe(server.baseUrl("/metrics")),
+            limit
+          )
+
+          scrape
+            .sample(at)
+            .map(result => assertEquals(result.left.map(_.code), Left(ErrorCode.UpstreamUnavailable)))
+        }
+      }
   }
 }

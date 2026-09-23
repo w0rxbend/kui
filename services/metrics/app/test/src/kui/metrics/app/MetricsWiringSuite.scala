@@ -155,13 +155,21 @@ final class MetricsWiringSuite extends KuiIOSuite {
       callTimeout: FiniteDuration = 2.seconds,
       retention: FiniteDuration = 24.hours,
       maxSamples: Int = 5000,
+      maxResponseBytes: Int = MetricsSourceSettings.DefaultMaxResponseBytes,
       kind: MetricsSourceKind = MetricsSourceKind.Prometheus
   ): MetricsConfig =
     MetricsConfig(
       scrapeInterval = interval,
       retention = retention,
       maxSamplesPerSeries = maxSamples,
-      sources = Map(quickstart -> MetricsSourceSettings(url, kind, callTimeout))
+      sources = Map(
+        quickstart -> MetricsSourceSettings(
+          url,
+          kind,
+          callTimeout,
+          maxResponseBytes = maxResponseBytes
+        )
+      )
     )
 
   private def querySettings(
@@ -259,6 +267,31 @@ final class MetricsWiringSuite extends KuiIOSuite {
         }
       }
     } yield assertEquals(rates.distinct, List(124800.5), s"expected the served rate on the wire, got $rates")
+  }
+
+  test("the collector applies the configured response byte ceiling") {
+    val limit = MetricsSourceSettings.MinResponseBytes
+    val oversized = exposition(1.0) + "#" + ("x" * limit)
+
+    for {
+      log <- FakeStructuredLogger[IO]
+      observed <- exporter(_ => oversized).use { serving =>
+        wiring(
+          metricsConfig(serving.url, maxResponseBytes = limit),
+          UrlPolicy.Dev,
+          log
+        ).use { server =>
+          IO.sleep(600.millis) *> (for {
+            document <- throughputOf(server, quickstart)
+            hits <- serving.hits
+          } yield (document, hits))
+        }
+      }
+    } yield {
+      val (document, hits) = observed
+      assert(hits > 0, s"expected the exporter to be scraped, got $hits requests")
+      assertEquals(measuredRates(document), Nil)
+    }
   }
 
   test("a wiring built by MetricsWiring.make scrapes at the configured interval") {

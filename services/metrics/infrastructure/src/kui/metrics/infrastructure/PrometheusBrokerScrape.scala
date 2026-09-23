@@ -7,7 +7,7 @@ import cats.syntax.all.*
 import sttp.client4.*
 import sttp.model.{StatusCode, Uri}
 
-import kui.config.SafeUrl
+import kui.config.{MetricsSourceSettings, SafeUrl}
 import kui.http.upstream.UpstreamFailure
 import kui.kernel.error.{ErrorCode, InfrastructureError, KuiError}
 import kui.metrics.domain.BrokerSample
@@ -47,7 +47,11 @@ trait BrokerScrape[F[_]] {
   * sub-path, and the fix is the same one: build against the root and let `rebase` put the path back exactly
   * once.
   */
-final class PrometheusBrokerScrape[F[_]: Async](backend: Backend[F], url: SafeUrl) extends BrokerScrape[F] {
+final class PrometheusBrokerScrape[F[_]: Async](
+    backend: Backend[F],
+    url: SafeUrl,
+    maxResponseBytes: Long = MetricsSourceSettings.DefaultMaxResponseBytes.toLong
+) extends BrokerScrape[F] {
 
   import PrometheusBrokerScrape.*
 
@@ -58,6 +62,9 @@ final class PrometheusBrokerScrape[F[_]: Async](backend: Backend[F], url: SafeUr
     basicRequest
       .get(root)
       .header("Accept", AcceptHeader)
+      // HttpClientFs2Backend enforces this while receiving the body, including chunked responses whose
+      // length was not declared, before `asStringAlways` can materialise an unbounded string.
+      .maxResponseBodyLength(maxResponseBytes)
       .response(asStringAlways)
       .send(backend)
       .map { response =>
