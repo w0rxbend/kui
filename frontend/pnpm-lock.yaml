@@ -13,13 +13,13 @@ importers:
     dependencies:
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@playwright/test':
         specifier: 1.63.0
@@ -62,7 +62,7 @@ importers:
         version: 10.6.0(@types/react@19.2.18)(react@19.2.8)
       storybook-solidjs-vite:
         specifier: 10.7.1
-        version: 10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
+        version: 10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -71,7 +71,7 @@ importers:
         version: 8.2.2(@types/node@22.13.0)(esbuild@0.28.2)
       vite-plugin-solid:
         specifier: 3.0.0-next.27
-        version: 3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
+        version: 3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
       vitest:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.13.0)(@vitest/coverage-v8@5.0.0)(@vitest/ui@5.0.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
@@ -102,13 +102,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-clusters:
     dependencies:
@@ -120,13 +120,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-connect:
     dependencies:
@@ -138,13 +138,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-consumers:
     dependencies:
@@ -156,13 +156,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-ksql:
     dependencies:
@@ -174,13 +174,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-messages:
     dependencies:
@@ -192,13 +192,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-schemas:
     dependencies:
@@ -210,13 +210,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/feature-topics:
     dependencies:
@@ -228,13 +228,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
 
   packages/kernel:
     dependencies:
@@ -243,10 +243,10 @@ importers:
         version: link:../api
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@storybook/addon-a11y':
         specifier: 10.6.0
@@ -268,7 +268,7 @@ importers:
         version: 10.6.0(@types/react@19.2.18)(react@19.2.8)
       storybook-solidjs-vite:
         specifier: 10.7.1
-        version: 10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
+        version: 10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
       vitest:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.13.0)(@vitest/coverage-v8@5.0.0)(@vitest/ui@5.0.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
@@ -307,13 +307,13 @@ importers:
         version: link:../kernel
       '@solidjs/router':
         specifier: 2.0.0-next.21
-        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)
       '@solidjs/web':
         specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.6
-        version: 2.0.0-rc.6
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@storybook/addon-a11y':
         specifier: 10.6.0
@@ -335,7 +335,7 @@ importers:
         version: 10.6.0(@types/react@19.2.18)(react@19.2.8)
       storybook-solidjs-vite:
         specifier: 10.7.1
-        version: 10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
+        version: 10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
       vitest:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.13.0)(@vitest/coverage-v8@5.0.0)(@vitest/ui@5.0.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
@@ -1112,8 +1112,9 @@ packages:
       '@solidjs/web': ^2.0.0-rc.5
       solid-js: ^2.0.0-rc.5
 
-  '@solidjs/signals@2.0.0-rc.6':
-    resolution: {integrity: sha512-lPqwZNLPq1Z9CBvgXkMvi1ZFr5OHUiFNz1X40+yehszDWEbJkneZx7BGKIe9eMT/AN1NSL+PMjOiMyZaqVB2xw==}
+  '@solidjs/signals@2.0.0-rc.9':
+    resolution: {integrity: sha512-o3pqiTgpH5NR2DstiKrt9s/6+0YOFtv+MfvLONwLsS247I+EWMMyTu9BkRcgd35UR5Pa1DM16lI1/5uaIMY6Gw==}
+    engines: {node: '>=22.12.0'}
 
   '@solidjs/vite-plugin@3.0.0-next.38':
     resolution: {integrity: sha512-6XiolrrjNcw3g+EZyxrh/ifGNJ3zk+zePQ61jRs5YuXwmcSQENN7dNE0X0beb3wow/UoZyRUtxaRkhVNPGKgiQ==}
@@ -1881,8 +1882,18 @@ packages:
     peerDependencies:
       seroval: ^1.0
 
+  seroval-plugins@1.6.7:
+    resolution: {integrity: sha512-4Nk35ttD3DTDJW4hgw5StsVAPeU6qnDFnULAouw6tQ7oLTV/ICXrWpsXo2EE52eSP2joUMazbVf52mFEcADqRw==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      seroval: ^1.0
+
   seroval@1.5.6:
     resolution: {integrity: sha512-rVQVWjjSvlINzaQPZH5JFqsqEsIWdTxY3iJZCnTL/5gQbXIRooVZKI60tVCkOVfzcRPejboxO2t0P89dg5mQaA==}
+    engines: {node: '>=10'}
+
+  seroval@1.6.7:
+    resolution: {integrity: sha512-AeDcLh0yO2SFm9W71essgnSzLV9DI8ZH0x0knXn2DMnUZj728mpLbxjlbB6IqKCmqh8JA3cEqRyGoNkt584JcQ==}
     engines: {node: '>=10'}
 
   siginfo@2.0.0:
@@ -1892,8 +1903,9 @@ packages:
     resolution: {integrity: sha512-2wcC/oGxHis/BoHkkPwldgiPSYcpZK3JU28WoMVv55yHJgcZ8rlXvuG9iZggz+sU1d4bRgIGASwyWqjxu3FM0g==}
     engines: {node: '>=18'}
 
-  solid-js@2.0.0-rc.6:
-    resolution: {integrity: sha512-Z/M8s9ypLBf+6Bl3AAb5upgkYCl73HkpM+UxdUJ5uFGctTwpOQVCM9Gpj3Mjbiaki270HHUfA3Z0Lyn4w+fDtg==}
+  solid-js@2.0.0-rc.9:
+    resolution: {integrity: sha512-J/oHWnWqe7S0FeIEdIRKDvyyo+HY/TYKr2PrIB8VlePMWuErDg78QHqdsAV7f6HKa9qhWR/23eqzR/ZRV9ep0g==}
+    engines: {node: '>=22.12.0'}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -2793,23 +2805,23 @@ snapshots:
       '@solidjs/compiler-wasm32-wasi': 2.0.0-rc.6
       '@solidjs/compiler-win32-x64-msvc': 2.0.0-rc.6
 
-  '@solidjs/router@2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)':
+  '@solidjs/router@2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)':
     dependencies:
-      '@solidjs/web': 2.0.0-rc.6(solid-js@2.0.0-rc.6)
-      solid-js: 2.0.0-rc.6
+      '@solidjs/web': 2.0.0-rc.6(solid-js@2.0.0-rc.9)
+      solid-js: 2.0.0-rc.9
 
-  '@solidjs/signals@2.0.0-rc.6': {}
+  '@solidjs/signals@2.0.0-rc.9': {}
 
-  '@solidjs/vite-plugin@3.0.0-next.38(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))':
+  '@solidjs/vite-plugin@3.0.0-next.38(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@babel/core': 7.29.7(supports-color@10.2.2)
       '@solidjs/babel-plugin': 2.0.0-rc.6(@babel/core@7.29.7(supports-color@10.2.2))
       '@solidjs/compiler': 2.0.0-rc.6
-      '@solidjs/web': 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+      '@solidjs/web': 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       '@types/babel__core': 7.20.5
       merge-anything: 5.1.7
-      solid-js: 2.0.0-rc.6
+      solid-js: 2.0.0-rc.9
       vite: 8.2.2(@types/node@22.13.0)(esbuild@0.28.2)
       vitefu: 1.1.3(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
     optionalDependencies:
@@ -2818,11 +2830,11 @@ snapshots:
       - '@tsrx/core'
       - supports-color
 
-  '@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6)':
+  '@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9)':
     dependencies:
       seroval: 1.5.6
       seroval-plugins: 1.5.6(seroval@1.5.6)
-      solid-js: 2.0.0-rc.6
+      solid-js: 2.0.0-rc.9
 
   '@storybook/addon-a11y@10.6.0(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))':
     dependencies:
@@ -3593,7 +3605,13 @@ snapshots:
     dependencies:
       seroval: 1.5.6
 
+  seroval-plugins@1.6.7(seroval@1.6.7):
+    dependencies:
+      seroval: 1.6.7
+
   seroval@1.5.6: {}
+
+  seroval@1.6.7: {}
 
   siginfo@2.0.0: {}
 
@@ -3603,12 +3621,12 @@ snapshots:
       mrmime: 2.0.1
       totalist: 3.0.1
 
-  solid-js@2.0.0-rc.6:
+  solid-js@2.0.0-rc.9:
     dependencies:
-      '@solidjs/signals': 2.0.0-rc.6
+      '@solidjs/signals': 2.0.0-rc.9
       csstype: 3.2.3
-      seroval: 1.5.6
-      seroval-plugins: 1.5.6(seroval@1.5.6)
+      seroval: 1.6.7
+      seroval-plugins: 1.6.7(seroval@1.6.7)
 
   source-map-js@1.2.1: {}
 
@@ -3618,7 +3636,7 @@ snapshots:
 
   std-env@4.2.0: {}
 
-  storybook-solidjs-vite@10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)):
+  storybook-solidjs-vite@10.7.1(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(typescript@5.9.3)(vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)):
     dependencies:
       '@storybook/builder-vite': 10.6.0(storybook@10.6.0(@types/react@19.2.18)(react@19.2.8))(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
       '@storybook/global': 5.0.0
@@ -3626,12 +3644,12 @@ snapshots:
       '@volar/language-core': 2.4.28
       '@volar/typescript': 2.4.28(typescript@5.9.3)
       semver: 7.8.5
-      solid-js: 2.0.0-rc.6
+      solid-js: 2.0.0-rc.9
       storybook: 10.6.0(@types/react@19.2.18)(react@19.2.8)
       vite: 8.2.2(@types/node@22.13.0)(esbuild@0.28.2)
-      vite-plugin-solid: 3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
+      vite-plugin-solid: 3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
     optionalDependencies:
-      '@solidjs/web': 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+      '@solidjs/web': 2.0.0-rc.6(solid-js@2.0.0-rc.9)
       typescript: 5.9.3
 
   storybook@10.6.0(@types/react@19.2.18)(react@19.2.8):
@@ -3736,9 +3754,9 @@ snapshots:
 
   validate-html-nesting@1.2.4: {}
 
-  vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)):
+  vite-plugin-solid@3.0.0-next.27(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2)):
     dependencies:
-      '@solidjs/vite-plugin': 3.0.0-next.38(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.6)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
+      '@solidjs/vite-plugin': 3.0.0-next.38(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.9))(@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@5.0.0))(solid-js@2.0.0-rc.9)(supports-color@10.2.2)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
     transitivePeerDependencies:
       - '@solidjs/start-devtools'
       - '@solidjs/web'
