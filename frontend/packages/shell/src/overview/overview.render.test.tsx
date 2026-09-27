@@ -2151,10 +2151,14 @@ describe("the range selector", () => {
     );
   });
 
-  /* Thirty seconds rather than the default five. Axe walks the whole subtree, and a 24h series is
-     288 rows of hidden data table beside 576 bar paths — the cost of the chart drawing every bucket
-     the server sent rather than re-bucketing it, which is the decision `throughput.ts` argues for. */
-  it("has no accessibility violations with a chart on the screen", { timeout: 30_000 }, async () => {
+  /* A hundred and twenty seconds rather than the default five. Axe walks the whole subtree, and a
+     24h series is 288 rows of hidden data table beside 576 bar paths — the cost of the chart
+     drawing every bucket the server sent rather than re-bucketing it, which is the decision
+     `throughput.ts` argues for. Thirty seconds covered the uninstrumented walk; under v8 coverage
+     instrumentation the same case measured 78s on a quiet machine (the instrumented Solid render
+     is roughly three times its plain cost), so the budget is the instrumented reading plus
+     headroom for a slower CI machine, not the plain one. */
+  it("has no accessibility violations with a chart on the screen", { timeout: 120_000 }, async () => {
     const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
     expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
   });

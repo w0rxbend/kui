@@ -63,5 +63,31 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     // See the header. Measured, not guessed: three times the worst contended axe reading.
     testTimeout: 20_000,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary", "html"],
+      // `all` so a source file no test ever loads counts as 0% rather than vanishing from the
+      // denominator — an unmeasured file and a fully covered file are not the same claim.
+      all: true,
+      include: ["packages/*/src/**"],
+      // Test files, their helpers, and Storybook stories are the harness, not the product; the
+      // number is about the product. The a11y sweep exercises the stories separately.
+      exclude: [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.stories.tsx",
+        "**/test-utils/**",
+      ],
+      // The ratchet: vitest fails the run below these numbers. First measured 2026-09-27 on the
+      // change that introduced coverage: lines 89.96, statements 88.41, functions 87.3, branches
+      // 80.6 — the floors sit a point or two below that for instrument noise. Raise them as
+      // suites improve; lower them only in the commit that says why.
+      thresholds: {
+        lines: 88,
+        functions: 86,
+        branches: 79,
+        statements: 87,
+      },
+    },
   },
 });

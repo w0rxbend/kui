@@ -509,8 +509,9 @@ private object BuildWiringSuite {
 
   /** Every named step `.github/workflows/ci.yml` runs, in the order it declares them.
     *
-    * `Install pnpm` appears three times, while two jobs each install the workspace and the pinned browser, so
-    * this is a list and is compared as one.
+    * `Install pnpm` appears three times, two jobs each install the workspace and the pinned browser, and the
+    * two coverage artifacts (Scala, frontend) upload under one step name, so this is a list and is compared
+    * as one.
     */
   val workflowSteps: List[String] = List(
     "Compile every module with -Werror",
@@ -525,6 +526,8 @@ private object BuildWiringSuite {
     "Check the committed browser constants",
     "Run every test suite",
     "Upload test reports",
+    "Coverage report and ratchet",
+    "Upload coverage report",
     "The interface image copies every workspace manifest",
     "Install pnpm",
     "Install",
@@ -537,6 +540,7 @@ private object BuildWiringSuite {
     "Install the pinned browser",
     "Accessibility sweep over every story, in both themes",
     "The generated types are up to date",
+    "Upload coverage report",
     "Install pnpm",
     "Install",
     "Install the pinned browser",

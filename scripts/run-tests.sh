@@ -49,8 +49,16 @@ echo
 # One invocation, so Mill compiles the shared upstream modules once and runs what it can in
 # parallel. The braces are Mill's selector syntax; see the note at the top of this file for why the
 # space-separated form is a trap.
+#
+# `-k` (keep-going) is not decoration. Mill's default fail-fast stops SCHEDULING new tasks at the
+# first failure, and on a machine without Docker the Testcontainers suites fail in their first
+# seconds — so a local run used to report those failures and quietly never start ~20 of the 81
+# test modules (which ones depended on scheduling order). The suites' own output made it look
+# like "everything except Docker passed". With `-k` every module is scheduled regardless; Mill's
+# exit code is still non-zero when anything failed, so CI semantics are unchanged — CI always had
+# Docker and never took the fail-fast path.
 selector="{$(IFS=,; echo "${modules[*]}")}"
-./mill "$selector"
+./mill -k "$selector"
 
 echo
 echo "run-tests.sh: counting test cases in the JUnit reports"

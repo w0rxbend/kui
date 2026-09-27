@@ -1,6 +1,7 @@
 //| mvnDeps:
 //| - com.goyeau::mill-scalafix::0.6.2
 //| - com.lihaoyi::mill-contrib-docker:1.1.8
+//| - com.lihaoyi::mill-contrib-scoverage:1.1.8
 
 package build
 
@@ -9,6 +10,7 @@ import mill.scalalib.*
 import mill.scalalib.scalafmt.ScalafmtModule
 import com.goyeau.mill.scalafix.ScalafixModule
 import mill.contrib.docker.DockerModule
+import mill.contrib.scoverage.{ScoverageModule, ScoverageReport}
 
 // Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
 import kui.build.{ArchitectureRules, BuildFacts, ForkedDocumentRun, ModuleFacts}
@@ -68,6 +70,10 @@ object Versions {
   // The Java artefact, resolved separately from the Scala wrapper above: `org.testcontainers:kafka`
   // does not exist at any version; the module is published as `testcontainers-kafka` (M1 F-15).
   val testcontainersJava = "2.0.5"
+  // The reporter/serializer/domain artifacts only: on Scala 3 the coverage instrumentation is the
+  // compiler's own (`-coverage-out`/`-sourceroot`, native since 3.2), so no plugin jar resolves —
+  // `ScoverageModule.scoveragePluginDeps` is empty for Scala 3 by construction.
+  val scoverage       = "2.5.2"
   // Playwright and the browser build it downloads are pinned together (BUILD-006 spike 3): the
   // library only speaks to the browser revision it shipped with, so bumping one means bumping both.
   val playwright        = "1.62.0"
@@ -110,7 +116,53 @@ trait KuiPureModule extends KuiModule {
 }
 
 /** A module that runs on the JVM. Its own trait so that JVM-only defaults have somewhere to live. */
-trait KuiJvmModule extends KuiModule {
+trait KuiJvmModule extends KuiModule with ScoverageModule {
+  def scoverageVersion = Versions.scoverage
+
+  /** JVM tests that run against the instrumented `scoverage.compile` classes of their enclosing
+    * module, so that every `./mill <module>.test` collects coverage as a side effect. There is no
+    * separate "coverage run" to forget, which is the whole reason the mixin lives here rather than
+    * in a task somebody has to remember to invoke: the 81 test modules below declare this trait
+    * and nothing else about coverage.
+    *
+    * It has to be declared inside `KuiJvmModule` because `ScoverageTests` is a path-dependent
+    * inner trait — it rewrites the test run classpath by swapping the *enclosing* module's classes
+    * for their instrumented counterparts, so it can only be named with an enclosing
+    * `ScoverageModule` instance in scope. One declaration site, eighty-one users.
+    */
+  trait KuiCoverageTests extends ScoverageTests with KuiTests
+
+  /** The instrumented compile, with one diagnostic silenced and one generated file excluded.
+    *
+    * Scala 3's coverage phase refuses to instrument a value initializer over 3000 tree nodes —
+    * several hand-written Tapir `Schema` givens in the `contract` modules are larger than that —
+    * and *warns* about it. Under this build's non-negotiable `-Werror` the warning is an error, so
+    * without the `-Wconf` line `__.compile` fails on six contract modules. Skipped means excluded
+    * from the statement counts entirely, numerator and denominator alike: the number stays honest,
+    * those givens simply do not participate. Silenced in the instrumented compile only, where it is
+    * the phase's own information about itself; a normal compile never emits it.
+    *
+    * The `BuildInfo` exclusion is for a crash, not a warning: `KuiBuildInfoModule` generates a
+    * source file under `out/`, and the scoverage reporter's Cobertura writer throws
+    * "No source root found" for any measured file that lives under no source root. A generated
+    * file of seven string literals is also not something a test can meaningfully cover — excluding
+    * it from instrumentation keeps it out of the counts for the same reason the big givens stay
+    * out: honest denominator, no noise.
+    *
+    * The regex's shape is not a guess. Scala 3's `InstrumentCoverage.isFileIncluded` strips every
+    * `.scala` occurrence from the path *before* matching and then requires a FULL match, so
+    * `.*BuildInfo\.scala` — the obvious spelling — never matches anything: the normalized path
+    * ends in `BuildInfo`. The `(\.scala)?` suffix exists because of that normalization, and this
+    * paragraph exists because the first version of this line found it out the hard way.
+    */
+  override lazy val scoverage: ScoverageData = new ScoverageData {
+    override def scalacOptions: T[Seq[String]] = Task {
+      super.scalacOptions() ++ Seq(
+        "-Wconf:msg=Skipping coverage instrumentation:s",
+        "-coverage-exclude-files:.*BuildInfo(\\.scala)?"
+      )
+    }
+  }
 
   /** Runs one of this module's document generators in a forked JVM, and when the fork dies, says
     * what the fork said.
@@ -242,7 +294,7 @@ object libs extends Module {
       // The kernel's own suites use the shared generators, which live in `libs/testkit` so that every
       // module gets them. That is a test-scope edge only: `libs.testkit` depends on the kernel, not
       // the other way round.
-      object test extends ScalaTests with KuiTests with KuiCrossTests {
+      object test extends KuiCoverageTests with KuiCrossTests {
         def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
       }
     }
@@ -276,7 +328,7 @@ object libs extends Module {
     object jvm extends Shared with KuiJvmModule {
       def moduleDeps = Seq(kernel.jvm, securityCore.jvm)
 
-      object test extends ScalaTests with KuiTests with KuiCrossTests
+      object test extends KuiCoverageTests with KuiCrossTests
     }
 
   }
@@ -327,7 +379,7 @@ object libs extends Module {
         mvn"org.bouncycastle:bcpkix-jdk18on:${Versions.bouncycastle}"
       )
 
-      object test extends ScalaTests with KuiTests with KuiCrossTests {
+      object test extends KuiCoverageTests with KuiCrossTests {
         def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
       }
     }
@@ -367,7 +419,7 @@ object libs extends Module {
       mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       // The store's own broker-backed suite (STORE-009). It runs one container of its own rather
@@ -406,7 +458,7 @@ object libs extends Module {
       mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
       // Test scope only, and it is the point of the suite: what this module renders is parsed
       // back by Kafka's own JAAS parser, not by a reimplementation that could share its bug.
@@ -445,7 +497,7 @@ object libs extends Module {
       mvn"at.yawk.lz4:lz4-java:${Versions.lz4}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
@@ -500,7 +552,7 @@ object libs extends Module {
       mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       // The suites assert against what was actually recorded rather than against a mock, so they
@@ -542,7 +594,7 @@ object libs extends Module {
       mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
@@ -602,7 +654,7 @@ object libs extends Module {
       mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
@@ -648,7 +700,7 @@ object libs extends Module {
       mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
@@ -687,7 +739,7 @@ object libs extends Module {
       mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
@@ -725,7 +777,7 @@ object libs extends Module {
       mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
@@ -771,7 +823,7 @@ object libs extends Module {
       def moduleDeps = Seq(kernel.jvm)
       def mvnDeps    = super.mvnDeps() ++ Seq(mvn"com.nimbusds:nimbus-jose-jwt:${Versions.nimbus}")
 
-      object test extends ScalaTests with KuiTests with KuiCrossTests
+      object test extends KuiCoverageTests with KuiCrossTests
     }
 
   }
@@ -913,7 +965,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -935,7 +987,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // The domain's test module carries the profile and topology fixtures every suite here
         // builds on. A generator of a domain type cannot live in `libs/testkit`: rule A5 forbids a
         // library depending on a service.
@@ -966,7 +1018,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
         def mvnDeps =
           super.mvnDeps() ++ Seq(
@@ -1000,7 +1052,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -1033,7 +1085,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1096,7 +1148,7 @@ object services extends Module {
         runDocumentMain("kui.cluster.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1158,7 +1210,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1189,7 +1241,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -1218,7 +1270,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // The domain's test module carries the generators every suite here builds on. A generator of a
         // domain type cannot live in `libs/testkit`: rule A5 forbids a library depending on a service.
         def moduleDeps =
@@ -1269,7 +1321,7 @@ object services extends Module {
           mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}"
         )
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -1314,7 +1366,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // `libs.serdeConfluent` is test-only here: `CelFilterSourceSuite`'s decode-then-filter cases prove
         // that the Avro/Protobuf/JSON-Schema JSON this module's `app` wires in at runtime is the same JSON
         // `CelFilterSource` filters against, without making the adapter itself depend on a concrete serde.
@@ -1362,7 +1414,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1427,7 +1479,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1492,7 +1544,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1526,7 +1578,7 @@ object services extends Module {
         // copying them instead would be two spellings of one wire format with nothing to keep them equal.
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm, identity.contract.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -1664,7 +1716,7 @@ object services extends Module {
         )()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // `services.gateway.application.test` is here for `FakeCapabilityRegistry`. The task asked for
         // that fake to live in `libs/testkit`, and it cannot: `CapabilityRegistry` is a gateway type
         // (ADR-041 §1a), and rule A5 forbids a library module from depending on a service module. One
@@ -1741,7 +1793,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1770,7 +1822,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -1796,7 +1848,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // The domain's test module carries the generators every suite here builds on. A generator of
         // a domain type cannot live in `libs/testkit`: rule A5 forbids a library depending on a
         // service.
@@ -1859,7 +1911,7 @@ object services extends Module {
         runDocumentMain("kui.topic.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // The domain's test module carries the topic fixtures the route suites build snapshots from.
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
@@ -1901,7 +1953,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -1924,7 +1976,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -1965,7 +2017,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2002,7 +2054,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -2023,7 +2075,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2053,7 +2105,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2104,7 +2156,7 @@ object services extends Module {
         runDocumentMain("kui.identity.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2146,7 +2198,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2175,7 +2227,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -2200,7 +2252,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -2221,7 +2273,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         // The domain's test module carries the group fixtures every suite here builds on. They
         // cannot live in `libs/testkit`: rule A5 forbids a library depending on a service.
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
@@ -2267,7 +2319,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2323,7 +2375,7 @@ object services extends Module {
         runDocumentMain("kui.consumer.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2369,7 +2421,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2405,7 +2457,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -2431,7 +2483,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -2451,7 +2503,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2482,7 +2534,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2534,7 +2586,7 @@ object services extends Module {
         runDocumentMain("kui.schema.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2576,7 +2628,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2603,7 +2655,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -2637,7 +2689,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -2656,7 +2708,7 @@ object services extends Module {
         mvn"org.typelevel::cats-effect::${Versions.catsEffect}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2689,7 +2741,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2738,7 +2790,7 @@ object services extends Module {
         runDocumentMain("kui.metrics.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2775,7 +2827,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2802,7 +2854,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -2835,7 +2887,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -2857,7 +2909,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2884,7 +2936,7 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2932,7 +2984,7 @@ object services extends Module {
         runDocumentMain("kui.alerts.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -2973,7 +3025,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3017,7 +3069,7 @@ object services extends Module {
           mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}"
         )
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -3050,7 +3102,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -3070,7 +3122,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3099,7 +3151,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3146,7 +3198,7 @@ object services extends Module {
         runDocumentMain("kui.connect.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3188,7 +3240,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3220,7 +3272,7 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -3257,7 +3309,7 @@ object services extends Module {
       def moduleDeps = Seq(libs.kernel.jvm)
       def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
       }
     }
@@ -3278,7 +3330,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3308,7 +3360,7 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3364,7 +3416,7 @@ object services extends Module {
         runDocumentMain("kui.ksql.api.OpenApiDocument", openApiTarget, "--check")()
       }
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3406,7 +3458,7 @@ object services extends Module {
         mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
-      object test extends ScalaTests with KuiTests {
+      object test extends KuiCoverageTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
@@ -3447,7 +3499,7 @@ object services extends Module {
           mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}"
         )
 
-        object test extends ScalaTests with KuiTests with KuiCrossTests
+        object test extends KuiCoverageTests with KuiCrossTests
       }
 
     }
@@ -3558,7 +3610,7 @@ object apps extends Module {
       mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
     )
 
-    object test extends ScalaTests with KuiTests {
+    object test extends KuiCoverageTests {
       // The identity service's `infrastructure`, for one thing only: `SignInSeamSuite` needs a real
       // password hash to configure an account with, and hashing one with the product's own key
       // derivation function is more honest than pasting a constant that could drift from the format.
@@ -4235,7 +4287,7 @@ object tools extends Module {
     // apart (ADR-048 §3).
     def moduleDeps = Seq(libs.kernel.jvm, libs.contractsCore.jvm, libs.securityCore.jvm)
 
-    object test extends ScalaTests with KuiTests
+    object test extends KuiCoverageTests
   }
 }
 
@@ -4333,8 +4385,8 @@ object depsSmoke extends KuiModule {
   * module graphs, and once by the meta-build (`mill-build/build.mill`), so that `checkArchitecture`
   * below runs exactly the code these tests cover.
   */
-object `build-tests` extends KuiPureModule {
-  object test extends ScalaTests with KuiTests {
+object `build-tests` extends KuiPureModule with KuiJvmModule {
+  object test extends KuiCoverageTests {
 
     /** The three files `BuildWiringSuite` opens at RUNTIME, declared so that Mill knows they are
       * inputs to this module's tests.
@@ -4464,4 +4516,16 @@ def resolveAll(): Task.Command[Int] = Task.Command {
   val jars = depsSmoke.resolvedMvnDeps()
   println(s"resolved ${jars.toSeq.size} artifacts for ${depsSmoke.mvnDeps().size} pinned coordinates")
   jars.toSeq.size
+}
+
+/** The aggregate coverage report over every `ScoverageModule` in the build. It resolves
+  * `__.scoverage.data` itself, so any `./mill __.test` run (or `scripts/run-tests.sh`) followed by
+  * `./mill scoverage.xmlCoberturaReportAll` answers "how much of the tree did the suites that just
+  * ran actually execute". `scripts/check-coverage.sh` is the ratchet over that answer, and the
+  * reason the numbers exist at all: the `identity.api` module once shipped zero tests inside a
+  * declared test module, and nothing could see it.
+  */
+object scoverage extends ScoverageReport {
+  def scalaVersion     = Versions.scala
+  def scoverageVersion = Versions.scoverage
 }

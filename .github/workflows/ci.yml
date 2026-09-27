@@ -162,7 +162,7 @@ jobs:
         run: ./mill frontend.apiConstants --check
 
   test:
-    name: unit + property + contract tests
+    name: unit + property + contract tests + coverage
     runs-on: ubuntu-latest
     # Every suite in the repository runs here, so this job is now minutes rather than seconds. The
     # backstop is against a hung Node process, not a budget.
@@ -192,6 +192,22 @@ jobs:
         with:
           name: test-reports
           path: out/**/test-report.xml
+          if-no-files-found: ignore
+
+      # The suites above already ran against the instrumented classes (every test module mixes in
+      # KuiCoverageTests), so this step only aggregates what they wrote and compares it against the
+      # committed floor in scripts/coverage-baseline.env. The floor is a ratchet: it fails on a
+      # drop, nags on a rise of more than a point, and scripts/check-coverage.sh says why it exists.
+      - name: Coverage report and ratchet
+        run: ./scripts/check-coverage.sh
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-scala
+          path: out/scoverage/
+          retention-days: 7
           if-no-files-found: ignore
 
   # The interface, which is a build of its own.
@@ -366,8 +382,10 @@ jobs:
       # catch one.
       - name: Typecheck
         run: pnpm typecheck
+      # Coverage is always on here: the thresholds in vitest.config.ts are the ratchet, and the
+      # report below is the artifact a reviewer opens instead of asking "how covered is this?".
       - name: Test
-        run: pnpm test
+        run: pnpm test:coverage
       # The other half of `./mill checkArchitecture`, which cannot see TypeScript. It is cheap and
       # it runs before the builds because the edge it forbids — one feature package importing
       # another — is a design mistake rather than a broken build, and it would otherwise be caught
@@ -435,6 +453,15 @@ jobs:
           }
           pnpm --filter @kui/api run generate
           git diff --exit-code packages/api/src/schema.d.ts
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # The product, in a browser, deployed the way it ships.
   #
